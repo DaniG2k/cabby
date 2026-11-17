@@ -2,5 +2,7 @@
 //!
 //! Status: interfaces only (SPEC.md §1 steps 1–3); behavior is `pending!`.
 
+pub mod cli;
+pub mod config;
 pub mod server;
 pub mod ws;
