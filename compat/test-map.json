@@ -16,8 +16,8 @@
       "go_vendored": 57
     },
     "reference": {
-      "not_observable": 113,
-      "pass": 646,
+      "not_observable": 109,
+      "pass": 650,
       "unverified": 164
     },
     "rust": {
@@ -28,8 +28,8 @@
       "cases": 45
     },
     "translation": {
-      "reviewed": 593,
-      "translated": 169,
+      "reviewed": 607,
+      "translated": 155,
       "unreviewed": 161
     },
     "upstream_result": {
@@ -1232,11 +1232,13 @@
       ],
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] only this test's ACL user is killed (upstream: CLIENT KILL TYPE pubsub on every client); restoration is observed as the channel subscribed again; also asserts at least one connection was killed."
+      ],
       "rust_cases": [
         "broadcast::legacy_redis_test::test_legacy_redis_broadcaster_reconnect"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9174,7 +9176,9 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] context cancelled explicitly instead of a 100 ms timeout; the ignored first read moved before the cancel so the cancelled loop cannot pick up \"2\"."
+      ],
       "rust_cases": [
         "hub::gate_test::test_shutdown"
       ],
@@ -9201,12 +9205,15 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] upstream's `len(gate.streams)` is exactly `Gate.Size()`, asserted here; the `sessionsStreams` check is in test_unsubscribe_sessions_streams.",
+        "[src] not_observable on Go: `len(gate.sessionsStreams)` reads an unexported map (which the Go implementation never writes, so upstream's assertion is vacuous there)."
+      ],
       "rust_cases": [
         "hub::gate_test::test_unsubscribe",
-        "hub::gate_test::test_unsubscribe_internal_indexes"
+        "hub::gate_test::test_unsubscribe_sessions_streams"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "not_observable",
       "rust_status": "pending",
       "evidence": [
@@ -9259,6 +9266,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
+        "[src] correctness only (exact per-session deliveries) with fixed b.N=100 and seeded stream assignment; throughput is measured by the external harness.",
         "Benchmark: not executed by `go test`; run with -bench for reference evidence"
       ],
       "rust_cases": [
@@ -9424,12 +9432,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, buildMessage (unexported) is observed as the EncodedMessage a gate passes to HubSession.Send for a session subscribed to (\"\", \"chat\")."
+      ],
       "rust_cases": [
         "hub::hub_test::test_build_message_json"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -9451,12 +9461,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, buildMessage (unexported) is observed as the EncodedMessage a gate passes to HubSession.Send for a session subscribed to (\"\", \"chat\")."
+      ],
       "rust_cases": [
         "hub::hub_test::test_build_message_string"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -9534,7 +9546,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9584,11 +9596,13 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] upstream shares the hub and session with the previous subtest; its steps are replayed first."
+      ],
       "rust_cases": [
         "hub::hub_test::test_subscribe_session::successful_to_the_same_stream_from_multiple_channels"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9611,7 +9625,9 @@
       "direct_assertions": 7,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] the two racing threads are joined before session2 is read (upstream reads concurrently); on Go a blocking bridge read would otherwise hold back the broadcasts it waits for."
+      ],
       "rust_cases": [
         "hub::hub_test::test_unsubscribe_race_conditions"
       ],
@@ -9638,13 +9654,14 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [
-        "hub::hub_test::test_unsubscribe_session",
-        "hub::hub_test::test_unsubscribe_session_from_all_channels"
+      "notes": [
+        "[src] on Go the unexported `unsubscribeSessionFromAllChannels` step is driven through the exported synchronous `RemoveSession`, which calls it and then only drops the sessions/identifiers entries that gate delivery never consults."
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "rust_cases": [
+        "hub::hub_test::test_unsubscribe_session"
+      ],
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -9670,7 +9687,7 @@
       "rust_cases": [
         "hub::hub_test::test_unsubscribe_session_from_channel"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14899,7 +14916,9 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] replays the subscriptions of the earlier shared subtests first, so \"a\" is subscribed twice before one unsubscribe (Subscribe is idempotent)."
+      ],
       "rust_cases": [
         "pubsub::nats_test::test_nats_common::broadcast",
         "pubsub::nats_test::test_nats_common::broadcast_commands",
@@ -15043,11 +15062,13 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] replays the subscriptions of the earlier shared subtests first, so \"a\" is subscribed twice before one unsubscribe (Subscribe is idempotent)."
+      ],
       "rust_cases": [
         "pubsub::nats_test::test_nats_common::subscribe_broadcast_unsubscribe_broadcast"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -15097,7 +15118,9 @@
       "direct_assertions": 12,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] private nats-server process instead of the embedded enats.Service (SPEC §3); readiness after the restart is the re-established subscription instead of conn.Status()."
+      ],
       "rust_cases": [
         "pubsub::nats_test::test_nats_reconnect"
       ],
@@ -15130,7 +15153,9 @@
       ],
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] replays the subscriptions of the earlier shared subtests first, so \"a\" is subscribed twice before one unsubscribe (Subscribe is idempotent)."
+      ],
       "rust_cases": [
         "pubsub::redis_test::test_redis_common::broadcast",
         "pubsub::redis_test::test_redis_common::broadcast_commands",
@@ -15304,11 +15329,13 @@
       ],
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] replays the subscriptions of the earlier shared subtests first, so \"a\" is subscribed twice before one unsubscribe (Subscribe is idempotent)."
+      ],
       "rust_cases": [
         "pubsub::redis_test::test_redis_common::subscribe_broadcast_unsubscribe_broadcast"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -15364,7 +15391,9 @@
       ],
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] only this test's ACL user is killed (upstream: CLIENT KILL TYPE pubsub on every client); restoration is observed as the subscriber's channels subscribed again."
+      ],
       "rust_cases": [
         "pubsub::redis_test::test_redis_reconnect"
       ],
@@ -15391,12 +15420,14 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] also asserts `!IsMultiNode()`, which upstream's early return before the multi-node subtests implies."
+      ],
       "rust_cases": [
         "pubsub::subscriber_test::test_legacy_subscriber::broadcast",
         "pubsub::subscriber_test::test_legacy_subscriber::broadcast_commands"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -15420,11 +15451,13 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] also asserts `!IsMultiNode()`, which upstream's early return before the multi-node subtests implies."
+      ],
       "rust_cases": [
         "pubsub::subscriber_test::test_legacy_subscriber::broadcast"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -15448,11 +15481,13 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] also asserts `!IsMultiNode()`, which upstream's early return before the multi-node subtests implies."
+      ],
       "rust_cases": [
         "pubsub::subscriber_test::test_legacy_subscriber::broadcast_commands"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -17699,12 +17734,14 @@
       ],
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] upstream closes the unexported `streamer.client` and sets `reconnectAttempt = MaxReconnectAttempts + 1`; here the handler calls the exported `Client().Close()` and streamer 1's config has `MaxReconnectAttempts = 0`, which makes `maybeReconnect` give up the same way. Upstream's `initClient()` before waiting is implied by the reader starting."
+      ],
       "rust_cases": [
         "redis::streamer_test::test_streamer_acks_claims"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
