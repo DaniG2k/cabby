@@ -259,9 +259,10 @@ impl Hub {
     pub fn unsubscribe_session_from_all_channels(&self, s: &MockSession) {
         match &self.inner {
             HubImpl::Rust { hub, .. } => hub.unsubscribe_session_from_all_channels(&s.rust_ref()),
-            HubImpl::Go(_) => {
-                unimplemented!("not_observable: hub.unsubscribeSessionFromAllChannels is unexported")
-            }
+            // Unexported upstream. The exported, synchronous `RemoveSession` calls it
+            // and then only deletes the hub's sessions/identifiers entries, which gate
+            // delivery never consults: subsequent broadcasts observe the same effect.
+            HubImpl::Go(_) => self.go_session("hub.RemoveSession", s, "", ""),
         }
     }
 
@@ -428,11 +429,13 @@ impl Gate {
         }
     }
 
-    /// `(len(gate.streams), len(gate.sessionsStreams))`.
-    pub fn index_sizes(&self) -> (usize, usize) {
+    /// `len(gate.sessionsStreams)`.
+    pub fn sessions_streams_size(&self) -> usize {
         match &self.inner {
-            GateImpl::Rust { gate, .. } => gate.index_sizes(),
-            GateImpl::Go(_) => unimplemented!("not_observable: Gate.streams and Gate.sessionsStreams are unexported"),
+            GateImpl::Rust { gate, .. } => gate.sessions_streams_size(),
+            GateImpl::Go(_) => unimplemented!(
+                "not_observable: Gate.sessionsStreams is unexported (and never written by the Go implementation)"
+            ),
         }
     }
 }
@@ -447,6 +450,14 @@ impl Default for Gate {
 pub fn build_message_json(msg: &StreamMessage, identifier: &str) -> Vec<u8> {
     match backend() {
         Backend::Rust => rs::build_message(msg, identifier).to_json(),
-        Backend::Go => unimplemented!("not_observable: hub.buildMessage is unexported"),
+        // buildMessage is unexported, but Gate.performBroadcast passes exactly
+        // `buildMessage(msg, identifier)` to HubSession.Send; the bridge captures it.
+        Backend::Go => {
+            let json: String = bridge::call(
+                "hub.BuildMessageJSON",
+                json!({"Msg": stream_message_json(msg), "Identifier": identifier}),
+            );
+            json.into_bytes()
+        }
     }
 }

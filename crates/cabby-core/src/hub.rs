@@ -175,10 +175,10 @@ impl Gate {
         pending!("hub::gate_size")
     }
 
-    /// Sizes of the internal indexes (upstream tests read the unexported
-    /// `streams` and `sessionsStreams` maps): `(streams, sessions_streams)`.
-    pub fn index_sizes(&self) -> (usize, usize) {
-        pending!("hub::gate_index_sizes")
+    /// Number of sessions in the session -> identifier -> streams index (upstream
+    /// tests read the unexported `sessionsStreams` map).
+    pub fn sessions_streams_size(&self) -> usize {
+        pending!("hub::gate_sessions_streams_size")
     }
 }
 
