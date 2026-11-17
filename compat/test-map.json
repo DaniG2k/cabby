@@ -16,8 +16,8 @@
       "go_vendored": 57
     },
     "reference": {
-      "not_observable": 109,
-      "pass": 650,
+      "not_observable": 102,
+      "pass": 657,
       "unverified": 164
     },
     "rust": {
@@ -28,8 +28,8 @@
       "cases": 45
     },
     "translation": {
-      "reviewed": 607,
-      "translated": 155,
+      "reviewed": 620,
+      "translated": 142,
       "unreviewed": 161
     },
     "upstream_result": {
@@ -6988,7 +6988,9 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] adaptation: upstream is compile-only; the type references are kept and the runtime counterpart (constructing an unconnected client) is exercised, with no state asserted."
+      ],
       "rust_cases": [
         "benchi_client::client_test::test_client_package_compiles"
       ],
@@ -7204,7 +7206,9 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] adaptation: go test -race is replaced by Sync types (data races are compile errors) plus the exact-total check under 100 concurrent threads."
+      ],
       "rust_cases": [
         "benchi_lib::counter_test::test_accumulator_race_clean"
       ],
@@ -7231,12 +7235,14 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] Go: the map Snapshot() returns stays behind a bridge handle and the writes go to it (op map.Set), so non-sharing is really observed."
+      ],
       "rust_cases": [
         "benchi_lib::counter_test::test_accumulator_snapshot_is_copy"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-benchi.jsonl"
@@ -7258,7 +7264,9 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] adaptation: upstream checks Go module linkage (replace directive + forked client); the external harness's link to the server is its binary, so the invariant is that the harness can execute it (Go: the bridge links cli.Embedded and the client)."
+      ],
       "rust_cases": [
         "benchi_lib::lib_test::test_module_links"
       ],
@@ -7420,7 +7428,9 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] adaptation: upstream's \"no goroutine leak\" remark becomes: a second close from another thread returns (workers already joined)."
+      ],
       "rust_cases": [
         "benchi_lib::publisher_test::test_publisher_against_build_server"
       ],
@@ -7478,7 +7488,7 @@
       "rust_cases": [
         "benchi_lib::publisher_test::test_publisher_cadence_not_gated_by_http_latency"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -7857,7 +7867,7 @@
       "rust_cases": [
         "benchi_lib::reconnecting_client_test::test_reconnecting_client_session_ids"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -7965,7 +7975,7 @@
       "rust_cases": [
         "benchi_lib::rpc_server_test::test_rpc_server_after_close"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -8096,11 +8106,13 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] adaptation: upstream redirects os.Stderr around the embedded server. Go: the bridge's stderr is read after a sentinel came through the pipe. Rust: the server is an external process with captured stdio, so this checks a harness default (ServerLog::Discard forwards nothing to the harness's stderr)."
+      ],
       "rust_cases": [
         "benchi_lib::server_test::test_build_server_log_suppression"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -8123,7 +8135,9 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] adaptation: the 1s bound covers spawning the server process, waiting until it accepts connections, and stopping it with SIGTERM (upstream: an in-process runner)."
+      ],
       "rust_cases": [
         "benchi_lib::server_test::test_build_server_starts_and_stops_in_one_second"
       ],
@@ -8393,12 +8407,14 @@
       "direct_assertions": 2,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] Go: the unexported commandStall is reached through the test-only scenario shim (go test -c with an overlaid _test.go; upstream files unchanged)."
+      ],
       "rust_cases": [
         "benchi_scenarios_reconnect_floods::main_test::test_command_stall"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-benchi.jsonl"
@@ -8447,12 +8463,14 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] Go: the unexported parseFlags is reached through the test-only scenario shim (go test -c with an overlaid _test.go; upstream files unchanged)."
+      ],
       "rust_cases": [
         "benchi_scenarios_reconnect_floods::main_test::test_parse_flags_waves"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-benchi.jsonl"
@@ -8474,11 +8492,13 @@
       "direct_assertions": 7,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] Go: parseFlags + runWithConfig with a 2s context, through the scenario shim. The drained check uses the gauge rule noted on TestRun_SmallWavesRecover."
+      ],
       "rust_cases": [
         "benchi_scenarios_reconnect_floods::main_test::test_run_interrupt_prints_summary"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -8528,11 +8548,13 @@
       "direct_assertions": 12,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] adaptation: upstream reads the embedded DisconnectQueue.Size(); the external harness reads the disconnect_queue_size gauge and counts a wave drained only on a sample refreshed after the wave once Disconnect calls plus discards cover the dropped sessions (reconnect_floods::wave_drained), so a stale 0 cannot pass. peak_goroutines/peak_heap_mb become server-process peak_server_threads/peak_server_rss_mb (not asserted). Go: run() is called in-process through the scenario shim."
+      ],
       "rust_cases": [
         "benchi_scenarios_reconnect_floods::main_test::test_run_small_waves_recover"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -8555,12 +8577,14 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] Go: run() with runOpts{...} is reached through the test-only scenario shim (go test -c with an overlaid _test.go; upstream files unchanged); the setup hook runs as a bridge callback."
+      ],
       "rust_cases": [
         "benchi_scenarios_stress_publications::main_test::test_stress_publications_cadence_under_artificial_latency"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-benchi.jsonl"
@@ -8582,12 +8606,14 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] Go: run() with runOpts{...} is reached through the test-only scenario shim (go test -c with an overlaid _test.go; upstream files unchanged); the setup hook runs as a bridge callback."
+      ],
       "rust_cases": [
         "benchi_scenarios_stress_publications::main_test::test_stress_publications_drain_timeout_honored"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-benchi.jsonl"
@@ -8663,12 +8689,14 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] Go: run() with runOpts{...} is reached through the test-only scenario shim (go test -c with an overlaid _test.go; upstream files unchanged); the setup hook runs as a bridge callback."
+      ],
       "rust_cases": [
         "benchi_scenarios_stress_publications::main_test::test_stress_publications_one_client_short"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-benchi.jsonl"
@@ -8717,12 +8745,14 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] Go: run() with runOpts{...} is reached through the test-only scenario shim (go test -c with an overlaid _test.go; upstream files unchanged); the setup hook runs as a bridge callback."
+      ],
       "rust_cases": [
         "benchi_scenarios_stress_publications::main_test::test_stress_publications_subscribe_failure_aborts"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-benchi.jsonl"
