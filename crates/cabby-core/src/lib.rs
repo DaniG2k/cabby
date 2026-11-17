@@ -5,8 +5,12 @@
 
 pub mod broker;
 pub mod common;
+pub mod encoders;
 pub mod identity;
+pub mod logger;
 pub mod pending;
 pub mod protocol;
 pub mod protos;
+pub mod router;
 pub mod streams;
+pub mod utils;

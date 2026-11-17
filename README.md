@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/cabby-mascot.png" width="320" alt="Cabby, a friendly orange crab in a yellow taxi-driver cap, waving and holding a network cable." />
+  <img src="docs/assets/cabby-mascot-v2.png" width="320" alt="Cabby, a round peach-coral crab with rosy cheeks and a butter-yellow taxi cap, holding a heart-shaped network cable." />
 </p>
 
 # Cabby
