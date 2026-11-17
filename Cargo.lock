@@ -155,9 +155,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "cabby-bench"
+version = "0.0.0"
+dependencies = [
+ "cabby-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "cabby-compat"
 version = "0.0.0"
 dependencies = [
+ "cabby-bench",
  "cabby-core",
  "cabby-testkit",
  "serde_json",
@@ -188,6 +199,7 @@ name = "cabby-testkit"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "cabby-bench",
  "cabby-core",
  "cabby-server",
  "serde",
