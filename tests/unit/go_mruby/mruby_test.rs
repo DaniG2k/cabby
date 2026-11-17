@@ -265,6 +265,7 @@ fn get_args_case(tc: &GetArgsCase) -> Result<(), String> {
 }
 
 /// upstream: vendorlib/go-mruby/mruby_test.go#TestMrbGetArgs
+/// note: runtime adaptation (goroutines -> threads): each case runs on its own OS thread with its own VM for 1000 rounds, joined per round; invariant: independent VMs run concurrently without shared state and each method sees exactly its own arguments. On Go each thread is its own bridge goroutine.
 ///
 /// Runtime adaptation (goroutines -> threads): upstream runs every case on its
 /// own goroutine with its own VM, 1000 rounds, to exercise go-mruby's global
@@ -393,6 +394,7 @@ fn test_mrb_raise() {
 }
 
 /// upstream: vendorlib/go-mruby/mruby_test.go#TestMrbYield
+/// note: runtime adaptation (t.Fatalf inside a cgo callback -> recorded failure): the callback records a Yield error instead of panicking (a panic must not cross into the VM) and the test fails right after LoadString.
 ///
 /// Upstream calls `t.Fatalf` inside the callback when Yield fails. The callback
 /// records the failure instead (a panic must not cross back into the VM) and the
@@ -500,6 +502,7 @@ fn test_mrb_run() {
 }
 
 /// upstream: vendorlib/go-mruby/mruby_test.go#TestMrbDefineMethodConcurrent
+/// note: runtime adaptation (goroutines -> threads): 100 threads define 100 singleton methods each on their own VM; the channel rendezvous becomes joining every thread; invariant: no race or deadlock.
 ///
 /// Runtime adaptation (goroutines -> threads): 100 goroutines each define 100
 /// singleton methods on their own VM, racing on go-mruby's global method table.
@@ -532,6 +535,7 @@ fn test_mrb_define_method_concurrent() {
 }
 
 /// upstream: vendorlib/go-mruby/mruby_test.go#TestMrbStackedException
+/// note: adaptation: Go `result != nil` ("result was not cleared") holds by construction for a Rust Result; on Go the facade asserts every exception comes with a nil *MrbValue.
 #[test]
 fn test_mrb_stacked_exception() {
     let test_class: Rc<RefCell<Option<Class>>> = Rc::default();
@@ -598,7 +602,8 @@ fn test_mrb_stacked_exception() {
     assert!(result.is_err(), "did not error");
 
     // Go: `result != nil` means "result was not cleared". A failed Result carries
-    // no value, so this holds by construction.
+    // no value, so this holds by construction; on Go the facade also asserts that
+    // the bridge returned a nil *MrbValue with the exception.
     assert!(result.ok().is_none(), "result was not cleared");
 
     mrb.close();

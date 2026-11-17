@@ -50,6 +50,7 @@ fn test_parser_parse_error() {
 }
 
 /// upstream: vendorlib/go-mruby/parser_test.go#TestParserError_error
+/// note: runtime adaptation (compile-time interface check -> trait + rendering): `var _ error = new(ParserError)` becomes: the zero ParserError is a std::error::Error and renders like Go Error() of a zero value ("Ruby parse error!\n\n").
 ///
 /// Runtime adaptation (Go interface satisfaction -> trait + usable error):
 /// upstream only checks at compile time that `*ParserError` implements `error`
