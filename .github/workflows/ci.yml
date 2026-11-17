@@ -14,6 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # Test services (e.g. a private nats-server) are built from the pinned module.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.3"
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Toolchain (rust-toolchain.toml)
@@ -22,6 +26,9 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test -p xtask -p cabby-core
       - run: cargo xtask check-inputs
+      - run: cargo xtask reference-checkout
+      - name: Start Redis and NATS (pinned images)
+        run: compat/scripts/services.sh start | sed 's/^export //; s/ /\n/g' >> "$GITHUB_ENV"
       # Green while cases are pending; fails on any regression, crash, ignore,
       # unmapped test or unreviewed pass (SPEC.md §5).
       - run: cargo xtask test --backend rust
@@ -39,7 +46,10 @@ jobs:
       - name: Toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - run: cargo xtask reference-checkout
+      - run: cargo xtask reference-mruby
       - run: cargo xtask reference-build
+      - name: Start Redis and NATS (pinned images)
+        run: compat/scripts/services.sh start | sed 's/^export //; s/ /\n/g' >> "$GITHUB_ENV"
       - run: cargo xtask test --backend go
       - name: Manifest is up to date
         run: |
