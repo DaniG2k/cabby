@@ -228,6 +228,11 @@ impl RedisService {
     }
 
     /// A fresh per-test scope with its own ACL user and key prefix.
+    /// The Redis server's address.
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
+    }
+
     pub fn scope(&'static self, tag: &str) -> RedisScope {
         let admin = self.admin().unwrap_or_else(|e| panic!("connecting to Redis: {e:#}"));
         let mut scope =
@@ -280,6 +285,14 @@ impl RedisScope {
         self.users.push(user.clone());
         let url = self.url_for(&user);
         (user, url)
+    }
+
+    /// Like [`RedisScope::url`], but connecting through `via` (e.g. a fault proxy
+    /// that forwards to [`RedisService::addr`]).
+    pub fn url_via(&self, via: SocketAddr) -> String {
+        let user = &self.users[0];
+        let db = if self.svc.db == 0 { String::new() } else { self.svc.db.to_string() };
+        format!("redis://{user}:pw_{user}@{via}/{db}")
     }
 
     fn url_for(&self, user: &str) -> String {

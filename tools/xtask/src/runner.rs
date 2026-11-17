@@ -34,6 +34,8 @@ enum Outcome {
     /// The Go facade reported `unimplemented!("not_observable: <reason>")`: the
     /// behavior cannot be reached through the reference (SPEC.md §5).
     NotObservable,
+    /// An `/// issue:` test failed on Go: the upstream defect it pins.
+    UpstreamFailure,
 }
 
 /// Marker used by Go facade arms for behavior the reference cannot expose.
@@ -153,6 +155,7 @@ fn status_str(o: Outcome) -> &'static str {
         Outcome::Pending => "pending",
         Outcome::Fail | Outcome::Ignored => "fail",
         Outcome::NotObservable => "not_observable",
+        Outcome::UpstreamFailure => "upstream_failure",
     }
 }
 
@@ -161,6 +164,8 @@ fn combine(outcomes: &[Outcome]) -> Outcome {
         Outcome::Fail
     } else if outcomes.contains(&Outcome::NotObservable) {
         Outcome::NotObservable
+    } else if outcomes.contains(&Outcome::UpstreamFailure) {
+        Outcome::UpstreamFailure
     } else if outcomes.iter().all(|o| *o == Outcome::Pass) {
         Outcome::Pass
     } else {
@@ -189,6 +194,10 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
 
     let mut results: BTreeMap<String, Outcome> = BTreeMap::new();
     let mut errors: Vec<String> = Vec::new();
+    // Tests pinning fixes for upstream issues may fail on Go: that failure is the
+    // documented upstream defect (recorded as `upstream_failure`), not an error.
+    let issue_tests: std::collections::HashSet<String> =
+        manifest::load()?.rust_only.iter().filter(|r| r.relation == "issue").map(|r| r.rust_case.clone()).collect();
     for (name, exe) in test_binaries()? {
         let (out, _ok) = run_binary(&exe, backend, &sut_bin, filter)?;
         let parsed = parse(&out);
@@ -196,6 +205,10 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
             errors.push(format!("{name}: could not parse test output (crash?):\n{out}"));
         }
         for (t, o) in parsed {
+            if o == Outcome::Fail && backend == Backend::Go && issue_tests.contains(&format!("{name}::{t}")) {
+                results.insert(format!("{name}::{t}"), Outcome::UpstreamFailure);
+                continue;
+            }
             if o == Outcome::Fail {
                 let section = out
                     .split(&format!("---- {t} stdout ----"))
@@ -259,6 +272,8 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
                     errors.push(format!("PENDING-ON-GO {label}: the Go reference cannot be pending"));
                 } else if o == Outcome::NotObservable && record {
                     *ref_status = "not_observable".into();
+                } else if o == Outcome::UpstreamFailure && record {
+                    *ref_status = "upstream_failure".into();
                 }
             }
             Backend::Rust => match (rust_status.as_str(), o) {
@@ -299,6 +314,7 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
             Outcome::Fail => "fail",
             Outcome::Ignored => "ignored",
             Outcome::NotObservable => "not_observable",
+            Outcome::UpstreamFailure => "upstream_failure",
         })
         .or_default() += 1;
         acc
