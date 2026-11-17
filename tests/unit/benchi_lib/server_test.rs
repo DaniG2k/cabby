@@ -38,6 +38,7 @@ fn test_build_server_broadcast_url_accepts_post() {
 }
 
 /// upstream: etc/benchi/lib/server_test.go#TestBuildServer_LogSuppression
+/// note: adaptation: upstream redirects os.Stderr around the embedded server. Go: the bridge's stderr is read after a sentinel came through the pipe. Rust: the server is an external process with captured stdio, so this checks a harness default (ServerLog::Discard forwards nothing to the harness's stderr).
 ///
 /// Runtime-specific adaptation: upstream swaps `os.Stderr` for a pipe around
 /// `BuildServer` + `Shutdown` of the embedded server and expects nothing written. The
@@ -71,6 +72,7 @@ fn test_build_server_double_shutdown_returns_nil() {
 }
 
 /// upstream: etc/benchi/lib/server_test.go#TestBuildServer_StartsAndStops_InOneSecond
+/// note: adaptation: the 1s bound covers spawning the server process, waiting until it accepts connections, and stopping it with SIGTERM (upstream: an in-process runner).
 ///
 /// Runtime-specific adaptation: upstream starts and stops an in-process runner; here
 /// the bound covers spawning the server process, waiting for it to accept
