@@ -76,9 +76,11 @@ func (b *scriptedBroker) PresenceRemove(string, string) (*common.PresenceEvent, 
 	return nil, nil
 }
 
-// PresenceInfo matches on the stream only (upstream: `mock.Anything` for options).
-func (b *scriptedBroker) PresenceInfo(stream string, _ ...broker.PresenceInfoOption) (*common.PresenceInfo, error) {
-	r := decodeScriptedReturn(b.s.answer("PresenceInfo", map[string]interface{}{"stream": stream}))
+// PresenceInfo matches on the stream and the number of options (upstream:
+// mockery unrolls the variadic, so `On("PresenceInfo", "a", mock.Anything)`
+// matches exactly one option of any value).
+func (b *scriptedBroker) PresenceInfo(stream string, opts ...broker.PresenceInfoOption) (*common.PresenceInfo, error) {
+	r := decodeScriptedReturn(b.s.answer("PresenceInfo", map[string]interface{}{"stream": stream, "options": len(opts)}))
 	if r.isNil() {
 		return nil, r.err()
 	}

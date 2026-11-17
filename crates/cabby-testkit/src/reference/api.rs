@@ -205,12 +205,16 @@ impl Authenticator {
 
 // ------------------------------------------------------------------ mocks
 
-/// A call received by the broker mock (`opts` is matched with `mock.Anything`).
+/// A call received by the broker mock.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BrokerCall {
     SupportsPresence,
+    /// `PresenceInfo(stream, opts...)`. mockery unrolls the variadic, so
+    /// upstream's `On("PresenceInfo", "a", mock.Anything)` matches exactly one
+    /// option of any value: `options` is how many were passed, values ignored.
     PresenceInfo {
         stream: String,
+        options: usize,
     },
     /// Any other `broker.Broker` method (always unexpected in these tests).
     Other(String),
@@ -228,6 +232,9 @@ pub enum BrokerReturn {
 pub struct MockBroker {
     expectations: Mutex<Vec<(BrokerCall, BrokerReturn)>>,
     calls: Mutex<Vec<BrokerCall>>,
+    /// Calls with no matching expectation (also rejected by a panic in `answer`,
+    /// which a server thread could swallow).
+    unmatched: Mutex<Vec<BrokerCall>>,
 }
 
 impl MockBroker {
@@ -239,8 +246,11 @@ impl MockBroker {
         self.expectations.lock().unwrap().push((call, ret));
     }
 
-    /// Every expectation was called at least once (testify `AssertExpectations`).
+    /// Every expectation was called at least once and no call went unmatched
+    /// (testify `AssertExpectations`, plus its failure on unexpected calls).
     pub fn assert_expectations(&self) {
+        let unmatched = self.unmatched.lock().unwrap();
+        assert!(unmatched.is_empty(), "unexpected broker calls: {unmatched:?}");
         let calls = self.calls.lock().unwrap();
         for (c, _) in self.expectations.lock().unwrap().iter() {
             assert!(calls.contains(c), "expected broker call {c:?} was not made; calls: {calls:?}");
@@ -250,6 +260,9 @@ impl MockBroker {
     fn answer(&self, call: BrokerCall) -> BrokerReturn {
         let ret = self.expectations.lock().unwrap().iter().find(|(c, _)| *c == call).map(|(_, r)| r.clone());
         self.calls.lock().unwrap().push(call.clone());
+        if ret.is_none() {
+            self.unmatched.lock().unwrap().push(call.clone());
+        }
         ret.unwrap_or_else(|| panic!("mock: unexpected broker call {call:?}"))
     }
 
@@ -260,7 +273,9 @@ impl MockBroker {
                 .map(|(c, r)| {
                     let (method, args) = match c {
                         BrokerCall::SupportsPresence => ("SupportsPresence", json!({})),
-                        BrokerCall::PresenceInfo { stream } => ("PresenceInfo", json!({"stream": stream})),
+                        BrokerCall::PresenceInfo { stream, options } => {
+                            ("PresenceInfo", json!({"stream": stream, "options": options}))
+                        }
                         BrokerCall::Other(m) => (m.as_str(), json!({})),
                     };
                     let returns = match r {
@@ -278,9 +293,10 @@ impl MockBroker {
         for c in calls.as_array().into_iter().flatten() {
             let call = match c["method"].as_str().unwrap_or_default() {
                 "SupportsPresence" => BrokerCall::SupportsPresence,
-                "PresenceInfo" => {
-                    BrokerCall::PresenceInfo { stream: c["args"]["stream"].as_str().unwrap_or_default().into() }
-                }
+                "PresenceInfo" => BrokerCall::PresenceInfo {
+                    stream: c["args"]["stream"].as_str().unwrap_or_default().into(),
+                    options: c["args"]["options"].as_u64().expect("PresenceInfo option count") as usize,
+                },
                 other => BrokerCall::Other(other.into()),
             };
             self.answer(call);
@@ -348,8 +364,9 @@ impl cabby_core::broker::Broker for MockBroker {
     fn presence_remove(&self, _stream: &str, _sid: &str) -> Result<Option<PresenceEvent>, BrokerError> {
         self.unexpected("PresenceRemove")
     }
-    fn presence_info(&self, stream: &str, _opts: Option<&PresenceInfoOptions>) -> Result<PresenceInfo, BrokerError> {
-        match self.answer(BrokerCall::PresenceInfo { stream: stream.into() }) {
+    fn presence_info(&self, stream: &str, opts: Option<&PresenceInfoOptions>) -> Result<PresenceInfo, BrokerError> {
+        // `Some(opts)` is Go's single `WithPresenceInfoOptions(opts)` argument.
+        match self.answer(BrokerCall::PresenceInfo { stream: stream.into(), options: usize::from(opts.is_some()) }) {
             BrokerReturn::PresenceInfo(r) => r,
             other => panic!("mock: PresenceInfo returns presence info, got {other:?}"),
         }
@@ -370,6 +387,8 @@ type HandlerExpectation = (Vec<u8>, Result<(), ApiError>);
 pub struct MockHandler {
     expectations: Mutex<Vec<HandlerExpectation>>,
     calls: Mutex<Vec<(String, Vec<u8>)>>,
+    /// Calls with no matching expectation (see [`MockBroker`]).
+    unmatched: Mutex<Vec<(String, Vec<u8>)>>,
 }
 
 impl MockHandler {
@@ -382,7 +401,14 @@ impl MockHandler {
         self.expectations.lock().unwrap().push((payload.to_vec(), ret));
     }
 
+    /// Every expectation was called at least once and no call went unmatched.
     pub fn assert_expectations(&self) {
+        let unmatched = self.unmatched.lock().unwrap();
+        assert!(
+            unmatched.is_empty(),
+            "unexpected handler calls: {:?}",
+            unmatched.iter().map(|(m, p)| format!("{m}({})", String::from_utf8_lossy(p))).collect::<Vec<_>>()
+        );
         let calls = self.calls.lock().unwrap();
         for (p, _) in self.expectations.lock().unwrap().iter() {
             assert!(
@@ -395,12 +421,16 @@ impl MockHandler {
 
     fn answer(&self, method: &str, payload: &[u8]) -> Result<(), ApiError> {
         self.calls.lock().unwrap().push((method.into(), payload.to_vec()));
-        if method != "HandleBroadcast" {
-            panic!("mock: unexpected handler call {method}({:?})", String::from_utf8_lossy(payload));
+        let ret = if method == "HandleBroadcast" {
+            let exps = self.expectations.lock().unwrap();
+            exps.iter().find(|(p, _)| p == payload).map(|(_, r)| r.clone())
+        } else {
+            None
+        };
+        if ret.is_none() {
+            self.unmatched.lock().unwrap().push((method.into(), payload.to_vec()));
         }
-        let exps = self.expectations.lock().unwrap();
-        let ret = exps.iter().find(|(p, _)| p == payload).map(|(_, r)| r.clone());
-        ret.unwrap_or_else(|| panic!("mock: unexpected HandleBroadcast({:?})", String::from_utf8_lossy(payload)))
+        ret.unwrap_or_else(|| panic!("mock: unexpected handler call {method}({:?})", String::from_utf8_lossy(payload)))
     }
 
     fn expectations_to_go(&self) -> Value {
@@ -521,6 +551,57 @@ pub fn new_server(conf: &mut Config, broker: &Arc<MockBroker>, handler: &Arc<Moc
             let r: GoConfigReply = bridge::call("api.NewServer", json!({"Config": GoConfig::from(&*conf)}));
             r.apply(conf)?;
             Ok(Server { conf: conf.clone(), broker: broker.clone(), handler: handler.clone(), rust: None })
+        }
+    }
+}
+
+/// Upstream's `defer api.Shutdown(context.Background()) // nolint:errcheck`:
+/// shuts the server down when dropped, ignoring the result, also when the test
+/// fails earlier.
+pub struct ShutdownOnDrop(Server);
+
+/// Wraps `server` so it is shut down at the end of the scope.
+pub fn defer_shutdown(server: Server) -> ShutdownOnDrop {
+    ShutdownOnDrop(server)
+}
+
+impl std::ops::Deref for ShutdownOnDrop {
+    type Target = Server;
+    fn deref(&self) -> &Server {
+        &self.0
+    }
+}
+
+thread_local! {
+    static SILENT_PANICS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// A panic hook that stays quiet on threads that set `SILENT_PANICS`, and
+/// otherwise defers to the previous hook.
+fn install_silencing_hook() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if !SILENT_PANICS.with(|s| s.get()) {
+                previous(info);
+            }
+        }));
+    });
+}
+
+impl Drop for ShutdownOnDrop {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            // The test already failed. Shut down anyway (as a Go defer does), but
+            // keep a panicking shutdown (e.g. a pending marker) out of the test's
+            // output, so the runner still classifies the case by its first failure.
+            install_silencing_hook();
+            SILENT_PANICS.with(|s| s.set(true));
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.0.shutdown()));
+            SILENT_PANICS.with(|s| s.set(false));
+        } else {
+            let _ = self.0.shutdown();
         }
     }
 }
