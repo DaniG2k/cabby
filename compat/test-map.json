@@ -16,8 +16,8 @@
       "go_vendored": 57
     },
     "reference": {
-      "not_observable": 102,
-      "pass": 657,
+      "not_observable": 101,
+      "pass": 658,
       "unverified": 164
     },
     "rust": {
@@ -28,8 +28,8 @@
       "cases": 45
     },
     "translation": {
-      "reviewed": 620,
-      "translated": 142,
+      "reviewed": 623,
+      "translated": 139,
       "unreviewed": 161
     },
     "upstream_result": {
@@ -11206,11 +11206,13 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] the 20 Inc / 13 Dec goroutines run inside one facade call (Rust: scoped threads; Go: goroutines inside the bridge op), so the Go gauge sees real concurrency rather than serialized bridge calls."
+      ],
       "rust_cases": [
         "metrics::gauge_test::test_gauge_inc_dec"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -11233,12 +11235,14 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] rotate interval 1s instead of upstream's 10 (no assertion depends on it): on Go, rotate() is driven through the exported Run loop with a bridge writer that blocks in Write after each rotation, so each rotate() costs one interval of wall time."
+      ],
       "rust_cases": [
         "metrics::metrics_test::test_metrics_snapshot"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11399,7 +11403,7 @@
       "rust_cases": [
         "metrics::prometheus_test::test_prometheus_with_tags"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21935,7 +21939,10 @@
       "direct_assertions": 13,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] the upstream test is split: this case (boot event, exported API) runs against Go; usage_event covers the rest.",
+        "[src] not_observable on Go: the usage half calls the unexported observeUsage/collectUsage and depends on the unexported usage-monitor goroutine (otherwise the usage event fires only after 30 minutes); the boot half runs against Go in boot_event."
+      ],
       "rust_cases": [
         "telemetry::telemetry_test::test_tracking::boot_event",
         "telemetry::telemetry_test::test_tracking::usage_event"
