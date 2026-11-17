@@ -28,7 +28,8 @@
       "cases": 36
     },
     "translation": {
-      "translated": 517,
+      "reviewed": 175,
+      "translated": 342,
       "unreviewed": 406
     },
     "upstream_result": {
@@ -56,7 +57,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -83,7 +84,7 @@
       "rust_cases": [
         "api::auth_test::test_authenticator::authenticate_rejects_invalid_token"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -110,7 +111,7 @@
       "rust_cases": [
         "api::auth_test::test_authenticator::authenticate_rejects_missing_authorization_header"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -137,7 +138,7 @@
       "rust_cases": [
         "api::auth_test::test_authenticator::authenticate_rejects_non_bearer_auth"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -164,7 +165,7 @@
       "rust_cases": [
         "api::auth_test::test_authenticator::authenticate_with_no_secret_configured_public"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -191,7 +192,7 @@
       "rust_cases": [
         "api::auth_test::test_authenticator::authenticate_with_valid_bearer_token"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -218,7 +219,7 @@
       "rust_cases": [
         "api::auth_test::test_authenticator::new_authenticator_with_explicit_secret"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -271,7 +272,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -298,7 +299,7 @@
       "rust_cases": [
         "api::config_test::test_config_derive_secret::derives_secret_from_secret_base"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -325,7 +326,7 @@
       "rust_cases": [
         "api::config_test::test_config_derive_secret::different_secret_base_produces_different_secrets"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -352,7 +353,7 @@
       "rust_cases": [
         "api::config_test::test_config_derive_secret::does_nothing_when_secret_base_is_empty"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -379,7 +380,7 @@
       "rust_cases": [
         "api::config_test::test_config_derive_secret::does_nothing_when_secret_is_already_set"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -405,7 +406,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -432,7 +433,7 @@
       "rust_cases": [
         "api::config_test::test_config_is_secured::returns_false_when_no_secret_configured"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -459,7 +460,7 @@
       "rust_cases": [
         "api::config_test::test_config_is_secured::returns_true_when_secret_base_is_set"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -486,7 +487,7 @@
       "rust_cases": [
         "api::config_test::test_config_is_secured::returns_true_when_secret_is_set"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -513,7 +514,7 @@
       "rust_cases": [
         "api::config_test::test_config_new_config"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -540,7 +541,7 @@
       "rust_cases": [
         "api::config_test::test_config_to_toml"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -567,7 +568,7 @@
       "rust_cases": [
         "api::config_test::test_config_to_toml_defaults"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1369,7 +1370,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1396,7 +1397,7 @@
       "rust_cases": [
         "broker::broker_test::test_streams_tracker_add_remove::add_first_subscription"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1423,7 +1424,7 @@
       "rust_cases": [
         "broker::broker_test::test_streams_tracker_add_remove::add_second_subscription_to_same_stream"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1450,7 +1451,7 @@
       "rust_cases": [
         "broker::broker_test::test_streams_tracker_add_remove::add_third_subscription_to_same_stream"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1477,7 +1478,7 @@
       "rust_cases": [
         "broker::broker_test::test_streams_tracker_add_remove::remove_first_subscription_count_3_to_2"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1504,7 +1505,7 @@
       "rust_cases": [
         "broker::broker_test::test_streams_tracker_add_remove::remove_non_existent_stream"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1531,7 +1532,7 @@
       "rust_cases": [
         "broker::broker_test::test_streams_tracker_add_remove::remove_second_subscription_count_2_to_1"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1558,7 +1559,7 @@
       "rust_cases": [
         "broker::broker_test::test_streams_tracker_add_remove::remove_third_subscription_count_1_to_0"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1585,7 +1586,7 @@
       "rust_cases": [
         "broker::broker_test::test_streams_tracker_multiple_streams"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1639,7 +1640,7 @@
       "rust_cases": [
         "broker::config_test::test_config_decode_toml"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1666,7 +1667,7 @@
       "rust_cases": [
         "broker::config_test::test_config_to_toml"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1693,7 +1694,7 @@
       "rust_cases": [
         "broker::memory_test::test_memory_expire"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "not_observable",
       "rust_status": "pending",
       "evidence": [
@@ -1719,7 +1720,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1746,7 +1747,7 @@
       "rust_cases": [
         "broker::memory_test::test_memory_from_offset::with_current_epoch"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1773,7 +1774,7 @@
       "rust_cases": [
         "broker::memory_test::test_memory_from_offset::with_unknown_epoch"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1800,7 +1801,7 @@
       "rust_cases": [
         "broker::memory_test::test_memory_limit"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1829,7 +1830,7 @@
       "rust_cases": [
         "broker::memory_test::test_memory_peak"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pass",
       "evidence": [
@@ -1856,7 +1857,7 @@
       "rust_cases": [
         "broker::memory_test::test_memory_presence"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1883,7 +1884,7 @@
       "rust_cases": [
         "broker::memory_test::test_memory_restore_session"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "not_observable",
       "rust_status": "pending",
       "evidence": [
@@ -1910,7 +1911,7 @@
       "rust_cases": [
         "broker::memory_test::test_memory_store"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -1937,7 +1938,7 @@
       "rust_cases": [
         "broker::memory_test::test_memory_expire_presence"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "not_observable",
       "rust_status": "pending",
       "evidence": [
@@ -1964,7 +1965,7 @@
       "rust_cases": [
         "broker::memory_test::test_memstream_filter_by_offset"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "not_observable",
       "rust_status": "pending",
       "evidence": [
@@ -2022,7 +2023,7 @@
         "broker::nats_test::test_nats_broker_history_from::with_current_epoch",
         "broker::nats_test::test_nats_broker_history_from::with_unknown_epoch"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2049,7 +2050,7 @@
       "rust_cases": [
         "broker::nats_test::test_nats_broker_history_from::when_no_new_messages"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2076,7 +2077,7 @@
       "rust_cases": [
         "broker::nats_test::test_nats_broker_history_from::when_no_stream"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2103,7 +2104,7 @@
       "rust_cases": [
         "broker::nats_test::test_nats_broker_history_from::with_current_epoch"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2130,7 +2131,7 @@
       "rust_cases": [
         "broker::nats_test::test_nats_broker_history_from::with_unknown_epoch"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2157,7 +2158,7 @@
       "rust_cases": [
         "broker::nats_test::test_nats_broker_history_since_expiration"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2184,7 +2185,7 @@
       "rust_cases": [
         "broker::nats_test::test_nats_broker_history_since_with_limit"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2211,7 +2212,7 @@
       "rust_cases": [
         "broker::nats_test::test_nats_broker_sessions"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2238,7 +2239,7 @@
       "rust_cases": [
         "broker::nats_test::test_nats_broker_sessions_ttl_change"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2673,7 +2674,7 @@
       "rust_cases": [
         "common::common_test::test_confirmation_message"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2700,7 +2701,7 @@
       "rust_cases": [
         "common::common_test::test_env_get_channel_state_field"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2727,7 +2728,7 @@
       "rust_cases": [
         "common::common_test::test_env_get_connection_state_field"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2753,7 +2754,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2780,7 +2781,7 @@
       "rust_cases": [
         "common::common_test::test_env_merge_channel_state::when_adding_and_rewriting"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2807,7 +2808,7 @@
       "rust_cases": [
         "common::common_test::test_env_merge_channel_state::when_new_channel"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2833,7 +2834,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2860,7 +2861,7 @@
       "rust_cases": [
         "common::common_test::test_env_merge_connection_state::when_adding_and_rewriting"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2887,7 +2888,7 @@
       "rust_cases": [
         "common::common_test::test_message_json_serialization"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2913,7 +2914,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2940,7 +2941,7 @@
       "rust_cases": [
         "common::common_test::test_pub_sub_message_from_json::broadcast_message"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2967,7 +2968,7 @@
       "rust_cases": [
         "common::common_test::test_pub_sub_message_from_json::remote_disconnect_message"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -2994,7 +2995,7 @@
       "rust_cases": [
         "common::common_test::test_rejection_message"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3020,7 +3021,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3047,7 +3048,7 @@
       "rust_cases": [
         "common::common_test::test_stream_message_to_reply_for::preserves_large_integers_precision"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3074,7 +3075,7 @@
       "rust_cases": [
         "common::common_test::test_stream_message_to_reply_for::with_trailing_garbage"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3101,7 +3102,7 @@
       "rust_cases": [
         "common::log_values_test::test_command_result_log_value_masks_signed_streams"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3127,7 +3128,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3155,7 +3156,7 @@
       "rust_cases": [
         "common::log_values_test::test_filtered_identifier::cable_ready_stream"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3183,7 +3184,7 @@
       "rust_cases": [
         "common::log_values_test::test_filtered_identifier::confirmation_message_"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3211,7 +3212,7 @@
       "rust_cases": [
         "common::log_values_test::test_filtered_identifier::invalid_json"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3239,7 +3240,7 @@
       "rust_cases": [
         "common::log_values_test::test_filtered_identifier::multiple_signed_streams"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3267,7 +3268,7 @@
       "rust_cases": [
         "common::log_values_test::test_filtered_identifier::not_a_json"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3295,7 +3296,7 @@
       "rust_cases": [
         "common::log_values_test::test_filtered_identifier::public_stream"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3323,7 +3324,7 @@
       "rust_cases": [
         "common::log_values_test::test_filtered_identifier::regular_channel"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3351,7 +3352,7 @@
       "rust_cases": [
         "common::log_values_test::test_filtered_identifier::signed_stream"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3379,7 +3380,7 @@
       "rust_cases": [
         "common::log_values_test::test_filtered_identifier::signed_stream_without_digest"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3407,7 +3408,7 @@
       "rust_cases": [
         "common::log_values_test::test_filtered_identifier::turbo_stream_with_spaces"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -3434,7 +3435,7 @@
       "rust_cases": [
         "common::log_values_test::test_filtered_transmissions"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6588,7 +6589,7 @@
       "rust_cases": [
         "encoders::encoding_cache_test::test_encoding_cache"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6614,7 +6615,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6641,7 +6642,7 @@
       "rust_cases": [
         "encoders::json_test::test_json_encoder::decode"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6668,7 +6669,7 @@
       "rust_cases": [
         "encoders::json_test::test_json_encoder::encode"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6695,7 +6696,7 @@
       "rust_cases": [
         "encoders::json_test::test_json_encoder::encode_transmission"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9624,7 +9625,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9651,7 +9652,7 @@
       "rust_cases": [
         "identity::identity_test::test_identifiable_controller::authenticate_error"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9678,7 +9679,7 @@
       "rust_cases": [
         "identity::identity_test::test_identifiable_controller::authenticate_failure"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9705,7 +9706,7 @@
       "rust_cases": [
         "identity::identity_test::test_identifiable_controller::authenticate_noop_passthrough"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9732,7 +9733,7 @@
       "rust_cases": [
         "identity::identity_test::test_identifiable_controller::authenticate_success"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9759,7 +9760,7 @@
       "rust_cases": [
         "identity::identity_test::test_identifiable_controller::disconnect"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9786,7 +9787,7 @@
       "rust_cases": [
         "identity::identity_test::test_identifiable_controller::perform"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9813,7 +9814,7 @@
       "rust_cases": [
         "identity::identity_test::test_identifiable_controller::shutdown"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9840,7 +9841,7 @@
       "rust_cases": [
         "identity::identity_test::test_identifiable_controller::start"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9867,7 +9868,7 @@
       "rust_cases": [
         "identity::identity_test::test_identifiable_controller::subscribe"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9894,7 +9895,7 @@
       "rust_cases": [
         "identity::identity_test::test_identifiable_controller::unsubscribe"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9920,7 +9921,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9947,7 +9948,7 @@
       "rust_cases": [
         "identity::identity_test::test_identifier_pipeline::first_identifier_fail"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9974,7 +9975,7 @@
       "rust_cases": [
         "identity::identity_test::test_identifier_pipeline::first_identifier_success"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -10001,7 +10002,7 @@
       "rust_cases": [
         "identity::identity_test::test_identifier_pipeline::second_identifier_success"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -10028,7 +10029,7 @@
       "rust_cases": [
         "identity::jwt_test::test_config_to_toml"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -10054,7 +10055,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -10081,7 +10082,7 @@
       "rust_cases": [
         "identity::jwt_test::test_jwt_identifier_identify::when_token_expired"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -10108,7 +10109,7 @@
       "rust_cases": [
         "identity::jwt_test::test_jwt_identifier_identify::when_token_is_missing_and_not_required"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -10135,7 +10136,7 @@
       "rust_cases": [
         "identity::jwt_test::test_jwt_identifier_identify::when_token_is_missing_and_required"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -10162,7 +10163,7 @@
       "rust_cases": [
         "identity::jwt_test::test_jwt_identifier_identify::with_invalid_algo"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -10189,7 +10190,7 @@
       "rust_cases": [
         "identity::jwt_test::test_jwt_identifier_identify::with_invalid_secret"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -10216,7 +10217,7 @@
       "rust_cases": [
         "identity::jwt_test::test_jwt_identifier_identify::with_invalid_token"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -10243,7 +10244,7 @@
       "rust_cases": [
         "identity::jwt_test::test_jwt_identifier_identify::with_valid_token_passed_as_a_header"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -10270,7 +10271,7 @@
       "rust_cases": [
         "identity::jwt_test::test_jwt_identifier_identify::with_valid_token_passed_as_query_param"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14099,7 +14100,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14126,7 +14127,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_new_command_message::base"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14153,7 +14154,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_new_command_message::with_connection_channel_state_and_data"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14180,7 +14181,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_new_connect_message"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14207,7 +14208,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_new_disconnect_request"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14233,7 +14234,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14260,7 +14261,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_parse_command_response::error"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14287,7 +14288,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_parse_command_response::failure"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14314,7 +14315,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_parse_command_response::success"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14341,7 +14342,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_parse_command_response::success_with_connection_and_channel_state"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14367,7 +14368,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14394,7 +14395,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_parse_connect_response::error"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14421,7 +14422,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_parse_connect_response::failure"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14448,7 +14449,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_parse_connect_response::success"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14474,7 +14475,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14501,7 +14502,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_parse_disconnect_response::error"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14528,7 +14529,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_parse_disconnect_response::failure"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -14555,7 +14556,7 @@
       "rust_cases": [
         "protocol::protocol_test::test_parse_disconnect_response::success"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -17707,7 +17708,7 @@
       "rust_cases": [
         "rpc::config_test::test_config_impl"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -17734,7 +17735,7 @@
       "rust_cases": [
         "rpc::config_test::test_config_to_toml::base"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -17761,7 +17762,7 @@
       "rust_cases": [
         "rpc::config_test::test_config_to_toml::wait_timeout"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -17814,7 +17815,7 @@
       "rust_cases": [
         "rpc::grpc_test::test_grpc_integration::exhausted"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -17868,7 +17869,7 @@
       "rust_cases": [
         "rpc::grpc_test::test_grpc_integration::timeout"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -17922,7 +17923,7 @@
       "rust_cases": [
         "rpc::http_test::test_http_client_helper_ready"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -17948,7 +17949,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -17975,7 +17976,7 @@
       "rust_cases": [
         "rpc::http_test::test_http_service_authentication::authentication_failure"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18002,7 +18003,7 @@
       "rust_cases": [
         "rpc::http_test::test_http_service_authentication::authentication_success"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18028,7 +18029,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18055,7 +18056,7 @@
       "rust_cases": [
         "rpc::http_test::test_http_service_bad_requests::bad_request"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18082,7 +18083,7 @@
       "rust_cases": [
         "rpc::http_test::test_http_service_bad_requests::unknown_url"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18108,7 +18109,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18135,7 +18136,7 @@
       "rust_cases": [
         "rpc::http_test::test_http_service_rpc::command"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18162,7 +18163,7 @@
       "rust_cases": [
         "rpc::http_test::test_http_service_rpc::connect"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18189,7 +18190,7 @@
       "rust_cases": [
         "rpc::http_test::test_http_service_rpc::disconnect"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18216,7 +18217,7 @@
       "rust_cases": [
         "rpc::http_test::test_http_service_request_timeout"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18243,7 +18244,7 @@
       "rust_cases": [
         "rpc::http_test::test_http_service_reuses_connections"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18296,7 +18297,7 @@
       "rust_cases": [
         "rpc::rpc_test::test_authenticate::canceled_before_rpc"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18377,7 +18378,7 @@
       "rust_cases": [
         "rpc::rpc_test::test_authenticate::failure"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18404,7 +18405,7 @@
       "rust_cases": [
         "rpc::rpc_test::test_authenticate::success"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18431,7 +18432,7 @@
       "rust_cases": [
         "rpc::rpc_test::test_custom_dial_fun::connect"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18458,7 +18459,7 @@
       "rust_cases": [
         "rpc::rpc_test::test_custom_dial_fun::connect"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18484,7 +18485,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18511,7 +18512,7 @@
       "rust_cases": [
         "rpc::rpc_test::test_disconnect::success"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18752,7 +18753,7 @@
       "rust_cases": [
         "rpc::rpc_test::test_subscribe::error"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18891,7 +18892,7 @@
       "rust_cases": [
         "rpc::rpc_test::test_wait_timeout::authenticate_times_out_waiting_for_a_slot"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18945,7 +18946,7 @@
       "rust_cases": [
         "rpc::rpc_test::test_wait_timeout::disconnect_waits_longer_than_the_wait_timeout"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18972,7 +18973,7 @@
       "rust_cases": [
         "rpc::rpc_test::test_wait_timeout::session_closes_while_waiting_for_a_slot"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -18999,7 +19000,7 @@
       "rust_cases": [
         "rpc::rpc_test::test_wait_timeout::subscribe_times_out_waiting_for_a_slot"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -19026,7 +19027,7 @@
       "rust_cases": [
         "rpc::rpc_test::test_wait_timeout::zero_wait_timeout_means_no_limit"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -20882,7 +20883,7 @@
       "rust_cases": [
         "streams::config_test::test_config_to_toml"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -20935,7 +20936,7 @@
       "rust_cases": [
         "streams::controller_test::test_cable_ready_controller::subscribe_failure"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -20962,7 +20963,7 @@
       "rust_cases": [
         "streams::controller_test::test_cable_ready_controller::subscribe_failure_not_a_string"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -20989,7 +20990,7 @@
       "rust_cases": [
         "streams::controller_test::test_cable_ready_controller::subscribe_success"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21042,7 +21043,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21069,7 +21070,7 @@
       "rust_cases": [
         "streams::controller_test::test_new_controller::no_stream_name"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21095,7 +21096,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21122,7 +21123,7 @@
       "rust_cases": [
         "streams::controller_test::test_streams_controller::subscribe_no_public_allowed"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21149,7 +21150,7 @@
       "rust_cases": [
         "streams::controller_test::test_streams_controller::subscribe_public"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21176,7 +21177,7 @@
       "rust_cases": [
         "streams::controller_test::test_streams_controller::subscribe_public_no_key"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21203,7 +21204,7 @@
       "rust_cases": [
         "streams::controller_test::test_streams_controller::subscribe_signed"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21230,7 +21231,7 @@
       "rust_cases": [
         "streams::controller_test::test_streams_controller::subscribe_signed_no_key"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21257,7 +21258,7 @@
       "rust_cases": [
         "streams::controller_test::test_streams_controller::subscribe_signed_whisper"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21284,7 +21285,7 @@
       "rust_cases": [
         "streams::controller_test::test_streams_controller::subscribe_signed_with_empty_key_no_key"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21337,7 +21338,7 @@
       "rust_cases": [
         "streams::controller_test::test_turbo_controller::subscribe_failure"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21364,7 +21365,7 @@
       "rust_cases": [
         "streams::controller_test::test_turbo_controller::subscribe_failure_not_a_string"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -21391,7 +21392,7 @@
       "rust_cases": [
         "streams::controller_test::test_turbo_controller::subscribe_success"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
