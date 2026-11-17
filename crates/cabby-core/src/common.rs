@@ -505,8 +505,8 @@ impl LogValuer for StreamMessage {
 
 // --- added for pusher/sse ---
 // `EncodedMessage` below is the data enum of the upstream implementors; it
-// implements the `encoders::EncodedMessage` / `EncodedMessageJson` traits and is
-// re-exported as `hub::EncodedMessage`.
+// implements the `encoders::EncodedMessage` / `EncodedMessageJson` traits. The hub
+// wraps it in `encoders::CachedEncodedMessage` (re-exported as `hub::EncodedMessage`).
 //
 // Mirrors of upstream `common` (and the `encoders.EncodedMessage` / `ws.SentFrame`
 // data shapes) needed by the pusher and sse translations. Go `interface{}` payloads
