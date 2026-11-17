@@ -21,8 +21,11 @@ struct Cli {
 enum Cmd {
     /// Clone/check out the pinned upstream reference into compat/reference.
     ReferenceCheckout,
-    /// Build the Go reference binary and the test bridge into target/.
+    /// Build the Go reference binary and the test bridges into target/.
     ReferenceBuild,
+    /// Build libmruby 1.2.0 for the reference (`mrb` tag) in the pinned Ruby 2.7
+    /// image, as upstream CI does (go-mruby's Rakefile needs Ruby < 3).
+    ReferenceMruby,
     /// Regenerate compat/test-map.json from the AST inventory, baseline runs and
     /// Rust `/// upstream:` annotations. Manually curated fields are preserved.
     Inventory,
@@ -77,6 +80,7 @@ fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::ReferenceCheckout => reference::checkout(),
         Cmd::ReferenceBuild => reference::build(),
+        Cmd::ReferenceMruby => reference::build_mruby(),
         Cmd::Inventory => inventory::run(),
         Cmd::Test { backend, record, filter } => runner::run(backend, record, filter.as_deref()),
         Cmd::CheckInputs => reference::check_inputs(),
