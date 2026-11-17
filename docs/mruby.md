@@ -158,10 +158,15 @@ exists. The Rust client is `cabby_testkit::mruby_bridge`.
 - Ops only marshal: each calls one exported go-mruby or `mrb` function. Decode targets are
   named Go types, because Go decodes by static type.
 
+- A callback reply that cannot be used (malformed `Return`, unknown handle, session ended)
+  is a harness fault. The op that ran the Ruby code fails with `callback fault: …`; it never
+  looks like a nil result.
+- Go returns a nil `*MrbValue` with every exception. The facade asserts this, because a Rust
+  `Err` carries no value (TestMrbStackedException's "result was not cleared").
+
 All 58 cases pass against Go. None is `not_observable`. TestIsDead's Go pass depends on
-upstream's read of freed memory (see above), which is not guaranteed. The Rust tests run in
-parallel, so other VMs on other threads can reuse that memory first; upstream's tests run
-sequentially. Out of about 95 back-to-back runs of the `go_mruby` binary against Go, one
-failed. That failing test's output was not captured. TestIsDead is the likely cause, but this
-is not confirmed. If it recurs, record the evidence and mark the case `upstream_failure` (an
-upstream use-after-free) rather than changing the bridge.
+upstream's read of freed memory (see above). With the Rust tests running in parallel, other
+VMs in the shared bridge can reuse that memory first. Upstream's tests run sequentially.
+Before isolation, one of about 95 back-to-back runs of the `go_mruby` binary failed. So the
+case runs in a bridge process of its own (`reference::mruby::isolated`), where no other VM
+allocates between `Close` and `IsDead`.

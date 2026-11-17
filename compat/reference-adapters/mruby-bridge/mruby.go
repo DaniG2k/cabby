@@ -94,20 +94,32 @@ func parserMessages(ms []*mruby.ParserMessage) []parserMessage {
 	return out
 }
 
-// fn builds a go-mruby Func that runs Rust callback `id` of session s.
+// fn builds a go-mruby Func that runs Rust callback `id` of session s. A reply
+// that cannot be used is a harness fault: the callback returns nil to mruby and
+// the enclosing op fails with the fault instead of returning its result.
 func (s *session) fn(id uint64) mruby.Func {
 	return func(m *mruby.Mrb, self *mruby.MrbValue) (mruby.Value, mruby.Value) {
 		raw := s.callback(id, map[string]interface{}{"mrb": put(m), "self": put(self)})
+		if raw == nil {
+			s.fault = fmt.Errorf("callback %d: session ended before Return", id)
+			return nil, nil
+		}
 		var r struct {
 			Ret *valueArg `json:"ret"`
 			Exc *valueArg `json:"exc"`
 		}
-		if raw == nil || json.Unmarshal(raw, &r) != nil {
+		if err := json.Unmarshal(raw, &r); err != nil {
+			s.fault = fmt.Errorf("callback %d: bad Return %s: %v", id, raw, err)
 			return nil, nil
 		}
-		ret, err1 := r.Ret.value()
-		exc, err2 := r.Exc.value()
-		if err1 != nil || err2 != nil {
+		ret, err := r.Ret.value()
+		if err != nil {
+			s.fault = fmt.Errorf("callback %d: result: %v", id, err)
+			return nil, nil
+		}
+		exc, err := r.Exc.value()
+		if err != nil {
+			s.fault = fmt.Errorf("callback %d: exception: %v", id, err)
 			return nil, nil
 		}
 		return ret, exc
