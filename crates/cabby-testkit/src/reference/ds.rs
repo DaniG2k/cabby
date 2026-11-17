@@ -728,10 +728,13 @@ struct RustHarness {
     memory: Option<Arc<cabby_core::broker::Memory>>,
 }
 
-/// A node with a `mocks.Controller` (`Shutdown` expected) and a broker.
+/// A node with a `mocks.Controller` (`Shutdown` expected) and a broker. The node
+/// is shut down by [`Harness::shutdown`], or on drop if it was not (upstream's
+/// `defer n.Shutdown(ctx)`), on both backends.
 pub struct Harness {
     go: Option<i64>,
     rust: Option<RustHarness>,
+    shut_down: AtomicBool,
 }
 
 #[derive(Deserialize)]
@@ -787,7 +790,11 @@ impl Harness {
     /// `mocks.Broker` with `Peak("test-stream") -> (nil, nil)`.
     pub fn build_node() -> Self {
         match backend() {
-            Backend::Go => Self { go: Some(bridge::call("ds.Harness.New", json!({"Broker": "mock"}))), rust: None },
+            Backend::Go => Self {
+                go: Some(bridge::call("ds.Harness.New", json!({"Broker": "mock"}))),
+                rust: None,
+                shut_down: AtomicBool::new(false),
+            },
             Backend::Rust => {
                 let controller = Arc::new(MockController::default());
                 let h = Self::rust_node(controller, false);
@@ -798,6 +805,7 @@ impl Harness {
                 let harness = Self {
                     go: None,
                     rust: Some(RustHarness { broker: mock.clone(), mock_broker: Some(mock), memory: None, ..h }),
+                    shut_down: AtomicBool::new(false),
                 };
                 harness.on_peak("test-stream", None);
                 harness
@@ -817,6 +825,7 @@ impl Harness {
                     json!({"Broker": "memory", "Epoch": epoch, "HistoryTTL": history_ttl, "HistoryLimit": history_limit}),
                 )),
                 rust: None,
+                shut_down: AtomicBool::new(false),
             },
             Backend::Rust => {
                 let controller = Arc::new(MockController::default());
@@ -844,6 +853,7 @@ impl Harness {
                 Self {
                     go: None,
                     rust: Some(RustHarness { broker: memory.clone(), mock_broker: None, memory: Some(memory), ..h }),
+                    shut_down: AtomicBool::new(false),
                 }
             }
         }
@@ -1103,8 +1113,12 @@ impl Harness {
         }
     }
 
-    /// `n.Shutdown(context.Background())`.
+    /// `n.Shutdown(context.Background())` (its error ignored, as upstream's
+    /// `// nolint: errcheck`). Mock calls it makes are checked by
+    /// [`Harness::unexpected_calls`] afterwards; on Go a testify panic during
+    /// shutdown is reported there too.
     pub fn shutdown(&self) {
+        self.shut_down.store(true, Ordering::SeqCst);
         match &self.rust {
             Some(r) => {
                 let _ = r.node.shutdown(&cabby_server::rpc::Context::default());
@@ -1197,8 +1211,9 @@ impl Harness {
 
 impl Drop for Harness {
     fn drop(&mut self) {
-        // `defer n.Shutdown(ctx)`
-        if !std::thread::panicking() && self.go.is_some() {
+        // `defer n.Shutdown(ctx)`, unless the test shut the node down itself (a
+        // second Shutdown fails upstream) or already failed.
+        if !std::thread::panicking() && !self.shut_down.load(Ordering::SeqCst) {
             self.shutdown();
         }
     }

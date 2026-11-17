@@ -76,11 +76,19 @@ func register(name string, f op) {
 	ops[name] = f
 }
 
-func handle(name string, raw json.RawMessage) (interface{}, error) {
+// handle runs one op. A panic in the op (a testify failure in a mock the op
+// calls, say) becomes a bridge error for that request instead of ending the
+// bridge, which serves every test of the binary.
+func handle(name string, raw json.RawMessage) (res interface{}, err error) {
 	f, ok := ops[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown op %q", name)
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			res, err = nil, fmt.Errorf("op %q panicked: %v", name, r)
+		}
+	}()
 	return f(raw)
 }
 
