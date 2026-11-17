@@ -50,6 +50,15 @@ The path after `#` is the **Go runtime name** as printed by `go test -json`: spa
 prefix). Table-driven rows have their own runtime IDs there too. `cargo xtask inventory` fails on
 unknown IDs and on tests without annotations.
 
+Adaptations and `not_observable` reasons must be recorded (SPEC §4). Write them as
+`/// note: …` lines on the test; `cargo xtask inventory` copies them into the case's
+`notes` in `compat/test-map.json` (prefixed `[src]`), e.g.
+
+```rust
+/// upstream: utils/queue_test.go#TestByteQueueClear
+/// note: not_observable on Go: head/tail are unexported with no accessor; assertions before head() run against Go.
+```
+
 An upstream test that exercises several behaviors may map to several Rust tests (repeat the same
 `/// upstream:` line). Several upstream rows may share one parameterized Rust helper, but each row
 needs its own `#[test]` so it is reported individually.

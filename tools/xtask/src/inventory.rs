@@ -580,7 +580,13 @@ pub struct Annotation {
     pub rust_case: String,
     pub relation: &'static str, // upstream | regression | external
     pub target: String,
+    /// `/// note: …` lines on the same test (adaptations, not_observable reasons).
+    pub notes: Vec<String>,
 }
+
+/// Prefix of manifest notes generated from `/// note:` annotations; they are
+/// recomputed on every inventory run, unlike curated notes.
+pub const SOURCE_NOTE: &str = "[src] ";
 
 #[derive(Deserialize)]
 struct TestsToml {
@@ -648,6 +654,7 @@ pub fn rust_annotations() -> Result<Vec<Annotation>> {
             let mut mods: Vec<(String, i32)> = Vec::new();
             let mut depth = 0;
             let mut pending: Vec<(&'static str, String)> = Vec::new();
+            let mut notes: Vec<String> = Vec::new();
             let mut is_test = false;
             for line in text.lines() {
                 let tl = line.trim_start();
@@ -659,6 +666,9 @@ pub fn rust_annotations() -> Result<Vec<Annotation>> {
                     if let Some(r) = tl.strip_prefix(prefix_s) {
                         pending.push((rel, r.trim().to_owned()));
                     }
+                }
+                if let Some(r) = tl.strip_prefix("/// note: ") {
+                    notes.push(r.trim().to_owned());
                 }
                 if tl.starts_with("#[test]") {
                     is_test = true;
@@ -682,10 +692,11 @@ pub fn rust_annotations() -> Result<Vec<Annotation>> {
                             );
                         }
                         for (relation, target) in pending.drain(..) {
-                            out.push(Annotation { rust_case: rust_case.clone(), relation, target });
+                            out.push(Annotation { rust_case: rust_case.clone(), relation, target, notes: notes.clone() });
                         }
                     }
                     pending.clear();
+                    notes.clear();
                     is_test = false;
                 }
                 depth += brace_delta(line);
@@ -739,6 +750,12 @@ pub fn run() -> Result<()> {
             bail!("{} references unknown upstream case {id}", a.rust_case);
         };
         if a.relation == "upstream" {
+            for n in &a.notes {
+                let n = format!("{SOURCE_NOTE}{n}");
+                if !cases[i].notes.contains(&n) {
+                    cases[i].notes.push(n);
+                }
+            }
             cases[i].rust_cases.push(a.rust_case);
         } else {
             match rust_only.iter_mut().find(|r| r.rust_case == a.rust_case) {
@@ -765,7 +782,8 @@ pub fn run() -> Result<()> {
         let prev = old.get(&c.id);
         if let Some(p) = prev {
             c.description = p.description.clone();
-            for n in &p.notes {
+            // Curated notes survive; source notes come only from the current annotations.
+            for n in p.notes.iter().filter(|n| !n.starts_with(SOURCE_NOTE)) {
                 if !c.notes.contains(n) {
                     c.notes.push(n.clone());
                 }
