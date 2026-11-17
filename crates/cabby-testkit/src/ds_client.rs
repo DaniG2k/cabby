@@ -3,15 +3,17 @@
 //! tests use (`Stream.Head`, `Stream.Read` and `ChunkIterator.Next`), ported as a
 //! test client so the same scenarios run against any server.
 //!
-//! Every network wait is bounded: by the iterator's deadline (Go's context
-//! timeout) and by [`crate::raw_http::IO_DEADLINE`] per read.
+//! Every network wait is bounded. A read iterator's requests, including one in
+//! flight, end at its deadline (Go's context timeout) with
+//! [`Error::DeadlineExceeded`]; `Head` (upstream `context.Background()`) waits at
+//! most [`crate::raw_http::IO_DEADLINE`] per read.
 
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-use crate::raw_http::{self, EventStream};
+use crate::raw_http::{self, EventStream, Line};
 
 /// `durablestreams.StartOffset`.
 pub const START_OFFSET: &str = "-1";
@@ -31,6 +33,8 @@ pub enum Error {
     Done,
     /// The iterator's context deadline passed (`context.DeadlineExceeded`).
     DeadlineExceeded,
+    /// `durablestreams.ErrAlreadyClosed`: `Next` after `Close`.
+    AlreadyClosed,
     /// `*StreamError`: an operation failed, with the HTTP status when there was one.
     Stream { op: String, url: String, status: u16, message: String },
 }
@@ -40,6 +44,7 @@ impl std::fmt::Display for Error {
         match self {
             Error::Done => f.write_str("durablestreams: no more items in iterator"),
             Error::DeadlineExceeded => f.write_str("context deadline exceeded"),
+            Error::AlreadyClosed => f.write_str("durablestreams: iterator already closed"),
             Error::Stream { op, url, status, message } if *status > 0 => {
                 write!(f, "durablestreams: {op} {url} failed with status {status}: {message}")
             }
@@ -153,7 +158,8 @@ impl Stream {
     }
 
     /// `stream.Read(ctx, WithOffset(offset), WithLive(live))`; `timeout` is the
-    /// context deadline (upstream `context.WithTimeout`), bounding every call.
+    /// context deadline (upstream `context.WithTimeout`): it bounds every call,
+    /// including a request (or an SSE read) in flight when it passes.
     pub fn read(&self, offset: &str, live: LiveMode, timeout: Duration) -> ChunkIterator {
         ChunkIterator {
             stream: self.clone(),
@@ -198,7 +204,7 @@ pub struct ChunkIterator {
     pub up_to_date: bool,
     done_once: bool,
     closed: bool,
-    sse: Option<EventStream>,
+    sse: Option<(EventStream, SseParser)>,
     sse_pending: Option<Chunk>,
 }
 
@@ -217,26 +223,57 @@ enum SseEvent {
     Control(ControlEvent),
 }
 
-/// client-go `internal/sse` parser applied to one event block.
-fn parse_sse_block(block: &str) -> Option<SseEvent> {
-    let mut kind = String::new();
-    let mut data = Vec::new();
-    for line in block.split('\n') {
-        let line = line.trim_end_matches('\r');
-        if let Some(t) = line.strip_prefix("event:") {
-            kind = t.trim().to_owned();
-        } else if let Some(d) = line.strip_prefix("data:") {
-            data.push(d.strip_prefix(' ').unwrap_or(d).to_owned());
+/// client-go `internal/sse.Parser`, fed one body line at a time.
+#[derive(Default)]
+struct SseParser {
+    event_type: String,
+    data_lines: Vec<String>,
+}
+
+/// What [`SseParser::feed`] made of a line.
+enum Parsed {
+    Event(SseEvent),
+    /// Needs more lines.
+    More,
+    /// The response ended (`io.EOF`) with no event left to flush.
+    Eof,
+}
+
+impl SseParser {
+    /// `Parser.Next`'s handling of one `ReadString('\n')` result: a line ends at
+    /// `\n` (one `\r` before it is dropped, so `\r\n` blank lines separate events
+    /// too); at the end of the body the partial last line is discarded and the
+    /// current event, if valid, is still delivered.
+    fn feed(&mut self, line: Line) -> Parsed {
+        let line = match line {
+            Line::Eof(_) => return self.flush().map_or(Parsed::Eof, Parsed::Event),
+            Line::Complete(l) => l,
+        };
+        let line = line.strip_suffix('\r').unwrap_or(&line);
+        if line.is_empty() {
+            return self.flush().map_or(Parsed::More, Parsed::Event);
         }
+        if let Some(t) = line.strip_prefix("event:") {
+            self.event_type = t.trim().to_owned();
+        } else if let Some(d) = line.strip_prefix("data:") {
+            self.data_lines.push(d.strip_prefix(' ').unwrap_or(d).to_owned());
+        }
+        Parsed::More
     }
-    if kind.is_empty() || data.is_empty() {
-        return None;
-    }
-    let data = data.join("\n");
-    match kind.as_str() {
-        "data" => Some(SseEvent::Data(data)),
-        "control" => serde_json::from_str(&data).ok().map(SseEvent::Control),
-        _ => None,
+
+    /// `flushEvent`: the current event if valid; resets the state.
+    fn flush(&mut self) -> Option<SseEvent> {
+        let kind = std::mem::take(&mut self.event_type);
+        let data = std::mem::take(&mut self.data_lines);
+        if kind.is_empty() || data.is_empty() {
+            return None;
+        }
+        let data = data.join("\n");
+        match kind.as_str() {
+            "data" => Some(SseEvent::Data(data)),
+            "control" => serde_json::from_str(&data).ok().map(SseEvent::Control),
+            _ => None,
+        }
     }
 }
 
@@ -256,7 +293,7 @@ impl ChunkIterator {
     #[allow(clippy::should_implement_trait)] // Go's iterator API: Done is an error, not the end of an Iterator
     pub fn next(&mut self) -> Result<Chunk, Error> {
         if self.closed {
-            return Err(io_error("read", &self.stream.url, "durablestreams: iterator already closed"));
+            return Err(Error::AlreadyClosed);
         }
         if self.done_once {
             return Err(Error::Done);
@@ -269,7 +306,7 @@ impl ChunkIterator {
         let target = self.stream.read_target(&self.offset, self.live, &self.cursor);
         let headers: Vec<(&str, &str)> = self.headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         let url = self.stream.url.clone();
-        let resp = raw_http::request(self.stream.addr, "GET", &target, &headers, None)
+        let resp = raw_http::request_until(self.stream.addr, "GET", &target, &headers, None, self.deadline)
             .map_err(|e| if self.left().is_err() { Error::DeadlineExceeded } else { io_error("read", &url, e) })?;
         let header = |name: &str| resp.header(name).unwrap_or_default().to_owned();
         match resp.status {
@@ -324,7 +361,7 @@ impl ChunkIterator {
         let mut headers: Vec<(&str, &str)> = vec![("Accept", "text/event-stream")];
         headers.extend(self.headers.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         let url = self.stream.url.clone();
-        let es = EventStream::open(self.stream.addr, "GET", &target, &headers, None)
+        let es = EventStream::open_until(self.stream.addr, "GET", &target, &headers, None, self.deadline)
             .map_err(|e| if self.left().is_err() { Error::DeadlineExceeded } else { io_error("read", &url, e) })?;
         let fail =
             |status: u16, message: String| Error::Stream { op: "read".into(), url: url.clone(), status, message };
@@ -333,7 +370,7 @@ impl ChunkIterator {
                 if !es.header("content-type").unwrap_or_default().starts_with("text/event-stream") {
                     return Err(fail(200, CONTENT_TYPE_MISMATCH.into()));
                 }
-                self.sse = Some(es);
+                self.sse = Some((es, SseParser::default()));
                 Ok(())
             }
             400 => Err(fail(400, CONTENT_TYPE_MISMATCH.into())),
@@ -350,28 +387,32 @@ impl ChunkIterator {
         }
         loop {
             let left = self.left()?;
-            let event = self.sse.as_mut().expect("SSE connection").next_event(left);
-            let block = match event {
-                Ok(Some(block)) => block,
-                Ok(None) => {
-                    // Connection closed gracefully: reconnect (client-go behavior).
-                    self.sse = None;
-                    self.left()?;
-                    self.establish_sse()?;
-                    continue;
-                }
+            let (es, parser) = self.sse.as_mut().expect("SSE connection");
+            let parsed = match es.next_line(left) {
+                Ok(line) => parser.feed(line),
                 Err(e) => {
                     self.sse = None;
                     self.left()?;
                     return Err(io_error("read", &self.stream.url, e));
                 }
             };
-            match parse_sse_block(&block) {
-                Some(SseEvent::Data(d)) => match &mut self.sse_pending {
+            let event = match parsed {
+                Parsed::Event(event) => event,
+                Parsed::More => continue,
+                Parsed::Eof => {
+                    // Connection closed gracefully: reconnect (client-go behavior).
+                    self.sse = None;
+                    self.left()?;
+                    self.establish_sse()?;
+                    continue;
+                }
+            };
+            match event {
+                SseEvent::Data(d) => match &mut self.sse_pending {
                     Some(p) => p.data.extend_from_slice(d.as_bytes()),
                     None => self.sse_pending = Some(Chunk { data: d.into_bytes(), ..Default::default() }),
                 },
-                Some(SseEvent::Control(c)) => {
+                SseEvent::Control(c) => {
                     self.offset = c.stream_next_offset.clone();
                     if !c.stream_cursor.is_empty() {
                         self.cursor = c.stream_cursor.clone();
@@ -392,7 +433,6 @@ impl ChunkIterator {
                         });
                     }
                 }
-                None => {}
             }
         }
     }
@@ -408,20 +448,118 @@ impl ChunkIterator {
 mod tests {
     use super::*;
 
-    #[test]
-    fn parses_sse_blocks_like_client_go() {
-        match parse_sse_block("event: data\ndata:[1]") {
-            Some(SseEvent::Data(d)) => assert_eq!(d, "[1]"),
-            _ => panic!("data event"),
-        }
-        match parse_sse_block("event: control\ndata:{\"streamNextOffset\":\"1::e\",\"upToDate\":true}") {
-            Some(SseEvent::Control(c)) => {
-                assert_eq!(c.stream_next_offset, "1::e");
-                assert!(c.up_to_date);
+    use std::io::{Read as _, Write as _};
+    use std::net::TcpListener;
+
+    /// Feeds `body` to a parser as `bufio.Reader.ReadString('\n')` would split it.
+    fn parse(body: &str) -> Vec<String> {
+        let mut p = SseParser::default();
+        let mut out = Vec::new();
+        let mut rest = body;
+        loop {
+            let line = match rest.find('\n') {
+                Some(i) => {
+                    let l = Line::Complete(rest[..i].to_owned());
+                    rest = &rest[i + 1..];
+                    l
+                }
+                None => Line::Eof(rest.to_owned()),
+            };
+            let eof = matches!(line, Line::Eof(_));
+            match p.feed(line) {
+                Parsed::Event(SseEvent::Data(d)) => out.push(format!("data {d}")),
+                Parsed::Event(SseEvent::Control(c)) => {
+                    out.push(format!("control {} {}", c.stream_next_offset, c.up_to_date))
+                }
+                Parsed::More => {}
+                Parsed::Eof => return out,
             }
-            _ => panic!("control event"),
+            if eof {
+                // client-go's next Parser.Next hits io.EOF again with nothing to flush.
+                assert!(matches!(p.feed(Line::Eof(String::new())), Parsed::Eof));
+                return out;
+            }
         }
-        assert!(parse_sse_block(": ping").is_none());
+    }
+
+    #[test]
+    fn parses_sse_events_like_client_go() {
+        let control = r#"{"streamNextOffset":"1::e","upToDate":true}"#;
+        assert_eq!(
+            parse(&format!("event: data\ndata:[1]\n\n: ping\n\nevent: control\ndata:{control}\n\n")),
+            ["data [1]", "control 1::e true"]
+        );
+        // CRLF line endings and blank lines.
+        assert_eq!(
+            parse(&format!("event: data\r\ndata: [1]\r\n\r\nevent: control\r\ndata: {control}\r\n\r\n")),
+            ["data [1]", "control 1::e true"]
+        );
+        // A last event without a trailing blank line is flushed at EOF ...
+        assert_eq!(parse("event: data\ndata: [2]\n"), ["data [2]"]);
+        // ... but a partial last line (no `\n`) is discarded, as ReadString's EOF result is.
+        assert_eq!(parse("event: data\ndata: [2]"), Vec::<String>::new());
+        assert_eq!(parse("event: data\ndata: [2]\nevent: con"), ["data [2]"]);
+        // Multi-line data and unknown or incomplete events.
+        assert_eq!(parse("event: data\ndata: a\ndata: b\n\nevent: other\ndata: x\n\ndata: y\n\n"), ["data a\nb"]);
+    }
+
+    /// Serves one connection: reads the request head, writes `response`, then
+    /// closes the connection (`hold: false`) or keeps it open until the returned
+    /// guard is dropped.
+    fn serve_once(response: &'static [u8], hold: bool) -> (String, std::sync::mpsc::Sender<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let base = format!("http://{}", listener.local_addr().expect("addr"));
+        let (guard, release) = std::sync::mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().expect("accept");
+            let mut head = Vec::new();
+            let mut b = [0u8; 1];
+            while !head.ends_with(b"\r\n\r\n") && conn.read(&mut b).is_ok_and(|n| n == 1) {
+                head.push(b[0]);
+            }
+            let _ = conn.write_all(response);
+            if hold {
+                let _ = release.recv_timeout(Duration::from_secs(30));
+            }
+        });
+        (base, guard)
+    }
+
+    #[test]
+    fn sse_read_delivers_crlf_events_and_a_last_event_at_eof() {
+        let (base, _guard) = serve_once(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n\
+              event: data\r\ndata: [1]\r\n\r\n\
+              event: control\ndata: {\"streamNextOffset\":\"7::e\",\"upToDate\":true}\n",
+            false,
+        );
+        let mut it = Client::new(&base).stream("/ds/x").read(START_OFFSET, LiveMode::Sse, Duration::from_secs(5));
+        let chunk = it.next().expect("chunk");
+        assert_eq!(chunk.data, b"[1]");
+        assert_eq!(chunk.next_offset, "7::e");
+        assert!(chunk.up_to_date);
+    }
+
+    #[test]
+    fn deadline_ends_an_in_flight_request() {
+        for live in [LiveMode::LongPoll, LiveMode::Sse] {
+            // The server accepts the request and never answers.
+            let (base, _guard) = serve_once(b"", true);
+            let started = Instant::now();
+            let mut it = Client::new(&base).stream("/ds/x").read(START_OFFSET, live, Duration::from_millis(300));
+            assert_eq!(it.next(), Err(Error::DeadlineExceeded), "{live:?}");
+            assert!(started.elapsed() < Duration::from_secs(2), "{live:?}: took {:?}", started.elapsed());
+        }
+    }
+
+    #[test]
+    fn next_after_close_is_already_closed() {
+        let mut it =
+            Client::new("http://127.0.0.1:1").stream("/ds/x").read(START_OFFSET, LiveMode::None, Duration::ZERO);
+        it.close();
+        let err = it.next().expect_err("closed");
+        assert_eq!(err, Error::AlreadyClosed);
+        assert_eq!(err.to_string(), "durablestreams: iterator already closed");
     }
 
     #[test]
