@@ -6,19 +6,26 @@
 
 pub mod api;
 pub mod benchi;
+pub mod broadcast;
 pub mod broker;
 pub mod cli;
 pub mod common;
 pub mod config;
+pub mod enats;
 pub mod encoders;
 mod go_types;
+pub mod hub;
 pub mod identity;
 pub mod logger;
 pub mod metrics;
 pub mod mrb;
 pub mod mruby;
+mod msg_shapes;
+pub mod nats;
 pub mod protocol;
+pub mod pubsub;
 pub mod pusher;
+pub mod redis;
 pub mod router;
 pub mod rpc;
 pub mod server;
