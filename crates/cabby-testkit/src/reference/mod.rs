@@ -14,6 +14,8 @@ mod go_types;
 pub mod identity;
 pub mod logger;
 pub mod metrics;
+pub mod node;
+mod node_doubles;
 pub mod protocol;
 pub mod pusher;
 pub mod router;
