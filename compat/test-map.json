@@ -16,8 +16,8 @@
       "go_vendored": 57
     },
     "reference": {
-      "not_observable": 85,
-      "pass": 736,
+      "not_observable": 82,
+      "pass": 739,
       "unverified": 102
     },
     "rust": {
@@ -28,8 +28,8 @@
       "cases": 45
     },
     "translation": {
-      "reviewed": 655,
-      "translated": 166,
+      "reviewed": 660,
+      "translated": 161,
       "unreviewed": 102
     },
     "upstream_result": {
@@ -2350,12 +2350,15 @@
       "direct_assertions": 12,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] Go arm runs the upstream body with its mockery doubles in the bridge through the exported NewRunner + Runner.Embed() (calls runNode) + Embedded.Shutdown (walks runner.shutdownables in order); Embedded.Shutdown stops at the first error where upstream asserts NoError per shutdownable, so the outcomes agree on pass.",
+        "[src] in-callback assertions, unexpected calls and mockery's AssertExpectations failures are collected as violations instead of failing from callback threads."
+      ],
       "rust_cases": [
         "cli::cli_test::test_runner_drains_broadcasts_before_broker_shutdown"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -3791,7 +3794,7 @@
       "rust_cases": [
         "config::presets_test::test_explicit_over_implicit_presets"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -19937,7 +19940,7 @@
       "rust_cases": [
         "server::health_handler_test::test_health_handler"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -22118,12 +22121,14 @@
       "direct_assertions": 2,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] the schedule (GID probe, workerRespawnThreshold+2 data tasks, GID probe) runs as one bridge op on the exported NewGoPool(\"test\", 1)/Schedule with upstream's getGID; the Rust worker identity is GoPool::current_worker_id()."
+      ],
       "rust_cases": [
         "utils::gopool_test::test_worker_respawn"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -22334,7 +22339,9 @@
       "direct_assertions": 12,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] not_observable on Go: head/tail are unexported ring-buffer fields with no accessor; the assertions before the first head() run against Go."
+      ],
       "rust_cases": [
         "utils::queue_test::test_byte_queue_clear"
       ],
@@ -22576,12 +22583,15 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] Go arm keeps a utils.Queue[*map[string]string] in the bridge; payloads get the upstream finalizers, runtime.GC() and require.Eventually(2s, 100ms) are bridge ops. Rust equivalent of \"finalized\": the payload was dropped.",
+        "[src] upstream orders the two producer goroutines with a 100ms sleep; the Rust test joins the first producer before starting the second."
+      ],
       "rust_cases": [
         "utils::queue_test::test_queue_vs_gc"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
