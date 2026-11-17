@@ -97,3 +97,33 @@ pub fn check_inputs() -> Result<()> {
     println!("rpc.proto matches upstream");
     Ok(())
 }
+
+/// Pinned in compat/upstream.lock ([images] ruby_2_7).
+const RUBY_2_7: &str = "ruby@sha256:2347de892e419c7160fc21dec721d5952736909f8c3fbb7f84cb4a07aaf9ce7d";
+
+pub fn build_mruby() -> Result<()> {
+    let reference = root().join("compat/reference").canonicalize().context("compat/reference missing")?;
+    let lib = reference.join("vendorlib/go-mruby/libmruby.a");
+    if lib.exists() {
+        println!("libmruby.a already built");
+        return Ok(());
+    }
+    let uid = String::from_utf8(Command::new("id").arg("-u").output()?.stdout)?.trim().to_owned();
+    let gid = String::from_utf8(Command::new("id").arg("-g").output()?.stdout)?.trim().to_owned();
+    let script = format!(
+        "apt-get update -qq >/dev/null && apt-get install -y -qq bison >/dev/null && \
+         MRUBY_COMMIT=1.2.0 MRUBY_CONFIG=/src/etc/build_config.rb make libmruby.a >/tmp/build.log 2>&1; \
+         rc=$?; tail -5 /tmp/build.log; chown -R {uid}:{gid} /src/vendorlib/go-mruby; exit $rc"
+    );
+    sh(Command::new("docker").args(["run", "--rm", "-v"]).arg(format!("{}:/src", reference.display())).args([
+        "-w",
+        "/src/vendorlib/go-mruby",
+        RUBY_2_7,
+        "bash",
+        "-c",
+        &script,
+    ]))?;
+    let sum = sha256_file(&lib)?;
+    println!("built libmruby.a (sha256 {sum})");
+    Ok(())
+}
