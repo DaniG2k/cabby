@@ -28,8 +28,8 @@
       "cases": 45
     },
     "translation": {
-      "reviewed": 660,
-      "translated": 161,
+      "reviewed": 662,
+      "translated": 159,
       "unreviewed": 102
     },
     "upstream_result": {
@@ -22829,7 +22829,9 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (Go reflection -> serde): Decode(out interface{}, v) fills `out` by reflection; Rust decodes into a serde Deserialize target (int->i64, *int->Box<i64>, map[string]string->HashMap, struct field Foo->serde field foo since Go matches the lower-cased name). Go reuses output variables across rows; each is fully overwritten, so a fresh target per row is equivalent. Go verifies the same rows via the bridge decoding into the named Go type."
+      ],
       "rust_cases": [
         "go_mruby::decode_test::test_decode"
       ],
@@ -22856,7 +22858,9 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (Go reflection -> dynamic tree): decoding into interface{} maps to decode_value returning Decoded (Bool/Int/Float/String/Map/Slice); the bridge tags Go dynamic types so int and float stay distinct."
+      ],
       "rust_cases": [
         "go_mruby::decode_test::test_decode_interface"
       ],
@@ -22883,7 +22887,9 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (Go example // Output: check -> string comparison): the printed line \"Result: 42\\n\" is built with format! and compared."
+      ],
       "rust_cases": [
         "go_mruby::examples_test::example_custom_function"
       ],
@@ -22910,7 +22916,9 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (Go fmt %v rendering -> structural equality): Go prints the decoded interface{} as \"Result: map[foo:bar]\", which is Go map formatting, not mruby behavior; the Rust invariant is that the value decoded inside the callback equals the map {\"foo\" => \"bar\"}."
+      ],
       "rust_cases": [
         "go_mruby::examples_test::example_decode"
       ],
@@ -22937,7 +22945,9 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (Go example // Output: check -> string comparison): the printed line \"Result: 42\\n\" is built with format! and compared."
+      ],
       "rust_cases": [
         "go_mruby::examples_test::example_simulate_files"
       ],
@@ -22991,11 +23001,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (dangling C pointer -> closed-VM invariant): go-mruby IsDead after Close reads the freed mrb_state (mrb_object_dead_p on a closed VM). Rust invariant: a value outliving its VM reports is_dead() without touching freed memory. On Go the case runs in its own bridge process (isolated) so no other VM can reuse the freed memory, matching upstream sequential tests; before isolation 1 of about 95 parallel runs failed."
+      ],
       "rust_cases": [
         "go_mruby::gc_test::test_is_dead"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -23207,7 +23219,9 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (goroutines -> threads): 100 threads define 100 singleton methods each on their own VM; the channel rendezvous becomes joining every thread; invariant: no race or deadlock."
+      ],
       "rust_cases": [
         "go_mruby::mruby_test::test_mrb_define_method_concurrent"
       ],
@@ -23342,7 +23356,9 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (goroutines -> threads): each case runs on its own OS thread with its own VM for 1000 rounds, joined per round; invariant: independent VMs run concurrently without shared state and each method sees exactly its own arguments. On Go each thread is its own bridge goroutine."
+      ],
       "rust_cases": [
         "go_mruby::mruby_test::test_mrb_get_args"
       ],
@@ -23585,11 +23601,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] adaptation: Go `result != nil` (\"result was not cleared\") holds by construction for a Rust Result; on Go the facade asserts every exception comes with a nil *MrbValue."
+      ],
       "rust_cases": [
         "go_mruby::mruby_test::test_mrb_stacked_exception"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -23612,7 +23630,9 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (t.Fatalf inside a cgo callback -> recorded failure): the callback records a Yield error instead of panicking (a panic must not cross into the VM) and the test fails right after LoadString."
+      ],
       "rust_cases": [
         "go_mruby::mruby_test::test_mrb_yield"
       ],
@@ -23693,7 +23713,9 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (compile-time interface check -> trait + rendering): `var _ error = new(ParserError)` becomes: the zero ParserError is a std::error::Error and renders like Go Error() of a zero value (\"Ruby parse error!\\n\\n\")."
+      ],
       "rust_cases": [
         "go_mruby::parser_test::test_parser_error_error"
       ],
@@ -23828,7 +23850,9 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (cgo lifetime -> owned data): upstream guards a fix where err.Error() read the closed VM; Rust invariant: exception text is owned and readable after close. LoadString must fail, as Go err.Error() on nil panics."
+      ],
       "rust_cases": [
         "go_mruby::value_test::test_exception_string_after_close"
       ],
@@ -24017,7 +24041,9 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (Go pointer identity -> value identity): upstream checks falseV.MrbValue(mrb) == falseV (same *MrbValue pointer); Rust checks mrb_value() denotes the same value (same). Go compares real pointers: bridge handles are interned by pointer."
+      ],
       "rust_cases": [
         "go_mruby::value_test::test_mrb_value_value"
       ],
@@ -24044,7 +24070,9 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (compile-time interface check -> conversion): `var _ Value = mrb.FalseValue()` becomes: an MrbValue converts into a Value that denotes the same value."
+      ],
       "rust_cases": [
         "go_mruby::value_test::test_mrb_value_value_impl"
       ],
@@ -24098,7 +24126,9 @@
       "direct_assertions": 2,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] runtime adaptation (reflect.DeepEqual of *Class -> Class: PartialEq): equal when both denote the same class; the Go run uses reflect.DeepEqual itself."
+      ],
       "rust_cases": [
         "go_mruby::value_test::test_value_class"
       ],
