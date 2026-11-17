@@ -285,11 +285,20 @@ fn go_cases(files: &[AstFile], rt: &Runtime) -> (Vec<Case>, Vec<Dependency>) {
                 && seen.iter().any(|s| s.starts_with(&format!("{SHORT}:{}#{}", ctx.file.path, node.path[0].name))))
         {
             let mut c = new_go_case(ctx, node, path, "static", dynamic_unrun);
-            c.notes.push(if node.kind == "benchmark" {
-                "Benchmark: not executed by `go test`; run with -bench for reference evidence".into()
+            if node.kind == "benchmark" {
+                // `go test -bench` output, recorded per package in compat/baseline/benchmarks/.
+                let pkg = dir_of(&ctx.file.path).replace('/', "-");
+                let evidence = format!("compat/baseline/benchmarks/go-bench-{pkg}.txt");
+                let text = std::fs::read_to_string(root().join(&evidence)).unwrap_or_default();
+                if text.contains(&format!("{}/", node.path[0].name)) && text.lines().any(|l| l == "PASS") {
+                    c.upstream_result = "pass".into();
+                    c.evidence = vec![evidence];
+                } else {
+                    c.notes.push("Benchmark: not executed by `go test`; run with -bench for reference evidence".into());
+                }
             } else {
-                "Static case with no runtime event in the baseline".into()
-            });
+                c.notes.push("Static case with no runtime event in the baseline".into());
+            }
             cases.push(c);
         }
         for child in node.children.iter().flatten() {
@@ -310,7 +319,8 @@ fn go_cases(files: &[AstFile], rt: &Runtime) -> (Vec<Case>, Vec<Dependency>) {
 
 fn feature_cases() -> Result<Vec<Case>> {
     let root = root();
-    let summary = std::fs::read_to_string(root.join("compat/baseline/features/summary.txt")).unwrap_or_default();
+    let summary = std::fs::read_to_string(root.join("compat/baseline/features/summary.txt")).unwrap_or_default()
+        + &std::fs::read_to_string(root.join("compat/baseline/benchmarks/summary.txt")).unwrap_or_default();
     let mut results = HashMap::new();
     for line in summary.lines() {
         if let Some((name, rest)) = line.split_once(" exit=") {
@@ -344,7 +354,10 @@ fn feature_cases() -> Result<Vec<Case>> {
             file_sha256: Some(sha256_file(&p)?),
             discovered: "static".into(),
             upstream_result: results.get(stem).copied().unwrap_or("not_run").into(),
-            evidence: if suite == "feature" { vec![format!("compat/baseline/features/{stem}.log")] } else { vec![] },
+            evidence: vec![format!(
+                "compat/baseline/{}/{stem}.log",
+                if suite == "feature" { "features" } else { "benchmarks" }
+            )],
             ..Default::default()
         });
     }
