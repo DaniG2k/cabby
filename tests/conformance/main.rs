@@ -6,4 +6,5 @@
 //! 26a1a703a54b870e42f5660c3d0785db2c602764. Copyright 2016-2026 Vladimir
 //! Dementyev. MIT License; see compat/licenses/anycable-MIT-LICENSE.
 
+mod api;
 mod origin;
