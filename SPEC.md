@@ -1,6 +1,6 @@
 # Cabby: tests-first AnyCable Rust port specification
 
-Status: M0 baseline recorded; M1 test port started (protocol and origin suites translated and verified against Go). No production behavior implemented yet.
+Status: M0 and M1 complete (923/923 cases translated and reviewed; 914 verified against Go, 9 not_observable). M2 foundations implemented (166 cases pass against Cabby); M3 (state, routing, RPC) in progress.
 Prepared: 2026-11-17. Progress: `cargo xtask report`; baseline evidence: `compat/baseline/README.md`.
 Project name: **Cabby**. Directory and planned binary: `cabby` (an independent AnyCable-compatible implementation).
 
