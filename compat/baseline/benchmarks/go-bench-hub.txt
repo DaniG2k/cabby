@@ -1,0 +1,48 @@
+go: downloading github.com/stretchr/testify v1.12.1
+go: downloading github.com/joomcode/errorx v1.2.0
+go: downloading github.com/mattn/go-isatty v0.0.24
+go: downloading github.com/lmittmann/tint v1.2.1
+go: downloading github.com/gorilla/websocket v1.5.3
+go: downloading github.com/matoous/go-nanoid v1.5.1
+go: downloading github.com/go-chi/chi/v5 v5.5.0
+go: downloading golang.org/x/net v0.61.0
+go: downloading golang.org/x/sys v0.49.0
+go: downloading go.yaml.in/yaml/v3 v3.0.5
+goos: linux
+goarch: amd64
+pkg: github.com/anycable/anycable-go/hub
+cpu: AMD Ryzen 5 PRO 6650H with Radeon Graphics     
+BenchmarkBroadcast/pool=128,streams=1000,sessions=1000,streams-per-session=10,payload=28B-12         	  589294	      9896 ns/op
+BenchmarkBroadcast/pool=128,streams=1000,sessions=10000,streams-per-session=10,payload=28B-12        	  199789	     11651 ns/op
+BenchmarkBroadcast/pool=16,streams=1000,sessions=1000,streams-per-session=10,payload=28B-12          	  592093	      9790 ns/op
+BenchmarkBroadcast/pool=16,streams=1000,sessions=10000,streams-per-session=10,payload=28B-12         	  216939	     11349 ns/op
+BenchmarkBroadcast/pool=2,streams=1000,sessions=1000,streams-per-session=10,payload=28B-12           	  251860	      9071 ns/op
+BenchmarkBroadcast/pool=2,streams=1000,sessions=10000,streams-per-session=10,payload=28B-12          	   84523	     24728 ns/op
+BenchmarkBroadcast/pool=1,streams=1000,sessions=1000,streams-per-session=10,payload=28B-12           	  148021	     15136 ns/op
+BenchmarkBroadcast/pool=1,streams=1000,sessions=10000,streams-per-session=10,payload=28B-12          	   46221	     43513 ns/op
+BenchmarkBroadcast/pool=128,streams=100,sessions=1000,streams-per-session=10,payload=28B-12          	  205183	     36715 ns/op
+BenchmarkBroadcast/pool=128,streams=100,sessions=10000,streams-per-session=10,payload=28B-12         	   31615	     95699 ns/op
+BenchmarkBroadcast/pool=16,streams=100,sessions=1000,streams-per-session=10,payload=28B-12           	  214833	     37261 ns/op
+BenchmarkBroadcast/pool=16,streams=100,sessions=10000,streams-per-session=10,payload=28B-12          	   34210	    132884 ns/op
+BenchmarkBroadcast/pool=2,streams=100,sessions=1000,streams-per-session=10,payload=28B-12            	   79261	     38854 ns/op
+BenchmarkBroadcast/pool=2,streams=100,sessions=10000,streams-per-session=10,payload=28B-12           	   11462	    186420 ns/op
+BenchmarkBroadcast/pool=1,streams=100,sessions=1000,streams-per-session=10,payload=28B-12            	   43634	     49429 ns/op
+BenchmarkBroadcast/pool=1,streams=100,sessions=10000,streams-per-session=10,payload=28B-12           	    6610	    345355 ns/op
+BenchmarkBroadcast/pool=128,streams=10,sessions=1000,streams-per-session=3,payload=28B-12            	   38278	     76042 ns/op
+BenchmarkBroadcast/pool=128,streams=10,sessions=10000,streams-per-session=3,payload=28B-12           	    3379	    733189 ns/op
+BenchmarkBroadcast/pool=16,streams=10,sessions=1000,streams-per-session=3,payload=28B-12             	   36892	     77360 ns/op
+BenchmarkBroadcast/pool=16,streams=10,sessions=10000,streams-per-session=3,payload=28B-12            	    3195	    811956 ns/op
+BenchmarkBroadcast/pool=2,streams=10,sessions=1000,streams-per-session=3,payload=28B-12              	   33411	     80964 ns/op
+BenchmarkBroadcast/pool=2,streams=10,sessions=10000,streams-per-session=3,payload=28B-12             	    2043	    988714 ns/op
+BenchmarkBroadcast/pool=1,streams=10,sessions=1000,streams-per-session=3,payload=28B-12              	   30532	     92510 ns/op
+BenchmarkBroadcast/pool=1,streams=10,sessions=10000,streams-per-session=3,payload=28B-12             	     686	   3213245 ns/op
+BenchmarkBroadcast/pool=128,streams=1,sessions=1000,streams-per-session=1,payload=28B-12             	    7239	    346682 ns/op
+BenchmarkBroadcast/pool=128,streams=1,sessions=10000,streams-per-session=1,payload=28B-12            	     165	  14295871 ns/op
+BenchmarkBroadcast/pool=16,streams=1,sessions=1000,streams-per-session=1,payload=28B-12              	    7532	    331164 ns/op
+BenchmarkBroadcast/pool=16,streams=1,sessions=10000,streams-per-session=1,payload=28B-12             	     170	  12809081 ns/op
+BenchmarkBroadcast/pool=2,streams=1,sessions=1000,streams-per-session=1,payload=28B-12               	    7564	    278617 ns/op
+BenchmarkBroadcast/pool=2,streams=1,sessions=10000,streams-per-session=1,payload=28B-12              	     189	  12449971 ns/op
+BenchmarkBroadcast/pool=1,streams=1,sessions=1000,streams-per-session=1,payload=28B-12               	    9637	    250317 ns/op
+BenchmarkBroadcast/pool=1,streams=1,sessions=10000,streams-per-session=1,payload=28B-12              	     246	   8364146 ns/op
+PASS
+ok  	github.com/anycable/anycable-go/hub	124.752s

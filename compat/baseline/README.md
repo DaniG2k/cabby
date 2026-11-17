@@ -11,7 +11,8 @@ Linux x86_64. Raw `go test -json` streams and runner logs sit next to this file.
 | Vendored go-mruby | `go test -vet=off -json ./...` | 57 pass | `go-mruby-vendored.jsonl` |
 | AnyT conformance, 9 Makefile targets | `compat/scripts/reference-conformance.sh` | all pass (32–41 tests each) | `conformance/` |
 | Feature scenarios (16 `.testfile`) | `ruby features/runner.rb <file>` | 16/16 pass | `features/` |
-| Benchmark scenarios (2 `.benchfile`) | — | not yet run | — |
+| Benchmark scenarios (2 `.benchfile`) | `ruby features/runner.rb <file>` (websocket-bench v0.4.0, gops v0.3.29) | 2/2 pass | `benchmarks/` |
+| Go benchmarks (`hub`) | `go test -run=^$ -bench=. -benchtime=2s ./hub/` | pass (6 configurations) | `benchmarks/go-bench-hub.txt` |
 
 Counts are `go test -json` test events (top-level tests plus subtests), not upstream case
 counts. Case-level mapping lives in `../test-map.json`.

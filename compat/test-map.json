@@ -30,8 +30,7 @@
       "unreviewed": 901
     },
     "upstream_result": {
-      "not_run": 4,
-      "pass": 918,
+      "pass": 922,
       "skip": 1
     }
   },
@@ -8321,14 +8320,16 @@
       ],
       "file_sha256": "96f0de05a83dcea11c5c8c7b212366c12cc8becd3a33e437e88dc017c7199d84",
       "discovered": "static",
-      "upstream_result": "not_run",
+      "upstream_result": "pass",
       "description": "",
       "notes": [],
       "rust_cases": [],
       "translation_status": "unreviewed",
       "reference_status": "unverified",
       "rust_status": "pending",
-      "evidence": []
+      "evidence": [
+        "compat/baseline/benchmarks/broadcasts.log"
+      ]
     },
     {
       "id": "26a1a703:features/enats_broker.testfile#scenario",
@@ -8415,14 +8416,16 @@
       ],
       "file_sha256": "16257e29f88cb47434268768f6ff349e610e04ee8911b9e3c4e23ca48020dd43",
       "discovered": "static",
-      "upstream_result": "not_run",
+      "upstream_result": "pass",
       "description": "",
       "notes": [],
       "rust_cases": [],
       "translation_status": "unreviewed",
       "reference_status": "unverified",
       "rust_status": "pending",
-      "evidence": []
+      "evidence": [
+        "compat/baseline/benchmarks/goroutines.log"
+      ]
     },
     {
       "id": "26a1a703:features/jwt.testfile#scenario",
@@ -8801,7 +8804,7 @@
       "discovered": "static",
       "aggregate": true,
       "direct_assertions": 0,
-      "upstream_result": "not_run",
+      "upstream_result": "pass",
       "description": "",
       "notes": [
         "Benchmark: not executed by `go test`; run with -bench for reference evidence"
@@ -8811,7 +8814,7 @@
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
-        "compat/baseline/go-unit-mrb.jsonl"
+        "compat/baseline/benchmarks/go-bench-hub.txt"
       ]
     },
     {
@@ -8829,7 +8832,7 @@
       "discovered": "static",
       "table_row": true,
       "direct_assertions": 0,
-      "upstream_result": "not_run",
+      "upstream_result": "pass",
       "description": "",
       "notes": [
         "Benchmark: not executed by `go test`; run with -bench for reference evidence"
@@ -8839,7 +8842,7 @@
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
-        "compat/baseline/go-unit-mrb.jsonl"
+        "compat/baseline/benchmarks/go-bench-hub.txt"
       ]
     },
     {
