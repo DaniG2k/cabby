@@ -5,4 +5,6 @@
 //! they must not contain behavior of their own (SPEC.md §5).
 
 pub mod protocol;
+pub mod pusher;
+pub mod sse;
 pub mod ws;
