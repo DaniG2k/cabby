@@ -9,6 +9,7 @@ license.workspace = true
 autotests = false
 
 [dependencies]
+cabby-bench.workspace = true
 cabby-core.workspace = true
 cabby-testkit.workspace = true
 serde_json.workspace = true
@@ -30,3 +31,19 @@ path = "unit/ws/main.rs"
 [[test]]
 name = "conformance"
 path = "conformance/main.rs"
+
+[[test]]
+name = "benchi_lib"
+path = "unit/benchi_lib/main.rs"
+
+[[test]]
+name = "benchi_client"
+path = "unit/benchi_client/main.rs"
+
+[[test]]
+name = "benchi_scenarios_reconnect_floods"
+path = "unit/benchi_scenarios_reconnect_floods/main.rs"
+
+[[test]]
+name = "benchi_scenarios_stress_publications"
+path = "unit/benchi_scenarios_stress_publications/main.rs"
