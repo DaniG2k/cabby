@@ -27,8 +27,8 @@
       "cases": 48
     },
     "translation": {
-      "reviewed": 803,
-      "translated": 120
+      "reviewed": 912,
+      "translated": 11
     },
     "upstream_result": {
       "pass": 922,
@@ -3981,7 +3981,7 @@
       "rust_cases": [
         "ds::auth_test::test_dshandler_signed_stream_authorization::setup_succeeds"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4009,7 +4009,7 @@
       "rust_cases": [
         "ds::auth_test::test_dshandler_signed_stream_authorization::head_rejects_signed_stream_for_a_different_path"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4037,7 +4037,7 @@
       "rust_cases": [
         "ds::auth_test::test_dshandler_signed_stream_authorization::head_rejects_signed_stream_header_for_a_different_path"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4065,7 +4065,7 @@
       "rust_cases": [
         "ds::auth_test::test_dshandler_signed_stream_authorization::sse_rejects_signed_stream_for_a_different_path"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4093,7 +4093,7 @@
       "rust_cases": [
         "ds::auth_test::test_dshandler_signed_stream_authorization::sse_rejects_signed_stream_header_for_a_different_path"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4120,7 +4120,7 @@
       "rust_cases": [
         "ds::auth_test::test_dshandler_signed_stream_authorization::allows_signed_stream_header_matching_the_path"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4147,7 +4147,7 @@
       "rust_cases": [
         "ds::auth_test::test_dshandler_signed_stream_authorization::allows_signed_stream_matching_the_path"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4175,7 +4175,7 @@
       "rust_cases": [
         "ds::auth_test::test_dshandler_signed_stream_authorization::catch_up_rejects_signed_stream_for_a_different_path"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4203,7 +4203,7 @@
       "rust_cases": [
         "ds::auth_test::test_dshandler_signed_stream_authorization::catch_up_rejects_signed_stream_header_for_a_different_path"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4231,7 +4231,7 @@
       "rust_cases": [
         "ds::auth_test::test_dshandler_signed_stream_authorization::long_poll_rejects_signed_stream_for_a_different_path"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4259,7 +4259,7 @@
       "rust_cases": [
         "ds::auth_test::test_dshandler_signed_stream_authorization::long_poll_rejects_signed_stream_header_for_a_different_path"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4286,7 +4286,7 @@
       "rust_cases": [
         "ds::auth_test::test_dshandler_signed_stream_authorization::rejects_unsigned_stream_when_public_streams_are_disabled"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4313,7 +4313,7 @@
       "rust_cases": [
         "ds::config_test::test_config_to_toml"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4340,7 +4340,7 @@
       "rust_cases": [
         "ds::config_test::test_config_to_toml_sse_ping_interval"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4366,7 +4366,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4395,7 +4395,7 @@
       "rust_cases": [
         "ds::ds_test::test_stream_generate_cursor::ensures_monotonic_progression_for_current_cursor"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4422,7 +4422,7 @@
       "rust_cases": [
         "ds::ds_test::test_stream_generate_cursor::generates_non_empty_cursor"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4449,7 +4449,7 @@
       "rust_cases": [
         "ds::ds_test::test_stream_generate_cursor::handles_invalid_cursor_gracefully"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4478,7 +4478,7 @@
       "rust_cases": [
         "ds::ds_test::test_stream_generate_cursor::returns_greater_cursor_when_client_cursor_is_old"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4504,7 +4504,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4532,7 +4532,7 @@
       "rust_cases": [
         "ds::encoder_test::test_decode_offset::empty"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4560,7 +4560,7 @@
       "rust_cases": [
         "ds::encoder_test::test_decode_offset::invalid"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4588,7 +4588,7 @@
       "rust_cases": [
         "ds::encoder_test::test_decode_offset::now"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4616,7 +4616,7 @@
       "rust_cases": [
         "ds::encoder_test::test_decode_offset::simple_offset"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4644,7 +4644,7 @@
       "rust_cases": [
         "ds::encoder_test::test_decode_offset::start"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4672,7 +4672,7 @@
       "rust_cases": [
         "ds::encoder_test::test_decode_offset::with_epoch"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4698,7 +4698,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4726,7 +4726,7 @@
       "rust_cases": [
         "ds::encoder_test::test_encode_offset::with_epoch"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4754,7 +4754,7 @@
       "rust_cases": [
         "ds::encoder_test::test_encode_offset::without_epoch"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4782,7 +4782,7 @@
       "rust_cases": [
         "ds::encoder_test::test_encode_offset::zero_offset"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4809,7 +4809,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_get::setup"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4836,7 +4836,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_get::catch_up_mode_w_empty_stream"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4863,7 +4863,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_get::catch_up_sets_etag"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4892,7 +4892,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_get::catch_up_with_matching_if_none_match"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4919,7 +4919,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_get::catch_up_with_now_offset"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4946,7 +4946,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_get::catch_up_with_now_offset_ignores_if_none_match"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -4975,7 +4975,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_get::catch_up_with_outdated_if_none_match"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5004,7 +5004,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_get::catch_up_with_signed_stream_name_in_header"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5031,7 +5031,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_get::catch_up_with_stale_offset"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5058,7 +5058,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_get::catch_up_with_valid_offset"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5085,7 +5085,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_get::requires_offset_for_live_mode"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5112,7 +5112,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_get::requires_stream_path"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5139,7 +5139,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_get::validates_live_mode"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5166,7 +5166,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_head::setup"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5193,7 +5193,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_head::requires_stream_path"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5220,7 +5220,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_head::returns_stream_metadata_for_existing_stream"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5247,7 +5247,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_head::returns_stream_metadata_for_unknown_stream"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5276,7 +5276,7 @@
       "rust_cases": [
         "ds::handler_test::test_dshandler_head::stream_authorization"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5302,7 +5302,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5332,7 +5332,7 @@
       "rust_cases": [
         "ds::handler_test::test_etag_matches::different"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5362,7 +5362,7 @@
       "rust_cases": [
         "ds::handler_test::test_etag_matches::empty"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5392,7 +5392,7 @@
       "rust_cases": [
         "ds::handler_test::test_etag_matches::exact"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5422,7 +5422,7 @@
       "rust_cases": [
         "ds::handler_test::test_etag_matches::list"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5452,7 +5452,7 @@
       "rust_cases": [
         "ds::handler_test::test_etag_matches::unquoted"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5482,7 +5482,7 @@
       "rust_cases": [
         "ds::handler_test::test_etag_matches::weak"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5512,7 +5512,7 @@
       "rust_cases": [
         "ds::handler_test::test_etag_matches::wildcard"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5538,7 +5538,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5568,7 +5568,7 @@
       "rust_cases": [
         "ds::handler_test::test_read_cache_control::now_offset"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5598,7 +5598,7 @@
       "rust_cases": [
         "ds::handler_test::test_read_cache_control::now_offset_in_long_poll_mode"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5628,7 +5628,7 @@
       "rust_cases": [
         "ds::handler_test::test_read_cache_control::public_stream_wo_auth"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5658,7 +5658,7 @@
       "rust_cases": [
         "ds::handler_test::test_read_cache_control::signed_stream_in_header_wo_auth"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5688,7 +5688,7 @@
       "rust_cases": [
         "ds::handler_test::test_read_cache_control::signed_stream_in_query_and_header_wo_auth"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5718,7 +5718,7 @@
       "rust_cases": [
         "ds::handler_test::test_read_cache_control::signed_stream_in_query_wo_auth"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5748,7 +5748,7 @@
       "rust_cases": [
         "ds::handler_test::test_read_cache_control::with_auth"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5828,7 +5828,7 @@
       "rust_cases": [
         "ds::integration_test::test_ds_integration_catchup_read::with_empty_stream"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5909,7 +5909,7 @@
       "rust_cases": [
         "ds::integration_test::test_ds_integration_head"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5991,7 +5991,7 @@
       "rust_cases": [
         "ds::integration_test::test_ds_integration_long_poll::should_wait_for_new_data_with_long_poll"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6129,7 +6129,7 @@
       "rust_cases": [
         "ds::integration_test::test_ds_integration_sse_offset_required"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6187,7 +6187,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_connection_close"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6213,7 +6213,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6240,7 +6240,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_connection_close_cache_control::disables_caching_for_errors"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6267,7 +6267,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_connection_close_cache_control::disables_caching_for_no_content"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6294,7 +6294,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_connection_close_cache_control::keeps_cache_control_for_ok"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6321,7 +6321,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_connection_close_cache_control::keeps_cache_control_for_not_modified"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6347,7 +6347,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6374,7 +6374,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_connection_write::handles_body_with_newlines"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6401,7 +6401,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_connection_write::parses_message_and_sets_offset_header"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6428,7 +6428,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_connection_write::returns_error_for_invalid_format"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6455,7 +6455,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_connection_write::sets_etag_header"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6482,7 +6482,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_connection_write::sets_cache_control_header"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6508,7 +6508,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6535,7 +6535,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_encoder_encode::encodes_reply_with_offset_and_epoch"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6562,7 +6562,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_encoder_encode::returns_nil_for_non_reply_messages"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6589,7 +6589,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_encoder_encode::returns_nil_for_reply_with_type"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6616,7 +6616,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_encoder_encode::returns_nil_for_reply_without_offset"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6643,7 +6643,7 @@
       "rust_cases": [
         "ds::poll_test::test_poll_encoder_id"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6669,7 +6669,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6696,7 +6696,7 @@
       "rust_cases": [
         "ds::sse_test::test_sse_encoder_encode::encodes_data_with_control_event"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6723,7 +6723,7 @@
       "rust_cases": [
         "ds::sse_test::test_sse_encoder_encode::encodes_ping_as_comment"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6750,7 +6750,7 @@
       "rust_cases": [
         "ds::sse_test::test_sse_encoder_encode::skips_non_data_messages"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6777,7 +6777,7 @@
       "rust_cases": [
         "ds::sse_test::test_sse_encoder_encode_transmission"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6988,14 +6988,16 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] inherent window: AnyT's 0.5 s no-message check",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] inherent window: AnyT's 0.5 s no-message check"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::broadcast_to_others",
         "conformance::anyt_broker_nats::broadcast_to_others",
         "conformance::anyt_broker_redis::broadcast_to_others",
+        "conformance::anyt_embedded::broadcast_to_others",
         "conformance::anyt_http::broadcast_to_others",
         "conformance::anyt_nats::broadcast_to_others",
         "conformance::anyt_nats_embedded::broadcast_to_others"
@@ -7028,14 +7030,16 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] inherent window: AnyT's 0.5 s no-message check",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] inherent window: AnyT's 0.5 s no-message check"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::whisper_to_others",
         "conformance::anyt_broker_nats::whisper_to_others",
         "conformance::anyt_broker_redis::whisper_to_others",
+        "conformance::anyt_embedded::whisper_to_others",
         "conformance::anyt_http::whisper_to_others",
         "conformance::anyt_nats::whisper_to_others",
         "conformance::anyt_nats_embedded::whisper_to_others"
@@ -7067,16 +7071,16 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] `sleep 2` after the before-block broadcasts is replaced by a witness subscriber that receives both",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::history_by_offset",
         "conformance::anyt_broker_nats::history_by_offset",
         "conformance::anyt_broker_redis::history_by_offset"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -7100,16 +7104,16 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] `sleep 2` after the before-block broadcasts is replaced by a witness subscriber that receives both",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::history_by_timestamp",
         "conformance::anyt_broker_nats::history_by_timestamp",
         "conformance::anyt_broker_redis::history_by_timestamp"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -7133,16 +7137,16 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] `sleep 2` after the before-block broadcasts is replaced by a witness subscriber that receives both",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::history_on_subscribe",
         "conformance::anyt_broker_nats::history_on_subscribe",
         "conformance::anyt_broker_redis::history_on_subscribe"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -7166,16 +7170,17 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
         "[src] keeps the Ruby semantics: the before-block client stays open and the scenario's `client.close` closes a new let(:client)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] inherent window: AnyT's `client.close` waits 0.5 s and fails on unprocessed messages"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::restore_session_by_sid",
         "conformance::anyt_broker_nats::restore_session_by_sid",
         "conformance::anyt_broker_redis::restore_session_by_sid"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -7198,8 +7203,8 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::presence_join_leave_on_perform",
@@ -7229,15 +7234,16 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
         "[src] inherent window: the leave follows the disconnect after the presence TTL (2 s), within the 5 s receive timeout",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] inherent window: AnyT's `client.close` waits 0.5 s and fails on unprocessed messages"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::presence_implicit_join_leave_on_disconnect",
         "conformance::anyt_broker_redis::presence_implicit_join_leave_on_disconnect"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -7261,15 +7267,16 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
         "[src] inherent windows: AnyT's 0.5 s no-event check; the leave after the presence TTL (2 s)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] inherent window: AnyT's `client.close` waits 0.5 s and fails on unprocessed messages"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::presence_explicit_duplicate_sessions",
         "conformance::anyt_broker_redis::presence_explicit_duplicate_sessions"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9079,12 +9086,13 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] correctness check only, same workload parameters; throughput belongs to the external Benchi harness (crates/cabby-bench); inherent window: --wait-broadcasts 30 s"
+        "[src] correctness check only, same workload parameters; throughput belongs to the external Benchi harness (crates/cabby-bench); inherent window: --wait-broadcasts 30 s",
+        "[src] deliveries are reconciled per step by broadcast id (step, sender, n), once per client, instead of websocket-bench's per-step message count"
       ],
       "rust_cases": [
         "features::bench::broadcasts"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9107,12 +9115,12 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] sleeps replaced by cluster-port readiness and retrying every 2 s within 40 s; JetStream readiness via KV__anycable_epoch_ store files as upstream"
+        "[src] sleeps replaced by cluster-port readiness, a NATS relay probe and an epoch-propagation probe (nodes 2 and 3 deliver a broadcast with node 1's epoch), then upstream's 2 attempts with a 2 s delay; JetStream readiness via KV__anycable_epoch_ store files as upstream"
       ],
       "rust_cases": [
         "features::enats::enats_broker"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9135,12 +9143,12 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] sleeps replaced by launching after cluster ports listen and retrying every 2 s within 40 s; the publisher performs after the subscribers subscribed (upstream race absorbed by its retry)"
+        "[src] sleeps replaced by launching after cluster ports listen and a NATS relay probe across the super-cluster, then upstream's 2 attempts with a 2 s delay; the publisher performs after the subscribers subscribed (upstream race absorbed by its retry)"
       ],
       "rust_cases": [
         "features::enats::enats_clusters"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9163,12 +9171,12 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] only stdout is parsed (upstream's pipe merges stderr); commands run in a fresh working directory with ANYCABLE_* removed"
+        "[src] upstream parses the runner's merged stdout+stderr; the port parses stdout and asserts stderr is empty; commands run in a fresh working directory with every ANYCABLE_* removed"
       ],
       "rust_cases": [
         "features::file_config::file_config"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9191,12 +9199,13 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] replacement invariant for the Go-specific gops goroutine checks: server fds return to idle (+10) after load and grow at most 10% (min 2) between runs; OS threads reported only"
+        "[src] gauges come from --metrics_http with --stats_refresh_interval=1 (upstream reads goroutines with gops), so the 5 s cool-down observes fresh values",
+        "[src] Go backend: upstream's goroutine checks (at most 200 after the cool-down, at most 10% growth between runs) on goroutines_num; every backend: clients_num, clients_uniq_num and broadcast_streams_num back at 0 within the 5 s cool-down, and server fds back near idle (+10, growth at most 10%, min 2) as a runtime-independent leak check"
       ],
       "rust_cases": [
         "features::bench::goroutines"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9418,7 +9427,7 @@
       "rust_cases": [
         "features::pusher::pusher"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9446,7 +9455,7 @@
       "rust_cases": [
         "features::with_rpc::shutdown"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -24744,18 +24753,22 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] inherent window: the server's default ping_interval (3 s); two pings take about 6 s, each within AnyT's 5 s receive timeout",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::ping",
         "conformance::anyt_broker_nats::ping",
         "conformance::anyt_broker_redis::ping",
         "conformance::anyt_default::ping",
+        "conformance::anyt_embedded::ping",
         "conformance::anyt_http::ping",
         "conformance::anyt_nats::ping",
-        "conformance::anyt_nats_embedded::ping"
+        "conformance::anyt_nats_embedded::ping",
+        "conformance::anyt_ssl::ping"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -24787,17 +24800,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::welcome",
         "conformance::anyt_broker_nats::welcome",
         "conformance::anyt_broker_redis::welcome",
         "conformance::anyt_default::welcome",
+        "conformance::anyt_embedded::welcome",
         "conformance::anyt_http::welcome",
         "conformance::anyt_nats::welcome",
-        "conformance::anyt_nats_embedded::welcome"
+        "conformance::anyt_nats_embedded::welcome",
+        "conformance::anyt_ssl::welcome"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -24828,19 +24845,24 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] inherent window: AnyT's `client.close` waits 0.5 s and fails on unprocessed messages",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::channel_state_available_in_unsubscribe",
         "conformance::anyt_broker_nats::channel_state_available_in_unsubscribe",
         "conformance::anyt_broker_redis::channel_state_available_in_unsubscribe",
         "conformance::anyt_default::channel_state_available_in_unsubscribe",
+        "conformance::anyt_embedded::channel_state_available_in_unsubscribe",
         "conformance::anyt_http::channel_state_available_in_unsubscribe",
         "conformance::anyt_nats::channel_state_available_in_unsubscribe",
-        "conformance::anyt_nats_embedded::channel_state_available_in_unsubscribe"
+        "conformance::anyt_nats_embedded::channel_state_available_in_unsubscribe",
+        "conformance::anyt_ssl::channel_state_available_in_unsubscribe"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -24871,17 +24893,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::channel_state_kept_between_commands",
         "conformance::anyt_broker_nats::channel_state_kept_between_commands",
         "conformance::anyt_broker_redis::channel_state_kept_between_commands",
         "conformance::anyt_default::channel_state_kept_between_commands",
+        "conformance::anyt_embedded::channel_state_kept_between_commands",
         "conformance::anyt_http::channel_state_kept_between_commands",
         "conformance::anyt_nats::channel_state_kept_between_commands",
-        "conformance::anyt_nats_embedded::channel_state_kept_between_commands"
+        "conformance::anyt_nats_embedded::channel_state_kept_between_commands",
+        "conformance::anyt_ssl::channel_state_kept_between_commands"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -24914,20 +24940,25 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] AnyT's Action Cable-only `sleep 1` is dropped: the welcome arrives after the session is registered",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] AnyT's Action Cable-only `sleep 1` is dropped: the welcome arrives after the session is registered (compat/deviations.md)",
+        "[src] serialized across variants and published after the server's Redis pub/sub subscribed: the pub/sub command channel is shared on the shared Redis",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::remote_disconnect_by_id",
         "conformance::anyt_broker_nats::remote_disconnect_by_id",
         "conformance::anyt_broker_redis::remote_disconnect_by_id",
         "conformance::anyt_default::remote_disconnect_by_id",
+        "conformance::anyt_embedded::remote_disconnect_by_id",
         "conformance::anyt_http::remote_disconnect_by_id",
         "conformance::anyt_nats::remote_disconnect_by_id",
-        "conformance::anyt_nats_embedded::remote_disconnect_by_id"
+        "conformance::anyt_nats_embedded::remote_disconnect_by_id",
+        "conformance::anyt_ssl::remote_disconnect_by_id"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -24958,20 +24989,24 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] restart_server! is ported as stopping the server (SIGTERM); the disconnect is sent while stopping, the restart is not performed",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] restart_server! is ported as stopping the server (SIGTERM, SIGKILL after 3 s as ChildProcess does); the disconnect is sent while stopping, the restart is not performed",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::server_restart_disconnect_message",
         "conformance::anyt_broker_nats::server_restart_disconnect_message",
         "conformance::anyt_broker_redis::server_restart_disconnect_message",
         "conformance::anyt_default::server_restart_disconnect_message",
+        "conformance::anyt_embedded::server_restart_disconnect_message",
         "conformance::anyt_http::server_restart_disconnect_message",
         "conformance::anyt_nats::server_restart_disconnect_message",
-        "conformance::anyt_nats_embedded::server_restart_disconnect_message"
+        "conformance::anyt_nats_embedded::server_restart_disconnect_message",
+        "conformance::anyt_ssl::server_restart_disconnect_message"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25002,17 +25037,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::request_channel_has_access_to_request",
         "conformance::anyt_broker_nats::request_channel_has_access_to_request",
         "conformance::anyt_broker_redis::request_channel_has_access_to_request",
         "conformance::anyt_default::request_channel_has_access_to_request",
+        "conformance::anyt_embedded::request_channel_has_access_to_request",
         "conformance::anyt_http::request_channel_has_access_to_request",
         "conformance::anyt_nats::request_channel_has_access_to_request",
-        "conformance::anyt_nats_embedded::request_channel_has_access_to_request"
+        "conformance::anyt_nats_embedded::request_channel_has_access_to_request",
+        "conformance::anyt_ssl::request_channel_has_access_to_request"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25044,17 +25083,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::request_accept_with_cookies",
         "conformance::anyt_broker_nats::request_accept_with_cookies",
         "conformance::anyt_broker_redis::request_accept_with_cookies",
         "conformance::anyt_default::request_accept_with_cookies",
+        "conformance::anyt_embedded::request_accept_with_cookies",
         "conformance::anyt_http::request_accept_with_cookies",
         "conformance::anyt_nats::request_accept_with_cookies",
-        "conformance::anyt_nats_embedded::request_accept_with_cookies"
+        "conformance::anyt_nats_embedded::request_accept_with_cookies",
+        "conformance::anyt_ssl::request_accept_with_cookies"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25085,17 +25128,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::request_accept_with_header",
         "conformance::anyt_broker_nats::request_accept_with_header",
         "conformance::anyt_broker_redis::request_accept_with_header",
         "conformance::anyt_default::request_accept_with_header",
+        "conformance::anyt_embedded::request_accept_with_header",
         "conformance::anyt_http::request_accept_with_header",
         "conformance::anyt_nats::request_accept_with_header",
-        "conformance::anyt_nats_embedded::request_accept_with_header"
+        "conformance::anyt_nats_embedded::request_accept_with_header",
+        "conformance::anyt_ssl::request_accept_with_header"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25128,17 +25175,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::request_reject_without_cookies",
         "conformance::anyt_broker_nats::request_reject_without_cookies",
         "conformance::anyt_broker_redis::request_reject_without_cookies",
         "conformance::anyt_default::request_reject_without_cookies",
+        "conformance::anyt_embedded::request_reject_without_cookies",
         "conformance::anyt_http::request_reject_without_cookies",
         "conformance::anyt_nats::request_reject_without_cookies",
-        "conformance::anyt_nats_embedded::request_reject_without_cookies"
+        "conformance::anyt_nats_embedded::request_reject_without_cookies",
+        "conformance::anyt_ssl::request_reject_without_cookies"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25171,17 +25222,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::request_reject_without_header",
         "conformance::anyt_broker_nats::request_reject_without_header",
         "conformance::anyt_broker_redis::request_reject_without_header",
         "conformance::anyt_default::request_reject_without_header",
+        "conformance::anyt_embedded::request_reject_without_header",
         "conformance::anyt_http::request_reject_without_header",
         "conformance::anyt_nats::request_reject_without_header",
-        "conformance::anyt_nats_embedded::request_reject_without_header"
+        "conformance::anyt_nats_embedded::request_reject_without_header",
+        "conformance::anyt_ssl::request_reject_without_header"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25214,17 +25269,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::request_url_is_set",
         "conformance::anyt_broker_nats::request_url_is_set",
         "conformance::anyt_broker_redis::request_url_is_set",
         "conformance::anyt_default::request_url_is_set",
+        "conformance::anyt_embedded::request_url_is_set",
         "conformance::anyt_http::request_url_is_set",
         "conformance::anyt_nats::request_url_is_set",
-        "conformance::anyt_nats_embedded::request_url_is_set"
+        "conformance::anyt_nats_embedded::request_url_is_set",
+        "conformance::anyt_ssl::request_url_is_set"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25255,17 +25314,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::request_disconnect_message_when_rejected",
         "conformance::anyt_broker_nats::request_disconnect_message_when_rejected",
         "conformance::anyt_broker_redis::request_disconnect_message_when_rejected",
         "conformance::anyt_default::request_disconnect_message_when_rejected",
+        "conformance::anyt_embedded::request_disconnect_message_when_rejected",
         "conformance::anyt_http::request_disconnect_message_when_rejected",
         "conformance::anyt_nats::request_disconnect_message_when_rejected",
-        "conformance::anyt_nats_embedded::request_disconnect_message_when_rejected"
+        "conformance::anyt_nats_embedded::request_disconnect_message_when_rejected",
+        "conformance::anyt_ssl::request_disconnect_message_when_rejected"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25298,19 +25361,24 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] inherent window: AnyT's `client.close` waits 0.5 s and fails on unprocessed messages",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::request_disconnect_unsubscribes_different_channels",
         "conformance::anyt_broker_nats::request_disconnect_unsubscribes_different_channels",
         "conformance::anyt_broker_redis::request_disconnect_unsubscribes_different_channels",
         "conformance::anyt_default::request_disconnect_unsubscribes_different_channels",
+        "conformance::anyt_embedded::request_disconnect_unsubscribes_different_channels",
         "conformance::anyt_http::request_disconnect_unsubscribes_different_channels",
         "conformance::anyt_nats::request_disconnect_unsubscribes_different_channels",
-        "conformance::anyt_nats_embedded::request_disconnect_unsubscribes_different_channels"
+        "conformance::anyt_nats_embedded::request_disconnect_unsubscribes_different_channels",
+        "conformance::anyt_ssl::request_disconnect_unsubscribes_different_channels"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25341,19 +25409,24 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] inherent window: AnyT's `client.close` waits 0.5 s and fails on unprocessed messages",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::request_disconnect_unsubscribes_same_channel_subscriptions",
         "conformance::anyt_broker_nats::request_disconnect_unsubscribes_same_channel_subscriptions",
         "conformance::anyt_broker_redis::request_disconnect_unsubscribes_same_channel_subscriptions",
         "conformance::anyt_default::request_disconnect_unsubscribes_same_channel_subscriptions",
+        "conformance::anyt_embedded::request_disconnect_unsubscribes_same_channel_subscriptions",
         "conformance::anyt_http::request_disconnect_unsubscribes_same_channel_subscriptions",
         "conformance::anyt_nats::request_disconnect_unsubscribes_same_channel_subscriptions",
-        "conformance::anyt_nats_embedded::request_disconnect_unsubscribes_same_channel_subscriptions"
+        "conformance::anyt_nats_embedded::request_disconnect_unsubscribes_same_channel_subscriptions",
+        "conformance::anyt_ssl::request_disconnect_unsubscribes_same_channel_subscriptions"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25384,17 +25457,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::broadcast_json_string",
         "conformance::anyt_broker_nats::broadcast_json_string",
         "conformance::anyt_broker_redis::broadcast_json_string",
         "conformance::anyt_default::broadcast_json_string",
+        "conformance::anyt_embedded::broadcast_json_string",
         "conformance::anyt_http::broadcast_json_string",
         "conformance::anyt_nats::broadcast_json_string",
-        "conformance::anyt_nats_embedded::broadcast_json_string"
+        "conformance::anyt_nats_embedded::broadcast_json_string",
+        "conformance::anyt_ssl::broadcast_json_string"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25427,17 +25504,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::broadcast_custom_string",
         "conformance::anyt_broker_nats::broadcast_custom_string",
         "conformance::anyt_broker_redis::broadcast_custom_string",
         "conformance::anyt_default::broadcast_custom_string",
+        "conformance::anyt_embedded::broadcast_custom_string",
         "conformance::anyt_http::broadcast_custom_string",
         "conformance::anyt_nats::broadcast_custom_string",
-        "conformance::anyt_nats_embedded::broadcast_custom_string"
+        "conformance::anyt_nats_embedded::broadcast_custom_string",
+        "conformance::anyt_ssl::broadcast_custom_string"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25469,17 +25550,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::broadcast_object",
         "conformance::anyt_broker_nats::broadcast_object",
         "conformance::anyt_broker_redis::broadcast_object",
         "conformance::anyt_default::broadcast_object",
+        "conformance::anyt_embedded::broadcast_object",
         "conformance::anyt_http::broadcast_object",
         "conformance::anyt_nats::broadcast_object",
-        "conformance::anyt_nats_embedded::broadcast_object"
+        "conformance::anyt_nats_embedded::broadcast_object",
+        "conformance::anyt_ssl::broadcast_object"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25512,18 +25597,22 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] AnyT's `sleep 1` after unsubscribe is replaced by a barrier subscription (Cabby::BarrierChannel) on the same session; inherent window: AnyT's 0.5 s no-message check",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] AnyT's `sleep 1` after unsubscribe is replaced by a barrier subscription (Cabby::BarrierChannel) on the same session (in-order command handling, compat/deviations.md); inherent window: AnyT's 0.5 s no-message check",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::many_clients_one_unsubscribes",
         "conformance::anyt_broker_nats::many_clients_one_unsubscribes",
         "conformance::anyt_broker_redis::many_clients_one_unsubscribes",
         "conformance::anyt_default::many_clients_one_unsubscribes",
+        "conformance::anyt_embedded::many_clients_one_unsubscribes",
         "conformance::anyt_http::many_clients_one_unsubscribes",
         "conformance::anyt_nats::many_clients_one_unsubscribes",
-        "conformance::anyt_nats_embedded::many_clients_one_unsubscribes"
+        "conformance::anyt_nats_embedded::many_clients_one_unsubscribes",
+        "conformance::anyt_ssl::many_clients_one_unsubscribes"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25554,17 +25643,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::many_clients_receive",
         "conformance::anyt_broker_nats::many_clients_receive",
         "conformance::anyt_broker_redis::many_clients_receive",
         "conformance::anyt_default::many_clients_receive",
+        "conformance::anyt_embedded::many_clients_receive",
         "conformance::anyt_http::many_clients_receive",
         "conformance::anyt_nats::many_clients_receive",
-        "conformance::anyt_nats_embedded::many_clients_receive"
+        "conformance::anyt_nats_embedded::many_clients_receive",
+        "conformance::anyt_ssl::many_clients_receive"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25597,18 +25690,22 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] AnyT's `sleep 1` after unsubscribe is replaced by a barrier subscription (Cabby::BarrierChannel) on the same session; inherent window: AnyT's 0.5 s no-message check",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] AnyT's `sleep 1` after unsubscribe is replaced by a barrier subscription (Cabby::BarrierChannel) on the same session (in-order command handling, compat/deviations.md); inherent window: AnyT's 0.5 s no-message check",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::multiple_streams_none_after_unsubscribe",
         "conformance::anyt_broker_nats::multiple_streams_none_after_unsubscribe",
         "conformance::anyt_broker_redis::multiple_streams_none_after_unsubscribe",
         "conformance::anyt_default::multiple_streams_none_after_unsubscribe",
+        "conformance::anyt_embedded::multiple_streams_none_after_unsubscribe",
         "conformance::anyt_http::multiple_streams_none_after_unsubscribe",
         "conformance::anyt_nats::multiple_streams_none_after_unsubscribe",
-        "conformance::anyt_nats_embedded::multiple_streams_none_after_unsubscribe"
+        "conformance::anyt_nats_embedded::multiple_streams_none_after_unsubscribe",
+        "conformance::anyt_ssl::multiple_streams_none_after_unsubscribe"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25638,17 +25735,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::multiple_streams_receive_both",
         "conformance::anyt_broker_nats::multiple_streams_receive_both",
         "conformance::anyt_broker_redis::multiple_streams_receive_both",
         "conformance::anyt_default::multiple_streams_receive_both",
+        "conformance::anyt_embedded::multiple_streams_receive_both",
         "conformance::anyt_http::multiple_streams_receive_both",
         "conformance::anyt_nats::multiple_streams_receive_both",
-        "conformance::anyt_nats_embedded::multiple_streams_receive_both"
+        "conformance::anyt_nats_embedded::multiple_streams_receive_both",
+        "conformance::anyt_ssl::multiple_streams_receive_both"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25681,18 +25782,22 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] AnyT's `sleep 1` after unsubscribe is replaced by a barrier subscription (Cabby::BarrierChannel) on the same session; inherent window: AnyT's 0.5 s no-message check",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] AnyT's `sleep 1` after unsubscribe is replaced by a barrier subscription (Cabby::BarrierChannel) on the same session (in-order command handling, compat/deviations.md); inherent window: AnyT's 0.5 s no-message check",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::single_stream_none_after_unsubscribe",
         "conformance::anyt_broker_nats::single_stream_none_after_unsubscribe",
         "conformance::anyt_broker_redis::single_stream_none_after_unsubscribe",
         "conformance::anyt_default::single_stream_none_after_unsubscribe",
+        "conformance::anyt_embedded::single_stream_none_after_unsubscribe",
         "conformance::anyt_http::single_stream_none_after_unsubscribe",
         "conformance::anyt_nats::single_stream_none_after_unsubscribe",
-        "conformance::anyt_nats_embedded::single_stream_none_after_unsubscribe"
+        "conformance::anyt_nats_embedded::single_stream_none_after_unsubscribe",
+        "conformance::anyt_ssl::single_stream_none_after_unsubscribe"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25722,17 +25827,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::single_stream_receives",
         "conformance::anyt_broker_nats::single_stream_receives",
         "conformance::anyt_broker_redis::single_stream_receives",
         "conformance::anyt_default::single_stream_receives",
+        "conformance::anyt_embedded::single_stream_receives",
         "conformance::anyt_http::single_stream_receives",
         "conformance::anyt_nats::single_stream_receives",
-        "conformance::anyt_nats_embedded::single_stream_receives"
+        "conformance::anyt_nats_embedded::single_stream_receives",
+        "conformance::anyt_ssl::single_stream_receives"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25765,17 +25874,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::single_stream_same_channel_different_params",
         "conformance::anyt_broker_nats::single_stream_same_channel_different_params",
         "conformance::anyt_broker_redis::single_stream_same_channel_different_params",
         "conformance::anyt_default::single_stream_same_channel_different_params",
+        "conformance::anyt_embedded::single_stream_same_channel_different_params",
         "conformance::anyt_http::single_stream_same_channel_different_params",
         "conformance::anyt_nats::single_stream_same_channel_different_params",
-        "conformance::anyt_nats_embedded::single_stream_same_channel_different_params"
+        "conformance::anyt_nats_embedded::single_stream_same_channel_different_params",
+        "conformance::anyt_ssl::single_stream_same_channel_different_params"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25808,18 +25921,22 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] the two `sleep 0.2` are replaced by a session barrier after `unfollow` and a witness client that receives Y before Z is broadcast",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::stop_streams_unsubscribes_from_stream",
         "conformance::anyt_broker_nats::stop_streams_unsubscribes_from_stream",
         "conformance::anyt_broker_redis::stop_streams_unsubscribes_from_stream",
         "conformance::anyt_default::stop_streams_unsubscribes_from_stream",
+        "conformance::anyt_embedded::stop_streams_unsubscribes_from_stream",
         "conformance::anyt_http::stop_streams_unsubscribes_from_stream",
         "conformance::anyt_nats::stop_streams_unsubscribes_from_stream",
-        "conformance::anyt_nats_embedded::stop_streams_unsubscribes_from_stream"
+        "conformance::anyt_nats_embedded::stop_streams_unsubscribes_from_stream",
+        "conformance::anyt_ssl::stop_streams_unsubscribes_from_stream"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25852,17 +25969,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::ack_confirmation",
         "conformance::anyt_broker_nats::ack_confirmation",
         "conformance::anyt_broker_redis::ack_confirmation",
         "conformance::anyt_default::ack_confirmation",
+        "conformance::anyt_embedded::ack_confirmation",
         "conformance::anyt_http::ack_confirmation",
         "conformance::anyt_nats::ack_confirmation",
-        "conformance::anyt_nats_embedded::ack_confirmation"
+        "conformance::anyt_nats_embedded::ack_confirmation",
+        "conformance::anyt_ssl::ack_confirmation"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25893,17 +26014,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::ack_rejection",
         "conformance::anyt_broker_nats::ack_rejection",
         "conformance::anyt_broker_redis::ack_rejection",
         "conformance::anyt_default::ack_rejection",
+        "conformance::anyt_embedded::ack_rejection",
         "conformance::anyt_http::ack_rejection",
         "conformance::anyt_nats::ack_rejection",
-        "conformance::anyt_nats_embedded::ack_rejection"
+        "conformance::anyt_nats_embedded::ack_rejection",
+        "conformance::anyt_ssl::ack_rejection"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25935,17 +26060,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::params_same_channel_different_params",
         "conformance::anyt_broker_nats::params_same_channel_different_params",
         "conformance::anyt_broker_redis::params_same_channel_different_params",
         "conformance::anyt_default::params_same_channel_different_params",
+        "conformance::anyt_embedded::params_same_channel_different_params",
         "conformance::anyt_http::params_same_channel_different_params",
         "conformance::anyt_nats::params_same_channel_different_params",
-        "conformance::anyt_nats_embedded::params_same_channel_different_params"
+        "conformance::anyt_nats_embedded::params_same_channel_different_params",
+        "conformance::anyt_ssl::params_same_channel_different_params"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -25976,17 +26105,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::perform_with_arguments",
         "conformance::anyt_broker_nats::perform_with_arguments",
         "conformance::anyt_broker_redis::perform_with_arguments",
         "conformance::anyt_default::perform_with_arguments",
+        "conformance::anyt_embedded::perform_with_arguments",
         "conformance::anyt_http::perform_with_arguments",
         "conformance::anyt_nats::perform_with_arguments",
-        "conformance::anyt_nats_embedded::perform_with_arguments"
+        "conformance::anyt_nats_embedded::perform_with_arguments",
+        "conformance::anyt_ssl::perform_with_arguments"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -26018,17 +26151,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::perform_without_arguments",
         "conformance::anyt_broker_nats::perform_without_arguments",
         "conformance::anyt_broker_redis::perform_without_arguments",
         "conformance::anyt_default::perform_without_arguments",
+        "conformance::anyt_embedded::perform_without_arguments",
         "conformance::anyt_http::perform_without_arguments",
         "conformance::anyt_nats::perform_without_arguments",
-        "conformance::anyt_nats_embedded::perform_without_arguments"
+        "conformance::anyt_nats_embedded::perform_without_arguments",
+        "conformance::anyt_ssl::perform_without_arguments"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
@@ -26059,17 +26196,21 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
-        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
+        "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::transmissions_from_subscribed",
         "conformance::anyt_broker_nats::transmissions_from_subscribed",
         "conformance::anyt_broker_redis::transmissions_from_subscribed",
         "conformance::anyt_default::transmissions_from_subscribed",
+        "conformance::anyt_embedded::transmissions_from_subscribed",
         "conformance::anyt_http::transmissions_from_subscribed",
         "conformance::anyt_nats::transmissions_from_subscribed",
-        "conformance::anyt_nats_embedded::transmissions_from_subscribed"
+        "conformance::anyt_nats_embedded::transmissions_from_subscribed",
+        "conformance::anyt_ssl::transmissions_from_subscribed"
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
