@@ -5,6 +5,7 @@
 //! they must not contain behavior of their own (SPEC.md §5).
 
 pub mod api;
+pub mod benchi;
 pub mod broker;
 pub mod cli;
 pub mod common;

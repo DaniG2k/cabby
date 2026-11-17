@@ -1,0 +1,21 @@
+[package]
+name = "cabby-bench"
+description = "Benchi port: external load harness that drives any AnyCable-compatible server binary"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "cabby-bench"
+path = "src/main.rs"
+
+[dependencies]
+cabby-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
