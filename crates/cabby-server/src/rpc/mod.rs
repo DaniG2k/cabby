@@ -72,6 +72,25 @@ pub struct RpcStatus {
     pub message: String,
 }
 
+/// Error of a single client/service call (Go: the `error` returned by a
+/// `pb.RPCClient` method). Context errors are distinct from gRPC statuses, as in
+/// Go, where a client may return the bare `context.Canceled` /
+/// `context.DeadlineExceeded` or a status error (real transports convert context
+/// errors into `Canceled` / `DeadlineExceeded` statuses).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ClientError {
+    /// Go `context.Canceled`.
+    #[error("context canceled")]
+    Canceled,
+    /// Go `context.DeadlineExceeded`.
+    #[error("context deadline exceeded")]
+    DeadlineExceeded,
+    #[error("rpc error: code = {:?} desc = {}", .0.code, .0.message)]
+    Status(RpcStatus),
+    #[error("{0}")]
+    Other(String),
+}
+
 /// Errors returned by the controller and the RPC services.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RpcError {
@@ -103,17 +122,17 @@ pub trait RpcClient: Send + Sync {
         &'a self,
         ctx: &'a Context,
         request: protos::ConnectionRequest,
-    ) -> BoxFuture<'a, Result<protos::ConnectionResponse, RpcStatus>>;
+    ) -> BoxFuture<'a, Result<protos::ConnectionResponse, ClientError>>;
     fn command<'a>(
         &'a self,
         ctx: &'a Context,
         request: protos::CommandMessage,
-    ) -> BoxFuture<'a, Result<protos::CommandResponse, RpcStatus>>;
+    ) -> BoxFuture<'a, Result<protos::CommandResponse, ClientError>>;
     fn disconnect<'a>(
         &'a self,
         ctx: &'a Context,
         request: protos::DisconnectRequest,
-    ) -> BoxFuture<'a, Result<protos::DisconnectResponse, RpcStatus>>;
+    ) -> BoxFuture<'a, Result<protos::DisconnectResponse, ClientError>>;
 }
 
 /// Server side of the AnyCable RPC service (upstream `pb.RPCServer`). The context
@@ -123,17 +142,17 @@ pub trait RpcService: Send + Sync {
         &'a self,
         ctx: &'a Context,
         request: protos::ConnectionRequest,
-    ) -> BoxFuture<'a, Result<protos::ConnectionResponse, RpcStatus>>;
+    ) -> BoxFuture<'a, Result<protos::ConnectionResponse, ClientError>>;
     fn command<'a>(
         &'a self,
         ctx: &'a Context,
         request: protos::CommandMessage,
-    ) -> BoxFuture<'a, Result<protos::CommandResponse, RpcStatus>>;
+    ) -> BoxFuture<'a, Result<protos::CommandResponse, ClientError>>;
     fn disconnect<'a>(
         &'a self,
         ctx: &'a Context,
         request: protos::DisconnectRequest,
-    ) -> BoxFuture<'a, Result<protos::DisconnectResponse, RpcStatus>>;
+    ) -> BoxFuture<'a, Result<protos::DisconnectResponse, ClientError>>;
 }
 
 /// Transport health of a dialed client (upstream `ClientHelper`).

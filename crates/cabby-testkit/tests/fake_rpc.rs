@@ -5,16 +5,23 @@ use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
 use cabby_core::protos;
-use cabby_server::rpc::{Context, RpcClient};
+use cabby_server::rpc::{ClientError, Context, RpcClient, RpcStatus};
 use cabby_testkit::fake_http::HttpRecorder;
 use cabby_testkit::fake_rpc::{CallState, FakeRpc, FakeRpcOptions, Method, Reply, Transport};
-use cabby_testkit::rpc_doubles::TonicRpcClient;
+use cabby_testkit::rpc_doubles::{CancelOnCall, TonicRpcClient};
 use cabby_testkit::runtime::{DEADLINE, block_on_within, spawn};
 use cabby_testkit::udp::UdpSink;
 use tonic::Code;
 
 fn connect_request(url: &str) -> protos::ConnectionRequest {
     protos::ConnectionRequest { env: Some(protos::Env { url: url.into(), ..Default::default() }) }
+}
+
+fn status(e: ClientError) -> RpcStatus {
+    match e {
+        ClientError::Status(s) => s,
+        other => panic!("expected a gRPC status, got {other:?}"),
+    }
 }
 
 fn ctx_with(md: &[(&str, &str)]) -> Context {
@@ -53,6 +60,7 @@ fn unmatched_calls_fail_and_are_recorded_as_unexpected() {
     let client = TonicRpcClient::new(&fake.grpc_target());
 
     let err = block_on_within(DEADLINE, client.connect(&Context::default(), connect_request("/b"))).unwrap_err();
+    let err = status(err);
 
     assert_eq!(Code::Unimplemented, err.code);
     assert_eq!(1, fake.unexpected_calls().len());
@@ -66,7 +74,7 @@ fn once_expectations_are_consumed_in_order() {
     let client = TonicRpcClient::new(&fake.grpc_target());
     let ctx = Context::default();
 
-    let first = block_on_within(DEADLINE, client.command(&ctx, protos::CommandMessage::default())).unwrap_err();
+    let first = status(block_on_within(DEADLINE, client.command(&ctx, protos::CommandMessage::default())).unwrap_err());
     let second = block_on_within(DEADLINE, client.command(&ctx, protos::CommandMessage::default())).unwrap();
     let third = block_on_within(DEADLINE, client.command(&ctx, protos::CommandMessage::default())).unwrap();
 
@@ -134,7 +142,7 @@ fn calls_abandoned_by_the_client_are_marked() {
     let call = spawn(async move { client.connect(&ctx, connect_request("/")).await });
     gate.await_held(1, DEADLINE);
     cancel.cancel();
-    let err = block_on_within(DEADLINE, call).expect("task").unwrap_err();
+    let err = status(block_on_within(DEADLINE, call).expect("task").unwrap_err());
 
     assert_eq!(Code::Cancelled, err.code);
     assert_eq!(CallState::Abandoned, fake.await_call_settled(0, DEADLINE));
@@ -283,4 +291,18 @@ fn udp_sink_receives_datagrams() {
     tx.send_to(b"metric:1|c", sink.addr()).unwrap();
     assert_eq!(Some(b"metric:1|c".to_vec()), sink.recv(DEADLINE));
     assert_eq!(None, sink.recv(Duration::from_millis(1)));
+}
+
+#[test]
+fn cancel_on_call_records_then_cancels_with_the_bare_context_error() {
+    let fake = FakeRpc::start();
+    fake.on(Method::Connect).reply(protos::ConnectionResponse::default());
+    let session = Context::default();
+    let client = CancelOnCall::new(&fake.grpc_target(), session.cancel.clone());
+
+    let err = block_on_within(DEADLINE, client.connect(&session, connect_request("/c"))).unwrap_err();
+
+    assert_eq!(ClientError::Canceled, err);
+    assert!(session.cancel.is_cancelled());
+    assert_eq!(&connect_request("/c"), fake.calls()[0].request.connect());
 }
