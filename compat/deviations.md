@@ -16,3 +16,9 @@ compatibility suite and the Go-vs-Rust benchmarks cover them.
 ## Proposed (not adopted yet)
 
 Record a proposed observable change here first, with its rationale and a test, before you implement it.
+
+| ID | Area | Go behavior | Proposed Cabby behavior | Why | Pinning test | Go result |
+|---|---|---|---|---|---|---|
+| D-003 | Redis pub/sub liveness | If Redis drops the node's stream subscription (subscription gone, connection alive) or the subscriber connection goes half-open, the node never resubscribes and silently stops delivering broadcasts until restarted | Detect lost subscriptions (unsolicited `unsubscribe` pushes, periodic liveness/reconciliation of the subscription set) and dead subscriber connections (heartbeat with timeout); reconnect and resubscribe; delivery resumes within 15s (dropped subscription) / 30s (half-open) | AnyCable issue 275 (open, not reproduced upstream); reproduced deterministically with `cabby_testkit::fault_proxy` | `conformance::issues::delivery_recovers_after_redis_drops_the_stream_subscription`, `conformance::issues::delivery_recovers_after_the_subscriber_connection_goes_half_open` | fails (upstream defect reproduced) |
+| D-004 | Redis pub/sub subscription lifecycle | Pinned version releases channels after the last subscriber leaves (fixed in 1.6.8 for this pattern) | Same, as a hard invariant: no Redis subscription for a stream without local subscribers | AnyCable issue 263 (open; reporter still sees growth) | `conformance::issues::redis_pubsub_channels_are_released_when_streams_have_no_subscribers` | passes (regression guard, no behavior change) |
+| D-005 | Memory stability | Slow RSS growth under traffic over days | No unbounded growth: after repeated connect/subscribe/broadcast/disconnect churn, RSS, threads, sockets and file descriptors return to within a fixed margin of baseline | AnyCable issue 265 (open) | Planned soak workload in `crates/cabby-bench` (M7), run against both servers | to measure |

@@ -23,6 +23,7 @@ pub mod bridge;
 pub mod cable_client;
 pub mod fake_http;
 pub mod fake_rpc;
+pub mod fault_proxy;
 pub mod http_stub;
 pub mod mruby_bridge;
 pub mod ports;
