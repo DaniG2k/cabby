@@ -250,10 +250,10 @@ fn pump(mut ws: WebSocket<TcpStream>, events: Sender<Event>, commands: Receiver<
                     ws.close(None)
                 }
             };
-            if let Err(e) = r {
-                if !matches!(e, tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) {
-                    let _ = events.send(Event::Error(e.to_string()));
-                }
+            if let Err(e) = r
+                && !matches!(e, tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed)
+            {
+                let _ = events.send(Event::Error(e.to_string()));
             }
         }
         if closing_since.is_some_and(|t| t.elapsed() > RECEIVE_DEADLINE) {
