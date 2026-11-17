@@ -20,10 +20,9 @@ const READ_DEADLINE: Duration = Duration::from_secs(10);
 const WAIT: Duration = Duration::from_secs(5);
 
 struct IntegrationServer {
-    // Dropped in this order: the server first (`defer ts.Close()`), the node last.
+    n: Harness,
     ts: Server,
     _handler: Handler,
-    n: Harness,
 }
 
 impl IntegrationServer {
@@ -31,8 +30,16 @@ impl IntegrationServer {
         Client::new(self.ts.url())
     }
 
-    fn assert_no_unexpected_calls(&self) {
-        assert_eq!(self.n.unexpected_calls(), Vec::<String>::new(), "unexpected mock calls");
+    /// The tests' deferred teardown, then the mock checks. Upstream defers
+    /// `ts.Close()` and then `n.Shutdown(ctx)`, so (last in, first out) the node
+    /// shuts down first, with the server still open, and the server closes after.
+    /// Mock calls made while shutting down are checked too. (A failed test skips
+    /// this: its fields drop in declaration order and the harness skips shutdown.)
+    fn finish(self) {
+        let IntegrationServer { n, ts, _handler } = self;
+        n.shutdown();
+        drop(ts);
+        assert_eq!(n.unexpected_calls(), Vec::<String>::new(), "unexpected mock calls");
     }
 }
 
@@ -55,7 +62,7 @@ fn setup_integration_server() -> IntegrationServer {
 
     let handler = n.handler(&ds_config, StreamsKind::RejectNoauth).expect("DSHandler");
     let ts = handler.listen();
-    IntegrationServer { ts, _handler: handler, n }
+    IntegrationServer { n, ts, _handler: handler }
 }
 
 fn messages(data: &[u8]) -> Vec<Map<String, Value>> {
@@ -82,7 +89,7 @@ fn test_ds_integration_head() {
 
     assert_eq!(meta.content_type, "application/json");
     assert!(!meta.next_offset.is_empty());
-    s.assert_no_unexpected_calls();
+    s.finish();
 }
 
 mod test_ds_integration_catchup_read {
@@ -104,10 +111,11 @@ mod test_ds_integration_catchup_read {
         assert_eq!(String::from_utf8_lossy(&chunk.data), "[]");
         assert!(chunk.up_to_date);
         it.close();
-        s.assert_no_unexpected_calls();
+        s.finish();
     }
 
     /// upstream: ds/integration_test.go#TestDSIntegration_CatchupRead/with_non-empty_stream
+    /// note: upstream sleeps 50ms after broadcasting; dropped: the memory broker stores a broadcast in the stream history before `HandleBroadcast` returns, so the read that follows sees it.
     #[test]
     fn with_non_empty_stream() {
         let s = setup_integration_server();
@@ -138,10 +146,11 @@ mod test_ds_integration_catchup_read {
         assert!(chunk.up_to_date);
         assert!(!chunk.next_offset.is_empty());
         it.close();
-        s.assert_no_unexpected_calls();
+        s.finish();
     }
 
     /// upstream: ds/integration_test.go#TestDSIntegration_CatchupRead/with_offset
+    /// note: upstream sleeps 50ms after broadcasting; dropped: the memory broker stores a broadcast in the stream history before `HandleBroadcast` returns, so the read that follows sees it.
     #[test]
     fn with_offset() {
         let s = setup_integration_server();
@@ -176,13 +185,21 @@ mod test_ds_integration_catchup_read {
         assert_eq!(last_msg["id"], 4.0);
         assert_eq!(last_msg["msg"], "fourth");
         it2.close();
-        s.assert_no_unexpected_calls();
+        s.finish();
     }
 }
 
-/// upstream: ds/integration_test.go#TestDSIntegration_Authenticate
-#[test]
-fn test_ds_integration_authenticate() {
+/// Asserts that `err` is client-go's `*StreamError` for `op` with HTTP `status`.
+fn assert_stream_status(err: &Error, op: &str, status: u16) {
+    match err {
+        Error::Stream { op: o, status: s, .. } if o == op && *s == status => {}
+        other => panic!("expected a {op} StreamError with status {status}, got {other:?}"),
+    }
+}
+
+/// `TestDSIntegration_Authenticate`'s setup: the controller's expectations are
+/// replaced by a failing and a passing `Authenticate` per request id.
+fn setup_authenticate() -> IntegrationServer {
     let s = setup_integration_server();
 
     // Reset mocks
@@ -205,15 +222,39 @@ fn test_ds_integration_authenticate() {
             ..Default::default()
         },
     );
+    s
+}
+
+/// upstream: ds/integration_test.go#TestDSIntegration_Authenticate
+#[test]
+fn test_ds_integration_authenticate() {
+    let s = setup_authenticate();
 
     let stream = s.client().stream("/ds/test-stream");
 
     let err = stream.head(&[("x-request-id", "sid-fail")]).expect_err("rejected");
+    // Upstream's check, kept as written: the message also holds the URL, so a
+    // port containing "401" satisfies it (the regression test checks the status).
     assert!(err.to_string().contains("401"), "{err}");
 
     let stream = s.client().stream("/ds/test-stream");
     stream.head(&[("x-request-id", "sid-pass")]).expect("HEAD");
-    s.assert_no_unexpected_calls();
+    s.finish();
+}
+
+/// regression-for: ds/integration_test.go#TestDSIntegration_Authenticate
+/// note: upstream checks `Contains(err.Error(), "401")`, which a server port containing 401 in the error's URL satisfies too; this asserts the error's HTTP status (`StreamError.StatusCode`).
+#[test]
+fn test_ds_integration_authenticate_rejects_with_status_401() {
+    let s = setup_authenticate();
+
+    let stream = s.client().stream("/ds/test-stream");
+
+    let err = stream.head(&[("x-request-id", "sid-fail")]).expect_err("rejected");
+    assert_stream_status(&err, "head", 401);
+
+    stream.head(&[("x-request-id", "sid-pass")]).expect("HEAD");
+    s.finish();
 }
 
 /// upstream: ds/integration_test.go#TestDSIntegration_StreamAuthorization
@@ -225,6 +266,7 @@ fn test_ds_integration_stream_authorization() {
     let stream = s.client().stream("/ds/please-noauth");
 
     let err = stream.head(&[]).expect_err("unauthorized");
+    // Upstream's checks, kept as written (see the regression test below).
     assert!(err.to_string().contains("401"), "{err}");
 
     let mut it = stream.read(START_OFFSET, LiveMode::Sse, READ_DEADLINE);
@@ -234,7 +276,26 @@ fn test_ds_integration_stream_authorization() {
     s.n.wait_size(0, WAIT);
 
     assert_eq!(s.n.size(), 0);
-    s.assert_no_unexpected_calls();
+    s.finish();
+}
+
+/// regression-for: ds/integration_test.go#TestDSIntegration_StreamAuthorization
+/// note: upstream checks `Contains(err.Error(), "401")`, which a server port containing 401 in the error's URL satisfies too; this asserts the errors' HTTP status (`StreamError.StatusCode`) for HEAD and the SSE read.
+#[test]
+fn test_ds_integration_stream_authorization_rejects_with_status_401() {
+    let s = setup_integration_server();
+
+    let stream = s.client().stream("/ds/please-noauth");
+
+    let err = stream.head(&[]).expect_err("unauthorized");
+    assert_stream_status(&err, "head", 401);
+
+    let mut it = stream.read(START_OFFSET, LiveMode::Sse, READ_DEADLINE);
+    let err = it.next().expect_err("unauthorized");
+    assert_stream_status(&err, "read", 401);
+
+    assert!(s.n.wait_size(0, WAIT), "the rejected session did not leave the hub");
+    s.finish();
 }
 
 mod test_ds_integration_long_poll {
@@ -312,10 +373,11 @@ mod test_ds_integration_long_poll {
 
         // Ensure the session is removed from the hub
         assert_eq!(s.n.size(), 0);
-        s.assert_no_unexpected_calls();
+        s.finish();
     }
 
     /// upstream: ds/integration_test.go#TestDSIntegration_LongPoll/should_return_immediately_if_data_already_exists
+    /// note: upstream sleeps 50ms after broadcasting; dropped: the memory broker stores a broadcast in the stream history before `HandleBroadcast` returns, so the read that follows sees it.
     #[test]
     fn should_return_immediately_if_data_already_exists() {
         let s = setup();
@@ -347,7 +409,7 @@ mod test_ds_integration_long_poll {
         // Ensure the session is removed from the hub
         assert_eq!(s.n.size(), 0);
         it.close();
-        s.assert_no_unexpected_calls();
+        s.finish();
     }
 }
 
@@ -362,7 +424,7 @@ fn test_ds_integration_sse_offset_required() {
     let resp = s.ts.request(&Request::new("GET", &format!("/ds/{stream_name}?live=sse")));
 
     assert_eq!(resp.status, 400);
-    s.assert_no_unexpected_calls();
+    s.finish();
 }
 
 mod test_ds_integration_sse {
@@ -376,15 +438,33 @@ mod test_ds_integration_sse {
     }
 
     /// upstream: ds/integration_test.go#TestDSIntegration_SSE/should_return_catchup_data_via_SSE_with_correct_metadata
+    /// note: upstream sleeps 50ms after broadcasting; dropped: the memory broker stores a broadcast in the stream history before `HandleBroadcast` returns, so the read that follows sees it.
     #[test]
     fn should_return_catchup_data_via_sse_with_correct_metadata() {
         let s = setup_integration_server();
+        catchup_read(&s);
+        s.finish();
+    }
+
+    /// regression-for: ds/integration_test.go#TestDSIntegration_SSE/should_stream_live_data_via_SSE
+    /// note: upstream runs the SSE subtests on one node, so the live subtest's `n.Size() == 1` also shows that the catch-up subtest's closed SSE session left the hub; the Rust subtests each get a fresh node, so this asserts it directly: after the catch-up read is closed, the size is awaited (bounded) to reach 0.
+    #[test]
+    fn closed_catchup_sse_session_leaves_the_hub() {
+        let s = setup_integration_server();
+        catchup_read(&s);
+        assert!(s.n.wait_size(0, WAIT), "the closed catch-up SSE session is still in the hub");
+        assert_eq!(s.n.size(), 0);
+        s.finish();
+    }
+
+    /// The catch-up subtest's body (closes its iterator).
+    fn catchup_read(s: &IntegrationServer) {
         let stream_name = "sse-catchup-test";
         s.n.broker_subscribe(stream_name);
 
         // Clients using fetch-then-live do not subscribe during catch-up,
         // so scope the expectation to this stream to avoid leaking it into other tests
-        program_catchup(&s);
+        program_catchup(s);
 
         s.n.broadcast(stream_name, r#"{"id":1,"msg":"hello"}"#).expect("broadcast");
         s.n.broadcast(stream_name, r#"{"id":2,"msg":"world"}"#).expect("broadcast");
@@ -407,11 +487,10 @@ mod test_ds_integration_sse {
         assert!(!chunk.next_offset.is_empty(), "should have next offset");
         assert!(!chunk.cursor.is_empty(), "should have cursor for CDN collapsing");
         it.close();
-        s.assert_no_unexpected_calls();
     }
 
     /// upstream: ds/integration_test.go#TestDSIntegration_SSE/should_stream_live_data_via_SSE
-    /// note: upstream sleeps 500ms before asserting `n.Size() == 1` and broadcasting (here: waits, bounded, until the session is subscribed) and 100ms before asserting `n.Size() == 0` (here: the size is awaited, bounded, then asserted). The catch-up subtest's stream-scoped expectation is replayed.
+    /// note: upstream sleeps 500ms before asserting `n.Size() == 1` and broadcasting (here: waits, bounded, until the session is subscribed) and 100ms before asserting `n.Size() == 0` (here: the size is awaited, bounded, then asserted). The catch-up subtest's stream-scoped expectation is replayed; on a fresh node `n.Size() == 1` no longer shows that the catch-up session left the hub, which `closed_catchup_sse_session_leaves_the_hub` asserts instead.
     #[test]
     fn should_stream_live_data_via_sse() {
         let s = setup_integration_server();
@@ -468,11 +547,12 @@ mod test_ds_integration_sse {
         s.n.wait_size(0, WAIT);
 
         assert_eq!(s.n.size(), 0);
-        s.assert_no_unexpected_calls();
+        s.finish();
     }
 
     /// upstream: ds/integration_test.go#TestDSIntegration_SSE/should_support_reconnection_with_last_known_offset
     /// note: replays the earlier subtests' controller expectations that can still match: the catch-up one (scoped to its stream); the live subtest's `Once` expectation was used up upstream, and a used-up testify expectation never matches again, so it is left out.
+    /// note: upstream sleeps 50ms after each round of broadcasts; dropped: the memory broker stores a broadcast in the stream history before `HandleBroadcast` returns, so the read that follows sees it.
     #[test]
     fn should_support_reconnection_with_last_known_offset() {
         let s = setup_integration_server();
@@ -508,6 +588,6 @@ mod test_ds_integration_sse {
         assert_eq!(messages[0]["id"], 3.0);
         assert_eq!(messages[0]["msg"], "message 3");
         it2.close();
-        s.assert_no_unexpected_calls();
+        s.finish();
     }
 }
