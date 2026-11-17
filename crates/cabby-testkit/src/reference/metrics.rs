@@ -289,6 +289,35 @@ impl Gauge {
             Gauge::Go(h) => Self::go(*h, "Dec", 0, 0),
         }
     }
+
+    /// Calls `inc()` from `incs` threads and `dec()` from `decs` threads at once
+    /// and joins them (Go: goroutines in the bridge, so the Go gauge sees real
+    /// concurrency instead of serialized bridge calls).
+    pub fn inc_dec_concurrently(&self, incs: usize, decs: usize) {
+        match self {
+            Gauge::Rust(g) => std::thread::scope(|s| {
+                let handles: Vec<_> = (0..incs)
+                    .map(|_| {
+                        s.spawn(|| {
+                            g.inc();
+                        })
+                    })
+                    .chain((0..decs).map(|_| {
+                        s.spawn(|| {
+                            g.dec();
+                        })
+                    }))
+                    .collect();
+                for h in handles {
+                    h.join().unwrap_or_else(|e| std::panic::resume_unwind(e));
+                }
+            }),
+            Gauge::Go(h) => {
+                let _: bool =
+                    bridge::call("metrics.Gauge.Concurrently", json!({"Handle": h, "Inc": incs, "Dec": decs}));
+            }
+        }
+    }
 }
 
 // --- Metrics -------------------------------------------------------------------
@@ -445,13 +474,22 @@ impl Metrics {
     }
 
     /// Upstream unexported `m.rotate()`.
+    ///
+    /// Go: rotation is driven through the exported `Run` loop, which rotates and
+    /// then calls each writer's `Write` on one goroutine. A bridge writer blocks
+    /// in `Write` until the next call, so when this returns exactly one more
+    /// rotation has happened and none follows until the next call. Each call
+    /// takes one rotate interval of wall time; the first one starts `Run`.
     pub fn rotate(&self) {
         match self {
             Metrics::Rust(m) => m.rotate(),
-            Metrics::Go(_) => unimplemented!(
-                "not_observable: Metrics.rotate is unexported; the exported Run loop only rotates after \
-                 rotate_interval seconds of wall time"
-            ),
+            Metrics::Go(h) => {
+                let deadline = Duration::from_secs(15);
+                let _: bool = bridge::call(
+                    "metrics.Metrics.StepRotation",
+                    json!({"Handle": h, "TimeoutMs": deadline.as_millis() as u64}),
+                );
+            }
         }
     }
 

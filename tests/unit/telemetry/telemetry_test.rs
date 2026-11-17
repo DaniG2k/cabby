@@ -67,6 +67,7 @@ mod test_tracking {
 
     /// upstream: telemetry/telemetry_test.go#TestTracking
     /// (first half: the boot event sent by `Collect`)
+    /// note: the upstream test is split: this case (boot event, exported API) runs against Go; usage_event covers the rest.
     #[test]
     fn boot_event() {
         let s = setup();
@@ -80,6 +81,7 @@ mod test_tracking {
 
     /// upstream: telemetry/telemetry_test.go#TestTracking
     /// (whole test, including the usage event)
+    /// note: not_observable on Go: the usage half calls the unexported observeUsage/collectUsage and depends on the unexported usage-monitor goroutine (otherwise the usage event fires only after 30 minutes); the boot half runs against Go in boot_event.
     #[test]
     fn usage_event() {
         let s = setup();
