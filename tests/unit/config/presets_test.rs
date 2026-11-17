@@ -40,7 +40,7 @@ fn test_fly_presets() {
 
     config.server.port = 8989;
 
-    assert_eq!(strings(&["fly"]), presets(&config, &env));
+    assert_eq!(Some(strings(&["fly"])), presets(&config, &env));
 
     let err = load_presets(&mut config, &env);
 
@@ -68,7 +68,7 @@ fn test_fly_presets_when_redis_configured() {
     let mut config = new_config();
     config.redis.url = "redis://some.cloud.redis:6379/1".into();
 
-    assert_eq!(strings(&["fly"]), presets(&config, &env));
+    assert_eq!(Some(strings(&["fly"])), presets(&config, &env));
 
     let err = load_presets(&mut config, &env);
 
@@ -93,7 +93,7 @@ fn test_heroku_presets() {
 
     let mut config = new_config();
 
-    assert_eq!(strings(&["heroku"]), presets(&config, &env));
+    assert_eq!(Some(strings(&["heroku"])), presets(&config, &env));
 
     let err = load_presets(&mut config, &env);
 
@@ -110,7 +110,7 @@ fn test_broker() {
     config.user_presets = Some(strings(&["broker"]));
     config.broadcast_adapters = strings(&["http"]);
 
-    assert_eq!(strings(&["broker"]), presets(&config, &EnvMap::new()));
+    assert_eq!(Some(strings(&["broker"])), presets(&config, &EnvMap::new()));
 
     let err = load_presets(&mut config, &EnvMap::new());
 
@@ -128,7 +128,7 @@ fn test_broker_when_redis_configured() {
     config.user_presets = Some(strings(&["broker"]));
     config.redis.url = "redis://localhost:6379/1".into();
 
-    assert_eq!(strings(&["broker"]), presets(&config, &EnvMap::new()));
+    assert_eq!(Some(strings(&["broker"])), presets(&config, &EnvMap::new()));
 
     let err = load_presets(&mut config, &EnvMap::new());
 
@@ -146,7 +146,7 @@ fn test_broker_when_enats_configured() {
     config.user_presets = Some(strings(&["broker"]));
     config.embedded_nats.enabled = true;
 
-    assert_eq!(strings(&["broker"]), presets(&config, &EnvMap::new()));
+    assert_eq!(Some(strings(&["broker"])), presets(&config, &EnvMap::new()));
 
     let err = load_presets(&mut config, &EnvMap::new());
 
@@ -166,7 +166,7 @@ fn test_fly_with_broker_presets() {
     config.user_presets = Some(strings(&["fly", "broker"]));
     config.server.port = 8989;
 
-    assert_eq!(strings(&["fly", "broker"]), presets(&config, &env));
+    assert_eq!(Some(strings(&["fly", "broker"])), presets(&config, &env));
 
     let err = load_presets(&mut config, &env);
 
@@ -193,7 +193,7 @@ fn test_override_some_preset_settings() {
 
     let mut config = new_config();
 
-    assert_eq!(strings(&["fly"]), presets(&config, &env));
+    assert_eq!(Some(strings(&["fly"])), presets(&config, &env));
 
     config.embedded_nats.service_addr = "nats://0.0.0.0:1234".into();
 
@@ -213,5 +213,6 @@ fn test_explicit_over_implicit_presets() {
     let mut config = new_config();
     config.user_presets = Some(vec![]);
 
-    assert_eq!(Vec::<String>::new(), presets(&config, &env));
+    // assert.Equal(t, []string{}, config.Presets()): an empty, non-nil slice.
+    assert_eq!(Some(Vec::<String>::new()), presets(&config, &env));
 }

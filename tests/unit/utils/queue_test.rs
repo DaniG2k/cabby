@@ -1,10 +1,7 @@
 //! upstream file: utils/queue_test.go
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use cabby_core::utils::{Item, PushResult};
-use cabby_testkit::reference::utils::{ByteQueue, rust_queue};
+use cabby_testkit::reference::utils::{ByteQueue, TrackedQueue};
 
 fn test_byte_queue_item(data: &[u8]) -> Item<Vec<u8>> {
     Item { data: data.to_vec(), size: data.len() as u64 }
@@ -133,10 +130,9 @@ mod test_byte_queue_push {
 }
 
 /// upstream: utils/queue_test.go#TestByteQueueClear
+/// note: not_observable on Go: head/tail are unexported ring-buffer fields with no accessor; the assertions before the first head() run against Go.
 #[test]
 fn test_byte_queue_clear() {
-    // head/tail are unexported ring-buffer fields upstream: against Go this case stops
-    // (not observable) at the first head() after verifying the preceding assertions.
     let q = ByteQueue::new(INITIAL_CAPACITY);
 
     q.add(test_byte_queue_item(b"1"));
@@ -160,58 +156,42 @@ fn test_byte_queue_clear() {
     assert!(!q.closed());
 }
 
-/// Records when its payload is dropped (upstream sets a GC finalizer).
-struct Tracked {
-    _payload: std::collections::HashMap<String, String>,
-    dropped: Arc<AtomicBool>,
-}
-
-impl Drop for Tracked {
-    fn drop(&mut self) {
-        self.dropped.store(true, Ordering::SeqCst);
-    }
-}
-
 /// upstream: utils/queue_test.go#TestQueue_vs_GC
+/// note: Go arm keeps a utils.Queue[*map[string]string] in the bridge; payloads get the upstream finalizers, runtime.GC() and require.Eventually(2s, 100ms) are bridge ops. Rust equivalent of "finalized": the payload was dropped.
+/// note: upstream orders the two producer goroutines with a 100ms sleep; the Rust test joins the first producer before starting the second.
 #[test]
 fn test_queue_vs_gc() {
-    // Upstream checks with runtime finalizers that a removed item is no longer
-    // referenced by the queue (collectable after runtime.GC()). The Rust equivalent:
-    // a removed item is dropped as soon as the caller drops it, while items still
-    // queued stay alive.
-    let q = Arc::new(rust_queue::<Tracked>(INITIAL_CAPACITY, "Go GC finalizers on queued pointers"));
+    let q = TrackedQueue::new(INITIAL_CAPACITY);
 
-    let a = Arc::new(AtomicBool::new(false));
-    let b = Arc::new(AtomicBool::new(false));
-
-    // Upstream orders the two producer goroutines with a 100ms sleep; join instead.
-    let (qa, fa) = (Arc::clone(&q), Arc::clone(&a));
+    let qa = q.clone();
     std::thread::spawn(move || {
-        let payload = [("foo".to_owned(), "a".to_owned())].into();
-        qa.add(Item { size: 1, data: Tracked { _payload: payload, dropped: fa } });
+        qa.add_tracked("a");
     })
     .join()
     .unwrap();
-    let (qb, fb) = (Arc::clone(&q), Arc::clone(&b));
+    let qb = q.clone();
     std::thread::spawn(move || {
-        let payload = [("foo".to_owned(), "b".to_owned())].into();
-        qb.add(Item { size: 1, data: Tracked { _payload: payload, dropped: fb } });
+        qb.add_tracked("b");
     })
     .join()
     .unwrap();
 
     assert_eq!(2, q.len());
 
-    drop(q.remove());
+    q.remove();
 
-    assert!(a.load(Ordering::SeqCst));
+    q.gc();
 
-    assert!(!b.load(Ordering::SeqCst));
+    assert!(q.released("a", true), "require.Eventually: a finalized");
 
-    drop(q.remove());
+    assert!(!q.released("b", false));
 
-    assert!(b.load(Ordering::SeqCst));
+    q.remove();
 
-    assert!(a.load(Ordering::SeqCst));
-    assert!(b.load(Ordering::SeqCst));
+    q.gc();
+
+    assert!(q.released("b", true), "require.Eventually: b finalized");
+
+    assert!(q.released("a", false));
+    assert!(q.released("b", false));
 }
