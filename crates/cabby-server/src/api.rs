@@ -40,28 +40,77 @@ pub struct Config {
     pub max_body_size: i64,
 }
 
+/// Upstream `apiKeyPhrase`: the message signed with the application secret to
+/// derive the API token.
+const API_KEY_PHRASE: &str = "api-cable";
+
+cabby_core::toml_section!(Config, "api.Config" {
+    "host" => host,
+    "port" => port,
+    "path" => path,
+    "secret" => secret,
+    "SecretBase" => secret_base,
+    "cors_headers" => add_cors_headers,
+    "cors_hosts" => cors_hosts,
+    "max_body_size" => max_body_size,
+});
+
 impl Config {
     /// Upstream `NewConfig()`.
     pub fn new() -> Self {
-        pending!("api::new_config")
+        Self { path: DEFAULT_API_PATH.to_owned(), max_body_size: DEFAULT_MAX_BODY_SIZE, ..Default::default() }
     }
 
     pub fn is_secured(&self) -> bool {
-        pending!("api::config_is_secured")
+        !self.secret.is_empty() || !self.secret_base.is_empty()
     }
 
-    /// Derives `secret` from `secret_base` unless a secret is set.
+    /// Derives `secret` from `secret_base` unless a secret is set: the hex
+    /// HMAC-SHA256 of [`API_KEY_PHRASE`] (upstream `MessageVerifier.Sign`).
     pub fn derive_secret(&mut self) -> Result<(), ApiError> {
-        pending!("api::config_derive_secret")
+        use hmac::{Hmac, KeyInit, Mac};
+
+        if !self.secret.is_empty() || self.secret_base.is_empty() {
+            return Ok(());
+        }
+
+        let mut mac = Hmac::<sha2::Sha256>::new_from_slice(self.secret_base.as_bytes())
+            .map_err(|e| ApiError { message: format!("failed to auto-generate authentication key for API: {e}") })?;
+        mac.update(API_KEY_PHRASE.as_bytes());
+        self.secret = mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        Ok(())
     }
 
     pub fn to_toml(&self) -> String {
-        pending!("api::config_to_toml")
+        let mut out = String::new();
+        out.push_str("# API server host (only used when port differs from main server)\n");
+        if self.host.is_empty() {
+            out.push_str("# host = \"localhost\"\n");
+        } else {
+            out.push_str(&format!("host = \"{}\"\n", self.host));
+        }
+        out.push_str("# API server port (0 = use main server port)\n");
+        out.push_str(&format!("port = {}\n", self.port));
+        out.push_str("# Base path for API endpoints\n");
+        out.push_str(&format!("path = \"{}\"\n", self.path));
+        out.push_str("# Secret token to authenticate API requests\n");
+        if self.secret.is_empty() {
+            out.push_str("# secret = \"\"\n");
+        } else {
+            out.push_str(&format!("secret = \"{}\"\n", self.secret));
+        }
+        out.push_str("# Enable CORS headers\n");
+        out.push_str(if self.add_cors_headers { "cors_headers = true\n" } else { "# cors_headers = false\n" });
+        out.push_str("# Maximum allowed size of the request body (in bytes)\n");
+        out.push_str(&format!("max_body_size = {}\n", self.max_body_size));
+        out.push('\n');
+        out
     }
 
     /// Decodes TOML over the current values (upstream `toml.Decode(s, &conf)`).
-    pub fn merge_toml(&mut self, _toml: &str) -> Result<(), ApiError> {
-        pending!("api::config_merge_toml")
+    pub fn merge_toml(&mut self, toml: &str) -> Result<(), ApiError> {
+        cabby_core::toml_config::decode(self, toml).map_err(|e| ApiError { message: e.0 })?;
+        Ok(())
     }
 }
 

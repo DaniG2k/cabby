@@ -44,9 +44,37 @@ impl Config {
 
     /// Renders the settings as an annotated TOML section body (upstream `ToToml`).
     pub fn to_toml(&self) -> String {
-        pending!("sse::config_to_toml")
+        let mut out = String::new();
+        out.push_str("# Enable Server-sent events support\n");
+        out.push_str(if self.enabled { "enabled = true\n" } else { "# enabled = true\n" });
+        out.push_str("# Server-sent events endpoint path\n");
+        out.push_str(&format!("path = \"{}\"\n", self.path));
+        out.push_str("# Send pings as SSE comments (\": ping\") instead of ping events (always enabled in raw mode)\n");
+        out.push_str(if self.comment_pings { "comment_pings = true\n" } else { "# comment_pings = true\n" });
+        out.push_str("# Keepalive interval for comment-based pings (seconds)\n");
+        out.push_str(&format!("# Defaults to the global ping_interval (if changed) or {DEFAULT_PING_INTERVAL}\n"));
+        if self.ping_interval > 0 {
+            out.push_str(&format!("ping_interval = {}\n", self.ping_interval));
+        } else {
+            out.push_str(&format!("# ping_interval = {DEFAULT_PING_INTERVAL}\n"));
+        }
+        out.push('\n');
+        out
+    }
+
+    /// Decodes TOML over the current values (upstream `toml.Decode(s, &conf)`).
+    pub fn decode_toml(&mut self, toml: &str) -> Result<(), String> {
+        cabby_core::toml_config::decode(self, toml).map_err(|e| e.0)?;
+        Ok(())
     }
 }
+
+cabby_core::toml_section!(Config, "sse.Config" {
+    "enabled" => enabled,
+    "path" => path,
+    "comment_pings" => comment_pings,
+    "ping_interval" => ping_interval,
+});
 
 /// Encodes server messages as SSE events (upstream `sse.Encoder`). Decoding client
 /// messages is unsupported.

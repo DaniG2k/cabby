@@ -203,9 +203,12 @@ name = "cabby-server"
 version = "0.0.0"
 dependencies = [
  "cabby-core",
+ "getrandom 0.4.3",
+ "hmac",
  "http",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "tokio",
  "tokio-util",
