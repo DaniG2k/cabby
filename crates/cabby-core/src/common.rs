@@ -80,3 +80,46 @@ pub struct CommandResult {
     pub disconnect_interest: i32,
     pub status: Status,
 }
+
+// --- added for hub/pubsub/broadcast ---
+
+/// Disconnect reason used by remote (broadcast) disconnects (upstream `common.REMOTE_DISCONNECT_REASON`).
+pub const REMOTE_DISCONNECT_REASON: &str = "remote";
+
+/// Command distributed to every node through pub/sub (upstream `common.RemoteCommandMessage`).
+/// `payload` keeps the raw JSON bytes (`json.RawMessage`); empty means absent.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RemoteCommandMessage {
+    pub command: String,
+    pub payload: Vec<u8>,
+}
+
+/// Remote disconnect command (upstream `common.RemoteDisconnectMessage`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RemoteDisconnectMessage {
+    pub identifier: String,
+    pub reconnect: bool,
+}
+
+/// Server-initiated disconnect notification (upstream `common.DisconnectMessage`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DisconnectMessage {
+    pub kind: String,
+    pub reason: String,
+    pub reconnect: bool,
+}
+
+/// Outgoing client message (upstream `common.Reply`, fields used by hub routing).
+/// `message` holds the raw JSON text of the payload (upstream embeds stream data
+/// verbatim); `None` is omitted.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Reply {
+    pub kind: String,
+    pub identifier: String,
+    pub message: Option<String>,
+    pub reason: String,
+    pub reconnect: bool,
+    pub stream_id: String,
+    pub epoch: String,
+    pub offset: u64,
+}
