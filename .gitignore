@@ -3,3 +3,6 @@
 /compat/reference/
 # Local scratch output from reference runs
 /compat/baseline/**/tmp/
+
+# Local agent worktrees and settings
+/.claude/
