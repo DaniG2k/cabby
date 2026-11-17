@@ -55,7 +55,8 @@ pub fn build() -> Result<()> {
         bail!("compat/reference missing: run `cargo xtask reference-checkout`");
     }
     // The `mrb` tag needs libmruby.a (built with Ruby 2.7, see compat/baseline/README.md).
-    let tags = if reference.join("vendorlib/go-mruby/libmruby.a").exists() { "mrb gops" } else { "gops" };
+    let mruby = reference.join("vendorlib/go-mruby/libmruby.a").exists();
+    let tags = if mruby { "mrb gops" } else { "gops" };
     println!("building anycable-go (tags: {tags})");
     sh(Command::new("go")
         .args(["build", "-tags", tags, "-o"])
@@ -68,6 +69,17 @@ pub fn build() -> Result<()> {
         .arg(root.join("target/reference-adapters/bridge"))
         .arg(".")
         .current_dir(root.join("compat/reference-adapters/bridge")))?;
+    // The go-mruby bridge links libmruby.a through cgo (tests `go_mruby`, `mrb`).
+    if mruby {
+        println!("building mruby reference bridge");
+        sh(Command::new("go")
+            .args(["build", "-tags", "mrb", "-o"])
+            .arg(root.join("target/reference-adapters/mruby-bridge"))
+            .arg(".")
+            .current_dir(root.join("compat/reference-adapters/mruby-bridge")))?;
+    } else {
+        println!("skipping mruby reference bridge: vendorlib/go-mruby/libmruby.a is missing");
+    }
     Ok(())
 }
 
