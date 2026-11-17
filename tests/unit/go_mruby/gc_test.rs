@@ -39,22 +39,26 @@ fn test_enable_disable_gc() {
 }
 
 /// upstream: vendorlib/go-mruby/gc_test.go#TestIsDead
+/// note: runtime adaptation (dangling C pointer -> closed-VM invariant): go-mruby IsDead after Close reads the freed mrb_state (mrb_object_dead_p on a closed VM). Rust invariant: a value outliving its VM reports is_dead() without touching freed memory. On Go the case runs in its own bridge process (isolated) so no other VM can reuse the freed memory, matching upstream sequential tests; before isolation 1 of about 95 parallel runs failed.
 ///
 /// Runtime adaptation (dangling C pointer -> closed-VM invariant): go-mruby's
 /// `IsDead` after `Close` reads the freed `mrb_state` (`mrb_object_dead_p` on a
 /// closed VM), which happens to report dead. The Rust invariant is that a value
 /// outliving its VM reports `is_dead() == true` without touching freed memory
 /// (values hold a weak reference to the VM). The Go run exercises the original
-/// path, so its pass depends on freed memory not being reused in between.
+/// path, so its pass depends on freed memory not being reused in between; it
+/// runs in a bridge process of its own so no other VM allocates meanwhile.
 #[test]
 fn test_is_dead() {
-    let mrb = Mrb::new();
+    isolated(|| {
+        let mrb = Mrb::new();
 
-    let val = mrb.load_string("$a = []").unwrap_or_else(|e| panic!("{}", e.error()));
+        let val = mrb.load_string("$a = []").unwrap_or_else(|e| panic!("{}", e.error()));
 
-    assert!(!val.is_dead(), "Value is already dead and should not be");
+        assert!(!val.is_dead(), "Value is already dead and should not be");
 
-    mrb.close();
+        mrb.close();
 
-    assert!(val.is_dead(), "Value should be dead and is not");
+        assert!(val.is_dead(), "Value should be dead and is not");
+    });
 }

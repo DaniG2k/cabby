@@ -61,6 +61,7 @@ fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
 }
 
 /// upstream: vendorlib/go-mruby/decode_test.go#TestDecode
+/// note: runtime adaptation (Go reflection -> serde): Decode(out interface{}, v) fills `out` by reflection; Rust decodes into a serde Deserialize target (int->i64, *int->Box<i64>, map[string]string->HashMap, struct field Foo->serde field foo since Go matches the lower-cased name). Go reuses output variables across rows; each is fully overwritten, so a fresh target per row is equivalent. Go verifies the same rows via the bridge decoding into the named Go type.
 #[test]
 fn test_decode() {
     // Booleans
@@ -117,6 +118,7 @@ fn string(s: &str) -> Decoded {
 }
 
 /// upstream: vendorlib/go-mruby/decode_test.go#TestDecodeInterface
+/// note: runtime adaptation (Go reflection -> dynamic tree): decoding into interface{} maps to decode_value returning Decoded (Bool/Int/Float/String/Map/Slice); the bridge tags Go dynamic types so int and float stay distinct.
 #[test]
 fn test_decode_interface() {
     // Booleans

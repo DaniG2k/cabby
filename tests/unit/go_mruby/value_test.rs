@@ -3,6 +3,7 @@
 use cabby_testkit::reference::mruby::*;
 
 /// upstream: vendorlib/go-mruby/value_test.go#TestExceptionString_afterClose
+/// note: runtime adaptation (cgo lifetime -> owned data): upstream guards a fix where err.Error() read the closed VM; Rust invariant: exception text is owned and readable after close. LoadString must fail, as Go err.Error() on nil panics.
 ///
 /// Runtime adaptation (cgo lifetime -> owned exception data): upstream guards a
 /// fix where `err.Error()` read the closed VM and panicked. The Rust invariant:
@@ -96,6 +97,7 @@ fn test_mrb_value_call_block() {
 }
 
 /// upstream: vendorlib/go-mruby/value_test.go#TestMrbValueValue
+/// note: runtime adaptation (Go pointer identity -> value identity): upstream checks falseV.MrbValue(mrb) == falseV (same *MrbValue pointer); Rust checks mrb_value() denotes the same value (same). Go compares real pointers: bridge handles are interned by pointer.
 ///
 /// Runtime adaptation (Go pointer identity -> value identity): upstream checks
 /// `falseV.MrbValue(mrb) == falseV`, i.e. converting an `*MrbValue` to a value
@@ -113,6 +115,7 @@ fn test_mrb_value_value() {
 }
 
 /// upstream: vendorlib/go-mruby/value_test.go#TestMrbValueValue_impl
+/// note: runtime adaptation (compile-time interface check -> conversion): `var _ Value = mrb.FalseValue()` becomes: an MrbValue converts into a Value that denotes the same value.
 ///
 /// Runtime adaptation (Go interface satisfaction -> conversion): upstream only
 /// checks at compile time that `*MrbValue` implements `Value`
@@ -220,6 +223,7 @@ fn test_string_mrb_value() {
 }
 
 /// upstream: vendorlib/go-mruby/value_test.go#TestValueClass
+/// note: runtime adaptation (reflect.DeepEqual of *Class -> Class: PartialEq): equal when both denote the same class; the Go run uses reflect.DeepEqual itself.
 ///
 /// Runtime adaptation (Go `reflect.DeepEqual` -> class equality): upstream
 /// compares the two `*Class` structs deeply (same `RClass` pointer and VM). The
