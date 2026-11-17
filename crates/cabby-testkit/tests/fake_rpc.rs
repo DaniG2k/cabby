@@ -165,7 +165,7 @@ fn dropping_the_fake_unblocks_held_calls() {
 
 #[test]
 fn max_concurrent_streams_option_is_accepted() {
-    let fake = FakeRpc::start_with(FakeRpcOptions { grpc_max_concurrent_streams: Some(1) });
+    let fake = FakeRpc::start_with(FakeRpcOptions { grpc_max_concurrent_streams: Some(1), ..Default::default() });
     fake.on(Method::Connect).reply(protos::ConnectionResponse::default());
     let client = TonicRpcClient::new(&fake.grpc_target());
     for _ in 0..3 {

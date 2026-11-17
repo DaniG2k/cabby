@@ -69,19 +69,32 @@ fn history_msg(id: &str, user_id: i64, status: &str) -> Value {
     json!({"identifier": id, "message": {"data": {"user_id": user_id, "status": status}}})
 }
 
-/// `before`: two broadcasts to `history_a`, then AnyT's "sleep 2 # Make sure
-/// broadcasts have been published". Replaced by a witness subscribed to the
-/// stream beforehand: the broker stores a message before delivering it, so
-/// once the witness has both, history holds them.
-fn history_before(w: &World, id: &str) {
-    let mut witness = w.default_client();
-    subscribe_acked(w, &mut witness, id);
+/// `before`: two broadcasts to `history_a` while nothing subscribes to it
+/// (the scenario checks that history is kept for a stream without
+/// subscribers), then AnyT's "sleep 2 # Make sure broadcasts have been
+/// published", replaced by an observation that never touches `history_a`:
+/// * HTTP broadcasts: the endpoint answers after the server handled the
+///   broadcast, so the returned POST is the barrier (the NATS broker first
+///   needs JetStream: before that it accepts broadcasts but parks them);
+/// * queued adapters (`redisx`): a sentinel broadcast to another stream after
+///   the two, received by a witness subscribed to that stream only; the
+///   server consumes the adapter's messages in order.
+fn history_before(w: &World) {
+    w.await_jetstream();
+    let sentinel = (!w.broadcasts_synchronously()).then(|| {
+        let id = identifier(&[("channel", json!(channel("BroadcastDataToStreamChannel")))]);
+        let mut witness = w.default_client();
+        subscribe_acked(w, &mut witness, &id);
+        (witness, id)
+    });
 
     w.broadcast("history_a", &json!({"data": {"user_id": 1, "status": "left"}}));
     w.broadcast("history_a", &json!({"data": {"user_id": 2, "status": "join"}}));
 
-    assert_message(&history_msg(id, 1, "left"), &w.recv(&mut witness));
-    assert_message(&history_msg(id, 2, "join"), &w.recv(&mut witness));
+    if let Some((mut witness, id)) = sentinel {
+        w.broadcast("a", &json!({"data": "sentinel"}));
+        assert_message(&json!({"identifier": id, "message": {"data": "sentinel"}}), &w.recv(&mut witness));
+    }
 }
 
 #[track_caller]
@@ -93,7 +106,7 @@ fn assert_equal(expected: &Value, actual: &Value) {
 pub fn history_by_timestamp(v: Variant) {
     let w = World::start(v);
     let id = identifier(&[("channel", json!(channel("HistoryChannel")))]);
-    history_before(&w, &id);
+    history_before(&w);
     let mut client = w.default_client();
 
     client.send(&subscribe_request(&id));
@@ -109,7 +122,7 @@ pub fn history_by_timestamp(v: Variant) {
 pub fn history_by_offset(v: Variant) {
     let w = World::start(v);
     let id = identifier(&[("channel", json!(channel("HistoryChannel")))]);
-    history_before(&w, &id);
+    history_before(&w);
     let mut client = w.default_client();
 
     let subscribe = subscribe_request(&id);
@@ -144,7 +157,7 @@ pub fn history_by_offset(v: Variant) {
 pub fn history_on_subscribe(v: Variant) {
     let w = World::start(v);
     let id = identifier(&[("channel", json!(channel("HistoryChannel")))]);
-    history_before(&w, &id);
+    history_before(&w);
     let mut client = w.default_client();
 
     client.send(&json!({"command": "subscribe", "identifier": id, "history": {"since": unix_now() - 30}}));
