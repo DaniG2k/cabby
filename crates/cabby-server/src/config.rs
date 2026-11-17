@@ -43,10 +43,7 @@ pub struct DsConfig {
 }
 
 /// `[app]` (upstream `node.Config`).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct AppConfig {
-    pub ping_interval: i64,
-}
+pub use crate::node::Config as AppConfig;
 
 /// `[http_broadcast]` (upstream `broadcast.HTTPConfig`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

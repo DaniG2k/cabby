@@ -33,6 +33,7 @@ pub mod runtime;
 pub mod services;
 pub mod sut;
 pub mod sync;
+pub mod timers;
 pub mod udp;
 
 pub use backend::{Backend, backend};

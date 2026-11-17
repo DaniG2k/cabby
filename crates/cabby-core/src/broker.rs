@@ -419,3 +419,79 @@ impl Broker for Nats {
         pending!("broker::nats_peak")
     }
 }
+
+/// Broker without history, presence or session cache: every call goes straight
+/// to the broadcaster (upstream `broker.NewLegacyBroker(broadcaster)`, used by
+/// single-node setups and by node tests).
+pub struct Legacy {
+    _broadcaster: Arc<dyn Broadcaster>,
+}
+
+impl Legacy {
+    pub fn new(broadcaster: Arc<dyn Broadcaster>) -> Self {
+        Self { _broadcaster: broadcaster }
+    }
+}
+
+impl Broker for Legacy {
+    fn start(&self) -> Result<(), BrokerError> {
+        pending!("broker::legacy_start")
+    }
+    fn shutdown(&self) -> Result<(), BrokerError> {
+        pending!("broker::legacy_shutdown")
+    }
+    fn announce(&self) -> String {
+        pending!("broker::legacy_announce")
+    }
+    fn handle_broadcast(&self, _msg: &StreamMessage) -> Result<(), BrokerError> {
+        pending!("broker::legacy_handle_broadcast")
+    }
+    fn handle_command(&self, _msg: &RemoteCommandMessage) -> Result<(), BrokerError> {
+        pending!("broker::legacy_handle_command")
+    }
+    fn subscribe(&self, _stream: &str) -> String {
+        pending!("broker::legacy_subscribe")
+    }
+    fn unsubscribe(&self, _stream: &str) -> String {
+        pending!("broker::legacy_unsubscribe")
+    }
+    fn history_from(&self, _stream: &str, _epoch: &str, _offset: u64) -> Result<Vec<StreamMessage>, BrokerError> {
+        pending!("broker::legacy_history_from")
+    }
+    fn history_since(&self, _stream: &str, _ts: i64) -> Result<Option<Vec<StreamMessage>>, BrokerError> {
+        pending!("broker::legacy_history_since")
+    }
+    fn commit_session(&self, _sid: &str, _session: &dyn Cacheable) -> Result<(), BrokerError> {
+        pending!("broker::legacy_commit_session")
+    }
+    fn restore_session(&self, _sid: &str) -> Result<Option<Vec<u8>>, BrokerError> {
+        pending!("broker::legacy_restore_session")
+    }
+    fn touch_session(&self, _sid: &str) -> Result<(), BrokerError> {
+        pending!("broker::legacy_touch_session")
+    }
+    fn supports_presence(&self) -> bool {
+        pending!("broker::legacy_supports_presence")
+    }
+    fn presence_add(
+        &self,
+        _stream: &str,
+        _sid: &str,
+        _pid: &str,
+        _info: Value,
+    ) -> Result<Option<PresenceEvent>, BrokerError> {
+        pending!("broker::legacy_presence_add")
+    }
+    fn presence_remove(&self, _stream: &str, _sid: &str) -> Result<Option<PresenceEvent>, BrokerError> {
+        pending!("broker::legacy_presence_remove")
+    }
+    fn presence_info(&self, _stream: &str, _opts: Option<&PresenceInfoOptions>) -> Result<PresenceInfo, BrokerError> {
+        pending!("broker::legacy_presence_info")
+    }
+    fn touch_presence(&self, _sid: &str) -> Result<(), BrokerError> {
+        pending!("broker::legacy_touch_presence")
+    }
+    fn peak(&self, _stream: &str) -> Result<Option<StreamMessage>, BrokerError> {
+        pending!("broker::legacy_peak")
+    }
+}
