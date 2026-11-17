@@ -14,7 +14,7 @@ use std::sync::Arc;
 use cabby_core::pending;
 use cabby_core::protos;
 
-use super::{BoxFuture, ClientHelper, Config, Context, RpcError, RpcService, RpcStatus};
+use super::{BoxFuture, ClientError, ClientHelper, Config, Context, RpcError, RpcService};
 
 /// Calls the application over HTTP (upstream `HTTPService`). Keeps up to
 /// `concurrency` idle keep-alive connections and guards calls with a circuit
@@ -35,21 +35,21 @@ impl RpcService for HttpService {
         &'a self,
         _ctx: &'a Context,
         _request: protos::ConnectionRequest,
-    ) -> BoxFuture<'a, Result<protos::ConnectionResponse, RpcStatus>> {
+    ) -> BoxFuture<'a, Result<protos::ConnectionResponse, ClientError>> {
         pending!("rpc::http_connect")
     }
     fn command<'a>(
         &'a self,
         _ctx: &'a Context,
         _request: protos::CommandMessage,
-    ) -> BoxFuture<'a, Result<protos::CommandResponse, RpcStatus>> {
+    ) -> BoxFuture<'a, Result<protos::CommandResponse, ClientError>> {
         pending!("rpc::http_command")
     }
     fn disconnect<'a>(
         &'a self,
         _ctx: &'a Context,
         _request: protos::DisconnectRequest,
-    ) -> BoxFuture<'a, Result<protos::DisconnectResponse, RpcStatus>> {
+    ) -> BoxFuture<'a, Result<protos::DisconnectResponse, ClientError>> {
         pending!("rpc::http_disconnect")
     }
 }
