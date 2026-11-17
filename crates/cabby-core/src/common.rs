@@ -4,7 +4,11 @@
 //! nil maps in results) are `Option`s here, so translated tests can observe the
 //! difference.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+
+use crate::logger::{self, Attr, CompactValue, LogValue, LogValuer};
+
+mod json;
 
 pub type StringMap = HashMap<String, String>;
 
@@ -15,6 +19,17 @@ pub enum Status {
     Success,
     Failure,
     Error,
+}
+
+impl Status {
+    /// Upstream `StatusName`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Status::Success => "success",
+            Status::Failure => "failure",
+            Status::Error => "error",
+        }
+    }
 }
 
 /// Underlying HTTP connection data plus connection/channel state for RPC calls.
@@ -168,33 +183,70 @@ pub trait Controller: Send + Sync {
 
 impl SessionEnv {
     /// Upstream `NewSessionEnv`: empty connection and channel state maps.
-    pub fn new(_url: &str, _headers: Option<StringMap>) -> Self {
-        crate::pending!("common::new_session_env")
+    pub fn new(url: &str, headers: Option<StringMap>) -> Self {
+        SessionEnv {
+            url: url.to_owned(),
+            headers,
+            identifiers: String::new(),
+            connection_state: Some(StringMap::new()),
+            channel_states: Some(HashMap::new()),
+        }
     }
 
     /// Adds or rewrites keys; an empty value removes the key.
-    pub fn merge_connection_state(&mut self, _other: &StringMap) {
-        crate::pending!("common::merge_connection_state")
+    pub fn merge_connection_state(&mut self, other: &StringMap) {
+        merge_state(self.connection_state.get_or_insert_with(StringMap::new), other);
     }
 
     /// Adds or rewrites keys of one channel's state; an empty value removes the key.
-    pub fn merge_channel_state(&mut self, _id: &str, _other: &StringMap) {
-        crate::pending!("common::merge_channel_state")
+    pub fn merge_channel_state(&mut self, id: &str, other: &StringMap) {
+        let states = self.channel_states.get_or_insert_with(HashMap::new);
+        if !states.contains_key(id) {
+            states.insert(id.to_owned(), StringMap::new());
+        }
+        if let Some(state) = states.get_mut(id) {
+            merge_state(state, other);
+        }
     }
 
     /// The field of a channel's state (`""` when missing).
-    pub fn get_channel_state_field(&self, _id: &str, _field: &str) -> String {
-        crate::pending!("common::get_channel_state_field")
+    pub fn get_channel_state_field(&self, id: &str, field: &str) -> String {
+        self.channel_states
+            .as_ref()
+            .and_then(|states| states.get(id))
+            .and_then(|state| state.get(field))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// The field of the connection state (`""` when missing).
-    pub fn get_connection_state_field(&self, _field: &str) -> String {
-        crate::pending!("common::get_connection_state_field")
+    pub fn get_connection_state_field(&self, field: &str) -> String {
+        self.connection_state.as_ref().and_then(|state| state.get(field)).cloned().unwrap_or_default()
     }
 
     /// Drops one channel's state (upstream `RemoveChannelState`).
-    pub fn remove_channel_state(&mut self, _id: &str) {
-        crate::pending!("common::remove_channel_state")
+    pub fn remove_channel_state(&mut self, id: &str) {
+        if let Some(states) = self.channel_states.as_mut() {
+            states.remove(id);
+        }
+    }
+
+    /// Adds a header, creating the headers map if needed (upstream `SetHeader`).
+    pub fn set_header(&mut self, key: &str, val: &str) {
+        self.headers.get_or_insert_with(StringMap::new).insert(key.to_owned(), val.to_owned());
+    }
+}
+
+/// Go `MergeConnectionState` / `MergeChannelState`: an empty value removes the key.
+fn merge_state(state: &mut StringMap, other: &StringMap) {
+    for (k, v) in other {
+        if v.is_empty() {
+            state.remove(k);
+        } else if let Some(cur) = state.get_mut(k) {
+            cur.clone_from(v);
+        } else {
+            state.insert(k.clone(), v.clone());
+        }
     }
 }
 
@@ -222,8 +274,12 @@ pub struct DecodeError(pub String);
 
 impl Message {
     /// Decodes a client message from its JSON form (upstream `json.Unmarshal`).
-    pub fn from_json(_raw: &[u8]) -> Result<Message, DecodeError> {
-        crate::pending!("common::message_from_json")
+    ///
+    /// As in Go, field names match case-insensitively, unknown fields are ignored,
+    /// `null` leaves a field unset, and numbers inside `data` and `presence.info`
+    /// (Go `interface{}`) are decoded as `float64`.
+    pub fn from_json(raw: &[u8]) -> Result<Message, DecodeError> {
+        json::decode_message(raw)
     }
 }
 
@@ -251,19 +307,36 @@ pub struct Reply {
 impl StreamMessage {
     /// Builds the client reply for a subscription identifier. The data is decoded as
     /// JSON when valid (keeping integer precision), otherwise sent as a string.
-    pub fn to_reply_for(&self, _identifier: &str) -> Reply {
-        crate::pending!("common::stream_message_to_reply_for")
+    pub fn to_reply_for(&self, identifier: &str) -> Reply {
+        // Go: `json.Valid`, then a `UseNumber` decode. JSON `null` decodes to nil, which
+        // falls back to the raw string too. `arbitrary_precision` keeps number text.
+        let message = match serde_json::from_str::<serde_json::Value>(&self.data) {
+            Ok(serde_json::Value::Null) | Err(_) => serde_json::Value::String(self.data.clone()),
+            Ok(value) => value,
+        };
+
+        // Only include the stream if offset/epoch is present.
+        let stream_id = if self.epoch.is_empty() { String::new() } else { self.stream.clone() };
+
+        Reply {
+            identifier: identifier.to_owned(),
+            message: Some(message),
+            stream_id,
+            offset: self.offset,
+            epoch: self.epoch.clone(),
+            ..Reply::default()
+        }
     }
 }
 
 /// Upstream `ConfirmationMessage`.
-pub fn confirmation_message(_identifier: &str) -> String {
-    crate::pending!("common::confirmation_message")
+pub fn confirmation_message(identifier: &str) -> String {
+    json::typed_identifier_message(CONFIRMED_TYPE, identifier)
 }
 
 /// Upstream `RejectionMessage`.
-pub fn rejection_message(_identifier: &str) -> String {
-    crate::pending!("common::rejection_message")
+pub fn rejection_message(identifier: &str) -> String {
+    json::typed_identifier_message(REJECTED_TYPE, identifier)
 }
 
 // --- Pub/sub messages -------------------------------------------------------
@@ -279,7 +352,7 @@ pub struct RemoteDisconnectMessage {
 
 impl RemoteCommandMessage {
     pub fn to_remote_disconnect_message(&self) -> Result<RemoteDisconnectMessage, DecodeError> {
-        crate::pending!("common::to_remote_disconnect_message")
+        json::decode_remote_disconnect(self.payload.as_bytes())
     }
 }
 
@@ -292,8 +365,11 @@ pub enum PubSubMessage {
 }
 
 /// Upstream `PubSubMessageFromJSON`.
-pub fn pub_sub_message_from_json(_raw: &[u8]) -> Result<PubSubMessage, DecodeError> {
-    crate::pending!("common::pub_sub_message_from_json")
+///
+/// Tries, in order: a stream message with a stream, a batch whose first message has
+/// a stream, and a remote command with a command.
+pub fn pub_sub_message_from_json(raw: &[u8]) -> Result<PubSubMessage, DecodeError> {
+    json::decode_pub_sub_message(raw)
 }
 
 // --- Log values -------------------------------------------------------------
@@ -302,34 +378,135 @@ pub fn pub_sub_message_from_json(_raw: &[u8]) -> Result<PubSubMessage, DecodeErr
 /// digests masked (upstream `filteredIdentifier`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilteredIdentifier {
-    _val: String,
+    val: String,
 }
 
-impl crate::logger::LogValuer for FilteredIdentifier {
-    fn log_value(&self) -> crate::logger::LogValue {
-        crate::pending!("common::filtered_identifier")
+impl FilteredIdentifier {
+    /// The identifier with signed stream digests masked (upstream `String()`).
+    pub fn filtered(&self) -> String {
+        if logger::LogFilter::global().enabled { mask_signed_stream_digests(&self.val) } else { self.val.clone() }
+    }
+}
+
+impl LogValuer for FilteredIdentifier {
+    fn log_value(&self) -> LogValue {
+        LogValue::String(self.filtered())
     }
 }
 
 /// Upstream `FilteredIdentifier`.
 pub fn filtered_identifier(identifier: &str) -> FilteredIdentifier {
-    FilteredIdentifier { _val: identifier.to_owned() }
+    FilteredIdentifier { val: identifier.to_owned() }
+}
+
+/// Signed streams (Turbo Streams, CableReady, AnyCable signed streams) have the form
+/// `<data>--<digest>` with a hex HMAC digest. Upstream masks every leftmost,
+/// non-overlapping match of `--([0-9a-fA-F]{32,})`, which also covers escaped
+/// identifiers (e.g. inside confirmation messages). A hand-written scan does the same
+/// without a regex engine.
+fn mask_signed_stream_digests(val: &str) -> String {
+    const MIN_DIGEST: usize = 32;
+    let bytes = val.as_bytes();
+    let mut out: Option<String> = None;
+    let mut last = 0;
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'-' && bytes[i + 1] == b'-' {
+            let start = i + 2;
+            let end = start + bytes[start..].iter().take_while(|b| b.is_ascii_hexdigit()).count();
+            if end - start >= MIN_DIGEST {
+                let buf = out.get_or_insert_with(|| String::with_capacity(val.len()));
+                buf.push_str(&val[last..start]);
+                buf.push_str(&logger::mask_value(&val[start..end]));
+                last = end;
+                i = end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    match out {
+        Some(mut buf) => {
+            buf.push_str(&val[last..]);
+            buf
+        }
+        None => val.to_owned(),
+    }
 }
 
 /// Transmissions masked and truncated for logs (upstream `filteredTransmissions`).
-pub fn filtered_transmissions(_transmissions: &[String]) -> Vec<crate::logger::CompactValue> {
-    crate::pending!("common::filtered_transmissions")
+pub fn filtered_transmissions(transmissions: &[String]) -> Vec<CompactValue> {
+    transmissions.iter().map(|msg| logger::compact_value(&filtered_identifier(msg).filtered())).collect()
 }
 
-impl crate::logger::LogValuer for CommandResult {
-    fn log_value(&self) -> crate::logger::LogValue {
-        crate::pending!("common::command_result_log_value")
+fn log_list<T: LogValuer>(values: &[T]) -> LogValue {
+    LogValue::List(values.iter().map(LogValuer::log_value).collect())
+}
+
+fn compact_list(values: &[String]) -> LogValue {
+    LogValue::List(values.iter().map(|v| logger::compact_value(v).log_value()).collect())
+}
+
+/// Upstream `logger.FilteredMap(state)`: only the (sorted) keys are shown.
+fn filtered_state(state: Option<&StringMap>) -> LogValue {
+    let sorted: Option<BTreeMap<String, String>> =
+        state.map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+    logger::filtered_map(sorted.as_ref()).log_value()
+}
+
+impl LogValuer for CommandResult {
+    fn log_value(&self) -> LogValue {
+        LogValue::Group(vec![
+            Attr::new("status", LogValue::String(self.status.name().to_owned())),
+            Attr::new("streams", compact_list(&self.streams)),
+            Attr::new("transmissions", log_list(&filtered_transmissions(&self.transmissions))),
+            Attr::new("stopped_streams", compact_list(&self.stopped_streams)),
+            Attr::new("stop_all_streams", LogValue::Bool(self.stop_all_streams)),
+            Attr::new("broadcasts", log_list(&self.broadcasts)),
+            Attr::new("disconnect", LogValue::Bool(self.disconnect)),
+            Attr::new("disconnect_interest", LogValue::Int(self.disconnect_interest.into())),
+            Attr::new("cstate", filtered_state(self.cstate.as_ref())),
+            Attr::new("istate", filtered_state(self.istate.as_ref())),
+        ])
+    }
+}
+
+impl LogValuer for ConnectResult {
+    fn log_value(&self) -> LogValue {
+        LogValue::Group(vec![
+            Attr::new("status", LogValue::String(self.status.name().to_owned())),
+            Attr::new("transmissions", log_list(&filtered_transmissions(&self.transmissions))),
+            Attr::new("broadcasts", log_list(&self.broadcasts)),
+            Attr::new("identifier", LogValue::String(self.identifier.clone())),
+            Attr::new("disconnect_interest", LogValue::Int(self.disconnect_interest.into())),
+            Attr::new("cstate", filtered_state(self.cstate.as_ref())),
+            Attr::new("istate", filtered_state(self.istate.as_ref())),
+        ])
+    }
+}
+
+impl LogValuer for StreamMessage {
+    fn log_value(&self) -> LogValue {
+        let mut attrs = vec![
+            Attr::new("stream", LogValue::String(self.stream.clone())),
+            Attr::new("data", logger::compact_value(&self.data).log_value()),
+        ];
+        if !self.epoch.is_empty() {
+            attrs.push(Attr::new("offset", LogValue::Uint(self.offset)));
+            attrs.push(Attr::new("epoch", LogValue::String(self.epoch.clone())));
+        }
+        if let Some(meta) = &self.meta {
+            let meta = vec![Attr::new("exclude_socket", LogValue::String(meta.exclude_socket.clone()))];
+            attrs.push(Attr::new("meta", LogValue::Group(meta)));
+        }
+        LogValue::Group(attrs)
     }
 }
 
 // --- added for pusher/sse ---
-// TODO(merge): `EncodedMessage` here is a data enum; `encoders::EncodedMessage` is the
-// upstream interface. Unify when encoders are implemented.
+// `EncodedMessage` below is the data enum of the upstream implementors; it
+// implements the `encoders::EncodedMessage` / `EncodedMessageJson` traits and is
+// re-exported as `hub::EncodedMessage`.
 //
 // Mirrors of upstream `common` (and the `encoders.EncodedMessage` / `ws.SentFrame`
 // data shapes) needed by the pusher and sse translations. Go `interface{}` payloads
