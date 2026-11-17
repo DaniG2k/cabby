@@ -17,8 +17,8 @@
     },
     "reference": {
       "not_observable": 36,
-      "pass": 477,
-      "unverified": 410
+      "pass": 535,
+      "unverified": 352
     },
     "rust": {
       "pass": 1,
@@ -29,8 +29,8 @@
     },
     "translation": {
       "reviewed": 175,
-      "translated": 342,
-      "unreviewed": 406
+      "translated": 400,
+      "unreviewed": 348
     },
     "upstream_result": {
       "pass": 922,
@@ -11494,9 +11494,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "mrb::mrb_test::test_load_string"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -21956,9 +21958,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::array_test::test_array"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -21981,9 +21985,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::class_test::test_class_define_class_method"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22006,9 +22012,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::class_test::test_class_define_const"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22031,9 +22039,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::class_test::test_class_define_method"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22056,9 +22066,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::class_test::test_class_new"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22081,9 +22093,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::class_test::test_class_new_exception"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22106,9 +22120,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::class_test::test_class_value"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22131,9 +22147,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::context_test::test_compile_context_filename"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22156,9 +22174,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::decode_test::test_decode"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22181,9 +22201,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::decode_test::test_decode_interface"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22206,9 +22228,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::examples_test::example_custom_function"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22231,9 +22255,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::examples_test::example_decode"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22256,9 +22282,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::examples_test::example_simulate_files"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22281,9 +22309,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::gc_test::test_enable_disable_gc"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22306,9 +22336,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::gc_test::test_is_dead"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22331,9 +22363,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::hash_test::test_hash"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22356,9 +22390,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_arena"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22381,9 +22417,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_class"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22406,9 +22444,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_const_defined"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22431,9 +22471,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_define_class"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22456,9 +22498,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_define_class_under"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22481,9 +22525,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_define_class_method_exception"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22506,9 +22552,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_define_method_concurrent"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22531,9 +22579,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_define_module"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22556,9 +22606,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_define_module_under"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22581,9 +22633,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_fixnum_value"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22606,9 +22660,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_full_gc"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22631,9 +22687,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_get_args"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22656,9 +22714,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_global_variable"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22681,9 +22741,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_instance_variable"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22706,9 +22768,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_load_string"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22731,9 +22795,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_load_string_exception"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22756,9 +22822,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_load_string_twice"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22781,9 +22849,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_module"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22806,9 +22876,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_raise"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22831,9 +22903,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_run"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22856,9 +22930,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_stacked_exception"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22881,9 +22957,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_yield"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22906,9 +22984,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_mrb_yield_exception"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22931,9 +23011,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::mruby_test::test_new_mrb"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22956,9 +23038,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::parser_test::test_parser_error_error"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -22981,9 +23065,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::parser_test::test_parser_generate_code"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23006,9 +23092,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::parser_test::test_parser_parse"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23031,9 +23119,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::parser_test::test_parser_parse_error"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23056,9 +23146,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::value_test::test_exception_backtrace"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23081,9 +23173,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::value_test::test_exception_string_after_close"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23106,9 +23200,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::value_test::test_int_mrb_value"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23131,9 +23227,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::value_test::test_mrb_value_call"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23156,9 +23254,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::value_test::test_mrb_value_call_block"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23181,9 +23281,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::value_test::test_mrb_value_fixnum"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23206,9 +23308,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::value_test::test_mrb_value_string"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23231,9 +23335,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::value_test::test_mrb_value_type"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23256,9 +23362,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::value_test::test_mrb_value_value"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23281,9 +23389,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::value_test::test_mrb_value_value_impl"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23306,9 +23416,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::value_test::test_string_mrb_value"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23331,9 +23443,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::value_test::test_value_class"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
@@ -23356,9 +23470,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "go_mruby::value_test::test_value_singleton_class"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
