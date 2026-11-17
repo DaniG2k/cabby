@@ -85,12 +85,20 @@ pub fn channel_state_available_in_unsubscribe(v: Variant) {
 /// features/remote_disconnect_test.rb. AnyT's `sleep 1` guards an Action
 /// Cable-only race; with AnyCable the `welcome` arrives after the session is
 /// registered, so the remote disconnect follows it directly.
+///
+/// The remote disconnect travels through the server's pub/sub, whose Redis
+/// command channel is shared by every server on the shared Redis, so the
+/// scenario is serialized across variants (all use `uid=26`) and publishes
+/// only once this server's pub/sub has subscribed.
 pub fn remote_disconnect_by_id(v: Variant) {
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let w = World::start(v);
     let mut client =
         w.client(cabby_testkit::cable_client::Options { qs: "test=uid&uid=26".into(), ..ignoring(&["ping"]) });
     assert_message(&json!({"type": "welcome"}), &w.recv(&mut client));
 
+    w.await_redis_pubsub();
     w.app.remote_disconnect_uid("26");
 
     assert_message(&json!({"type": "disconnect", "reconnect": true, "reason": "remote"}), &w.recv(&mut client));
@@ -99,8 +107,9 @@ pub fn remote_disconnect_by_id(v: Variant) {
 }
 
 /// features/server_restart_test.rb. `restart_server!` stops the server
-/// (SIGTERM) and starts it again; the disconnect message is sent while
-/// stopping, so the port stops the server and does not start a new one.
+/// (ChildProcess: SIGTERM, SIGKILL after 3 s) and starts it again; the
+/// disconnect message is sent while stopping, so the port stops the server
+/// and does not start a new one.
 pub fn server_restart_disconnect_message(v: Variant) {
     let mut w = World::start(v);
     // `ignore: %(ping)` is the String "ping"; `String#include?` ignores pings.
@@ -110,7 +119,7 @@ pub fn server_restart_disconnect_message(v: Variant) {
     });
     assert_message(&json!({"type": "welcome"}), &w.recv(&mut client));
 
-    w.sut.process.stop(std::time::Duration::from_secs(30)).expect("stopping the server");
+    w.sut.process.stop(std::time::Duration::from_secs(3)).expect("stopping the server");
 
     assert_message(
         &json!({"type": "disconnect", "reconnect": true, "reason": "server_restart"}),
