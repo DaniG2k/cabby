@@ -12,4 +12,3 @@ mod config_test;
 mod connection_test;
 mod encoder_test;
 mod handler_test;
-mod support;

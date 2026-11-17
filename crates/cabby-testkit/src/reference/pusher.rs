@@ -13,8 +13,7 @@ use cabby_core::common::{
 };
 use cabby_server::pusher::{self as rs, PusherClientEvent, PusherSubscriptionData};
 use cabby_server::pusher_sse_deps::{
-    self as deps, BroadcastHandler, Broker, CallResult, Controller as _, Encoder as _, Error, Executor as _,
-    ExecutorSession,
+    self as deps, BroadcastHandler, Broker, CallResult, Controller as _, Encoder as _, Error, ExecutorSession,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -44,6 +43,36 @@ struct GoConfig {
     #[serde(rename = "CORSHosts")]
     cors_hosts: String,
     max_body_size: i64,
+}
+
+/// `pusher.NewConfig()`: Go's defaults against Go, the Rust constants against Rust.
+pub fn new_config() -> rs::Config {
+    match backend() {
+        Backend::Rust => rs::Config::new(),
+        Backend::Go => {
+            let g: GoConfig = bridge::call("pusher.NewConfig", json!({}));
+            rs::Config {
+                app_id: g.app_id,
+                app_key: g.app_key,
+                secret: g.secret,
+                api_port: g.api_port,
+                add_cors_headers: g.add_cors_headers,
+                cors_hosts: g.cors_hosts,
+                max_body_size: g.max_body_size,
+            }
+        }
+    }
+}
+
+/// `pusher.NewEncoder()`: Go's default activity timeout against Go.
+pub fn new_encoder() -> rs::Encoder {
+    match backend() {
+        Backend::Rust => rs::Encoder::new(),
+        Backend::Go => {
+            let v: Value = bridge::call("pusher.NewEncoder", json!({}));
+            rs::Encoder { activity_timeout: v["ActivityTimeout"].as_i64().expect("ActivityTimeout") }
+        }
+    }
 }
 
 /// `conf.ToToml()`.
@@ -238,6 +267,9 @@ fn str_field(v: &Value, k: &str) -> String {
 impl GoDecoded {
     pub(crate) fn into_result(self) -> Result<Message, String> {
         if let Some(e) = self.error {
+            // Upstream asserts `Error(err)` *and* `Nil(actual)`: a message returned
+            // alongside the error must not be hidden by the `Err`.
+            assert!(self.message.is_none(), "Go returned a non-nil message together with error {e:?}");
             return Err(e);
         }
         let m = self.message.expect("decoded message");
@@ -367,50 +399,183 @@ impl Controller {
         rs::Controller::new(Some(Arc::new(self.broker.clone())), self.conf.clone())
     }
 
-    fn go(&self, op: &str, sid: &str, env: &SessionEnv, ids: &str, identifier: &str) -> CallResult<CommandResult> {
-        let p: GoParsed<GoCommandResult> = bridge::call(
+    fn go(&self, op: &str, sid: &str, env: &SessionEnv, ids: &str, identifier: &str) -> ControllerCall {
+        let p: GoParsed<Value> = bridge::call(
             op,
             json!({"Config": go_config(&self.conf), "Presence": self.broker.presence_info.as_ref().map(go_presence_info),
                    "Env": env_json(env), "Sid": sid, "Ids": ids, "Identifier": identifier}),
         );
-        CallResult { result: p.result.map(Into::into), error: p.error.map(Error) }
+        let raw = p.result.unwrap_or(Value::Null);
+        let nil = |k: &str| raw.get(k).is_none_or(Value::is_null);
+        let (nil_transmissions, nil_streams) = (nil("Transmissions"), nil("Streams"));
+        let result =
+            (!raw.is_null()).then(|| serde_json::from_value::<GoCommandResult>(raw).expect("CommandResult").into());
+        ControllerCall { result, error: p.error.map(Error), nil_transmissions, nil_streams }
     }
 
-    pub fn subscribe(&self, sid: &str, env: &SessionEnv, ids: &str, identifier: &str) -> CallResult<CommandResult> {
+    fn rust_call(out: CallResult<CommandResult>) -> ControllerCall {
+        // Rust `CommandResult` slices are never nil.
+        ControllerCall { result: out.result, error: out.error, nil_transmissions: false, nil_streams: false }
+    }
+
+    pub fn subscribe(&self, sid: &str, env: &SessionEnv, ids: &str, identifier: &str) -> ControllerCall {
         match backend() {
-            Backend::Rust => self.rust().subscribe(sid, env, ids, identifier),
+            Backend::Rust => Self::rust_call(self.rust().subscribe(sid, env, ids, identifier)),
             Backend::Go => self.go("pusher.Controller.Subscribe", sid, env, ids, identifier),
         }
     }
 
-    pub fn unsubscribe(&self, sid: &str, env: &SessionEnv, ids: &str, identifier: &str) -> CallResult<CommandResult> {
+    pub fn unsubscribe(&self, sid: &str, env: &SessionEnv, ids: &str, identifier: &str) -> ControllerCall {
         match backend() {
-            Backend::Rust => self.rust().unsubscribe(sid, env, ids, identifier),
+            Backend::Rust => Self::rust_call(self.rust().unsubscribe(sid, env, ids, identifier)),
             Backend::Go => self.go("pusher.Controller.Unsubscribe", sid, env, ids, identifier),
         }
     }
 }
 
+/// A controller `(*CommandResult, error)` plus the Go nil-slice distinction that
+/// `CommandResult` cannot carry (`[]string{}` vs nil; always non-nil in Rust).
+#[derive(Debug, Clone)]
+pub struct ControllerCall {
+    pub result: Option<CommandResult>,
+    pub error: Option<Error>,
+    pub nil_transmissions: bool,
+    pub nil_streams: bool,
+}
+
 // ------------------------------------------------------------------ executor
 
-/// `pusher.NewExecutor(app, pusher.NewVerifier(app_id, key))`.
+/// The upstream test's `MockExecutor`: runs `Subscribe` on the pusher controller and
+/// sends the transmissions to the session; anything else is "not implemented".
+struct MockExecutor {
+    ctrl: Controller,
+}
+
+impl deps::Executor for MockExecutor {
+    fn handle_command(&self, s: &mut dyn ExecutorSession, msg: &Message) -> Result<(), Error> {
+        let mut res = None;
+        let mut err = None;
+
+        if msg.command == "subscribe" {
+            let out = self.ctrl.subscribe(&s.id(), &s.env(), &s.identifiers(), &msg.identifier);
+            res = out.result;
+            err = out.error;
+        }
+
+        if let Some(r) = &res {
+            for t in &r.transmissions {
+                s.send_json_transmission(t);
+            }
+        }
+
+        if res.is_none() {
+            return Err(Error("not implemeented".into()));
+        }
+
+        err.map_or(Ok(()), Err)
+    }
+
+    fn disconnect(&self, _s: &mut dyn ExecutorSession) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+/// The upstream test's `buildSession`: sid "1234.1234", URL
+/// "ws://anycable.io/pusher/app-id", no headers, `Authenticated` with identifiers
+/// "", encoder `&Encoder{}`, over `mocks.NewMockConnection()` (frames queued).
+struct TestSession {
+    env: SessionEnv,
+    conn: std::collections::VecDeque<Vec<u8>>,
+}
+
+impl ExecutorSession for TestSession {
+    fn id(&self) -> String {
+        "1234.1234".into()
+    }
+
+    fn identifiers(&self) -> String {
+        String::new()
+    }
+
+    fn env(&self) -> SessionEnv {
+        self.env.clone()
+    }
+
+    fn merge_channel_state(&mut self, identifier: &str, state: &StringMap) {
+        self.env.merge_channel_state(identifier, state);
+    }
+
+    fn send_json_transmission(&mut self, msg: &str) {
+        if let Ok(Some(frame)) = encode_transmission(&rs::Encoder::default(), msg) {
+            self.conn.push_back(frame.payload);
+        }
+    }
+}
+
+/// The outcome of one `executor.HandleCommand` and the following `conn.Read()`s.
+#[derive(Debug, Clone)]
+pub struct ExecutorRun {
+    pub error: Option<String>,
+    pub reads: Vec<Result<Vec<u8>, String>>,
+}
+
+/// `TestHandleCommand` setup: config with `AppKey = app_id`, `Secret = key`; a
+/// `mocks.Broker` whose `PresenceInfo` returns `presence`; `MockExecutor` over the
+/// pusher controller; `pusher.NewExecutor(app, pusher.NewVerifier(app_id, key))`.
 pub struct Executor {
-    inner: rs::Executor,
+    app_id: String,
+    key: String,
+    presence: PresenceInfo,
 }
 
 impl Executor {
-    pub fn new(app: Arc<dyn deps::Executor>, app_id: &str, key: &str) -> Self {
-        Self { inner: rs::Executor::new(app, rs::Verifier::new(app_id, key)) }
+    pub fn new(app_id: &str, key: &str, presence: PresenceInfo) -> Self {
+        Self { app_id: app_id.into(), key: key.into(), presence }
     }
 
-    pub fn handle_command(&self, session: &mut dyn ExecutorSession, msg: &Message) -> Result<(), Error> {
+    /// `executor.HandleCommand(session, &msg)` on a fresh `buildSession`, then
+    /// `conn.Read()` `reads` times.
+    pub fn handle_command(&self, msg: &Message, reads: usize) -> ExecutorRun {
         match backend() {
-            Backend::Rust => self.inner.handle_command(session, msg),
-            Backend::Go => unimplemented!(
-                "not_observable: the upstream case drives pusher.Executor through a real node.Session \
-                 (mocks.Connection) and a test-defined MockExecutor; covered externally by \
-                 tests/conformance/pusher.rs"
-            ),
+            Backend::Rust => {
+                let mut conf = rs::Config::new();
+                conf.app_key = self.app_id.clone();
+                conf.secret = self.key.clone();
+                let bro = StubBroker { presence_info: Some(self.presence.clone()) };
+                let app = Arc::new(MockExecutor { ctrl: Controller::new(bro, &conf) });
+                let executor = rs::Executor::new(app, rs::Verifier::new(&self.app_id, &self.key));
+                let mut session = TestSession {
+                    env: SessionEnv { url: "ws://anycable.io/pusher/app-id".into(), ..Default::default() },
+                    conn: Default::default(),
+                };
+                let error = deps::Executor::handle_command(&executor, &mut session, msg).err().map(|e| e.0);
+                let reads = (0..reads)
+                    .map(|_| session.conn.pop_front().ok_or_else(|| "connection hasn't received any messages".into()))
+                    .collect();
+                ExecutorRun { error, reads }
+            }
+            Backend::Go => {
+                let data = msg.data.as_ref().map(|d| {
+                    let sub = d.downcast_ref::<PusherSubscriptionData>().expect("subscription data");
+                    json!({"channel": sub.channel, "auth": sub.auth, "channel_data": sub.channel_data})
+                });
+                let r: Value = bridge::call(
+                    "pusher.Executor.HandleCommand",
+                    json!({"AppID": self.app_id, "Key": self.key, "Presence": go_presence_info(&self.presence),
+                           "Command": msg.command, "Identifier": msg.identifier, "SubscriptionData": data,
+                           "Reads": reads}),
+                );
+                let reads = r["reads"]
+                    .as_array()
+                    .expect("reads")
+                    .iter()
+                    .map(|x| match x["error"].as_str() {
+                        Some(e) => Err(e.to_owned()),
+                        None => Ok(x["msg"].as_str().unwrap_or_default().as_bytes().to_vec()),
+                    })
+                    .collect();
+                ExecutorRun { error: r["error"].as_str().map(str::to_owned), reads }
+            }
         }
     }
 }
@@ -473,14 +638,35 @@ pub enum ApiBroker {
     Memory(MemoryBroker),
 }
 
-/// `mocks.Handler` with `On("HandleBroadcast", ...).Return(nil)`, recording payloads.
-#[derive(Default)]
-struct BroadcastRecorder(Mutex<Vec<Vec<u8>>>);
+/// How the REST API's `mocks.Handler` is programmed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandlerMock {
+    /// `On("HandleBroadcast", ...).Return(nil)`: calls are accepted and recorded.
+    AcceptBroadcasts,
+    /// `&mocks.Handler{}`: every call is forbidden.
+    NoExpectations,
+}
+
+/// `mocks.Handler`: accepted payloads in order, plus forbidden calls.
+struct BroadcastRecorder {
+    mode: HandlerMock,
+    calls: Mutex<Vec<Vec<u8>>>,
+    unexpected: Mutex<Vec<String>>,
+}
 
 impl BroadcastHandler for BroadcastRecorder {
     fn handle_broadcast(&self, payload: &[u8]) -> Result<(), Error> {
-        self.0.lock().unwrap().push(payload.to_vec());
-        Ok(())
+        match self.mode {
+            HandlerMock::AcceptBroadcasts => {
+                self.calls.lock().unwrap().push(payload.to_vec());
+                Ok(())
+            }
+            HandlerMock::NoExpectations => {
+                let call = format!("HandleBroadcast({:?})", String::from_utf8_lossy(payload));
+                self.unexpected.lock().unwrap().push(call.clone());
+                Err(Error(format!("mocks.Handler: unexpected call {call}")))
+            }
+        }
     }
 }
 
@@ -517,8 +703,9 @@ pub struct RestApi {
 }
 
 impl RestApi {
-    pub fn new(broker: ApiBroker, conf: &rs::Config) -> Self {
-        let handler = Arc::new(BroadcastRecorder::default());
+    pub fn new(broker: ApiBroker, handler: HandlerMock, conf: &rs::Config) -> Self {
+        let handler =
+            Arc::new(BroadcastRecorder { mode: handler, calls: Default::default(), unexpected: Default::default() });
         let rust = match backend() {
             Backend::Rust => {
                 let b: Arc<dyn Broker> = match &broker {
@@ -561,18 +748,24 @@ impl RestApi {
                     "pusher.RestAPI.Handler",
                     json!({"Config": go_config(&self.conf), "Broker": kind, "Presence": presence,
                            "Method": method, "Target": target,
-                           "Body": String::from_utf8(body.to_vec()).expect("UTF-8 body")}),
+                           "Body": String::from_utf8(body.to_vec()).expect("UTF-8 body"),
+                           "AcceptBroadcasts": self.handler.mode == HandlerMock::AcceptBroadcasts}),
                 );
-                let mut calls = self.handler.0.lock().unwrap();
-                calls.extend(r.broadcasts.iter().map(|b| b.clone().into_bytes()));
+                self.handler.calls.lock().unwrap().extend(r.broadcasts.iter().map(|b| b.clone().into_bytes()));
+                self.handler.unexpected.lock().unwrap().extend(r.unexpected.iter().cloned());
                 r.into_response()
             }
         }
     }
 
-    /// Payloads passed to `HandleBroadcast`, in order.
+    /// Payloads passed to `HandleBroadcast` and accepted, in order.
     pub fn broadcasts(&self) -> Vec<Vec<u8>> {
-        self.handler.0.lock().unwrap().clone()
+        self.handler.calls.lock().unwrap().clone()
+    }
+
+    /// `HandleBroadcast` calls the mock had no expectation for.
+    pub fn unexpected_calls(&self) -> Vec<String> {
+        self.handler.unexpected.lock().unwrap().clone()
     }
 }
 
@@ -585,9 +778,19 @@ pub(crate) struct GoApiResponse {
     body_read: usize,
     #[serde(default)]
     broadcasts: Vec<String>,
+    #[serde(default)]
+    unexpected: Vec<String>,
 }
 
 impl GoApiResponse {
+    pub(crate) fn from_parts(
+        status: u16,
+        headers: std::collections::HashMap<String, Vec<String>>,
+        body: String,
+    ) -> ApiResponse {
+        GoApiResponse { status, headers, body, body_read: 0, broadcasts: vec![], unexpected: vec![] }.into_response()
+    }
+
     pub(crate) fn into_response(self) -> ApiResponse {
         let mut headers: Vec<(String, String)> = self
             .headers

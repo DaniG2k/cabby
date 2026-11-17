@@ -9,7 +9,7 @@
 
 use cabby_server::pusher::Config;
 use cabby_testkit::pusher_auth::{get_channel_users, md5_hex, now_timestamp};
-use cabby_testkit::reference::pusher::{ApiBroker, MemoryBroker, RestApi, Verifier};
+use cabby_testkit::reference::pusher::{ApiBroker, HandlerMock, MemoryBroker, RestApi, Verifier, new_config};
 use serde_json::json;
 
 const PAYLOAD: &[u8] = br#"{"name":"test-event","channel":"test-channel","data":"{\"message\":\"hello world\"}"}"#;
@@ -17,7 +17,7 @@ const BROADCAST_PAYLOAD: &[u8] =
     br#"{"stream":"test-channel","data":"{\"event\":\"test-event\",\"data\":\"{\\\"message\\\":\\\"hello world\\\"}\"}"}"#;
 
 fn http_config() -> Config {
-    let mut config = Config::new();
+    let mut config = new_config();
     config.app_id = "my-app-id".into();
     config.app_key = "my-app-key".into();
     config.secret = "test-push".into();
@@ -30,6 +30,7 @@ fn verifier(config: &Config) -> Verifier {
 
 /// Every `HandleBroadcast` call must match the mock's only expectation.
 fn assert_broadcasts_match_expectation(api: &RestApi) {
+    assert_eq!(Vec::<String>::new(), api.unexpected_calls());
     for b in api.broadcasts() {
         assert_eq!(String::from_utf8_lossy(BROADCAST_PAYLOAD), String::from_utf8_lossy(&b));
     }
@@ -42,7 +43,7 @@ mod test_http_handler {
     #[test]
     fn handles_broadcasts() {
         let config = http_config();
-        let rest_api = RestApi::new(ApiBroker::Mock, &config);
+        let rest_api = RestApi::new(ApiBroker::Mock, HandlerMock::AcceptBroadcasts, &config);
 
         let auth_params = format!(
             "auth_key={}&auth_timestamp={}&auth_version=1.0&body_md5={}",
@@ -66,7 +67,7 @@ mod test_http_handler {
     #[test]
     fn handles_broadcasts_exactly_once() {
         let config = http_config();
-        let rest_api = RestApi::new(ApiBroker::Mock, &config);
+        let rest_api = RestApi::new(ApiBroker::Mock, HandlerMock::AcceptBroadcasts, &config);
         let auth_params = format!(
             "auth_key={}&auth_timestamp={}&auth_version=1.0&body_md5={}",
             config.app_key,
@@ -86,18 +87,19 @@ mod test_http_handler {
     #[test]
     fn rejects_unsupported_methods() {
         let config = http_config();
-        let rest_api = RestApi::new(ApiBroker::Mock, &config);
+        let rest_api = RestApi::new(ApiBroker::Mock, HandlerMock::AcceptBroadcasts, &config);
 
         let rr = rest_api.serve("DELETE", "/", PAYLOAD);
 
         assert_eq!(422, rr.status);
+        assert_broadcasts_match_expectation(&rest_api);
     }
 
     /// upstream: pusher/http_test.go#TestHttpHandler/Rejects_when_authorization_data_is_incorrect
     #[test]
     fn rejects_when_authorization_data_is_incorrect() {
         let config = http_config();
-        let rest_api = RestApi::new(ApiBroker::Mock, &config);
+        let rest_api = RestApi::new(ApiBroker::Mock, HandlerMock::AcceptBroadcasts, &config);
 
         let auth_params = format!(
             "auth_key={}&body_md5={}&auth_version=1.0&auth_timestamp={}",
@@ -117,7 +119,7 @@ mod test_http_handler {
     #[test]
     fn rejects_when_auth_timestamp_is_too_far_from_current_time() {
         let config = http_config();
-        let rest_api = RestApi::new(ApiBroker::Mock, &config);
+        let rest_api = RestApi::new(ApiBroker::Mock, HandlerMock::AcceptBroadcasts, &config);
 
         let stale_timestamp = (now_timestamp().parse::<i64>().unwrap() - 15 * 60).to_string();
         let auth_params = format!(
@@ -139,7 +141,7 @@ mod test_http_handler {
     #[test]
     fn rejects_when_body_does_not_match_signature() {
         let config = http_config();
-        let rest_api = RestApi::new(ApiBroker::Mock, &config);
+        let rest_api = RestApi::new(ApiBroker::Mock, HandlerMock::AcceptBroadcasts, &config);
 
         let auth_params = format!(
             "auth_key={}&auth_timestamp={}&auth_version=1.0&body_md5={}",
@@ -167,7 +169,7 @@ mod test_http_handler {
         let mut small_config = config.clone();
         small_config.max_body_size = 16;
 
-        let small_api = RestApi::new(ApiBroker::Mock, &small_config);
+        let small_api = RestApi::new(ApiBroker::Mock, HandlerMock::AcceptBroadcasts, &small_config);
 
         let auth_params = format!(
             "auth_key={}&auth_timestamp={}&auth_version=1.0&body_md5=deadbeef",
@@ -181,11 +183,12 @@ mod test_http_handler {
 
         assert_eq!(401, rr.status);
         assert_eq!(0, rr.body_read);
+        assert_broadcasts_match_expectation(&small_api);
     }
 }
 
 fn users_config() -> Config {
-    let mut config = Config::new();
+    let mut config = new_config();
     config.app_id = "app-id".into();
     config.app_key = "app-key".into();
     config.secret = "secret".into();
@@ -204,7 +207,8 @@ impl UsersFixture {
         let config = users_config();
         let mem_broker = MemoryBroker::new();
         mem_broker.start().expect("memory broker start");
-        let rest_api = RestApi::new(ApiBroker::Memory(mem_broker.clone()), &config);
+        // `&mocks.Handler{}` without expectations: any broadcast is forbidden.
+        let rest_api = RestApi::new(ApiBroker::Memory(mem_broker.clone()), HandlerMock::NoExpectations, &config);
         Self { config, mem_broker, rest_api }
     }
 
@@ -222,6 +226,8 @@ impl Drop for UsersFixture {
     fn drop(&mut self) {
         // defer memBroker.Shutdown(...)
         if !std::thread::panicking() {
+            assert!(self.rest_api.broadcasts().is_empty(), "unexpected broadcasts");
+            assert_eq!(Vec::<String>::new(), self.rest_api.unexpected_calls());
             let _ = self.mem_broker.shutdown();
         }
     }
