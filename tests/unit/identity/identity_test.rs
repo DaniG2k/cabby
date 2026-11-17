@@ -11,6 +11,8 @@ use cabby_core::common::{CommandResult, ConnectResult, ControllerError, Outcome,
 use cabby_testkit::reference::identity::*;
 
 /// `common.NewSessionEnv(url, headers)`: empty, non-nil connection and channel state.
+/// Built locally (not via `reference::common::new_session_env`) so these cases
+/// depend only on this package's implementation, not on `common`'s.
 fn new_session_env(url: &str, headers: Option<StringMap>) -> SessionEnv {
     SessionEnv {
         url: url.into(),

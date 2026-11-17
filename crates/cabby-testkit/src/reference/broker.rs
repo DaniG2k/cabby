@@ -157,7 +157,8 @@ pub struct Tracker {
 #[derive(Deserialize)]
 struct GoTrackerReply {
     result: bool,
-    called: bool,
+    /// How many times the Go callback ran.
+    calls: usize,
 }
 
 /// `broker.NewStreamsTracker()`.
@@ -172,8 +173,9 @@ impl Tracker {
     fn go_call(&self, method: &str, name: &str, callback: &mut dyn FnMut()) -> bool {
         let r: GoTrackerReply =
             bridge::call("broker.StreamsTracker", json!({"id": self.go, "method": method, "name": name}));
-        // The Go callback only records that it ran; run the test's callback for it.
-        if r.called {
+        // The Go callback only counts its invocations; run the test's callback
+        // once per invocation, so extra calls in Go show up in the test's counts.
+        for _ in 0..r.calls {
             callback();
         }
         r.result
@@ -663,10 +665,30 @@ impl NatsBroker {
     }
 
     /// `broker.local.GetEpoch()` (unexported field upstream).
+    ///
+    /// Go: observed through the exported `HistoryFrom`, which delegates to
+    /// `n.local.HistoryFrom`; that checks the epoch first and rejects any other
+    /// epoch with `unknown epoch: <given>, current: <local epoch>`. The facade
+    /// reads the local epoch from that rejection, then checks that the local
+    /// broker accepts it (no "unknown epoch" error for it).
     pub fn local_epoch(&self) -> String {
+        const PROBE_STREAM: &str = "cabby-local-epoch-probe";
+        const SENTINEL: &str = "cabby-sentinel-epoch";
         match &self.rust {
             Some(b) => b.local_epoch(),
-            None => unimplemented!("not_observable: NATS.local is an unexported field"),
+            None => {
+                let rejected = self.history_from(PROBE_STREAM, SENTINEL, 0).expect_err("sentinel epoch accepted");
+                let prefix = format!("unknown epoch: {SENTINEL}, current: ");
+                let current = rejected
+                    .message
+                    .strip_prefix(&prefix)
+                    .unwrap_or_else(|| panic!("unexpected HistoryFrom rejection {:?}", rejected.message))
+                    .to_owned();
+                if let Err(e) = self.history_from(PROBE_STREAM, &current, 0) {
+                    assert!(!e.message.starts_with("unknown epoch"), "local broker rejects its own epoch: {e}");
+                }
+                current
+            }
         }
     }
 

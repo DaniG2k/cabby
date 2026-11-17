@@ -14,6 +14,8 @@ const IDS: &str = "{\"user_id\":\"15\"}";
 const UNAUTHORIZED: &str = "{\"type\":\"disconnect\",\"reason\":\"unauthorized\",\"reconnect\":false}";
 
 /// `common.NewSessionEnv(url, headers)`.
+/// Built locally (not via `reference::common::new_session_env`) so these cases
+/// depend only on this package's implementation, not on `common`'s.
 fn new_session_env(url: &str, headers: Option<StringMap>) -> SessionEnv {
     SessionEnv {
         url: url.into(),

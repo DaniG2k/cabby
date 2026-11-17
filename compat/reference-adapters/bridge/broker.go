@@ -161,8 +161,9 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		called := false
-		mark := func() { called = true }
+		// Counts callback invocations so the facade can replay each one.
+		calls := 0
+		mark := func() { calls++ }
 		var result bool
 		switch a.Method {
 		case "Add":
@@ -174,7 +175,7 @@ func init() {
 		default:
 			return nil, fmt.Errorf("unknown tracker method %q", a.Method)
 		}
-		return map[string]interface{}{"result": result, "called": called}, nil
+		return map[string]interface{}{"result": result, "calls": calls}, nil
 	})
 
 	register("broker.NewMemoryBroker", func(raw json.RawMessage) (interface{}, error) {
