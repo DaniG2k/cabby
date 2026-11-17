@@ -181,6 +181,7 @@ name = "cabby-server"
 version = "0.0.0"
 dependencies = [
  "cabby-core",
+ "thiserror",
 ]
 
 [[package]]
@@ -192,6 +193,7 @@ dependencies = [
  "cabby-server",
  "serde",
  "serde_json",
+ "sha2",
  "tungstenite",
 ]
 
