@@ -1,12 +1,11 @@
 //! upstream file: sse/config_test.go
 
-use cabby_server::sse::Config;
-use cabby_testkit::reference::sse::{config_to_toml, decode_config_toml};
+use cabby_testkit::reference::sse::{config_to_toml, decode_config_toml, new_config};
 
 /// upstream: sse/config_test.go#TestConfig_ToToml
 #[test]
 fn test_config_to_toml() {
-    let mut conf = Config::new();
+    let mut conf = new_config();
     conf.path = "/events".into();
 
     let toml_str = config_to_toml(&conf);
@@ -23,7 +22,7 @@ fn test_config_to_toml() {
 /// upstream: sse/config_test.go#TestConfig_ToToml_CommentPings
 #[test]
 fn test_config_to_toml_comment_pings() {
-    let mut conf = Config::new();
+    let mut conf = new_config();
 
     let toml_str = config_to_toml(&conf);
     assert!(toml_str.contains("# comment_pings = true"), "{toml_str}");

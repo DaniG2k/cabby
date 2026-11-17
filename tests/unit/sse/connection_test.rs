@@ -32,6 +32,7 @@ mod test_connection_close {
     use super::*;
 
     /// upstream: sse/connection_test.go#TestConnection_Close/Close_cancels_the_context
+    /// note: Go has no accessor for the unexported `c.done`; on Go it is probed indirectly (a closed connection drops a later Write, so Established leaves the body nil). The second Close runs on Go too.
     #[test]
     fn close_cancels_the_context() {
         // Create a new connection

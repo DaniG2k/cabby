@@ -4,8 +4,8 @@ use cabby_core::common::{
     CONFIRMED_TYPE, DisconnectMessage, EncodedMessage, PING_TYPE, PONG_TYPE, PRESENCE_JOIN_TYPE, PRESENCE_LEAVE_TYPE,
     PRESENCE_TYPE, PingMessage, REJECTED_TYPE, Reply, SentFrame, WELCOME_TYPE,
 };
-use cabby_server::pusher::{Encoder, PusherClientEvent, PusherSubscriptionData};
-use cabby_testkit::reference::pusher::{decode, encode, encode_transmission};
+use cabby_server::pusher::{PusherClientEvent, PusherSubscriptionData};
+use cabby_testkit::reference::pusher::{decode, encode, encode_transmission, new_encoder};
 use serde_json::json;
 
 const IDENTIFIER: &str = r#"{"channel":"$pusher","stream":"pucha"}"#;
@@ -44,7 +44,7 @@ mod test_pusher_encode {
     /// upstream: pusher/encoder_test.go#TestPusherEncode/Reply_with_event_and_data
     #[test]
     fn reply_with_event_and_data() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let message = json!({"event": "custom-event", "data": "custom-data"});
         let msg = reply(Reply { identifier: IDENTIFIER.into(), message: Some(message), ..Default::default() });
 
@@ -56,7 +56,7 @@ mod test_pusher_encode {
     /// upstream: pusher/encoder_test.go#TestPusherEncode/Reply_w/o_event/data
     #[test]
     fn reply_without_event_data() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = reply(Reply { identifier: IDENTIFIER.into(), message: Some(json!("hello")), ..Default::default() });
 
         let actual = encode(&coder, &msg).expect("no error");
@@ -67,7 +67,7 @@ mod test_pusher_encode {
     /// upstream: pusher/encoder_test.go#TestPusherEncode/Reply_with_private_channel
     #[test]
     fn reply_with_private_channel() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let message = json!({"event": "custom-event", "data": "custom-data"});
         let msg = reply(Reply { identifier: PRIVATE_IDENTIFIER.into(), message: Some(message), ..Default::default() });
 
@@ -79,7 +79,7 @@ mod test_pusher_encode {
     /// upstream: pusher/encoder_test.go#TestPusherEncode/Ping
     #[test]
     fn ping() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
         let msg = EncodedMessage::Ping(PingMessage { kind: PING_TYPE.into(), message: Some(json!(now)) });
 
@@ -91,7 +91,7 @@ mod test_pusher_encode {
     /// upstream: pusher/encoder_test.go#TestPusherEncode/Pong
     #[test]
     fn pong() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = reply(Reply { kind: PONG_TYPE.into(), ..Default::default() });
 
         let expected = r#"{"event":"pusher:pong"}"#;
@@ -102,7 +102,7 @@ mod test_pusher_encode {
     /// upstream: pusher/encoder_test.go#TestPusherEncode/Disconnect_with_reconnect
     #[test]
     fn disconnect_with_reconnect() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = EncodedMessage::Disconnect(DisconnectMessage {
             kind: "disconnect".into(),
             reason: "server error".into(),
@@ -117,7 +117,7 @@ mod test_pusher_encode {
     /// upstream: pusher/encoder_test.go#TestPusherEncode/Disconnect_without_reconnect
     #[test]
     fn disconnect_without_reconnect() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = EncodedMessage::Disconnect(DisconnectMessage {
             kind: "disconnect".into(),
             reason: "unauthorized".into(),
@@ -132,7 +132,7 @@ mod test_pusher_encode {
     /// upstream: pusher/encoder_test.go#TestPusherEncode/Welcome
     #[test]
     fn welcome() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = reply(Reply { kind: WELCOME_TYPE.into(), sid: "lu2007".into(), ..Default::default() });
 
         let expected =
@@ -144,7 +144,7 @@ mod test_pusher_encode {
     /// upstream: pusher/encoder_test.go#TestPusherEncode/Confirmed
     #[test]
     fn confirmed() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = reply(Reply { kind: CONFIRMED_TYPE.into(), identifier: IDENTIFIER.into(), ..Default::default() });
 
         let expected = r#"{"event":"pusher_internal:subscription_succeeded","data":"{}","channel":"pucha"}"#;
@@ -155,7 +155,7 @@ mod test_pusher_encode {
     /// upstream: pusher/encoder_test.go#TestPusherEncode/Rejected
     #[test]
     fn rejected() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = reply(Reply { kind: REJECTED_TYPE.into(), identifier: IDENTIFIER.into(), ..Default::default() });
 
         let expected = r#"{"event":"pusher:error","data":{"message":"rejected","code":4009}}"#;
@@ -166,7 +166,7 @@ mod test_pusher_encode {
     /// upstream: pusher/encoder_test.go#TestPusherEncode/Presence_join
     #[test]
     fn presence_join() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = reply(Reply {
             kind: PRESENCE_TYPE.into(),
             identifier: PRESENCE_IDENTIFIER.into(),
@@ -182,7 +182,7 @@ mod test_pusher_encode {
     /// upstream: pusher/encoder_test.go#TestPusherEncode/Presence_leave
     #[test]
     fn presence_leave() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = reply(Reply {
             kind: PRESENCE_TYPE.into(),
             identifier: PRESENCE_IDENTIFIER.into(),
@@ -203,7 +203,7 @@ mod test_pusher_encode_transmission {
     /// upstream: pusher/encoder_test.go#TestPusherEncodeTransmission/welcome
     #[test]
     fn welcome() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = r#"{"type":"welcome","sid":"lu2007"}"#;
         let expected =
             r#"{"event":"pusher:connection_established","data":"{\"socket_id\":\"lu2007\",\"activity_timeout\":30}"}"#;
@@ -214,7 +214,7 @@ mod test_pusher_encode_transmission {
     /// upstream: pusher/encoder_test.go#TestPusherEncodeTransmission/confirm_subscription
     #[test]
     fn confirm_subscription() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = reply_json("confirm_subscription", IDENTIFIER, None);
         let expected = r#"{"event":"pusher_internal:subscription_succeeded","data":"{}","channel":"pucha"}"#;
 
@@ -224,7 +224,7 @@ mod test_pusher_encode_transmission {
     /// upstream: pusher/encoder_test.go#TestPusherEncodeTransmission/confirm_subscription_+_presence
     #[test]
     fn confirm_subscription_presence() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = reply_json(
             "confirm_subscription",
             IDENTIFIER,
@@ -238,7 +238,7 @@ mod test_pusher_encode_transmission {
     /// upstream: pusher/encoder_test.go#TestPusherEncodeTransmission/reject_subscription
     #[test]
     fn reject_subscription() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = reply_json("reject_subscription", IDENTIFIER, None);
         let expected = r#"{"event":"pusher:error","data":{"message":"rejected","code":4009}}"#;
 
@@ -248,7 +248,7 @@ mod test_pusher_encode_transmission {
     /// upstream: pusher/encoder_test.go#TestPusherEncodeTransmission/message_with_event
     #[test]
     fn message_with_event() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let message = json!({"event": "user-joined", "data": {"name": "John"}});
         let msg = reply_json("", IDENTIFIER, Some(message));
         let expected = r#"{"event":"user-joined","data":{"name":"John"},"channel":"pucha"}"#;
@@ -263,7 +263,7 @@ mod test_pusher_decode {
     /// upstream: pusher/encoder_test.go#TestPusherDecode/subscribe
     #[test]
     fn subscribe() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = br#"{"event":"pusher:subscribe","data":{"auth":"","channel":"pucha"}}"#;
 
         let actual = decode(&coder, msg).expect("no error");
@@ -279,7 +279,7 @@ mod test_pusher_decode {
     /// upstream: pusher/encoder_test.go#TestPusherDecode/subscribe_to_private
     #[test]
     fn subscribe_to_private() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = br#"{"event":"pusher:subscribe","data":{"auth":"signed-private-party","channel":"private-party"}}"#;
 
         let actual = decode(&coder, msg).expect("no error");
@@ -295,7 +295,7 @@ mod test_pusher_decode {
     /// upstream: pusher/encoder_test.go#TestPusherDecode/unsubscribe
     #[test]
     fn unsubscribe() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = br#"{"event":"pusher:unsubscribe","data":{"channel":"pucha"}}"#;
 
         let actual = decode(&coder, msg).expect("no error");
@@ -307,7 +307,7 @@ mod test_pusher_decode {
     /// upstream: pusher/encoder_test.go#TestPusherDecode/ping
     #[test]
     fn ping() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = br#"{"event":"pusher:ping","data":{}}"#;
 
         let actual = decode(&coder, msg).expect("no error");
@@ -318,7 +318,7 @@ mod test_pusher_decode {
     /// upstream: pusher/encoder_test.go#TestPusherDecode/pong
     #[test]
     fn pong() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = br#"{"event":"pusher:pong"}"#;
 
         let actual = decode(&coder, msg).expect("no error");
@@ -329,7 +329,7 @@ mod test_pusher_decode {
     /// upstream: pusher/encoder_test.go#TestPusherDecode/client_event
     #[test]
     fn client_event() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = br#"{"event":"client-message","data":{"text":"hello"},"channel":"private-party"}"#;
         let actual = decode(&coder, msg);
 
@@ -350,7 +350,7 @@ mod test_pusher_decode {
     /// upstream: pusher/encoder_test.go#TestPusherDecode/custom_event
     #[test]
     fn custom_event() {
-        let coder = Encoder::new();
+        let coder = new_encoder();
         let msg = br#"{"event":"custom-message","data":{"channel":"test-channel","text":"hello"}}"#;
 
         let actual = decode(&coder, msg);

@@ -1,22 +1,13 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
-	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/anycable/anycable-go/broker"
 	"github.com/anycable/anycable-go/encoders"
-	"github.com/anycable/anycable-go/metrics"
-	"github.com/anycable/anycable-go/mocks"
-	"github.com/anycable/anycable-go/node"
-	"github.com/anycable/anycable-go/pubsub"
-	"github.com/anycable/anycable-go/server"
 	"github.com/anycable/anycable-go/sse"
 )
 
@@ -164,47 +155,5 @@ func init() {
 			results = append(results, r)
 		}
 		return results, nil
-	})
-	// SSEHandler serving one request that never reaches the application: the node's
-	// controller is an expectation-free mocks.Controller (as built by the upstream
-	// test's buildNode, not started), the shutdown context is never cancelled.
-	register("sse.SSEHandler.ServeHTTP", func(raw json.RawMessage) (res interface{}, err error) {
-		// A request reaching the expectation-free controller panics inside testify;
-		// report it instead of taking the shared bridge process down.
-		defer func() {
-			if r := recover(); r != nil {
-				res, err = nil, fmt.Errorf("request reached the application (not bridgeable): %v", r)
-			}
-		}()
-		var a struct {
-			Config         sse.Config
-			Method, Target string
-			Headers        map[string]string
-			Body           *string
-		}
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return nil, err
-		}
-		controller := &mocks.Controller{}
-		config := node.NewConfig()
-		config.HubGopoolSize = 2
-		n := node.NewNode(&config, node.WithController(controller), node.WithInstrumenter(metrics.NewMetrics(nil, 10, quietLog)))
-		n.SetBroker(broker.NewLegacyBroker(pubsub.NewLegacySubscriber(n)))
-		handler := sse.SSEHandler(n, nil, context.Background(), &server.DefaultHeadersExtractor{}, &a.Config, quietLog)
-		var req *http.Request
-		if a.Body != nil {
-			req, err = http.NewRequest(a.Method, a.Target, strings.NewReader(*a.Body))
-		} else {
-			req, err = http.NewRequest(a.Method, a.Target, nil)
-		}
-		if err != nil {
-			return nil, err
-		}
-		for k, v := range a.Headers {
-			req.Header.Set(k, v)
-		}
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, req)
-		return apiResponse{Status: w.Code, Headers: w.Header(), Body: w.Body.String(), Broadcasts: []string{}}, nil
 	})
 }
