@@ -7,6 +7,7 @@ edition = "2024"
 rust-version = "1.100"
 version = "0.0.0"
 publish = false
+license = "MIT"
 
 [workspace.dependencies]
 cabby-core = { path = "crates/cabby-core" }
