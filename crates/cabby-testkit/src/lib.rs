@@ -36,3 +36,8 @@ pub fn workspace_root() -> std::path::PathBuf {
 pub mod clock;
 pub mod jwt;
 pub mod nats;
+
+// added for pusher/sse
+pub mod pusher_auth;
+pub mod raw_http;
+pub mod text_ws;

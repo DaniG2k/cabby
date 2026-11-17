@@ -7,6 +7,7 @@ require (
 	github.com/anycable/anycable-go v0.0.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/nats-io/nats.go v1.55.0
+	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli/v2 v2.27.7
 	google.golang.org/grpc v1.85.0
 )
@@ -43,7 +44,6 @@ require (
 	github.com/smira/go-statsd v1.3.4 // indirect
 	github.com/sony/gobreaker v1.0.0 // indirect
 	github.com/stretchr/objx v0.8.0 // indirect
-	github.com/stretchr/testify v1.12.1 // indirect
 	github.com/xrash/smetrics v0.0.0-20261013231157-39c47d93efba // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect

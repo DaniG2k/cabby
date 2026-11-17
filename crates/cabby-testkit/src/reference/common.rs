@@ -272,7 +272,7 @@ pub(crate) struct GoReply {
 impl From<&Reply> for GoReply {
     fn from(r: &Reply) -> Self {
         GoReply {
-            kind: r.r#type.clone(),
+            kind: r.kind.clone(),
             identifier: r.identifier.clone(),
             message: r.message.clone(),
             presence: r.presence.as_ref().map(Into::into),
@@ -291,7 +291,7 @@ impl From<&Reply> for GoReply {
 impl From<GoReply> for Reply {
     fn from(g: GoReply) -> Self {
         Reply {
-            r#type: g.kind,
+            kind: g.kind,
             identifier: g.identifier,
             message: g.message,
             presence: g.presence.map(Into::into),
@@ -338,7 +338,7 @@ impl From<GoMessage> for Message {
         Message {
             command: g.command,
             identifier: g.identifier,
-            data: g.data,
+            data: g.data.map(cabby_core::common::MessageData::Json),
             history: HistoryRequest {
                 since: g.history.since,
                 streams: g

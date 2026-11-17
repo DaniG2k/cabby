@@ -198,7 +198,7 @@ fn test_message_json_serialization() {
 
     assert_eq!(msg.command, "subscribe");
     assert_eq!(msg.identifier, "test_channel");
-    assert_eq!(msg.data, Some(json!({"foo": "bar"})));
+    assert_eq!(msg.data, Some(cabby_core::common::MessageData::Json(json!({"foo": "bar"}))));
     assert_eq!(msg.history.since, 20202020);
     assert_eq!(msg.history.streams["1"], HistoryPosition { epoch: "test".into(), offset: 14 });
     assert_eq!(msg.history.streams["2"], HistoryPosition { epoch: "test".into(), offset: 42 });
