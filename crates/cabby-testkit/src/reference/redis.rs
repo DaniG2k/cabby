@@ -253,7 +253,7 @@ impl StreamCollector {
             c.received.lock().unwrap_or_else(|e| e.into_inner()).push_back(msg);
             c.ready.notify_all();
             if let Some(streamer) = close.and_then(|w| w.upgrade()) {
-                streamer.close_client_without_reconnect();
+                streamer.close_client();
             }
             Ok(())
         })
@@ -287,19 +287,21 @@ impl StreamCollector {
         }
     }
 
-    /// Makes the handler close `streamer`'s Redis client (without reconnecting)
-    /// the first time it handles an entry whose `payload` is `payload`, before
-    /// the entry can be acknowledged. Upstream reaches into the streamer's
-    /// unexported `client` and `reconnectAttempt` from its handler.
+    /// Makes the handler close `streamer`'s Redis client (`streamer.Client().Close()`)
+    /// the first time it handles an entry whose `payload` is `payload`, after
+    /// recording it and before it can be acknowledged.
     pub fn close_client_on_payload(&self, streamer: &Streamer, payload: &str) {
         match (&self.inner, &streamer.inner) {
             (CollectorImpl::Rust(c), StreamerImpl::Rust(s)) => {
                 *c.close_on.lock().unwrap_or_else(|e| e.into_inner()) = Some((payload.to_owned(), Arc::downgrade(s)));
             }
-            _ => unimplemented!(
-                "not_observable: closing Streamer.client and setting Streamer.reconnectAttempt from the handler \
-                 requires unexported state"
-            ),
+            (CollectorImpl::Go(h), StreamerImpl::Go(s)) => {
+                let _: bool = bridge::call(
+                    "redis.StreamHandlerCloseClientOn",
+                    json!({"Handler": h, "Streamer": s, "Payload": payload}),
+                );
+            }
+            _ => unreachable!("collector and streamer from different backends"),
         }
     }
 }

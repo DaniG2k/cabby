@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -36,6 +37,28 @@ type redisOptions struct {
 
 type redisStreamHandler struct {
 	received chan map[string]string
+
+	// Upstream TestStreamerAcksClaims: on the first entry with this payload,
+	// the handler closes the streamer's client (`streamer.Client().Close()`)
+	// after delivering the entry, so it is never acknowledged.
+	mu       sync.Mutex
+	closeOn  string
+	streamer *rconfig.Streamer
+}
+
+func (h *redisStreamHandler) handle(msg map[string]string) error {
+	h.received <- msg
+	h.mu.Lock()
+	var s *rconfig.Streamer
+	if h.streamer != nil && msg["payload"] == h.closeOn {
+		s = h.streamer
+		h.streamer = nil
+	}
+	h.mu.Unlock()
+	if s != nil {
+		s.Client().Close()
+	}
+	return nil
 }
 
 type redisStreamer struct {
@@ -163,13 +186,30 @@ func init() {
 		if err := json.Unmarshal(a.Config, &c); err != nil {
 			return nil, err
 		}
-		handler := func(msg map[string]string) error {
-			h.received <- msg
-			return nil
-		}
 		s := rconfig.NewStreamer(a.Stream, a.Group, &c, slog.Default(),
-			rconfig.StreamerWithHandler(handler), rconfig.StreamerWithBlockMS(a.BlockMs))
+			rconfig.StreamerWithHandler(h.handle), rconfig.StreamerWithBlockMS(a.BlockMs))
 		return msgPut(&redisStreamer{streamer: s}), nil
+	})
+	register("redis.StreamHandlerCloseClientOn", func(raw json.RawMessage) (interface{}, error) {
+		a, err := msgArgs[struct {
+			Handler, Streamer int64
+			Payload           string
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		h, err := msgGet[*redisStreamHandler](a.Handler)
+		if err != nil {
+			return nil, err
+		}
+		s, err := msgGet[*redisStreamer](a.Streamer)
+		if err != nil {
+			return nil, err
+		}
+		h.mu.Lock()
+		h.closeOn, h.streamer = a.Payload, s.streamer
+		h.mu.Unlock()
+		return true, nil
 	})
 	streamerOf := func(raw json.RawMessage) (*redisStreamer, int64, error) {
 		a, err := msgArgs[struct{ Streamer, TimeoutMs int64 }](raw)

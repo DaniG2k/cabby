@@ -118,6 +118,21 @@ func (s *hubSession) drain(n int, deadline time.Time) [][]byte {
 	}
 }
 
+// capturingSession records the EncodedMessage values passed to Send.
+type capturingSession struct {
+	sent chan encoders.EncodedMessage
+}
+
+func (s *capturingSession) GetID() string          { return "capture" }
+func (s *capturingSession) GetIdentifiers() string { return "capture" }
+func (s *capturingSession) Send(msg encoders.EncodedMessage) {
+	select {
+	case s.sent <- msg:
+	default:
+	}
+}
+func (s *capturingSession) DisconnectWithMessage(encoders.EncodedMessage, string) {}
+
 type hubGate struct {
 	gate   *hub.Gate
 	cancel context.CancelFunc
@@ -393,6 +408,37 @@ func init() {
 			out = append(out, counts)
 		}
 		return out, nil
+	})
+
+	// Observes the unexported buildMessage(msg, identifier): Gate.performBroadcast
+	// passes exactly that value to HubSession.Send, so a session subscribed to
+	// (msg.Stream, identifier) captures it. Returns json.Marshal(&msg) of the
+	// captured EncodedMessage, as upstream's toJSON helper.
+	register("hub.BuildMessageJSON", func(raw json.RawMessage) (interface{}, error) {
+		a, err := msgArgs[struct {
+			Msg        common.StreamMessage
+			Identifier string
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		gate := hub.NewGate(ctx, slog.Default())
+		s := &capturingSession{sent: make(chan encoders.EncodedMessage, 1)}
+		gate.Subscribe(s, a.Msg.Stream, a.Identifier)
+		msg := a.Msg
+		gate.Broadcast(&msg)
+		select {
+		case captured := <-s.sent:
+			b, err := json.Marshal(&captured)
+			if err != nil {
+				return nil, err
+			}
+			return string(b), nil
+		case <-time.After(5 * time.Second):
+			return nil, errors.New("gate did not deliver the message within 5s")
+		}
 	})
 
 	register("hub.NewGate", func(raw json.RawMessage) (interface{}, error) {

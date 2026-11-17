@@ -16,6 +16,7 @@ fn msg(stream: &str, data: &str) -> StreamMessage {
 }
 
 /// upstream: hub/hub_test.go#TestUnsubscribeRaceConditions
+/// note: the two racing threads are joined before session2 is read (upstream reads concurrently); on Go a blocking bridge read would otherwise hold back the broadcasts it waits for.
 #[test]
 fn test_unsubscribe_race_conditions() {
     let _load = crate::shared_load();
@@ -72,7 +73,7 @@ fn test_unsubscribe_race_conditions() {
 }
 
 /// upstream: hub/hub_test.go#TestUnsubscribeSession
-/// Exported part (up to the call of unexported `unsubscribeSessionFromAllChannels`).
+/// note: on Go the unexported `unsubscribeSessionFromAllChannels` step is driven through the exported synchronous `RemoveSession`, which calls it and then only drops the sessions/identifiers entries that gate delivery never consults.
 #[test]
 fn test_unsubscribe_session() {
     let _load = crate::shared_load();
@@ -97,26 +98,6 @@ fn test_unsubscribe_session() {
 
     hub.broadcast("test2", "\"bye\"");
 
-    let msg = session.read();
-    assert_eq!(Ok("{\"identifier\":\"test_channel\",\"message\":\"bye\"}".to_owned()), msg);
-}
-
-/// upstream: hub/hub_test.go#TestUnsubscribeSession
-/// Remainder: after `unsubscribeSessionFromAllChannels` (unexported upstream) no
-/// stream is delivered any more.
-#[test]
-fn test_unsubscribe_session_from_all_channels() {
-    let _load = crate::shared_load();
-    let hub = Hub::start(2);
-
-    let session = MockSession::new("123");
-    hub.add_session(&session);
-
-    hub.subscribe_session(&session, "test", "test_channel");
-    hub.subscribe_session(&session, "test2", "test_channel");
-    hub.unsubscribe_session(&session, "test", "test_channel");
-
-    hub.broadcast("test2", "\"bye\"");
     let msg = session.read();
     assert_eq!(Ok("{\"identifier\":\"test_channel\",\"message\":\"bye\"}".to_owned()), msg);
 
@@ -180,12 +161,18 @@ mod test_subscribe_session {
     }
 
     /// upstream: hub/hub_test.go#TestSubscribeSession/Successful_to_the_same_stream_from_multiple_channels
+    /// note: upstream shares the hub and session with the previous subtest; its steps are replayed first.
     #[test]
     fn successful_to_the_same_stream_from_multiple_channels() {
         let _load = crate::shared_load();
         let hub = Hub::start(2);
         let session = MockSession::new("123");
         hub.add_session(&session);
+
+        // Replay of subtest "Subscribe to a single channel".
+        hub.subscribe_session(&session, "test", "test_channel");
+        hub.broadcast("test", "\"hello\"");
+        assert_eq!(Ok("{\"identifier\":\"test_channel\",\"message\":\"hello\"}".to_owned()), session.read());
 
         hub.subscribe_session(&session, "test", "test_channel");
         hub.subscribe_session(&session, "test", "test_channel2");
@@ -334,6 +321,7 @@ fn test_broadcast_order() {
 }
 
 /// upstream: hub/hub_test.go#TestBuildMessageJSON
+/// note: on Go, buildMessage (unexported) is observed as the EncodedMessage a gate passes to HubSession.Send for a session subscribed to ("", "chat").
 #[test]
 fn test_build_message_json() {
     let _load = crate::shared_load();
@@ -343,6 +331,7 @@ fn test_build_message_json() {
 }
 
 /// upstream: hub/hub_test.go#TestBuildMessageString
+/// note: on Go, buildMessage (unexported) is observed as the EncodedMessage a gate passes to HubSession.Send for a session subscribed to ("", "chat").
 #[test]
 fn test_build_message_string() {
     let _load = crate::shared_load();
@@ -492,6 +481,7 @@ mod benchmark_broadcast {
     }
 
     /// upstream: hub/hub_test.go#BenchmarkBroadcast/<config.Inspect()>
+    /// note: correctness only (exact per-session deliveries) with fixed b.N=100 and seeded stream assignment; throughput is measured by the external harness.
     /// Configurations with streams=1000, streams-per-session=10.
     #[test]
     fn streams_1000_per_session_10() {
@@ -499,6 +489,7 @@ mod benchmark_broadcast {
     }
 
     /// upstream: hub/hub_test.go#BenchmarkBroadcast/<config.Inspect()>
+    /// note: correctness only (exact per-session deliveries) with fixed b.N=100 and seeded stream assignment; throughput is measured by the external harness.
     /// Configurations with streams=100, streams-per-session=10.
     #[test]
     fn streams_100_per_session_10() {
@@ -506,6 +497,7 @@ mod benchmark_broadcast {
     }
 
     /// upstream: hub/hub_test.go#BenchmarkBroadcast/<config.Inspect()>
+    /// note: correctness only (exact per-session deliveries) with fixed b.N=100 and seeded stream assignment; throughput is measured by the external harness.
     /// Configurations with streams=10, streams-per-session=3.
     #[test]
     fn streams_10_per_session_3() {
@@ -513,6 +505,7 @@ mod benchmark_broadcast {
     }
 
     /// upstream: hub/hub_test.go#BenchmarkBroadcast/<config.Inspect()>
+    /// note: correctness only (exact per-session deliveries) with fixed b.N=100 and seeded stream assignment; throughput is measured by the external harness.
     /// Configurations with streams=1, streams-per-session=1.
     #[test]
     fn streams_1_per_session_1() {

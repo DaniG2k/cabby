@@ -105,15 +105,16 @@ mod test_streamer {
 ///
 /// The handler closes the first streamer's client when it gets payload "2", so
 /// that entry is never acknowledged and the second streamer must claim it.
-/// Upstream does this through unexported state (`streamer.client.Close()`,
-/// `streamer.reconnectAttempt`, `streamer.initClient()`), so the Go run is
-/// `not_observable`. Each streamer connects as its own ACL user so consumers can
-/// be counted per streamer.
+/// Each streamer connects as its own ACL user so consumers can be counted per
+/// streamer.
+/// note: upstream closes the unexported `streamer.client` and sets `reconnectAttempt = MaxReconnectAttempts + 1`; here the handler calls the exported `Client().Close()` and streamer 1's config has `MaxReconnectAttempts = 0`, which makes `maybeReconnect` give up the same way. Upstream's `initClient()` before waiting is implied by the reader starting.
 #[test]
 fn test_streamer_acks_claims() {
     const BLOCK_MS: i64 = 100;
 
-    let (mut scope, stream, rconfig) = setup();
+    let (mut scope, stream, mut rconfig) = setup();
+    // Upstream: `streamer.reconnectAttempt = rconfig.MaxReconnectAttempts + 1`.
+    rconfig.max_reconnect_attempts = 0;
     let (user2, url2) = scope.extra_user("second");
     let rconfig2 = config_for(url2);
 

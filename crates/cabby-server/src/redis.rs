@@ -160,10 +160,10 @@ impl Streamer {
         pending!("redis::streamer_ready")
     }
 
-    /// Test hook: closes the Redis client and disables reconnection, so entries
-    /// handled afterwards are never acknowledged (upstream tests call
-    /// `streamer.client.Close()` and bump the unexported `reconnectAttempt`).
-    pub fn close_client_without_reconnect(&self) {
+    /// Closes the streamer's Redis client (upstream `streamer.Client().Close()`):
+    /// entries being handled can no longer be acknowledged, and the reader then
+    /// reconnects up to `max_reconnect_attempts` times.
+    pub fn close_client(&self) {
         pending!("redis::streamer_close_client")
     }
 }
