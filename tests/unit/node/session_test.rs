@@ -1,129 +1,65 @@
 //! upstream file: node/session_test.go
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
 
-use cabby_core::common::SessionEnv;
-use cabby_core::encoders::{FrameType, SentFrame};
-use cabby_server::node::Connection;
+use cabby_core::common::{SessionEnv, StringMap};
 use cabby_testkit::reference::common::{get_channel_state_field, get_connection_state_field};
 use cabby_testkit::reference::node::*;
 use serde_json::json;
 
 use super::support::{DEADLINE, map};
 
-fn text(payload: &str) -> SentFrame {
-    SentFrame { frame_type: FrameType::Text, payload: payload.as_bytes().to_vec(), ..Default::default() }
-}
-
 /// upstream: node/session_test.go#TestSendRaceConditions
+/// note: the scaffolding (10 sessions, endless readers, four nested concurrent sendFrame calls each, wg.Wait) runs in the facade on detached threads, bounded by a deadline; on Go it runs as goroutines in the bridge, with sendFrame(TextFrame) as the exported SendJSONTransmission (the same frame with the JSON encoder).
 #[test]
 fn test_send_race_conditions() {
     let node = new_mock_node();
-    let (done_tx, done_rx) = mpsc::channel::<()>();
-    let stop_readers = AtomicBool::new(false);
-    let mut expected = 0;
 
-    std::thread::scope(|sc| {
-        for _ in 1..=10 {
-            let session = new_mock_session("123", &node, vec![]);
-            let conn = session.conn().clone();
-            let session = session.rust().clone();
-
-            // Upstream reads `session.conn` in an endless goroutine; these
-            // readers stop when the sends are done.
-            let stop = &stop_readers;
-            sc.spawn(move || {
-                while !stop.load(Ordering::Acquire) {
-                    let _ = conn.read();
-                }
-            });
-
-            expected += 4;
-            for pair in [["hi!", "bye"], ["bye", "why"]] {
-                let session = session.clone();
-                let done_tx = done_tx.clone();
-                sc.spawn(move || {
-                    std::thread::scope(|inner| {
-                        for payload in pair {
-                            let (session, done_tx) = (session.clone(), done_tx.clone());
-                            inner.spawn(move || {
-                                session.send_frame(text(payload));
-                                done_tx.send(()).expect("done channel");
-                            });
-                        }
-                    });
-                });
-            }
-        }
-
-        // wg.Wait(): every concurrent send completes (bounded here).
-        let result = (0..expected).try_for_each(|i| done_rx.recv_timeout(DEADLINE).map_err(|_| i));
-        stop_readers.store(true, Ordering::Release);
-        if let Err(i) = result {
-            panic!("only {i} of {expected} sends completed within {DEADLINE:?}");
-        }
-    });
+    assert!(send_race_conditions(&node, DEADLINE), "concurrent sends did not complete within {DEADLINE:?}");
 }
 
 /// upstream: node/session_test.go#TestSessionSend
+/// note: upstream sends from a goroutine while reading; here the ten sends come first (the mock connection buffers ten frames, so no send blocks) because Go reads go through the serialized bridge. sendFrame(TextFrame) is the exported SendJSONTransmission on Go.
 #[test]
 fn test_session_send() {
     let node = new_mock_node();
     let session = new_mock_session("123", &node, vec![]);
 
-    std::thread::scope(|sc| {
-        let s = session.rust().clone();
-        sc.spawn(move || {
-            for _ in 1..=10 {
-                s.send_frame(text("bye"));
-            }
-        });
+    for _ in 1..=10 {
+        session.send_text_frame("bye");
+    }
 
-        for _ in 1..=10 {
-            let r = session.conn().read();
-            assert!(r.is_ok(), "{r:?}");
-        }
-    });
+    for _ in 1..=10 {
+        let r = session.read();
+        assert!(r.is_ok(), "{r:?}");
+    }
 }
 
 /// upstream: node/session_test.go#TestSessionDisconnect
+/// note: session.connected.Store(true) is node.Authenticated(s, s.GetIdentifiers()) on Go (also registers the session in the hub); sendFrame(TextFrame) is SendJSONTransmission; the send and Disconnect run before the reads (upstream: in a goroutine) because Go reads go through the serialized bridge.
 #[test]
 fn test_session_disconnect() {
     let node = new_mock_node();
     let session = new_mock_session("123", &node, vec![]);
     // Upstream: session.closed = false; session.connected.Store(true)
-    session.rust().set_connected(true);
+    session.mark_connected(&node);
 
-    std::thread::scope(|sc| {
-        let s = session.rust().clone();
-        sc.spawn(move || {
-            s.send_frame(text("bye"));
-            s.disconnect("test", 1042);
-        });
+    session.send_text_frame("bye");
+    session.disconnect("test", 1042);
 
-        // Message frame
-        let r = session.conn().read();
-        assert!(r.is_ok(), "{r:?}");
+    // Message frame
+    let r = session.read();
+    assert!(r.is_ok(), "{r:?}");
 
-        // Close frame
-        let r = session.conn().read();
-        assert!(r.is_ok(), "{r:?}");
-    });
+    // Close frame
+    let r = session.read();
+    assert!(r.is_ok(), "{r:?}");
 }
 
-/// upstream: node/session_test.go#TestMergeEnv
-#[test]
-fn test_merge_env() {
-    let node = new_mock_node();
-    let session = new_mock_session("123", &node, vec![]);
-
+fn merge_env_fixture() -> (SessionEnv, SessionEnv, SessionEnv) {
     let istate: HashMap<String, _> = [("test_channel".to_owned(), map(&[("foo", "bar"), ("a", "z")]))].into();
     let cstate = map(&[("_s_", "id=42")]);
     let orig_env = SessionEnv { channel_states: Some(istate), connection_state: Some(cstate), ..Default::default() };
-
-    session.set_env(&orig_env);
 
     let istate2: HashMap<String, _> = [
         ("test_channel".to_owned(), map(&[("foo", "baz")])),
@@ -137,16 +73,26 @@ fn test_merge_env() {
 
     let env2 = SessionEnv { connection_state: Some(cstate2), ..Default::default() };
 
-    std::thread::scope(|sc| {
-        sc.spawn(|| session.merge_env(&env));
-        sc.spawn(|| session.merge_env(&env2));
-    });
+    (orig_env, env, env2)
+}
+
+/// upstream: node/session_test.go#TestMergeEnv
+/// note: the two concurrent MergeEnv calls run on threads (Go: goroutines in the bridge). Upstream asserts on origEnv, which the Go session holds by pointer and MergeEnv mutates; the Rust session owns its env, so its snapshot stands for origEnv.
+#[test]
+fn test_merge_env() {
+    let node = new_mock_node();
+    let session = new_mock_session("123", &node, vec![]);
+
+    let (orig_env, env, env2) = merge_env_fixture();
+
+    session.set_env(&orig_env);
+
+    assert!(merge_env_concurrently(&session, &[env, env2], DEADLINE), "MergeEnv calls did not return");
 
     // Upstream: assert.Equal(t, &origEnv, session.GetEnv()). In Go the session
     // keeps the very `origEnv` pointer and MergeEnv mutates it in place, so the
-    // assertions below read `origEnv`. A Rust session owns its env; its
-    // snapshot stands for `origEnv`, and the parts MergeEnv must not touch are
-    // still those of `origEnv`.
+    // comparison is with itself and the assertions below read `origEnv`. The
+    // parts MergeEnv must not touch are still those of `origEnv`.
     let orig_env = session.get_env();
     assert_eq!("", orig_env.url);
     assert_eq!(None, orig_env.headers);
@@ -160,24 +106,48 @@ fn test_merge_env() {
     assert_eq!("time", get_channel_state_field(&orig_env, "another_channel", "wasting"));
 }
 
+/// Upstream's first assertion compares a pointer with itself and the others
+/// read single fields. The merged env is exactly the union: no key lost, none
+/// added, untouched channel keys kept.
+///
+/// regression-for: node/session_test.go#TestMergeEnv
+#[test]
+fn merge_env_produces_the_exact_union() {
+    let node = new_mock_node();
+    let session = new_mock_session("123", &node, vec![]);
+
+    let (orig_env, env, env2) = merge_env_fixture();
+    session.set_env(&orig_env);
+
+    assert!(merge_env_concurrently(&session, &[env, env2], DEADLINE), "MergeEnv calls did not return");
+
+    let merged = session.get_env();
+    assert_eq!(Some(map(&[("_s_", "id=42"), ("red", "end of silence")])), merged.connection_state);
+    let expected: HashMap<String, StringMap> = [
+        ("test_channel".to_owned(), map(&[("foo", "baz"), ("a", "z")])),
+        ("another_channel".to_owned(), map(&[("wasting", "time")])),
+    ]
+    .into();
+    assert_eq!(Some(expected), merged.channel_states);
+}
+
 /// upstream: node/session_test.go#TestCacheEntry
+/// note: on Go, the bare sessions are node.BuildSession; subscriptions.AddChannel* re-apply a cache entry through the exported RestoreFromCache, subscriptions are read from ToCacheEntry's subs, and env merges are called on GetEnv().
 #[test]
 fn test_cache_entry() {
     let session = bare_session();
 
-    session.subscriptions().add_channel("chat_1");
-    session.subscriptions().add_channel("presence_1");
+    session.add_channel("chat_1");
+    session.add_channel("presence_1");
 
-    session.subscriptions().add_channel_stream("chat_1", "a");
-    session.subscriptions().add_channel_stream("chat_1", "b");
-    session.subscriptions().add_channel_stream("presence_1", "z");
+    session.add_channel_stream("chat_1", "a");
+    session.add_channel_stream("chat_1", "b");
+    session.add_channel_stream("presence_1", "z");
 
     // session.env = common.NewSessionEnv("/cable", nil) (bare_session)
     session.set_identifiers("plastilin");
-    session.rust().update_env(&mut |e| {
-        e.merge_connection_state(&map(&[("tenant", "x"), ("locale", "it")]));
-        e.merge_channel_state("chat_1", &map(&[("presence", "on")]));
-    });
+    session.merge_connection_state(&map(&[("tenant", "x"), ("locale", "it")]));
+    session.merge_channel_state("chat_1", &map(&[("presence", "on")]));
 
     session.mark_disconnectable(true);
 
@@ -189,10 +159,10 @@ fn test_cache_entry() {
 
     assert_eq!("plastilin", new_session.get_identifiers());
 
-    let channels = new_session.subscriptions().channels();
+    let channels = new_session.channels();
     assert!(channels.contains(&"chat_1".to_owned()));
     assert!(channels.contains(&"presence_1".to_owned()));
-    let streams = |id| new_session.subscriptions().streams_for(id).unwrap_or_default();
+    let streams = |id| new_session.streams_for(id).unwrap_or_default();
     assert!(streams("chat_1").contains(&"a".to_owned()));
     assert!(streams("chat_1").contains(&"b".to_owned()));
     assert!(streams("presence_1").contains(&"z".to_owned()));
@@ -206,6 +176,7 @@ fn test_cache_entry() {
 }
 
 /// upstream: node/session_test.go#TestCacheEntryEmptySession
+/// note: on Go, the bare sessions are node.BuildSession.
 #[test]
 fn test_cache_entry_empty_session() {
     let session = bare_session();
@@ -218,6 +189,7 @@ fn test_cache_entry_empty_session() {
 }
 
 /// upstream: node/session_test.go#TestMarkDisconnectable
+/// note: on Go, the bare session is node.BuildSession.
 #[test]
 fn test_mark_disconnectable() {
     let session = bare_session();
@@ -271,6 +243,7 @@ mod test_send_max_pending_size {
 
     /// upstream: node/session_test.go#TestSend__maxPendingSize/Disconnect_when_queue_size_at_least_maxPendingSize
     /// upstream: node/session_test.go#TestSend__maxPendingSize
+    /// note: session.wmu.Lock() plus a 100ms sleep is a gated mock connection (the writer blocks writing the first frame) and a wait for that write; maxPendingSize.Store(n) after creation is WithMaxPendingSize(n) at creation.
     #[test]
     fn disconnect_when_queue_size_at_least_max_pending_size() {
         let node = new_mock_node();
@@ -285,6 +258,7 @@ mod test_send_max_pending_size {
 
     /// upstream: node/session_test.go#TestSend__maxPendingSize/Allow_when_queue_size_less_than_maxPendingSize
     /// upstream: node/session_test.go#TestSend__maxPendingSize
+    /// note: session.wmu.Lock() plus a 100ms sleep is a gated mock connection and a wait for the held write; maxPendingSize.Store(n) is WithMaxPendingSize(n) at creation.
     #[test]
     fn allow_when_queue_size_less_than_max_pending_size() {
         let node = new_mock_node();
@@ -299,6 +273,7 @@ mod test_send_max_pending_size {
 
     /// upstream: node/session_test.go#TestSend__maxPendingSize/Allow_when_maxPendingSize_is_0_(unlimited)
     /// upstream: node/session_test.go#TestSend__maxPendingSize
+    /// note: session.wmu.Lock() plus a 100ms sleep is a gated mock connection and a wait for the held write; maxPendingSize.Store(n) is WithMaxPendingSize(n) at creation.
     #[test]
     fn allow_when_max_pending_size_is_0_unlimited() {
         let node = new_mock_node();
