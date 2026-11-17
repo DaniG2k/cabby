@@ -101,3 +101,7 @@ path = "unit/pusher/main.rs"
 [[test]]
 name = "sse"
 path = "unit/sse/main.rs"
+
+[[test]]
+name = "node"
+path = "unit/node/main.rs"
