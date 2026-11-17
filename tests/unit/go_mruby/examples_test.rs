@@ -10,6 +10,7 @@ use std::rc::Rc;
 use cabby_testkit::reference::mruby::*;
 
 /// upstream: vendorlib/go-mruby/examples_test.go#Example_CustomFunction
+/// note: runtime adaptation (Go example // Output: check -> string comparison): the printed line "Result: 42\n" is built with format! and compared.
 #[test]
 fn example_custom_function() {
     let mrb = Mrb::new();
@@ -36,6 +37,7 @@ fn example_custom_function() {
 }
 
 /// upstream: vendorlib/go-mruby/examples_test.go#Example_Decode
+/// note: runtime adaptation (Go fmt %v rendering -> structural equality): Go prints the decoded interface{} as "Result: map[foo:bar]", which is Go map formatting, not mruby behavior; the Rust invariant is that the value decoded inside the callback equals the map {"foo" => "bar"}.
 ///
 /// Runtime adaptation (Go `fmt` rendering -> structural equality): Go prints the
 /// decoded `interface{}` with `%v`, giving `Result: map[foo:bar]`. That text is
@@ -75,6 +77,7 @@ fn example_decode() {
 }
 
 /// upstream: vendorlib/go-mruby/examples_test.go#Example_SimulateFiles
+/// note: runtime adaptation (Go example // Output: check -> string comparison): the printed line "Result: 42\n" is built with format! and compared.
 #[test]
 fn example_simulate_files() {
     let mrb = Mrb::new();

@@ -211,6 +211,9 @@ impl GoFallible {
     /// non-exception error is a harness error for the ops that use this.
     fn result(self) -> Result<Option<MrbValue>, Exception> {
         if let Some(e) = self.exc {
+            // Go returns a nil value with every exception (TestMrbStackedException:
+            // "result was not cleared"); `Err` drops the value, so check it here.
+            assert!(self.value.is_none(), "go-mruby returned a value together with an exception");
             return Err(e.into());
         }
         if let Some(e) = self.error {
@@ -500,6 +503,15 @@ impl Mrb {
             }
             Mrb::Go(h) => go_value("mruby.Mrb.Yield", json!({"h": h, "block": block.to_go(), "args": go_values(args)})),
         }
+    }
+}
+
+/// Runs `f` in a bridge process of its own on Go (no other VM in that process);
+/// directly on Rust.
+pub fn isolated<R>(f: impl FnOnce() -> R) -> R {
+    match backend() {
+        Backend::Rust => f(),
+        Backend::Go => bridge::isolated(f),
     }
 }
 
