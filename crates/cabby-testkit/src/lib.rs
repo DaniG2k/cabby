@@ -56,3 +56,6 @@ pub mod text_ws;
 pub mod anyt_app;
 pub mod publish;
 pub mod wsdirector;
+
+// added for ds (durable streams)
+pub mod ds_client;
