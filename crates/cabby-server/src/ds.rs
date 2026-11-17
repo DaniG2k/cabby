@@ -84,15 +84,50 @@ pub struct Config {
     pub allowed_origins: String,
 }
 
+cabby_core::toml_section!(Config, "ds.Config" {
+    "enabled" => enabled,
+    "path" => path,
+    "skip_auth" => skip_auth,
+    "poll_interval" => poll_interval,
+    "sse_ttl" => sse_ttl,
+    "sse_ping_interval" => sse_ping_interval,
+});
+
 impl Config {
     /// Upstream `NewConfig()`.
     pub fn new() -> Self {
-        pending!("ds::new_config")
+        Self { enabled: false, path: "/ds".to_owned(), poll_interval: 10, sse_ttl: 60, ..Default::default() }
     }
 
     /// Renders the settings as an annotated TOML section body (upstream `ToToml`).
     pub fn to_toml(&self) -> String {
-        pending!("ds::config_to_toml")
+        let ping = crate::sse::DEFAULT_PING_INTERVAL;
+        let mut out = String::new();
+        out.push_str("# Enable Durable Streams support\n");
+        out.push_str(if self.enabled { "enabled = true\n" } else { "# enabled = true\n" });
+        out.push_str("# Skip authentication (only authorize per-stream access)\n");
+        out.push_str(if self.skip_auth { "skip_auth = true\n" } else { "# skip_auth = true\n" });
+        out.push_str("# Durable Streams mount path\n");
+        out.push_str(&format!("path = \"{}\"\n", self.path));
+        out.push_str("# Poll interval for live=poll mode (in seconds)\n");
+        out.push_str(&format!("poll_interval = {}\n", self.poll_interval));
+        out.push_str("# Max time to live for a SSE connection (in seconds)\n");
+        out.push_str(&format!("sse_ttl = {}\n", self.sse_ttl));
+        out.push_str("# Keepalive interval for comment-based pings in live=sse mode (in seconds)\n");
+        out.push_str(&format!("# Defaults to the global ping_interval (if changed) or {ping}\n"));
+        if self.sse_ping_interval > 0 {
+            out.push_str(&format!("sse_ping_interval = {}\n", self.sse_ping_interval));
+        } else {
+            out.push_str(&format!("# sse_ping_interval = {ping}\n"));
+        }
+        out.push('\n');
+        out
+    }
+
+    /// Decodes TOML over the current values (upstream `toml.Decode(s, &conf)`).
+    pub fn decode_toml(&mut self, toml: &str) -> Result<(), DsError> {
+        cabby_core::toml_config::decode(self, toml).map_err(|e| DsError(e.0))?;
+        Ok(())
     }
 }
 

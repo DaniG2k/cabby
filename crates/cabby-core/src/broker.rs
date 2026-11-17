@@ -55,19 +55,52 @@ pub struct Config {
     pub presence_ttl: i64,
 }
 
+crate::toml_section!(Config, "broker.Config" {
+    "adapter" => adapter,
+    "history_ttl" => history_ttl,
+    "history_limit" => history_limit,
+    "sessions_ttl" => sessions_ttl,
+    "presence_ttl" => presence_ttl,
+});
+
 impl Config {
     /// Upstream `NewConfig()`.
     pub fn new() -> Self {
-        pending!("broker::new_config")
+        Self {
+            adapter: String::new(),
+            // 5 minutes
+            history_ttl: 5 * 60,
+            history_limit: 100,
+            // 5 minutes
+            sessions_ttl: 5 * 60,
+            presence_ttl: 15,
+        }
     }
 
     pub fn to_toml(&self) -> String {
-        pending!("broker::config_to_toml")
+        let mut out = String::new();
+        out.push_str("# Broker backend adapter\n");
+        if self.adapter.is_empty() {
+            out.push_str("# adapter = \"memory\"\n");
+        } else {
+            out.push_str(&format!("adapter = \"{}\"\n", self.adapter));
+        }
+        out.push_str("# For how long to keep streams history (seconds)\n");
+        out.push_str(&format!("history_ttl = {}\n", self.history_ttl));
+        out.push_str("# Max number of messages to keep in a stream history\n");
+        out.push_str(&format!("history_limit = {}\n", self.history_limit));
+        out.push_str("# For how long to store sessions state for resumeability (seconds)\n");
+        out.push_str(&format!("sessions_ttl = {}\n", self.sessions_ttl));
+        out.push_str("# For how long to keep presence information after session disconnect (seconds)\n");
+        out.push_str(&format!("presence_ttl = {}\n", self.presence_ttl));
+        out.push('\n');
+        out
     }
 
     /// Decodes TOML over the current values (upstream `toml.Decode(s, &conf)`).
-    pub fn merge_toml(&mut self, _toml: &str) -> Result<(), ConfigError> {
-        pending!("broker::config_merge_toml")
+    pub fn merge_toml(&mut self, toml: &str) -> Result<(), ConfigError> {
+        crate::toml_config::decode(self, toml).map_err(|e| ConfigError { message: e.0 })?;
+        Ok(())
     }
 }
 
@@ -306,20 +339,7 @@ impl Broker for Memory {
 }
 
 /// NATS connection settings (upstream `nats.NATSConfig`, used by the NATS broker).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct NatsConfig {
-    /// Comma-separated server URLs.
-    pub servers: String,
-    pub dont_randomize_servers: bool,
-    pub max_reconnect_attempts: i64,
-}
-
-impl NatsConfig {
-    /// Upstream `nats.NewNATSConfig()`.
-    pub fn new() -> Self {
-        pending!("broker::new_nats_config")
-    }
-}
+pub use crate::nats::NatsConfig;
 
 /// Broker backed by NATS JetStream (upstream `broker.NATS`). History and
 /// session TTLs are enforced by the NATS server, on its own clock.
