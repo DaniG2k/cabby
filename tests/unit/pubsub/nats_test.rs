@@ -108,6 +108,7 @@ mod test_nats_common {
     }
 
     /// upstream: pubsub/nats_test.go#TestNATSCommon/Subscribe_-_Broadcast_-_Unsubscribe_-_Broadcast
+    /// note: replays the subscriptions of the earlier shared subtests first, so "a" is subscribed twice before one unsubscribe (Subscribe is idempotent).
     /// upstream: pubsub/nats_test.go#TestNATSCommon
     #[test]
     fn subscribe_broadcast_unsubscribe_broadcast() {
@@ -116,6 +117,7 @@ mod test_nats_common {
 }
 
 /// upstream: pubsub/nats_test.go#TestNATSReconnect
+/// note: private nats-server process instead of the embedded enats.Service (SPEC §3); readiness after the restart is the re-established subscription instead of conn.Status().
 ///
 /// The server is private to this test (it is restarted), so upstream's subject
 /// names are kept. Upstream waits for `conn.Status() == CONNECTED` after the
