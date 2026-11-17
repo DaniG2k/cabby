@@ -5,10 +5,11 @@
 //! version pinned by the reference `go.mod` into `target/test-services/`.
 //! Every instance gets its own port and storage directory.
 
-use std::net::SocketAddr;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
@@ -17,6 +18,67 @@ use crate::process::Supervised;
 use crate::workspace_root;
 
 const START_DEADLINE: Duration = Duration::from_secs(20);
+/// Upstream `service.WaitJetStreamReady(5)`.
+const JETSTREAM_DEADLINE: Duration = Duration::from_secs(5);
+const PROBE_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Waits until JetStream answers `$JS.API.INFO` with account info (upstream
+/// `enats.Service.WaitJetStreamReady`): accepting TCP connections does not mean
+/// JetStream has finished starting. Speaks the NATS text protocol directly.
+fn wait_jetstream_ready(addr: SocketAddr, deadline: Duration) -> Result<()> {
+    let until = Instant::now() + deadline;
+    let mut last = String::from("no attempt");
+    while Instant::now() < until {
+        match jetstream_info(addr) {
+            Ok(true) => return Ok(()),
+            Ok(false) => last = "JetStream not ready".into(),
+            Err(e) => last = format!("{e:#}"),
+        }
+        std::thread::sleep(PROBE_INTERVAL);
+    }
+    bail!("JetStream not ready within {deadline:?}: {last}")
+}
+
+/// One `$JS.API.INFO` request: `Ok(true)` for an account info response.
+fn jetstream_info(addr: SocketAddr) -> Result<bool> {
+    const INBOX: &str = "_CABBY_JS_PROBE";
+    let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
+    stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(1)))?;
+    let mut writer = stream.try_clone()?;
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    reader.read_line(&mut line)?; // INFO {...}
+    // `no_responders` makes an absent JetStream answer with a 503 status (HMSG).
+    write!(
+        writer,
+        "CONNECT {{\"verbose\":false,\"pedantic\":false,\"headers\":true,\"no_responders\":true}}\r\n\
+         SUB {INBOX} 1\r\nPUB $JS.API.INFO {INBOX} 0\r\n\r\nPING\r\n"
+    )?;
+    loop {
+        line.clear();
+        if reader.read_line(&mut line)? == 0 {
+            bail!("connection closed");
+        }
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        match fields.first().copied() {
+            Some("PING") => write!(writer, "PONG\r\n")?,
+            Some("PONG") | Some("+OK") | Some("INFO") => {}
+            Some("-ERR") => bail!("server error: {}", line.trim()),
+            Some("HMSG") => return Ok(false), // no responders yet
+            Some("MSG") => {
+                let len: usize = fields.last().and_then(|n| n.parse().ok()).context("MSG size")?;
+                let mut payload = vec![0; len + 2];
+                reader.read_exact(&mut payload)?;
+                let text = String::from_utf8_lossy(&payload[..len]);
+                return Ok(
+                    text.contains("io.nats.jetstream.api.v1.account_info_response") && !text.contains("\"error\"")
+                );
+            }
+            _ => bail!("unexpected protocol line {:?}", line.trim()),
+        }
+    }
+}
 
 fn server_binary() -> Result<PathBuf> {
     if let Ok(p) = std::env::var("CABBY_NATS_SERVER") {
@@ -60,7 +122,10 @@ impl NatsServer {
         let mut cmd = Command::new(bin);
         cmd.args(["-js", "-a", "127.0.0.1", "-p", &port.to_string(), "-sd"]).arg(&store_dir);
         let mut process = Supervised::spawn("nats-server", cmd)?;
-        process.wait_tcp(SocketAddr::from(([127, 0, 0, 1], port)), START_DEADLINE)?;
+        let addr = SocketAddr::from(([127, 0, 0, 1], port));
+        process.wait_tcp(addr, START_DEADLINE)?;
+        wait_jetstream_ready(addr, JETSTREAM_DEADLINE)
+            .with_context(|| format!("nats-server output:\n{}", process.output()))?;
         Ok(Self { process, port, store_dir })
     }
 
