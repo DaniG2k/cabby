@@ -209,17 +209,6 @@ pub struct HistoryRequest {
     pub streams: HashMap<String, HistoryPosition>,
 }
 
-/// An incoming client message (upstream `common.Message`).
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Message {
-    pub command: String,
-    pub identifier: String,
-    /// Arbitrary JSON (`None`: absent).
-    pub data: Option<serde_json::Value>,
-    pub history: HistoryRequest,
-    pub presence: Option<PresenceEvent>,
-}
-
 /// A JSON decoding failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
@@ -235,7 +224,7 @@ impl Message {
 /// An outgoing client message (upstream `common.Reply`).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Reply {
-    pub r#type: String,
+    pub kind: String,
     pub identifier: String,
     /// Arbitrary JSON (`None`: absent).
     pub message: Option<serde_json::Value>,
@@ -327,4 +316,103 @@ impl crate::logger::LogValuer for CommandResult {
     fn log_value(&self) -> crate::logger::LogValue {
         crate::pending!("common::command_result_log_value")
     }
+}
+
+// --- added for pusher/sse ---
+// TODO(merge): `EncodedMessage` here is a data enum; `encoders::EncodedMessage` is the
+// upstream interface. Unify when encoders are implemented.
+//
+// Mirrors of upstream `common` (and the `encoders.EncodedMessage` / `ws.SentFrame`
+// data shapes) needed by the pusher and sse translations. Go `interface{}` payloads
+// are `serde_json::Value`; nil is `None`.
+
+/// Reply message types (upstream `common.WelcomeType` etc.).
+pub const WELCOME_TYPE: &str = "welcome";
+pub const PING_TYPE: &str = "ping";
+pub const PONG_TYPE: &str = "pong";
+pub const DISCONNECT_TYPE: &str = "disconnect";
+pub const CONFIRMED_TYPE: &str = "confirm_subscription";
+pub const REJECTED_TYPE: &str = "reject_subscription";
+pub const PRESENCE_TYPE: &str = "presence";
+
+/// Disconnect reason sent on shutdown (upstream `common.SERVER_RESTART_REASON`).
+pub const SERVER_RESTART_REASON: &str = "server_restart";
+
+/// Server ping (upstream `common.PingMessage`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PingMessage {
+    /// Go `Type`.
+    pub kind: String,
+    pub message: Option<serde_json::Value>,
+}
+
+/// Server disconnect notice (upstream `common.DisconnectMessage`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DisconnectMessage {
+    /// Go `Type`.
+    pub kind: String,
+    pub reason: String,
+    pub reconnect: bool,
+}
+
+/// A message an encoder can serialize (upstream `encoders.EncodedMessage`
+/// implementors: `*common.Reply`, `*common.PingMessage`, `*common.DisconnectMessage`).
+#[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)] // a data mirror; boxing would only add noise at call sites
+pub enum EncodedMessage {
+    Reply(Reply),
+    Ping(PingMessage),
+    Disconnect(DisconnectMessage),
+}
+
+pub use crate::encoders::{FrameType, SentFrame};
+
+/// Go `Message.Data interface{}`: decoded JSON, or a typed payload attached by a
+/// protocol decoder (Go stores a struct pointer, e.g. `*pusher.PusherSubscriptionData`).
+#[derive(Clone)]
+pub enum MessageData {
+    Json(serde_json::Value),
+    Typed(std::sync::Arc<dyn std::any::Any + Send + Sync>),
+}
+
+impl MessageData {
+    /// The typed payload if it is a `T` (Go type assertion `msg.Data.(*T)`).
+    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+        match self {
+            MessageData::Typed(v) => v.downcast_ref::<T>(),
+            MessageData::Json(_) => None,
+        }
+    }
+}
+
+impl PartialEq for MessageData {
+    /// JSON payloads compare by value; typed payloads only when they are the same
+    /// allocation (Go compares interface pointers the same way).
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (MessageData::Json(a), MessageData::Json(b)) => a == b,
+            (MessageData::Typed(a), MessageData::Typed(b)) => std::sync::Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+}
+
+impl std::fmt::Debug for MessageData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MessageData::Json(v) => f.debug_tuple("Json").field(v).finish(),
+            MessageData::Typed(_) => f.write_str("Typed(..)"),
+        }
+    }
+}
+
+/// Client command (upstream `common.Message`). `data` mirrors Go's `interface{}`:
+/// decoded JSON, or a typed payload attached by a protocol decoder.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Message {
+    pub command: String,
+    pub identifier: String,
+    pub data: Option<MessageData>,
+    pub history: HistoryRequest,
+    pub presence: Option<PresenceEvent>,
 }

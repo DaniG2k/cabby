@@ -9,10 +9,12 @@ license.workspace = true
 autotests = false
 
 [dependencies]
+base64 = "0.22.1"
 cabby-core.workspace = true
 cabby-server.workspace = true
 cabby-testkit.workspace = true
 serde_json.workspace = true
+tokio-util.workspace = true
 
 [lints]
 workspace = true
@@ -91,3 +93,11 @@ path = "unit/metrics/main.rs"
 [[test]]
 name = "telemetry"
 path = "unit/telemetry/main.rs"
+
+[[test]]
+name = "pusher"
+path = "unit/pusher/main.rs"
+
+[[test]]
+name = "sse"
+path = "unit/sse/main.rs"
