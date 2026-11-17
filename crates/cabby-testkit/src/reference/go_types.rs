@@ -173,14 +173,20 @@ pub(crate) fn connect_result_from_go(v: &Value) -> ConnectResult {
     }
 }
 
+/// An empty list as Go's nil slice: upstream fixtures leave unset result lists
+/// nil, and the node tests `!= nil` on them (e.g. to mark state dirty).
+fn nil_if_empty<T: serde::Serialize>(v: &[T]) -> Value {
+    if v.is_empty() { Value::Null } else { json!(v) }
+}
+
 pub(crate) fn command_result_to_go(r: &CommandResult) -> Value {
     json!({
         "StopAllStreams": r.stop_all_streams,
         "Disconnect": r.disconnect,
-        "Streams": r.streams,
-        "StoppedStreams": r.stopped_streams,
-        "Transmissions": r.transmissions,
-        "Broadcasts": r.broadcasts.iter().map(stream_message_to_go).collect::<Vec<_>>(),
+        "Streams": nil_if_empty(&r.streams),
+        "StoppedStreams": nil_if_empty(&r.stopped_streams),
+        "Transmissions": nil_if_empty(&r.transmissions),
+        "Broadcasts": nil_if_empty(&r.broadcasts.iter().map(stream_message_to_go).collect::<Vec<_>>()),
         "CState": r.cstate,
         "IState": r.istate,
         "Presence": r.presence.as_ref().map(presence_event_to_go),
