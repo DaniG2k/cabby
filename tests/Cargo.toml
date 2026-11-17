@@ -79,3 +79,15 @@ path = "unit/cli/main.rs"
 [[test]]
 name = "config"
 path = "unit/config/main.rs"
+
+[[test]]
+name = "rpc"
+path = "unit/rpc/main.rs"
+
+[[test]]
+name = "metrics"
+path = "unit/metrics/main.rs"
+
+[[test]]
+name = "telemetry"
+path = "unit/telemetry/main.rs"

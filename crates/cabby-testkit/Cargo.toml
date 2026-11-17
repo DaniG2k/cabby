@@ -1,6 +1,6 @@
 [package]
 name = "cabby-testkit"
-description = "Test support for Cabby: backend selection, Go reference bridge, process supervision"
+description = "Test support for Cabby: backend selection, Go reference bridge, process supervision, fake RPC services"
 edition.workspace = true
 rust-version.workspace = true
 version.workspace = true
@@ -15,6 +15,16 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tungstenite.workspace = true
+bytes.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+prost.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+tonic.workspace = true
 
 [lints]
 workspace = true
