@@ -35,14 +35,18 @@ From `cargo xtask report` (source of truth: [`compat/test-map.json`](compat/test
 | | Count |
 |---|---:|
 | Upstream cases inventoried (Go unit, Benchi, go-mruby, features, AnyT) | 923 |
-| Translated to Rust | 451 |
-| Translated cases verified against Go | 418 |
-| Translated cases the Go reference cannot expose (`not_observable`, tested against Rust only) | 29 |
+| Translated to Rust | 821 |
+| Independently reviewed | 660 |
+| Translated cases verified against Go | 739 |
+| Translated cases the Go reference cannot expose (`not_observable`, tested against Rust only) | 82 |
 | Passing against Cabby | 1 (an upstream test with an empty body; no server behavior yet) |
 
 Every case is listed individually, including skipped and runtime-specific ones.
 Behavioral differences from Go, if any, are recorded in
-[`compat/deviations.md`](compat/deviations.md).
+[`compat/deviations.md`](compat/deviations.md), including fixes Cabby proposes for open AnyCable
+issues: [#275](https://github.com/anycable/anycable/issues/275) (silent loss of Redis pub/sub
+broadcasts, reproduced deterministically against Go), [#263](https://github.com/anycable/anycable/issues/263)
+and [#265](https://github.com/anycable/anycable/issues/265).
 
 ## Layout
 
