@@ -77,6 +77,9 @@ func register(name string, f op) {
 type session struct {
 	id uint64
 	in chan request
+	// fault is a harness error raised inside a callback (bad Return, ended
+	// session). The op that ran the Ruby code reports it instead of its result.
+	fault error
 }
 
 func (s *session) run() {
@@ -94,6 +97,11 @@ func (s *session) serve(req request) {
 		resp.Err = err.Error()
 	} else {
 		resp.Ok = res
+	}
+	if s.fault != nil {
+		resp.Ok = nil
+		resp.Err = "callback fault: " + s.fault.Error()
+		s.fault = nil
 	}
 	send(resp)
 }
@@ -148,7 +156,7 @@ func get[T any](h uint64) (T, error) {
 	t, isT := o.(T)
 	if !ok || !isT {
 		var zero T
-		return zero, fmt.Errorf("handle %d is not a %T", h, zero)
+		return zero, fmt.Errorf("handle %d is not a %s", h, reflect.TypeOf((*T)(nil)).Elem())
 	}
 	return t, nil
 }
