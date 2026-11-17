@@ -69,9 +69,11 @@ struct AstSkip {
 
 fn go_ast() -> Result<Vec<AstFile>> {
     let root = root();
+    // Canonicalized: the AST walker does not descend into a symlinked root.
+    let reference = root.join("compat/reference").canonicalize().context("resolving compat/reference")?;
     let out = Command::new("go")
         .args(["run", ".", "-root"])
-        .arg(root.join("compat/reference"))
+        .arg(&reference)
         .arg(".")
         .current_dir(root.join("compat/reference-adapters/inventory"))
         .output()

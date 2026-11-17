@@ -160,6 +160,7 @@ version = "0.0.0"
 dependencies = [
  "cabby-core",
  "cabby-testkit",
+ "serde",
  "serde_json",
 ]
 
@@ -181,6 +182,7 @@ name = "cabby-server"
 version = "0.0.0"
 dependencies = [
  "cabby-core",
+ "serde",
 ]
 
 [[package]]
