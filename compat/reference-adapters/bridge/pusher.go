@@ -104,6 +104,7 @@ type apiResponse struct {
 	Body       string              `json:"body"`
 	BodyRead   int                 `json:"body_read"`
 	Broadcasts []string            `json:"broadcasts"`
+	Unexpected []string            `json:"unexpected,omitempty"`
 }
 
 // countingReader reports how many request body bytes the handler consumed.
@@ -219,19 +220,24 @@ func init() {
 	// RestAPI.Handler serving one request (as http.NewRequest builds it) with a
 	// mocks.Handler accepting any broadcast, and either an expectation-free
 	// mocks.Broker or a started memory broker with the given presence records.
-	register("pusher.RestAPI.Handler", func(raw json.RawMessage) (interface{}, error) {
+	register("pusher.RestAPI.Handler", func(raw json.RawMessage) (out interface{}, err error) {
 		var a struct {
 			Config         pusher.Config
 			Broker         string // mock | memory
 			Presence       []presenceAdd
 			Method, Target string
 			Body           string
+			// AcceptBroadcasts: On("HandleBroadcast", mock.Anything).Return(nil);
+			// otherwise &mocks.Handler{} without expectations (any call is forbidden).
+			AcceptBroadcasts bool
 		}
 		if err := decodeJSON(raw, &a); err != nil {
 			return nil, err
 		}
 		handler := &mocks.Handler{}
-		handler.On("HandleBroadcast", mock.Anything).Return(nil)
+		if a.AcceptBroadcasts {
+			handler.On("HandleBroadcast", mock.Anything).Return(nil)
+		}
 		var b broker.Broker
 		switch a.Broker {
 		case "mock":
@@ -259,8 +265,17 @@ func init() {
 			return nil, err
 		}
 		rr := httptest.NewRecorder()
-		http.HandlerFunc(api.Handler).ServeHTTP(rr, req)
-		res := apiResponse{Status: rr.Code, Headers: rr.Header(), Body: rr.Body.String(), BodyRead: body.n, Broadcasts: []string{}}
+		var unexpected []string
+		func() {
+			// testify panics on a call without expectation: record it as forbidden.
+			defer func() {
+				if r := recover(); r != nil {
+					unexpected = append(unexpected, fmt.Sprint(r))
+				}
+			}()
+			http.HandlerFunc(api.Handler).ServeHTTP(rr, req)
+		}()
+		res := apiResponse{Status: rr.Code, Headers: rr.Header(), Body: rr.Body.String(), BodyRead: body.n, Broadcasts: []string{}, Unexpected: unexpected}
 		for _, c := range handler.Calls {
 			if c.Method == "HandleBroadcast" {
 				res.Broadcasts = append(res.Broadcasts, string(c.Arguments.Get(0).([]byte)))
