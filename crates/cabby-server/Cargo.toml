@@ -12,6 +12,11 @@ path = "src/main.rs"
 
 [dependencies]
 cabby-core.workspace = true
+http.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tonic.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true
