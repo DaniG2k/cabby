@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Starts the external services translated tests require (pinned images from
+# compat/upstream.lock) on loopback ports and prints the env to export:
+#   eval "$(compat/scripts/services.sh start)"   /   compat/scripts/services.sh stop
+# Tests never skip when a service is missing; they fail with a clear message.
+set -euo pipefail
+redis=redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+nats=nats@sha256:558394a23dd3c36f2d3a64b51865fd09908010e80a542cea5e75c2af543ed62a
+case "${1:-start}" in
+  start)
+    docker rm -f cabby-svc-redis cabby-svc-nats >/dev/null 2>&1 || true
+    docker run -d --rm --name cabby-svc-redis -p 127.0.0.1:0:6379 "$redis" >/dev/null
+    docker run -d --rm --name cabby-svc-nats -p 127.0.0.1:0:4222 -p 127.0.0.1:0:8222 "$nats" -js -m 8222 >/dev/null
+    rp=$(docker port cabby-svc-redis 6379/tcp | head -1 | cut -d: -f2)
+    np=$(docker port cabby-svc-nats 4222/tcp | head -1 | cut -d: -f2)
+    mp=$(docker port cabby-svc-nats 8222/tcp | head -1 | cut -d: -f2)
+    for _ in $(seq 1 100); do docker exec cabby-svc-redis redis-cli ping 2>/dev/null | grep -q PONG && break; sleep 0.1; done
+    for _ in $(seq 1 100); do curl -sf "http://127.0.0.1:$mp/healthz" >/dev/null && break; sleep 0.1; done
+    echo "export CABBY_REDIS_URL=redis://127.0.0.1:$rp/ CABBY_NATS_URL=nats://127.0.0.1:$np CABBY_NATS_MONITOR_URL=http://127.0.0.1:$mp"
+    ;;
+  stop) docker rm -f cabby-svc-redis cabby-svc-nats >/dev/null 2>&1 || true ;;
+  *) echo "usage: $0 start|stop" >&2; exit 2 ;;
+esac

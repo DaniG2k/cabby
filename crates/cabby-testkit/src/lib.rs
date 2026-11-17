@@ -10,6 +10,7 @@
 //!   translated test calls these, so one test body verifies both implementations.
 //! * [`process`]: supervised external processes (SUT binaries, fake services).
 //! * [`ports`]: isolated local ports.
+//! * [`services`]: required external Redis/NATS services with per-test scopes.
 //! * [`sut`]: the server under test as an external process.
 //! * [`fake_rpc`]: scriptable fake AnyCable RPC application (gRPC and HTTP RPC).
 //! * [`fake_http`], [`udp`]: recording HTTP/UDP endpoints (telemetry, StatsD).
@@ -29,6 +30,7 @@ pub mod process;
 pub mod reference;
 pub mod rpc_doubles;
 pub mod runtime;
+pub mod services;
 pub mod sut;
 pub mod sync;
 pub mod udp;

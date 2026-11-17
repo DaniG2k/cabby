@@ -127,3 +127,27 @@ path = "unit/go_mruby/main.rs"
 [[test]]
 name = "mrb"
 path = "unit/mrb/main.rs"
+
+[[test]]
+name = "hub"
+path = "unit/hub/main.rs"
+
+[[test]]
+name = "pubsub"
+path = "unit/pubsub/main.rs"
+
+[[test]]
+name = "redis"
+path = "unit/redis/main.rs"
+
+[[test]]
+name = "broadcast"
+path = "unit/broadcast/main.rs"
+
+[[test]]
+name = "nats"
+path = "unit/nats/main.rs"
+
+[[test]]
+name = "enats"
+path = "unit/enats/main.rs"
