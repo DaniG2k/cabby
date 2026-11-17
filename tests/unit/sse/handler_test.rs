@@ -1,28 +1,26 @@
 //! upstream file: sse/handler_test.go
 //!
 //! Upstream shares one node and `mocks.Controller` across subtests (expectations are
-//! keyed by session ID); each Rust test builds its own. Requests carry a context
-//! with a 2s timeout: every read below is bounded by the same 2s deadline, and the
-//! request context is cancelled when the test ends (`defer cancel()`).
+//! keyed by session ID); each Rust test builds its own through the facade, which
+//! runs the upstream harness in the bridge against Go. Requests carry a context
+//! with a 2s timeout (`context.WithTimeout`): every read is bounded by the same 2s
+//! deadline and the request context is cancelled when it expires or the test ends.
 //!
 //! Streaming subtests read events from a `streamingWriter`, which embeds a *copy*
 //! of the `httptest.ResponseRecorder` `w`. Their final `require.Equal(200, w.Code)`
 //! therefore inspects the untouched original recorder and always passes; it is kept
-//! as written and `streaming_response_status_is_ok` asserts the intended status.
+//! as written (`original_code`), and `streaming_response_status_is_ok` asserts the
+//! intended status for one of them.
 //!
-//! Requests rejected before authentication are served through the Go bridge; the
-//! rest need the in-process node and RPC mock (not observable through the bridge,
-//! covered externally by tests/conformance/sse.rs).
+//! `mocks.Controller` calls without an expectation are forbidden: they are recorded
+//! and the fixture asserts there were none.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cabby_core::common::{CommandResult, ConnectResult, Status, StreamMessage};
 use cabby_server::sse::Config;
-use cabby_testkit::reference::sse::{Handler, Node, Recorder, TestRequest, build_node, sse_handler};
-use tokio_util::sync::CancellationToken;
-
-use crate::support::MockController;
+use cabby_testkit::reference::sse::{Handler, MockController, Node, TestRequest, build_node, new_config, sse_handler};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -36,21 +34,22 @@ struct Fixture {
 /// `TestSSEHandler` setup: `buildNode()`, a disconnect queue with rate 1, the node
 /// started, and the handler with a never-cancelled shutdown context.
 fn setup() -> Fixture {
-    let controller = Arc::new(MockController::default());
-    let node = build_node(controller.clone());
-    let conf = Config::new();
+    let (node, controller) = build_node();
+    let conf = new_config();
 
     node.start();
 
-    let handler = sse_handler(&node, &CancellationToken::new(), &conf);
+    let handler = sse_handler(&node, &conf);
 
     Fixture { node, controller, conf, handler }
 }
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        // defer appNode.Shutdown(...)
         if !std::thread::panicking() {
+            // testify would have failed the test on any call without expectation.
+            assert_eq!(Vec::<String>::new(), self.controller.unexpected_calls(), "forbidden controller calls");
+            // defer appNode.Shutdown(...)
             self.node.shutdown();
         }
     }
@@ -100,7 +99,7 @@ mod test_sse_handler {
         let f = setup();
         let req = TestRequest::new("GET", "/");
 
-        let w = f.handler.serve(&req);
+        let w = f.handler.serve(&req, REQUEST_TIMEOUT);
 
         assert_eq!(Some("text/event-stream; charset=utf-8"), w.header("Content-Type"));
         assert_eq!(Some("private, no-cache, no-store, must-revalidate, max-age=0"), w.header("Cache-Control"));
@@ -114,12 +113,12 @@ mod test_sse_handler {
         let f = setup();
         let req = TestRequest::new("GET", "/").header("Origin", "http://www.example.com");
 
-        let mut cors_conf = Config::new();
+        let mut cors_conf = new_config();
         cors_conf.allowed_origins = "*.example.com".into();
 
-        let cors_handler = sse_handler(&f.node, &CancellationToken::new(), &cors_conf);
+        let cors_handler = sse_handler(&f.node, &cors_conf);
 
-        let w = cors_handler.serve(&req);
+        let w = cors_handler.serve(&req, REQUEST_TIMEOUT);
 
         assert_eq!(Some("http://www.example.com"), w.header("Access-Control-Allow-Origin"));
     }
@@ -130,7 +129,7 @@ mod test_sse_handler {
         let f = setup();
         let req = TestRequest::new("OPTIONS", "/");
 
-        let w = f.handler.serve(&req);
+        let w = f.handler.serve(&req, REQUEST_TIMEOUT);
 
         assert_eq!(200, w.status);
     }
@@ -141,7 +140,7 @@ mod test_sse_handler {
         let f = setup();
         let req = TestRequest::new("PUT", "/");
 
-        let w = f.handler.serve(&req);
+        let w = f.handler.serve(&req, REQUEST_TIMEOUT);
 
         assert_eq!(405, w.status);
     }
@@ -161,14 +160,12 @@ mod test_sse_handler {
         );
 
         let req = TestRequest::new("GET", "/?channel=room_1").header("X-Request-ID", "sid-fail");
-        let ctx = CancellationToken::new();
 
-        let w = f.handler.serve_app(&req, &ctx);
+        let w = f.handler.serve(&req, REQUEST_TIMEOUT);
 
         assert_eq!(401, w.status);
         assert!(w.text().is_empty());
 
-        ctx.cancel();
         f.node.assert_no_sessions(Duration::from_secs(2));
     }
 
@@ -187,10 +184,8 @@ mod test_sse_handler {
 
         let req = TestRequest::new("GET", "/?identifier=chat_1").header("X-Request-ID", "sid-gut");
         let deadline = Deadline::after(REQUEST_TIMEOUT);
-        let ctx = CancellationToken::new();
 
-        let w = Recorder::new();
-        let sw = f.handler.serve_streaming(&req, &ctx);
+        let sw = f.handler.serve_streaming(&req, REQUEST_TIMEOUT);
 
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!("event: welcome\n".to_owned() + r#"data: {"type":"welcome"}"#, msg);
@@ -203,7 +198,7 @@ mod test_sse_handler {
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!(r#"data: {"content":"hello"}"#, msg);
 
-        assert_eq!(200, w.code());
+        assert_eq!(200, sw.original_code());
 
         assert!(sw.finish(REQUEST_TIMEOUT), "handler did not return after the request was cancelled");
         f.node.assert_no_sessions(Duration::from_secs(2));
@@ -227,10 +222,8 @@ mod test_sse_handler {
 
         let req = TestRequest::new("GET", "/?turbo_signed_stream_name=chat_1").header("X-Request-ID", "sid-turbo");
         let deadline = Deadline::after(REQUEST_TIMEOUT);
-        let ctx = CancellationToken::new();
 
-        let w = Recorder::new();
-        let sw = f.handler.serve_streaming(&req, &ctx);
+        let sw = f.handler.serve_streaming(&req, REQUEST_TIMEOUT);
 
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!("event: welcome\n".to_owned() + r#"data: {"type":"welcome"}"#, msg);
@@ -238,7 +231,7 @@ mod test_sse_handler {
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!("event: confirm\n".to_owned() + r#"data: {"type":"confirm","identifier":"turbo_1"}"#, msg);
 
-        assert_eq!(200, w.code());
+        assert_eq!(200, sw.original_code());
 
         assert!(sw.finish(REQUEST_TIMEOUT), "handler did not return after the request was cancelled");
         f.node.assert_no_sessions(Duration::from_secs(2));
@@ -262,10 +255,8 @@ mod test_sse_handler {
 
         let req = TestRequest::new("GET", "/?stream=chat_1").header("X-Request-ID", "sid-public-stream");
         let deadline = Deadline::after(REQUEST_TIMEOUT);
-        let ctx = CancellationToken::new();
 
-        let w = Recorder::new();
-        let sw = f.handler.serve_streaming(&req, &ctx);
+        let sw = f.handler.serve_streaming(&req, REQUEST_TIMEOUT);
 
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!("event: welcome\n".to_owned() + r#"data: {"type":"welcome"}"#, msg);
@@ -273,7 +264,7 @@ mod test_sse_handler {
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!("event: confirm\n".to_owned() + r#"data: {"type":"confirm","identifier":"chat_1"}"#, msg);
 
-        assert_eq!(200, w.code());
+        assert_eq!(200, sw.original_code());
 
         assert!(sw.finish(REQUEST_TIMEOUT), "handler did not return after the request was cancelled");
         f.node.assert_no_sessions(Duration::from_secs(2));
@@ -297,10 +288,8 @@ mod test_sse_handler {
 
         let req = TestRequest::new("GET", "/?signed_stream=secretto").header("X-Request-ID", "sid-signed-stream");
         let deadline = Deadline::after(REQUEST_TIMEOUT);
-        let ctx = CancellationToken::new();
 
-        let w = Recorder::new();
-        let sw = f.handler.serve_streaming(&req, &ctx);
+        let sw = f.handler.serve_streaming(&req, REQUEST_TIMEOUT);
 
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!("event: welcome\n".to_owned() + r#"data: {"type":"welcome"}"#, msg);
@@ -308,7 +297,7 @@ mod test_sse_handler {
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!("event: confirm\n".to_owned() + r#"data: {"type":"confirm","identifier":"secret_chat_1"}"#, msg);
 
-        assert_eq!(200, w.code());
+        assert_eq!(200, sw.original_code());
 
         assert!(sw.finish(REQUEST_TIMEOUT), "handler did not return after the request was cancelled");
         f.node.assert_no_sessions(Duration::from_secs(2));
@@ -333,16 +322,14 @@ mod test_sse_handler {
         );
 
         let req = TestRequest::new("GET", "/?channel=room_1").header("X-Request-ID", "sid-reject");
-        let ctx = CancellationToken::new();
 
-        let w = f.handler.serve_app(&req, &ctx);
+        let w = f.handler.serve(&req, REQUEST_TIMEOUT);
 
         assert_eq!(400, w.status);
         assert!(w.text().is_empty());
 
         f.controller.assert_called_subscribe("sid-reject", "se2034", r#"{"channel":"room_1"}"#);
 
-        ctx.cancel();
         f.node.assert_no_sessions(Duration::from_secs(2));
     }
 
@@ -352,13 +339,14 @@ mod test_sse_handler {
         let f = setup();
         let req = TestRequest::new("GET", "/");
 
-        let w = f.handler.serve(&req);
+        let w = f.handler.serve(&req, REQUEST_TIMEOUT);
 
         assert_eq!(400, w.status);
         assert!(w.text().is_empty());
     }
 
     /// upstream: sse/handler_test.go#TestSSEHandler/GET_request_with_?raw=t
+    /// note: upstream's 1s sleep before broadcasting is replaced by waiting for the status line, which the handler writes after subscribing.
     #[test]
     fn get_request_with_raw_t() {
         let f = setup();
@@ -373,10 +361,8 @@ mod test_sse_handler {
 
         let req = TestRequest::new("GET", "/?identifier=chat_1&raw=t").header("X-Request-ID", "sid-gut-raw");
         let deadline = Deadline::after(REQUEST_TIMEOUT);
-        let ctx = CancellationToken::new();
 
-        let w = Recorder::new();
-        let sw = f.handler.serve_streaming(&req, &ctx);
+        let sw = f.handler.serve_streaming(&req, REQUEST_TIMEOUT);
 
         // Upstream sleeps 1s "to make sure that the session is subscribed". The handler
         // subscribes before it writes the status line, so wait for that instead.
@@ -387,7 +373,7 @@ mod test_sse_handler {
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!(r#"data: {"content":"hello"}"#, msg);
 
-        assert_eq!(200, w.code());
+        assert_eq!(200, sw.original_code());
 
         assert!(sw.finish(REQUEST_TIMEOUT), "handler did not return after the request was cancelled");
         f.node.assert_no_sessions(Duration::from_secs(2));
@@ -406,25 +392,23 @@ mod test_sse_handler {
             confirmed(r#"{"type":"confirm","identifier":"chat_1"}"#, "messages_1"),
         );
 
-        let mut ping_conf = Config::new();
+        let mut ping_conf = new_config();
         ping_conf.ping_interval = 1;
 
-        let ping_handler = sse_handler(&f.node, &CancellationToken::new(), &ping_conf);
+        let ping_handler = sse_handler(&f.node, &ping_conf);
 
         let req = TestRequest::new("GET", "/?identifier=chat_1&raw=t").header("X-Request-ID", "sid-gut-raw-ping");
 
         // The node's ping interval is 3s, so the first ping would arrive in 1.5-4.5s if
         // the custom interval wasn't applied.
         let deadline = Deadline::after(REQUEST_TIMEOUT);
-        let ctx = CancellationToken::new();
 
-        let w = Recorder::new();
-        let sw = ping_handler.serve_streaming(&req, &ctx);
+        let sw = ping_handler.serve_streaming(&req, REQUEST_TIMEOUT);
 
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!(": ping", msg);
 
-        assert_eq!(200, w.code());
+        assert_eq!(200, sw.original_code());
 
         assert!(sw.finish(REQUEST_TIMEOUT), "handler did not return after the request was cancelled");
         f.node.assert_no_sessions(Duration::from_secs(2));
@@ -443,21 +427,19 @@ mod test_sse_handler {
             confirmed(r#"{"type":"confirm","identifier":"chat_1"}"#, "messages_1"),
         );
 
-        let mut ping_conf = Config::new();
+        let mut ping_conf = new_config();
         ping_conf.comment_pings = true;
         ping_conf.ping_interval = 1;
 
-        let ping_handler = sse_handler(&f.node, &CancellationToken::new(), &ping_conf);
+        let ping_handler = sse_handler(&f.node, &ping_conf);
 
         let req = TestRequest::new("GET", "/?identifier=chat_1").header("X-Request-ID", "sid-gut-comment-ping");
 
         // The node's ping interval is 3s, so the first ping would arrive in 1.5-4.5s if
         // the custom interval wasn't applied.
         let deadline = Deadline::after(REQUEST_TIMEOUT);
-        let ctx = CancellationToken::new();
 
-        let w = Recorder::new();
-        let sw = ping_handler.serve_streaming(&req, &ctx);
+        let sw = ping_handler.serve_streaming(&req, REQUEST_TIMEOUT);
 
         // Protocol events are still sent
         let msg = sw.read_event(deadline.left()).expect("no error");
@@ -469,7 +451,7 @@ mod test_sse_handler {
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!(": ping", msg);
 
-        assert_eq!(200, w.code());
+        assert_eq!(200, sw.original_code());
 
         assert!(sw.finish(REQUEST_TIMEOUT), "handler did not return after the request was cancelled");
         f.node.assert_no_sessions(Duration::from_secs(2));
@@ -484,20 +466,16 @@ mod test_sse_handler {
 
         let req = TestRequest::new("POST", "/").header("X-Request-ID", "sid-post-no-op");
         let deadline = Deadline::after(REQUEST_TIMEOUT);
-        let ctx = CancellationToken::new();
 
-        let w = Recorder::new();
+        // shutdownCtx, shutdownFn := context.WithCancel(...): the handler's own context.
+        let shutdown_handler = sse_handler(&f.node, &f.conf);
 
-        let shutdown_ctx = CancellationToken::new();
-
-        let shutdown_handler = sse_handler(&f.node, &shutdown_ctx, &f.conf);
-
-        let sw = shutdown_handler.serve_streaming(&req, &ctx);
+        let sw = shutdown_handler.serve_streaming(&req, REQUEST_TIMEOUT);
 
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!("event: welcome\n".to_owned() + r#"data: {"type":"welcome"}"#, msg);
 
-        shutdown_ctx.cancel();
+        shutdown_handler.shutdown();
 
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!(
@@ -506,7 +484,7 @@ mod test_sse_handler {
             msg
         );
 
-        assert_eq!(200, w.code());
+        assert_eq!(200, sw.original_code());
 
         assert!(sw.finish(REQUEST_TIMEOUT), "handler did not return after the request was cancelled");
         f.node.assert_no_sessions(Duration::from_secs(2));
@@ -535,10 +513,8 @@ mod test_sse_handler {
             "{\"command\":\"subscribe\",\"identifier\":\"chat_1\"}\n{\"command\":\"subscribe\",\"identifier\":\"presence_1\"}",
         );
         let deadline = Deadline::after(REQUEST_TIMEOUT);
-        let ctx = CancellationToken::new();
 
-        let w = Recorder::new();
-        let sw = f.handler.serve_streaming(&req, &ctx);
+        let sw = f.handler.serve_streaming(&req, REQUEST_TIMEOUT);
 
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!("event: welcome\n".to_owned() + r#"data: {"type":"welcome"}"#, msg);
@@ -559,23 +535,14 @@ mod test_sse_handler {
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!(r#"data: {"identifier":"presence_1","message":{"type":"join","user_id":1}}"#, msg);
 
-        assert_eq!(200, w.code());
+        assert_eq!(200, sw.original_code());
 
         assert!(sw.finish(REQUEST_TIMEOUT), "handler did not return after the request was cancelled");
         f.node.assert_no_sessions(Duration::from_secs(2));
     }
 
     /// regression-for: sse/handler_test.go#TestSSEHandler/GET_request_with_identifier
-    /// regression-for: sse/handler_test.go#TestSSEHandler/GET_request_with_turbo_signed_stream_name
-    /// regression-for: sse/handler_test.go#TestSSEHandler/GET_request_with_stream
-    /// regression-for: sse/handler_test.go#TestSSEHandler/GET_request_with_signed_stream
-    /// regression-for: sse/handler_test.go#TestSSEHandler/GET_request_with_?raw=t
-    /// regression-for: sse/handler_test.go#TestSSEHandler/GET_request_with_?raw=t_sends_comment_pings
-    /// regression-for: sse/handler_test.go#TestSSEHandler/GET_request_with_comment_pings
-    /// regression-for: sse/handler_test.go#TestSSEHandler/POST_request_without_commands_+_server_shutdown
-    /// regression-for: sse/handler_test.go#TestSSEHandler/POST_request_with_multiple_subscriptions
-    /// The upstream `w.Code` checks read a recorder the handler never writes to; this
-    /// asserts the status the streaming response actually carries.
+    /// note: upstream's `w.Code` check reads a recorder the handler never writes to (the streaming writer holds a copy); this asserts the status the streaming response carries. The other streaming subtests share the weak check.
     #[test]
     fn streaming_response_status_is_ok() {
         let f = setup();
@@ -590,15 +557,14 @@ mod test_sse_handler {
 
         let req = TestRequest::new("GET", "/?identifier=chat_1").header("X-Request-ID", "sid-status");
         let deadline = Deadline::after(REQUEST_TIMEOUT);
-        let ctx = CancellationToken::new();
 
-        let sw = f.handler.serve_streaming(&req, &ctx);
+        let sw = f.handler.serve_streaming(&req, REQUEST_TIMEOUT);
 
         let msg = sw.read_event(deadline.left()).expect("no error");
         assert_eq!("event: welcome\n".to_owned() + r#"data: {"type":"welcome"}"#, msg);
-        assert_eq!(200, sw.code());
 
         assert!(sw.finish(REQUEST_TIMEOUT), "handler did not return after the request was cancelled");
+        assert_eq!(200, sw.code());
         f.node.assert_no_sessions(Duration::from_secs(2));
     }
 }

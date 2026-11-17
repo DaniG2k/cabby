@@ -3,8 +3,8 @@
 //! The upstream subtests share one `env`; the presence subtest merges channel state
 //! into it, which no other subtest reads. Each Rust test builds its own env.
 //! `mocks.Broker` with `On("PresenceInfo", mock.Anything)` is [`StubBroker`].
-//! Go distinguishes `[]string{}` from nil in `Unsubscribe`'s result; Cabby's
-//! `CommandResult` has no nil slices, so only emptiness is compared.
+//! Go distinguishes `[]string{}` from nil in `Unsubscribe`'s result; the facade
+//! reports Go's nil slices separately (`CommandResult` has none).
 
 use std::collections::HashMap;
 
@@ -12,8 +12,7 @@ use cabby_core::common::{
     PRESENCE_INFO_TYPE, PRESENCE_JOIN_TYPE, PRESENCE_STREAM_STATE, PresenceEvent, PresenceInfo, SessionEnv, Status,
     WHISPER_STREAM_STATE,
 };
-use cabby_server::pusher::Config;
-use cabby_testkit::reference::pusher::{Controller, StubBroker};
+use cabby_testkit::reference::pusher::{Controller, StubBroker, new_config};
 use serde_json::json;
 
 fn build_env() -> SessionEnv {
@@ -26,7 +25,7 @@ fn build_env() -> SessionEnv {
 }
 
 fn build_controller() -> Controller {
-    let conf = Config::new();
+    let conf = new_config();
     let bro = StubBroker {
         presence_info: Some(PresenceInfo {
             kind: PRESENCE_INFO_TYPE.into(),
@@ -149,6 +148,7 @@ mod test_pusher_controller {
     }
 
     /// upstream: pusher/controller_test.go#TestPusherController/Unsubscribe
+    /// note: `assert.Equal([]string{}, ...)` also requires non-nil slices; checked through the facade's Go nil flags (Rust slices are never nil).
     #[test]
     fn unsubscribe() {
         let env = build_env();
@@ -161,7 +161,9 @@ mod test_pusher_controller {
         let res = out.result.expect("result");
         assert_eq!(Status::Success, res.status);
         assert_eq!(Vec::<String>::new(), res.transmissions);
+        assert!(!out.nil_transmissions, "Transmissions is nil, upstream expects []string{{}}");
         assert_eq!(Vec::<String>::new(), res.streams);
+        assert!(!out.nil_streams, "Streams is nil, upstream expects []string{{}}");
         assert!(res.stop_all_streams);
     }
 }
