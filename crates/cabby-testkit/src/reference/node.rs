@@ -1197,12 +1197,17 @@ impl TestNode {
         }
     }
 
-    /// `node.hub.AddSession(session)`. Go: the exported `node.Authenticated(s,
-    /// s.GetIdentifiers())`, which adds the session to the hub and also marks it
-    /// connected (identifiers unchanged).
+    /// `node.hub.AddSession(session)`, also marking the session connected on
+    /// both backends. Go has no exported hub-only call: it uses
+    /// `node.Authenticated(s, s.GetIdentifiers())` (identifiers unchanged),
+    /// which does both; the Rust arm does the same so both backends exercise
+    /// the same (connected) disconnect path.
     pub fn hub_add_session(&self, s: &TestSession) {
         match &self.imp {
-            NodeImp::Rust(r) => r.node.hub().add_session(s.rust_session().clone()),
+            NodeImp::Rust(r) => {
+                r.node.hub().add_session(s.rust_session().clone());
+                s.rust_session().set_connected(true);
+            }
             NodeImp::Go { .. } => self.authenticated(s, &s.get_identifiers()),
         }
     }
@@ -1244,7 +1249,11 @@ impl TestNode {
     pub fn lookup_session(&self, ids: &str) -> Option<SessionId> {
         match &self.imp {
             NodeImp::Rust(r) => r.node.lookup_session(ids).map(|s| SessionId(Arc::as_ptr(&s) as u64)),
-            NodeImp::Go { .. } => self.go_node("LookupSession", json!({"ids": ids})).as_u64().map(SessionId),
+            NodeImp::Go { .. } => match self.go_node("LookupSession", json!({"ids": ids})) {
+                Value::Null => None,
+                Value::Number(n) => Some(SessionId(n.as_u64().expect("a handle"))),
+                other => panic!("LookupSession returned a session the bridge does not know: {other}"),
+            },
         }
     }
 
@@ -1374,15 +1383,18 @@ impl Drop for HubGuard<'_> {
 
 /// Upstream `blockingDisconnector` (node_test.go): a `NoopDisconnectQueue`
 /// whose `Enqueue` signals `enqueued` and blocks until `release`.
+///
+/// Upstream closes `enqueued` on every call, so a second Enqueue panics; here
+/// calls are counted and the test asserts exactly one.
 pub struct BlockingDisconnector {
     noop: rs::NoopDisconnectQueue,
-    enqueued: Watched<bool>,
+    enqueued: Watched<usize>,
     release: BlockingGate,
 }
 
 impl Default for BlockingDisconnector {
     fn default() -> Self {
-        Self { noop: rs::NoopDisconnectQueue, enqueued: Watched::new(false), release: BlockingGate::new() }
+        Self { noop: rs::NoopDisconnectQueue, enqueued: Watched::new(0), release: BlockingGate::new() }
     }
 }
 
@@ -1394,7 +1406,7 @@ impl Disconnector for BlockingDisconnector {
         self.noop.shutdown(ctx)
     }
     fn enqueue(&self, _session: Arc<Session>) -> Result<(), NodeError> {
-        self.enqueued.update(|e| *e = true);
+        self.enqueued.update(|e| *e += 1);
         self.release.pass();
         Ok(())
     }
@@ -1412,13 +1424,25 @@ impl TestBlockingDisconnector {
     /// `select { case <-d.enqueued: ...; case <-time.After(deadline): ... }`.
     pub fn await_enqueued(&self, deadline: Duration) -> bool {
         match self {
-            Self::Rust(d) => d.enqueued.wait_until(deadline, |e| *e),
+            Self::Rust(d) => d.enqueued.wait_until(deadline, |e| *e > 0),
             Self::Go(h) => bridge::call::<_, Value>(
                 "node.BlockingDisconnector",
                 json!({"id": h, "method": "AwaitEnqueued", "timeout_ms": deadline.as_millis() as u64}),
             )
             .as_bool()
             .expect("bool"),
+        }
+    }
+
+    /// Enqueue calls so far.
+    pub fn enqueues(&self) -> usize {
+        match self {
+            Self::Rust(d) => d.enqueued.read(|e| *e),
+            Self::Go(h) => {
+                bridge::call::<_, Value>("node.BlockingDisconnector", json!({"id": h, "method": "Enqueues"}))
+                    .as_u64()
+                    .expect("count") as usize
+            }
         }
     }
 
