@@ -4,11 +4,28 @@
 //! rendered by slog handlers. Cabby models the resolved value tree ([`LogValue`])
 //! and the two handler formats used upstream ([`format_text`], [`format_json`]).
 //! `Display` of a [`LogValue`] corresponds to Go's `slog.Value.String()`.
+//!
+//! Sensitive data filtering is a value ([`LogFilter`]) rather than a mutable package
+//! global: [`LogFilter::global`] reads `ANYCABLE_FILTER_LOGS` once per process (and
+//! never writes the environment), and everything else takes the policy explicitly, so
+//! tests can exercise both policies in parallel.
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::OnceLock;
 
-use crate::pending;
+mod config;
+mod format;
+mod gofmt;
+mod url;
+mod values;
+
+pub use config::{Config, TomlError};
+pub use format::{format_json, format_text};
+pub use values::{
+    AnyValue, CompactAny, CompactValue, FilteredMap, FilteredUrl, compact_any, compact_value, compact_value_bytes,
+    compact_values, compact_values_bytes,
+};
 
 /// Values longer than this are truncated by the compact wrappers (upstream `maxValueLength`).
 pub const MAX_VALUE_LENGTH: usize = 100;
@@ -32,8 +49,45 @@ pub enum LogValue {
 }
 
 impl fmt::Display for LogValue {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        pending!("logger::log_value_string")
+    /// Go `slog.Value.String()`: scalars as is, slices as `[a b]`, maps as
+    /// `map[k:v]` (sorted keys), groups as `[k=v k2=v2]`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LogValue::String(s) => f.write_str(s),
+            LogValue::Bool(b) => write!(f, "{b}"),
+            LogValue::Int(i) => write!(f, "{i}"),
+            LogValue::Uint(u) => write!(f, "{u}"),
+            LogValue::List(items) => {
+                f.write_str("[")?;
+                for (i, v) in items.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(" ")?;
+                    }
+                    write!(f, "{v}")?;
+                }
+                f.write_str("]")
+            }
+            LogValue::Map(m) => {
+                f.write_str("map[")?;
+                for (i, (k, v)) in m.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(" ")?;
+                    }
+                    write!(f, "{k}:{v}")?;
+                }
+                f.write_str("]")
+            }
+            LogValue::Group(attrs) => {
+                f.write_str("[")?;
+                for (i, a) in attrs.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(" ")?;
+                    }
+                    write!(f, "{a}")?;
+                }
+                f.write_str("]")
+            }
+        }
     }
 }
 
@@ -52,8 +106,8 @@ impl Attr {
 
 impl fmt::Display for Attr {
     /// Go `slog.Attr.String()`: `key=value`.
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        pending!("logger::attr_string")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}={}", self.key, self.value)
     }
 }
 
@@ -71,79 +125,34 @@ pub enum Level {
     Error,
 }
 
-/// Renders a record the way upstream's text handler does (`slog.NewTextHandler`).
-pub fn format_text(_level: Level, _msg: &str, _attrs: &[Attr]) -> String {
-    pending!("logger::format_text")
-}
-
-/// Renders a record the way upstream's JSON handler does (`slog.NewJSONHandler`).
-pub fn format_json(_level: Level, _msg: &str, _attrs: &[Attr]) -> String {
-    pending!("logger::format_json")
-}
-
-/// A string or byte value shown truncated in logs (upstream `compactValue`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompactValue {
-    _val: Vec<u8>,
-}
-
-impl LogValuer for CompactValue {
-    fn log_value(&self) -> LogValue {
-        pending!("logger::compact_value")
+impl Level {
+    /// Go `slog.Level.String()`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Level::Debug => "DEBUG",
+            Level::Info => "INFO",
+            Level::Warn => "WARN",
+            Level::Error => "ERROR",
+        }
     }
-}
-
-/// Upstream `CompactValue` for a string.
-pub fn compact_value(v: &str) -> CompactValue {
-    CompactValue { _val: v.as_bytes().to_vec() }
-}
-
-/// Upstream `CompactValue` for a byte slice.
-pub fn compact_value_bytes(v: &[u8]) -> CompactValue {
-    CompactValue { _val: v.to_vec() }
-}
-
-/// Upstream `CompactValues` for strings.
-pub fn compact_values(_v: &[&str]) -> Vec<CompactValue> {
-    pending!("logger::compact_values")
-}
-
-/// Upstream `CompactValues` for byte slices.
-pub fn compact_values_bytes(_v: &[&[u8]]) -> Vec<CompactValue> {
-    pending!("logger::compact_values")
-}
-
-/// A dynamically typed value as upstream passes to `CompactAny` (Go `interface{}`):
-/// decoded JSON, or a struct printed with Go's `%+v` verb.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AnyValue {
-    Json(serde_json::Value),
-    /// A struct with named fields, in declaration order.
-    Struct(Vec<(String, AnyValue)>),
-}
-
-/// Any value shown truncated in logs (upstream `compactAny`).
-#[derive(Debug, Clone, PartialEq)]
-pub struct CompactAny {
-    _val: AnyValue,
-}
-
-impl LogValuer for CompactAny {
-    fn log_value(&self) -> LogValue {
-        pending!("logger::compact_any")
-    }
-}
-
-/// Upstream `CompactAny`.
-pub fn compact_any(val: AnyValue) -> CompactAny {
-    CompactAny { _val: val }
 }
 
 /// Upstream `filteringEnabledFromEnv`: parses the `ANYCABLE_FILTER_LOGS` value
 /// (anything unparsable keeps filtering enabled).
-pub fn filtering_enabled_from_env(_val: &str) -> bool {
-    pending!("logger::filtering_enabled_from_env")
+pub fn filtering_enabled_from_env(val: &str) -> bool {
+    // Go strconv.ParseBool
+    match val {
+        "1" | "t" | "T" | "TRUE" | "true" | "True" => true,
+        "0" | "f" | "F" | "FALSE" | "false" | "False" => false,
+        _ => true,
+    }
 }
+
+const FILTERED_MASK: &str = "***";
+/// Values up to this length are masked completely.
+const FULL_MASK_MAX_LENGTH: usize = 5;
+/// Values up to this length keep only the first and the last characters visible.
+const SHORT_MASK_MAX_LENGTH: usize = 8;
 
 /// Sensitive data filtering policy. Upstream keeps it in a package global read from
 /// `ANYCABLE_FILTER_LOGS` at start; Cabby passes it explicitly so tests do not mutate
@@ -154,50 +163,42 @@ pub struct LogFilter {
 }
 
 impl LogFilter {
-    /// The process-wide policy (upstream `FilteringEnabled()`).
+    /// The process-wide policy (upstream `FilteringEnabled()`), read from
+    /// `ANYCABLE_FILTER_LOGS` on first use.
     pub fn global() -> LogFilter {
-        pending!("logger::filtering_enabled")
+        static GLOBAL: OnceLock<LogFilter> = OnceLock::new();
+        *GLOBAL.get_or_init(|| {
+            let val = std::env::var(FILTER_LOGS_ENV).unwrap_or_default();
+            LogFilter { enabled: filtering_enabled_from_env(&val) }
+        })
     }
 
     /// Upstream `FilteredURL` under this policy.
     pub fn filtered_url(&self, val: &str) -> FilteredUrl {
-        FilteredUrl { _val: val.to_owned(), _filter: *self }
+        FilteredUrl { val: val.to_owned(), filter: *self }
     }
 
-    /// Upstream `MaskValue` under this policy.
-    pub fn mask_value(&self, _val: &str) -> String {
-        pending!("logger::mask_value")
+    /// Upstream `MaskValue` under this policy: hides the value, keeping only the first
+    /// and the last characters visible if the value is long enough. Lengths count
+    /// bytes, as upstream.
+    pub fn mask_value(&self, val: &str) -> String {
+        if val.is_empty() || !self.enabled {
+            return val.to_owned();
+        }
+        let b = val.as_bytes();
+        if b.len() <= FULL_MASK_MAX_LENGTH {
+            return FILTERED_MASK.to_owned();
+        }
+        let visible = if b.len() <= SHORT_MASK_MAX_LENGTH { 1 } else { 2 };
+        let mut out = String::from_utf8_lossy(&b[..visible]).into_owned();
+        out.push_str(FILTERED_MASK);
+        out.push_str(&String::from_utf8_lossy(&b[b.len() - visible..]));
+        out
     }
 
     /// Upstream `FilteredMap` under this policy (`None`: a nil map).
     pub fn filtered_map(&self, val: Option<&BTreeMap<String, String>>) -> FilteredMap {
-        FilteredMap { _val: val.cloned(), _filter: *self }
-    }
-}
-
-/// A URL shown with masked query values and user info (upstream `filteredURL`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FilteredUrl {
-    _val: String,
-    _filter: LogFilter,
-}
-
-impl LogValuer for FilteredUrl {
-    fn log_value(&self) -> LogValue {
-        pending!("logger::filtered_url")
-    }
-}
-
-/// A map shown by its keys only (upstream `filteredMap`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FilteredMap {
-    _val: Option<BTreeMap<String, String>>,
-    _filter: LogFilter,
-}
-
-impl LogValuer for FilteredMap {
-    fn log_value(&self) -> LogValue {
-        pending!("logger::filtered_map")
+        FilteredMap { val: val.cloned(), filter: *self }
     }
 }
 
@@ -216,35 +217,26 @@ pub fn filtered_map(val: Option<&BTreeMap<String, String>>) -> FilteredMap {
     LogFilter::global().filtered_map(val)
 }
 
-/// Logging settings (upstream `logger.Config`, TOML table `[logging]`).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Config {
-    /// `level`
-    pub log_level: String,
-    /// `format`
-    pub log_format: String,
-    /// `debug`
-    pub debug: bool,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// A TOML decoding failure.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{0}")]
-pub struct TomlError(pub String);
-
-impl Config {
-    /// Defaults (upstream `logger.NewConfig`).
-    pub fn new() -> Self {
-        pending!("logger::new_config")
+    #[test]
+    fn displays_like_slog_values() {
+        let v = LogValue::Group(vec![
+            Attr::new("a", LogValue::Int(-1)),
+            Attr::new("l", LogValue::List(vec![LogValue::String("x".into()), LogValue::Bool(true)])),
+            Attr::new("m", LogValue::Map([("k".to_owned(), LogValue::Uint(2))].into())),
+        ]);
+        assert_eq!("[a=-1 l=[x true] m=map[k:2]]", v.to_string());
     }
 
-    /// Renders the annotated TOML section (upstream `Config.ToToml`).
-    pub fn to_toml(&self) -> String {
-        pending!("logger::config_to_toml")
-    }
-
-    /// Decodes TOML over the current values (upstream `toml.Decode(s, &conf)`).
-    pub fn decode_toml(&mut self, _toml: &str) -> Result<(), TomlError> {
-        pending!("logger::config_decode_toml")
+    #[test]
+    fn masks_by_length() {
+        let f = LogFilter { enabled: true };
+        assert_eq!("", f.mask_value(""));
+        assert_eq!("***", f.mask_value("12345"));
+        assert_eq!("1***6", f.mask_value("123456"));
+        assert_eq!("12***89", f.mask_value("123456789"));
     }
 }
