@@ -1,0 +1,4 @@
+[info] [2026-11-17T14:17:21+00:00]  Running command: ["sh", "-c", "./dist/anycable-go --debug --noauth --port 2024 --broadcast_adapter=http,redisx --sse --metrics_tags=env:production,node_id:xyz --statsd_tags_format=datadog --print-config > ./anycable.toml"]
+[info] [2026-11-17T14:17:21+00:00]  Finished
+[info] [2026-11-17T14:17:21+00:00]  Running command: dist/anycable-go --print-config
+Command expected to finish in 120s but is still running

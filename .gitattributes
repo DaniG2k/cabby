@@ -1,0 +1,3 @@
+# Append-only registries: parallel translation branches each add lines here.
+tests/Cargo.toml merge=union
+crates/cabby-testkit/src/reference/mod.rs merge=union

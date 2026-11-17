@@ -1,0 +1,5 @@
+# Toolchains for Cabby and the pinned Go reference (see compat/upstream.lock).
+[tools]
+rust = { version = "1.100.0", components = "rustfmt,clippy" }
+go = "1.27.3"      # matches `toolchain go1.27.3` in the reference go.mod
+protoc = "36.2"

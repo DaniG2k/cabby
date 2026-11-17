@@ -1,0 +1,19 @@
+--- go.mod	2026-11-17 14:45:02.306682777 +0100
++++ compat/reference-adapters/benchi-modfile/go.mod	2026-11-17 14:50:04.612186232 +0100
+@@ -36,7 +36,7 @@
+ 	github.com/mitchellh/go-mruby v0.0.0-20200315023956-207cedc21542 // indirect
+ 	github.com/nats-io/jwt/v2 v2.8.2 // indirect
+ 	github.com/nats-io/nats-server/v2 v2.15.1 // indirect
+-	github.com/nats-io/nats.go v1.54.0 // indirect
++	github.com/nats-io/nats.go v1.55.0 // indirect
+ 	github.com/nats-io/nkeys v0.4.16 // indirect
+ 	github.com/nats-io/nuid v1.0.1 // indirect
+ 	github.com/posthog/posthog-go v1.35.0 // indirect
+@@ -55,6 +55,6 @@
+ 	golang.org/x/text v0.43.0 // indirect
+ 	golang.org/x/time v0.16.0 // indirect
+ 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261012220534-4341edf3f941 // indirect
+-	google.golang.org/grpc v1.84.0 // indirect
++	google.golang.org/grpc v1.85.0 // indirect
+ 	google.golang.org/protobuf v1.36.12 // indirect
+ )

@@ -1,0 +1,9 @@
+test-conformance exit=0
+test-conformance-ssl exit=0
+test-conformance-http exit=0
+test-conformance-nats exit=0
+test-conformance-nats-embedded exit=0
+test-conformance-broker-http exit=0
+test-conformance-broker-redis exit=0
+test-conformance-broker-nats exit=0
+test-conformance-embedded exit=0

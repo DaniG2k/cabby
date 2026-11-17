@@ -1,0 +1,5 @@
+/target
+# Disposable pinned upstream checkout; recreated from compat/upstream.lock
+/compat/reference/
+# Local scratch output from reference runs
+/compat/baseline/**/tmp/

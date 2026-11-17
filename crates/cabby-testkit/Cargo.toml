@@ -1,0 +1,17 @@
+[package]
+name = "cabby-testkit"
+description = "Test support for Cabby: backend selection, Go reference bridge, process supervision"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+cabby-core.workspace = true
+cabby-server.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

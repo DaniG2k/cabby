@@ -1,0 +1,100 @@
+//! Client for `compat/reference-adapters/bridge`, a Go program that exposes
+//! exported functions of the pinned reference over JSON lines (protocol v1).
+//!
+//! One bridge process is shared per test binary; calls are serialized and each
+//! has a deadline.
+
+use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{Receiver, channel};
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+
+use anyhow::{Context, Result, anyhow, bail};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use serde_json::{Value, json};
+
+const PROTOCOL_VERSION: u64 = 1;
+const CALL_DEADLINE: Duration = Duration::from_secs(30);
+
+struct Bridge {
+    _child: Child,
+    stdin: ChildStdin,
+    lines: Receiver<std::io::Result<String>>,
+}
+
+static BRIDGE: OnceLock<Mutex<Bridge>> = OnceLock::new();
+
+/// Path to the bridge binary: `CABBY_GO_BRIDGE`, or built once with `go build`.
+fn bridge_binary() -> Result<PathBuf> {
+    if let Ok(p) = std::env::var("CABBY_GO_BRIDGE") {
+        return Ok(PathBuf::from(p));
+    }
+    let root = crate::workspace_root();
+    let out = root.join("target/reference-adapters/bridge");
+    let status = Command::new("go")
+        .args(["build", "-o"])
+        .arg(&out)
+        .arg(".")
+        .current_dir(root.join("compat/reference-adapters/bridge"))
+        .status()
+        .context("running `go build` for the reference bridge (is the Go toolchain on PATH?)")?;
+    if !status.success() {
+        bail!("building the reference bridge failed; run `cargo xtask reference-checkout` first");
+    }
+    Ok(out)
+}
+
+fn start() -> Result<Bridge> {
+    let mut child = Command::new(bridge_binary()?)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .context("spawning the reference bridge")?;
+    let stdin = child.stdin.take().expect("piped stdin");
+    let stdout = child.stdout.take().expect("piped stdout");
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let mut bridge = Bridge { _child: child, stdin, lines: rx };
+    let v = bridge.call_raw("Version", json!({}))?;
+    if v != json!(PROTOCOL_VERSION) {
+        bail!("bridge protocol version {v}, expected {PROTOCOL_VERSION}");
+    }
+    Ok(bridge)
+}
+
+impl Bridge {
+    fn call_raw(&mut self, op: &str, args: Value) -> Result<Value> {
+        let req = json!({"v": PROTOCOL_VERSION, "op": op, "args": args});
+        writeln!(self.stdin, "{req}").context("writing to bridge")?;
+        self.stdin.flush()?;
+        let line = self
+            .lines
+            .recv_timeout(CALL_DEADLINE)
+            .map_err(|_| anyhow!("bridge did not answer {op} within {CALL_DEADLINE:?}"))??;
+        let mut resp: Value = serde_json::from_str(&line).with_context(|| format!("bridge reply: {line}"))?;
+        if let Some(err) = resp.get("err").and_then(Value::as_str) {
+            bail!("bridge op {op} failed: {err}");
+        }
+        Ok(resp.get_mut("ok").map(Value::take).unwrap_or(Value::Null))
+    }
+}
+
+/// Calls a bridge op and decodes its result. Panics on bridge failures: those are
+/// harness errors, never test outcomes.
+pub fn call<A: Serialize, R: DeserializeOwned>(op: &str, args: A) -> R {
+    let bridge = BRIDGE.get_or_init(|| Mutex::new(start().expect("starting the Go reference bridge")));
+    let mut bridge = bridge.lock().unwrap_or_else(|e| e.into_inner());
+    let args = serde_json::to_value(args).expect("serializable bridge args");
+    let value = bridge.call_raw(op, args).unwrap_or_else(|e| panic!("{e:#}"));
+    serde_json::from_value(value.clone()).unwrap_or_else(|e| panic!("decoding {op} result {value}: {e}"))
+}

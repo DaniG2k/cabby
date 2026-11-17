@@ -1,0 +1,17 @@
+[package]
+name = "cabby-server"
+description = "Cabby transports, RPC clients, adapters, configuration and executable"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "cabby"
+path = "src/main.rs"
+
+[dependencies]
+cabby-core.workspace = true
+
+[lints]
+workspace = true

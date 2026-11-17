@@ -1,0 +1,9 @@
+# Reference environment for the pinned Go AnyCable: Go toolchain + Ruby 2.7
+# (upstream CI uses Ruby 2.7 for go-mruby and AnyT). Used for baseline runs only.
+FROM ruby:2.7@sha256:2347de892e419c7160fc21dec721d5952736909f8c3fbb7f84cb4a07aaf9ce7d
+ARG GO_VERSION=1.27.3
+RUN apt-get update -qq && apt-get install -y -qq bison lsof netcat-openbsd >/dev/null \
+ && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" | tar -C /usr/local -xz
+ENV PATH=/usr/local/go/bin:/root/go/bin:$PATH \
+    ANYCABLE_DISABLE_TELEMETRY=true ANYCABLE_DEBUG=1 BUNDLE_PATH=/bundle
+WORKDIR /src

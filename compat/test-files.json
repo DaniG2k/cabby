@@ -1,0 +1,807 @@
+{
+  "upstream": "https://github.com/anycable/anycable",
+  "commit": "26a1a703a54b870e42f5660c3d0785db2c602764",
+  "generated_on": "2026-11-17",
+  "status": "file_inventory_only",
+  "note": "Case enumeration and test execution have not been performed. External AnyT cases and Go Benchmark/Example/Fuzz functions must be inventoried separately. Case-level mapping and statuses now live in test-map.json; file status here is a coarse summary.",
+  "files": [
+    {
+      "path": "api/auth_test.go",
+      "blob_sha": "1b4353a0c3dbc48dce3f49076983694994d372f7",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "api/config_test.go",
+      "blob_sha": "c86d7700d8ee22d47212a246f9a50958b5432a64",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "api/presence_test.go",
+      "blob_sha": "21581bc43f30b237b350a65f67ab26fbf335a2ee",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "api/publish_test.go",
+      "blob_sha": "aaad4c3ad111f750005fc7b3452b6ed49759c4f2",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "broadcast/http_test.go",
+      "blob_sha": "5d31385a031935a08aada38b9de7ce9f468259d0",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "broadcast/legacy_nats_test.go",
+      "blob_sha": "bffd503d136cf6a3fd993a0c5b8cd7601cab4b6a",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "broadcast/legacy_redis_test.go",
+      "blob_sha": "bf811565f363aad0fab2bb0be94ee68fbc26a4d1",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "broadcast/redis_test.go",
+      "blob_sha": "cb3a7ffd60a4b907cf43bfed1b84062bd6d1ea7e",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "broker/broker_test.go",
+      "blob_sha": "7b12b25347539fa041408978fd2e5dc244c9c565",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "broker/config_test.go",
+      "blob_sha": "7d03d028745be0d934590ca4f4d07c60148fc398",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "broker/memory_test.go",
+      "blob_sha": "4739485de6fb71a4533fe03d30faae90074058e0",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "broker/nats_test.go",
+      "blob_sha": "2d66ed902789564a53d57511d54862ee026ad911",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "broker/presenter_test.go",
+      "blob_sha": "249cb4a890d88d0da2283db5279468a30e819787",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "cli/cli_test.go",
+      "blob_sha": "7c50bba2b1c25674a55c504539e91e6552ae659c",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "cli/options_test.go",
+      "blob_sha": "4df23f9f36832ce6b84294ea52d6b3a251399f95",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "common/common_test.go",
+      "blob_sha": "f64c5d558436dbb453cd1c0abe4cc2ac2468c0ba",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "common/log_values_test.go",
+      "blob_sha": "17db53319251bcf61b60f00fe810017c72a2abf0",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "config/config_test.go",
+      "blob_sha": "f0f5748502c951a855e237d1285e6c9eda4a74fd",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "config/presets_test.go",
+      "blob_sha": "9de52184d64d948b43b983f624514bbc06447ba5",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "ds/auth_test.go",
+      "blob_sha": "1d3576dd306fc853c28f653e7e22ae625954ef2b",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "ds/config_test.go",
+      "blob_sha": "fd142e170c6bd0514bdeae1adde086ea7550d15c",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "ds/ds_test.go",
+      "blob_sha": "6f6d8242fd80b28ef5722132b7d14a55782ae128",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "ds/encoder_test.go",
+      "blob_sha": "794fe3a160491152fa7eb0a42ac79d34a41da513",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "ds/handler_test.go",
+      "blob_sha": "90c9401d75c5d00b3e94ebe95b43f57d2664a9ab",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "ds/integration_test.go",
+      "blob_sha": "c0bd2ddcd86c1ca0f59828f019b83618c08f48d0",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "ds/poll_test.go",
+      "blob_sha": "5b4351e7c1257f92c6e60ec8fe15323fd2d5d473",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "ds/sse_test.go",
+      "blob_sha": "18a19c7532198e8ca9774da9324176564099e3ec",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "enats/config_test.go",
+      "blob_sha": "999bf6f826e5886360a2161f02b2c06099daf88c",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "encoders/encoding_cache_test.go",
+      "blob_sha": "3f7117dabec89ebd294359fcc72d276fe8bf67fc",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "encoders/json_test.go",
+      "blob_sha": "ebf3f5de663d980e28fca57b48e37c51a4fe1eed",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "etc/anyt/broadcast_tests/options_test.rb",
+      "blob_sha": "8b54e3af1be51199f6760afa776cc42e96d99431",
+      "status": "unreviewed",
+      "kind": "conformance_extension"
+    },
+    {
+      "path": "etc/anyt/broadcast_tests/whisper_test.rb",
+      "blob_sha": "e0d8b31496d9dd2837e9dc4bd201d838a6d1bb51",
+      "status": "unreviewed",
+      "kind": "conformance_extension"
+    },
+    {
+      "path": "etc/anyt/broker_tests/history_test.rb",
+      "blob_sha": "feee1f491cf5fa9e094ed4e28326448f83d03a01",
+      "status": "unreviewed",
+      "kind": "conformance_extension"
+    },
+    {
+      "path": "etc/anyt/broker_tests/restore_test.rb",
+      "blob_sha": "249dc35b62fac598f36689fa64c24cab1e6a4452",
+      "status": "unreviewed",
+      "kind": "conformance_extension"
+    },
+    {
+      "path": "etc/anyt/presence_tests/perform_test.rb",
+      "blob_sha": "61382207ede51312e1a3574c3ec4062a7ba2c4da",
+      "status": "unreviewed",
+      "kind": "conformance_extension"
+    },
+    {
+      "path": "etc/anyt/presence_tests/subscribe_test.rb",
+      "blob_sha": "67167adb4448252e07d7af762d8d523577c34479",
+      "status": "unreviewed",
+      "kind": "conformance_extension"
+    },
+    {
+      "path": "etc/benchi/client/client_test.go",
+      "blob_sha": "7229b7bd46246f4b5a27c8bd4c84c38eb4a6f186",
+      "status": "unreviewed",
+      "kind": "benchmark_harness_go_test"
+    },
+    {
+      "path": "etc/benchi/lib/client_test.go",
+      "blob_sha": "afdfa52349b8886f21dcbf456f500b5b0d21b0d9",
+      "status": "unreviewed",
+      "kind": "benchmark_harness_go_test"
+    },
+    {
+      "path": "etc/benchi/lib/counter_test.go",
+      "blob_sha": "3f7a4675e792326cfa0fa7610a031bf5520db79e",
+      "status": "unreviewed",
+      "kind": "benchmark_harness_go_test"
+    },
+    {
+      "path": "etc/benchi/lib/lib_test.go",
+      "blob_sha": "8f1de90d8b67022328d97bee5d77732ff5d0f4cc",
+      "status": "unreviewed",
+      "kind": "benchmark_harness_go_test"
+    },
+    {
+      "path": "etc/benchi/lib/pool_test.go",
+      "blob_sha": "521bda768d1a08577201d941cd1acc1a9855ffe4",
+      "status": "unreviewed",
+      "kind": "benchmark_harness_go_test"
+    },
+    {
+      "path": "etc/benchi/lib/publisher_test.go",
+      "blob_sha": "d90f03a748da1a4e7f10094b56d99923af50bd46",
+      "status": "unreviewed",
+      "kind": "benchmark_harness_go_test"
+    },
+    {
+      "path": "etc/benchi/lib/reconnecting_client_test.go",
+      "blob_sha": "d2223ffebec5b8941e310c873c0ad0672d344e55",
+      "status": "unreviewed",
+      "kind": "benchmark_harness_go_test"
+    },
+    {
+      "path": "etc/benchi/lib/rpc_server_test.go",
+      "blob_sha": "ccacb88f286a74ddd4a142ccb9df8d4ace77f7cf",
+      "status": "unreviewed",
+      "kind": "benchmark_harness_go_test"
+    },
+    {
+      "path": "etc/benchi/lib/server_test.go",
+      "blob_sha": "81dc0ce660799853f768d7cc9edf7c793d9c1ab7",
+      "status": "unreviewed",
+      "kind": "benchmark_harness_go_test"
+    },
+    {
+      "path": "etc/benchi/lib/throughput_test.go",
+      "blob_sha": "bc51a6a76acf8ebced4bf93997c5194953f4f448",
+      "status": "unreviewed",
+      "kind": "benchmark_harness_go_test"
+    },
+    {
+      "path": "etc/benchi/scenarios/reconnect_floods/main_test.go",
+      "blob_sha": "7d0f98995461e3bbee707d912b675ac8d69f4207",
+      "status": "unreviewed",
+      "kind": "benchmark_harness_go_test"
+    },
+    {
+      "path": "etc/benchi/scenarios/stress_publications/main_test.go",
+      "blob_sha": "100091d1ebef5c3bb2142fceac81cd04fc78344d",
+      "status": "unreviewed",
+      "kind": "benchmark_harness_go_test"
+    },
+    {
+      "path": "features/broadcasts.benchfile",
+      "blob_sha": "312ad14815fc39eee5ad878d1ac62e0639485272",
+      "status": "unreviewed",
+      "kind": "benchmark"
+    },
+    {
+      "path": "features/enats_broker.testfile",
+      "blob_sha": "e27e31a538d46f3ebc4a2d492c63763c8645377b",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/enats_clusters.testfile",
+      "blob_sha": "e5c3ab1c27194bf9f43b7beb7600ac6c4494b04f",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/file_config.testfile",
+      "blob_sha": "b08db44e90391e995a02a482fafd9e8454f35347",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/goroutines.benchfile",
+      "blob_sha": "8ae8ae98d6dee5bc07ea80f34deebcdb5f86d024",
+      "status": "unreviewed",
+      "kind": "benchmark"
+    },
+    {
+      "path": "features/jwt.testfile",
+      "blob_sha": "6aaa2d34cf537c44667fd6dd2a8b0f2d2f27c391",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/metrics.testfile",
+      "blob_sha": "ac255ce5c6511b18d57946b022c74930cf9bdfb9",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/mruby_printers.testfile",
+      "blob_sha": "e006c9290fb5f79d283264dd23eae9dff1eec686",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/ping.testfile",
+      "blob_sha": "9fd92c0f017cf2c32d621c2ee9198093d12c9559",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/ping_pong.testfile",
+      "blob_sha": "14f7cf591896dc7ca25ecf168e0d8f297e2578c1",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/pusher-presence.testfile",
+      "blob_sha": "608894bda513286e44c045b55952f2f060a31f3f",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/pusher-private.testfile",
+      "blob_sha": "6ed76b8352a014278507728cc576c3824ce7bc58",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/pusher.testfile",
+      "blob_sha": "f396de67acb29a43b21be897e834ef55dccec472",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/shutdown.testfile",
+      "blob_sha": "f07c467d1c90cfacecbd10d9a02e211571eb92bb",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/sse.testfile",
+      "blob_sha": "3b98043cb094dcd7d964909d2b0652877e3e1253",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/standalone.testfile",
+      "blob_sha": "f9c19a6192ad0083b04e863fdd9211d773bbb0c1",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/streams.testfile",
+      "blob_sha": "4ceebfbb2845e0b22ee03135993c23ec43e01b43",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "features/turbo_rpc_less.testfile",
+      "blob_sha": "343f3e6b005ccfed56edd9c127a633cc27553fe4",
+      "status": "unreviewed",
+      "kind": "feature"
+    },
+    {
+      "path": "hub/gate_test.go",
+      "blob_sha": "4037bd4bfd002132239ad863441d42fb3e3be270",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "hub/hub_test.go",
+      "blob_sha": "5268d559198030dc669ea742ecbe6e87f31e9b95",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "identity/identity_test.go",
+      "blob_sha": "1b86842940ccb51c59c8d2c5b8cbbcc4233652a0",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "identity/jwt_test.go",
+      "blob_sha": "35f8f859f3de4587c1e59edbd920e38500317078",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "logger/config_test.go",
+      "blob_sha": "7b74c0be35b6bc72e840e5ea1d87a0d31b4ce2a5",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "logger/values_test.go",
+      "blob_sha": "2065220e9c9c4b04ca999ffbe04e15c67694cc49",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "metrics/config_test.go",
+      "blob_sha": "a33a97e8ccb530ba2b786fe39e605daae8b45753",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "metrics/counter_test.go",
+      "blob_sha": "97a90d8ccc02c26c40e11151c0fc40c154e3cb21",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "metrics/gauge_test.go",
+      "blob_sha": "b15ad60eb233587d3c4f23b0c4093a441e41eea1",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "metrics/metrics_test.go",
+      "blob_sha": "060dab5ea33c6b074d87033b0acb7e6cfb776825",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "metrics/prometheus_test.go",
+      "blob_sha": "fd8102dd76322ea732d7c64350c16d968ae1d6ba",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "metrics/statsd_writer_test.go",
+      "blob_sha": "bee3e57b5b37fbfa084abc18c8b76639c97848a8",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "mrb/mrb_test.go",
+      "blob_sha": "d99ac38f988c2e26c3dc4a27fd3adc2cb9e57bdd",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "nats/config_test.go",
+      "blob_sha": "25983edd2f1c89c70a7e9142c78dc89a77016706",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "node/broker_integration_test.go",
+      "blob_sha": "a0c2910431f1ad7d8063845751a34ea00bd08cda",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "node/config_test.go",
+      "blob_sha": "0fc3f4a213c4abbd9a921eba34aa19c40110d3ce",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "node/disconnect_queue_test.go",
+      "blob_sha": "e47d1b2cf311382b77ed0cc9ca369e0cfd4e21e7",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "node/node_mocks_test.go",
+      "blob_sha": "cc3d7aa55b128ecbd41d8e4d291ff7401e341c9f",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "node/node_test.go",
+      "blob_sha": "0aadbeaf8f622a398aca117fc1ecad6dff49f011",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "node/session_test.go",
+      "blob_sha": "b9e89143d90c861840d8301d2a90521e412106fd",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "node/subscription_state_test.go",
+      "blob_sha": "f951f30d09dafc0934e4a31c0dadea8c7ccb42d0",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "protocol/protocol_test.go",
+      "blob_sha": "bb419e3d9d7a73fa11c2e8533a6e8d2a5b613dd7",
+      "status": "translated",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "pubsub/nats_test.go",
+      "blob_sha": "d3d6b4897b9bfd89f9718b3a63ebbfbc0d328a8e",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "pubsub/redis_test.go",
+      "blob_sha": "628c947bc56b74ca531f5643d0e5d77af5eb60b7",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "pubsub/subscriber_test.go",
+      "blob_sha": "6d3d653f563f667585401611f4ce8ab94f4329fd",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "pusher/config_test.go",
+      "blob_sha": "51ffd282a7f7d682783115544e4f0b00f5d71419",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "pusher/controller_test.go",
+      "blob_sha": "0b9874767af3a8a837ddd9c5eb8816d24c58b64e",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "pusher/encoder_test.go",
+      "blob_sha": "3d7f43c6a702882748187e95ca0bf3ae739ff922",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "pusher/executor_test.go",
+      "blob_sha": "660fc9edc0e58d6eab2eddef91576118b93fb80d",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "pusher/http_test.go",
+      "blob_sha": "afec21c6b6ffe48dabbf7a6f7116582a4b75099f",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "pusher/verifier_test.go",
+      "blob_sha": "902122b00d3e736a7008791d241426323ec7f0b6",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "redis/config_test.go",
+      "blob_sha": "286dac9caa97ae94916d135ff6c7ca000d830d1d",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "redis/streamer_test.go",
+      "blob_sha": "4b0a269bb2007fcdcfdb7b1727c0f29a14a2cc87",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "router/router_test.go",
+      "blob_sha": "8c784db8c6df1a5759e5cbd2de8432be448ac11b",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "rpc/config_test.go",
+      "blob_sha": "5a7c46bcc49141c535d5f968d0319cceca1ccfb2",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "rpc/grpc_test.go",
+      "blob_sha": "2fcfe90a4340f8b5f073957ec43a355c98f99524",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "rpc/http_test.go",
+      "blob_sha": "0d6428cd1e20ad40791eee46f78d88e59dc387d0",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "rpc/rpc_test.go",
+      "blob_sha": "4d7bdb72b374058bbfce03da9e327c530728de44",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "server/config_test.go",
+      "blob_sha": "b8fdf777c642b40a78f7267f566b0679055c2af3",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "server/headers_extractor_test.go",
+      "blob_sha": "bcd06b709344537dc1e5e27339c6d2fdf219374e",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "server/health_handler_test.go",
+      "blob_sha": "2ecc3575f39df88cdd3ac057ecf7905b17e600be",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "server/request_info_test.go",
+      "blob_sha": "845e80457bc90e56a092377b119119777d1204ab",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "server/ssl_config_test.go",
+      "blob_sha": "5c0c0b528b3b9999d4c687cae7b703a0669ca270",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "sse/config_test.go",
+      "blob_sha": "be6ad850a106866c1af1784135a276bc6db502ed",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "sse/connection_test.go",
+      "blob_sha": "0b9abc7d64b038da7809cc30776e46d97e440844",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "sse/encoder_test.go",
+      "blob_sha": "96d19932e6350963075d8e3ea7c113943dbb6d5e",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "sse/handler_test.go",
+      "blob_sha": "2c43c466d9e3a46f7160961fd7daf1d567c4a66e",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "streams/config_test.go",
+      "blob_sha": "e99a4dfc2ceed006057f4339fff3d885e6652694",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "streams/controller_test.go",
+      "blob_sha": "aea4948d41802f50640933154c66c6f0fb72eaf2",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "telemetry/telemetry_test.go",
+      "blob_sha": "40f9f6e18abd93921030de655e17565d571fd5b7",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "utils/gopool_test.go",
+      "blob_sha": "a14c3ac72429f00a0e05b7abd9d71b9e9a88e6fa",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "utils/message_verifier_test.go",
+      "blob_sha": "e808eb618e44cb52fd89a33cd72056aeef3854ce",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "utils/priority_queue_test.go",
+      "blob_sha": "7df59bf5d3c4860e9fb8eb2ee2a26cefd4a47b57",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "utils/queue_test.go",
+      "blob_sha": "e6def61f2fba80d30dc04d9e589d6423fb6a26de",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "vendorlib/go-mruby/array_test.go",
+      "blob_sha": "9df0888396fc6bcf4769872f0113b387fb3559cd",
+      "status": "unreviewed",
+      "kind": "vendored_go_test"
+    },
+    {
+      "path": "vendorlib/go-mruby/class_test.go",
+      "blob_sha": "09c6363266e75d77d14df1cf1dcae4cb86326ccd",
+      "status": "unreviewed",
+      "kind": "vendored_go_test"
+    },
+    {
+      "path": "vendorlib/go-mruby/context_test.go",
+      "blob_sha": "bbd6ee2b3206c518da058c5fabfa4a8410bf32b7",
+      "status": "unreviewed",
+      "kind": "vendored_go_test"
+    },
+    {
+      "path": "vendorlib/go-mruby/decode_test.go",
+      "blob_sha": "9fdd495b959955639d21c2c65e8b48d77e08d7e7",
+      "status": "unreviewed",
+      "kind": "vendored_go_test"
+    },
+    {
+      "path": "vendorlib/go-mruby/examples_test.go",
+      "blob_sha": "d20cc1900f2ef7dbc5e58ab35289f0ef64f15f8d",
+      "status": "unreviewed",
+      "kind": "vendored_go_test"
+    },
+    {
+      "path": "vendorlib/go-mruby/func_test.go",
+      "blob_sha": "938b0c650a37156103aae234fd1addb339eb85cd",
+      "status": "unreviewed",
+      "kind": "vendored_go_test"
+    },
+    {
+      "path": "vendorlib/go-mruby/gc_test.go",
+      "blob_sha": "bc9b793e2dd812fba3d3b112cdc47b2a0004dfe3",
+      "status": "unreviewed",
+      "kind": "vendored_go_test"
+    },
+    {
+      "path": "vendorlib/go-mruby/hash_test.go",
+      "blob_sha": "73e218515459677c062cd8adfdd717de70a41097",
+      "status": "unreviewed",
+      "kind": "vendored_go_test"
+    },
+    {
+      "path": "vendorlib/go-mruby/mruby_test.go",
+      "blob_sha": "a0fa26037faf1e60cbd58a900baa8eee2db0b5c6",
+      "status": "unreviewed",
+      "kind": "vendored_go_test"
+    },
+    {
+      "path": "vendorlib/go-mruby/parser_test.go",
+      "blob_sha": "31307183d88eede1ad19861b4f9e4698de71e3e9",
+      "status": "unreviewed",
+      "kind": "vendored_go_test"
+    },
+    {
+      "path": "vendorlib/go-mruby/value_test.go",
+      "blob_sha": "4102bcb7129a775b059b2b8aaca8ad448c678475",
+      "status": "unreviewed",
+      "kind": "vendored_go_test"
+    },
+    {
+      "path": "ws/config_test.go",
+      "blob_sha": "26b4b013c566980ad12f10101c821804e4138abc",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "ws/handler_test.go",
+      "blob_sha": "5bd8616a91cd81d12cb8576802feb29fb9249ff7",
+      "status": "translated",
+      "kind": "server_go_test"
+    }
+  ]
+}
