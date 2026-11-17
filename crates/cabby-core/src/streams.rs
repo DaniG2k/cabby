@@ -28,27 +28,72 @@ pub struct Config {
     pub cable_ready_secret: String,
 }
 
+crate::toml_section!(Config, "streams.Config" {
+    "secret" => secret,
+    "public" => public,
+    "whisper" => whisper,
+    "presence" => presence,
+    "pubsub_channel" => pubsub_channel,
+    "turbo" => turbo,
+    "turbo_secret" => turbo_secret,
+    "cable_ready" => cable_ready,
+    "cable_ready_secret" => cable_ready_secret,
+});
+
 impl Config {
     /// Upstream `NewConfig()`.
     pub fn new() -> Self {
-        pending!("streams::new_config")
+        Self { pubsub_channel: "$pubsub".to_owned(), presence: true, ..Default::default() }
     }
 
     pub fn turbo_secret(&self) -> String {
-        pending!("streams::config_get_turbo_secret")
+        if self.turbo_secret.is_empty() { self.secret.clone() } else { self.turbo_secret.clone() }
     }
 
     pub fn cable_ready_secret(&self) -> String {
-        pending!("streams::config_get_cable_ready_secret")
+        if self.cable_ready_secret.is_empty() { self.secret.clone() } else { self.cable_ready_secret.clone() }
     }
 
     pub fn to_toml(&self) -> String {
-        pending!("streams::config_to_toml")
+        fn flag(out: &mut String, comment: &str, key: &str, on: bool) {
+            out.push_str(comment);
+            out.push_str(if on { "" } else { "# " });
+            out.push_str(key);
+            out.push_str(" = true\n");
+        }
+        fn secret(out: &mut String, comment: &str, key: &str, value: &str) {
+            out.push_str(comment);
+            if value.is_empty() {
+                out.push_str(&format!("# {key} = \"\"\n"));
+            } else {
+                out.push_str(&format!("{key} = \"{value}\"\n"));
+            }
+        }
+
+        let mut out = String::new();
+        secret(&mut out, "# Secret key used to sign and verify pub/sub streams\n", "secret", &self.secret);
+        flag(&mut out, "# Enable public (unsigned) streams\n", "public", self.public);
+        flag(&mut out, "# Enable whispering support for pub/sub streams\n", "whisper", self.whisper);
+        flag(&mut out, "# Enable presence support for pub/sub streams\n", "presence", self.presence);
+        out.push_str("# Name of the channel used for pub/sub\n");
+        out.push_str(&format!("pubsub_channel = \"{}\"\n", self.pubsub_channel));
+        flag(&mut out, "# Enable Turbo Streams support\n", "turbo", self.turbo);
+        secret(&mut out, "# Custom secret key used to verify Turbo Streams\n", "turbo_secret", &self.turbo_secret);
+        flag(&mut out, "# Enable CableReady support\n", "cable_ready", self.cable_ready);
+        secret(
+            &mut out,
+            "# Custom secret key used to verify CableReady streams\n",
+            "cable_ready_secret",
+            &self.cable_ready_secret,
+        );
+        out.push('\n');
+        out
     }
 
     /// Decodes TOML over the current values (upstream `toml.Decode(s, &conf)`).
-    pub fn merge_toml(&mut self, _toml: &str) -> Result<(), ConfigError> {
-        pending!("streams::config_merge_toml")
+    pub fn merge_toml(&mut self, toml: &str) -> Result<(), ConfigError> {
+        crate::toml_config::decode(self, toml).map_err(|e| ConfigError { message: e.0 })?;
+        Ok(())
     }
 }
 

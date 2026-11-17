@@ -77,35 +77,57 @@ pub struct SentinelOptions {
     pub password: String,
 }
 
+cabby_core::toml_section!(RedisConfig, "redis.RedisConfig" {
+    "url" => url,
+    "sentinels" => sentinels,
+    "sentinel_discovery_interval" => sentinel_discovery_interval,
+    "keepalive_ping_interval" => keepalive_ping_interval,
+    "tls_verify" => tls_verify,
+    "tls_ca_cert_path" => tls_ca_cert_path,
+    "tls_client_cert_path" => tls_client_cert_path,
+    "tls_client_key_path" => tls_client_key_path,
+    "max_reconnect_attempts" => max_reconnect_attempts,
+    "disable_cache" => disable_cache,
+});
+
 impl RedisConfig {
     /// Upstream `redis.NewRedisConfig()` (defaults).
     pub fn new() -> Self {
-        pending!("redis::new_redis_config")
+        Self {
+            url: "redis://localhost:6379".to_owned(),
+            keepalive_ping_interval: 30,
+            sentinel_discovery_interval: 30,
+            tls_verify: false,
+            max_reconnect_attempts: 5,
+            disable_cache: false,
+            ..Default::default()
+        }
     }
 
     pub fn is_cluster(&self) -> bool {
-        let _ = (&self.hosts, &self.sentinel_master);
-        pending!("redis::is_cluster")
+        self.hosts.len() > 1 && !self.is_sentinel()
     }
 
     pub fn is_sentinel(&self) -> bool {
-        pending!("redis::is_sentinel")
+        !self.sentinels.is_empty() || !self.sentinel_master.is_empty()
     }
 
     pub fn tls_verification_skipped(&self) -> bool {
-        pending!("redis::tls_verification_skipped")
+        !self.tls_verify && (self.url.contains("rediss://") || self.sentinels.contains("rediss://"))
     }
 
     pub fn hostnames(&self) -> Vec<String> {
-        pending!("redis::hostnames")
+        self.hosts.clone()
     }
 
+    /// The sentinel master, or the first host (upstream panics without hosts;
+    /// this returns `""`).
     pub fn hostname(&self) -> String {
-        pending!("redis::hostname")
+        if self.is_sentinel() { self.sentinel_master.clone() } else { self.hosts.first().cloned().unwrap_or_default() }
     }
 
     pub fn tls_client_cert_available(&self) -> bool {
-        pending!("redis::tls_client_cert_available")
+        !self.tls_client_cert_path.is_empty() && !self.tls_client_key_path.is_empty()
     }
 
     /// Upstream `ToRueidisOptions`; also records the resolved hosts.
@@ -114,13 +136,45 @@ impl RedisConfig {
     }
 
     pub fn to_toml(&self) -> String {
-        pending!("redis::to_toml")
+        fn optional(out: &mut String, key: &str, value: &str, placeholder: &str) {
+            if value.is_empty() {
+                out.push_str(&format!("# {key} = \"{placeholder}\"\n"));
+            } else {
+                out.push_str(&format!("{key} = \"{value}\"\n"));
+            }
+        }
+
+        let mut out = String::new();
+        out.push_str("# Redis instance URL or master name in case of sentinels usage\n");
+        out.push_str("# or list of URLs if cluster usage\n");
+        out.push_str(&format!("url = \"{}\"\n", self.url));
+        out.push_str("# Sentinel addresses (comma-separated list)\n");
+        out.push_str(&format!("sentinels = \"{}\"\n", self.sentinels));
+        out.push_str("# Sentinel discovery interval (seconds)\n");
+        out.push_str(&format!("sentinel_discovery_interval = {}\n", self.sentinel_discovery_interval));
+        out.push_str("# Keepalive ping interval (seconds)\n");
+        out.push_str(&format!("keepalive_ping_interval = {}\n", self.keepalive_ping_interval));
+        out.push_str("# Enable TLS Verify\n");
+        out.push_str(if self.tls_verify { "tls_verify = true\n" } else { "# tls_verify = true\n" });
+        out.push_str("# Path to CA certificate file to verify Redis server\n");
+        optional(&mut out, "tls_ca_cert_path", &self.tls_ca_cert_path, "/path/to/ca.pem");
+        out.push_str("# Path to client TLS certificate file for mutual TLS\n");
+        optional(&mut out, "tls_client_cert_path", &self.tls_client_cert_path, "/path/to/cert.pem");
+        out.push_str("# Path to client TLS private key file for mutual TLS\n");
+        optional(&mut out, "tls_client_key_path", &self.tls_client_key_path, "/path/to/key.pem");
+        out.push_str("# Max number of reconnect attempts\n");
+        out.push_str(&format!("max_reconnect_attempts = {}\n", self.max_reconnect_attempts));
+        out.push_str("# Disable client-side caching\n");
+        out.push_str(if self.disable_cache { "disable_cache = true\n" } else { "# disable_cache = true\n" });
+        out.push('\n');
+        out
     }
 
     /// Decodes TOML into `self`, keeping fields the document omits (upstream
     /// `toml.Decode(str, &config)`).
-    pub fn decode_toml(&mut self, _toml: &str) -> Result<(), RedisError> {
-        pending!("redis::decode_toml")
+    pub fn decode_toml(&mut self, toml: &str) -> Result<(), RedisError> {
+        cabby_core::toml_config::decode(self, toml).map_err(|e| RedisError(e.0))?;
+        Ok(())
     }
 }
 
