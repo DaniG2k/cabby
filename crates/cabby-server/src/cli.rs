@@ -73,10 +73,7 @@ pub trait Broadcaster: Shutdownable {
 }
 
 /// Upstream `pubsub.Handler`: receives messages from the pub/sub subscriber.
-pub trait SubscriberHandler: Send + Sync {
-    fn broadcast(&self, msg: &StreamMessage);
-    fn execute_remote_command(&self, msg: &RemoteCommandMessage);
-}
+pub use cabby_core::pubsub::Handler as SubscriberHandler;
 
 /// Upstream `pubsub.Subscriber`.
 pub trait Subscriber: Shutdownable {

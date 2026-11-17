@@ -288,6 +288,29 @@ impl Session {
     }
 }
 
+/// The session as a hub participant. The hub calls `send` and
+/// `disconnect_with_message` from its gate threads with a
+/// [`CachedEncodedMessage`](cabby_core::hub::CachedEncodedMessage): fetch the
+/// frame for the session's encoder with `fetch_with` (encoded once per broadcast
+/// and encoder, shared as `Arc<SentFrame>`) and queue it without blocking.
+impl cabby_core::hub::HubSession for Session {
+    fn get_id(&self) -> String {
+        Session::get_id(self)
+    }
+
+    fn get_identifiers(&self) -> String {
+        Session::get_identifiers(self)
+    }
+
+    fn send(&self, _msg: &cabby_core::hub::EncodedMessage) {
+        pending!("node::session_hub_send")
+    }
+
+    fn disconnect_with_message(&self, _msg: &cabby_core::hub::EncodedMessage, _code: &str) {
+        pending!("node::session_hub_disconnect_with_message")
+    }
+}
+
 /// The cache entry: JSON with `ids`, `subs`, `cstate`, `istate` and
 /// `Disconnectable` (upstream `ToCacheEntry`).
 impl Cacheable for Session {
