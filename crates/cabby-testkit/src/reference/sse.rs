@@ -200,6 +200,15 @@ impl Recorder {
         self.0.lock().unwrap().body.clone()
     }
 
+    /// Every published header (lower-cased names, sorted).
+    pub fn headers(&self) -> Vec<(String, String)> {
+        let s = self.0.lock().unwrap();
+        let mut h: Vec<(String, String)> =
+            s.headers.iter().map(|(k, v)| (k.as_str().to_owned(), v.to_str().unwrap_or_default().to_owned())).collect();
+        h.sort();
+        h
+    }
+
     pub fn body_string(&self) -> String {
         String::from_utf8_lossy(&self.body_bytes().unwrap_or_default()).into_owned()
     }
