@@ -8,7 +8,7 @@ fn msg(stream: &str, data: &str) -> StreamMessage {
 }
 
 /// upstream: hub/gate_test.go#TestUnsubscribe
-/// Exported part: stream counts through `Size()`.
+/// note: upstream's `len(gate.streams)` is exactly `Gate.Size()`, asserted here; the `sessionsStreams` check is in test_unsubscribe_sessions_streams.
 #[test]
 fn test_unsubscribe() {
     let _load = crate::shared_load();
@@ -23,13 +23,15 @@ fn test_unsubscribe() {
     gate.unsubscribe(&session, "test", "test_channel");
 
     assert_eq!(0, gate.size());
+
+    // Upstream: assert.Equal(t, 0, len(gate.streams)) (= Size()).
+    assert_eq!(0, gate.size());
 }
 
 /// upstream: hub/gate_test.go#TestUnsubscribe
-/// Upstream also checks the unexported `streams` and `sessionsStreams` maps are
-/// empty (not observable through the Go reference).
+/// note: not_observable on Go: `len(gate.sessionsStreams)` reads an unexported map (which the Go implementation never writes, so upstream's assertion is vacuous there).
 #[test]
-fn test_unsubscribe_internal_indexes() {
+fn test_unsubscribe_sessions_streams() {
     let _load = crate::shared_load();
     let gate = Gate::new();
 
@@ -38,9 +40,7 @@ fn test_unsubscribe_internal_indexes() {
     gate.subscribe(&session, "test", "test_channel");
     gate.unsubscribe(&session, "test", "test_channel");
 
-    let (streams, sessions_streams) = gate.index_sizes();
-    assert_eq!(0, streams);
-    assert_eq!(0, sessions_streams);
+    assert_eq!(0, gate.sessions_streams_size());
 }
 
 /// upstream: hub/gate_test.go#TestShutdown
@@ -52,6 +52,7 @@ fn test_unsubscribe_internal_indexes() {
 /// synchronizes on "1" having been handled, so the cancelled broadcast loop is
 /// idle and cannot pick up "2" (a Go `select` with both cases ready chooses at
 /// random).
+/// note: context cancelled explicitly instead of a 100 ms timeout; the ignored first read moved before the cancel so the cancelled loop cannot pick up "2".
 #[test]
 fn test_shutdown() {
     let _load = crate::shared_load();
