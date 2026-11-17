@@ -24,6 +24,7 @@ toml = "1.2.1"
 tonic = "0.14.9"
 tonic-prost = "0.14.9"
 tonic-prost-build = "0.14.9"
+tungstenite = "0.30.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
