@@ -113,6 +113,7 @@ mod test_legacy_redis_broadcaster {
 }
 
 /// upstream: broadcast/legacy_redis_test.go#TestLegacyRedisBroadcasterReconnect
+/// note: only this test's ACL user is killed (upstream: CLIENT KILL TYPE pubsub on every client); restoration is observed as the channel subscribed again; also asserts at least one connection was killed.
 #[test]
 fn test_legacy_redis_broadcaster_reconnect() {
     let scope = services::redis().scope("legacy_redis");
@@ -135,7 +136,10 @@ fn test_legacy_redis_broadcaster_reconnect() {
     assert_eq!(Some("before_disconnect"), messages[0].get("data").map(String::as_str));
 
     // Drop Redis pub/sub connections (mimics connection failure)
-    scope.kill_pubsub_connections(scope.user()).expect("CLIENT KILL");
+    let killed = scope.kill_pubsub_connections(scope.user()).expect("CLIENT KILL");
+    // Addition: makes sure a connection was actually dropped (upstream only
+    // requires the command to succeed).
+    assert!(killed >= 1, "expected to kill the broadcaster's pub/sub connection");
     // Upstream waitRedisPubSubConnectionsRestored: any channel active again.
     wait_subscription(&scope, &config.channel);
 
