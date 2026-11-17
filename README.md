@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/cabby-mascot.png" width="320" alt="Cabby, a friendly orange crab in a yellow taxi-driver cap, waving and holding a network cable." />
+</p>
+
 # Cabby
 
 An [AnyCable](https://github.com/anycable/anycable)-compatible real-time server written in
