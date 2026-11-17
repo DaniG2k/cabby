@@ -30,3 +30,19 @@ path = "unit/ws/main.rs"
 [[test]]
 name = "conformance"
 path = "conformance/main.rs"
+
+[[test]]
+name = "identity"
+path = "unit/identity/main.rs"
+
+[[test]]
+name = "streams"
+path = "unit/streams/main.rs"
+
+[[test]]
+name = "broker"
+path = "unit/broker/main.rs"
+
+[[test]]
+name = "api"
+path = "unit/api/main.rs"
