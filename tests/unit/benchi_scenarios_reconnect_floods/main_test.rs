@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use cabby_testkit::reference::benchi::reconnect_floods::{
-    Sample, command_stall, parse_flags, run, run_interrupted_after,
+    Sample, command_stall, parse_flags, prepare, run, run_interrupted_after,
 };
 
 /// upstream: etc/benchi/scenarios/reconnect_floods/main_test.go#TestParseFlags_RequiresClientsAndWaves
@@ -19,6 +19,7 @@ fn test_parse_flags_requires_clients_and_waves() {
 }
 
 /// upstream: etc/benchi/scenarios/reconnect_floods/main_test.go#TestParseFlags_Waves
+/// note: Go: the unexported parseFlags is reached through the test-only scenario shim (go test -c with an overlaid _test.go; upstream files unchanged).
 #[test]
 fn test_parse_flags_waves() {
     let cfg = parse_flags(&["-c", "100", "--waves", "10, 20,30"]).expect("flags parse");
@@ -28,6 +29,7 @@ fn test_parse_flags_waves() {
 }
 
 /// upstream: etc/benchi/scenarios/reconnect_floods/main_test.go#TestRun_SmallWavesRecover
+/// note: adaptation: upstream reads the embedded DisconnectQueue.Size(); the external harness reads the disconnect_queue_size gauge and counts a wave drained only on a sample refreshed after the wave once Disconnect calls plus discards cover the dropped sessions (reconnect_floods::wave_drained), so a stale 0 cannot pass. peak_goroutines/peak_heap_mb become server-process peak_server_threads/peak_server_rss_mb (not asserted). Go: run() is called in-process through the scenario shim.
 #[test]
 fn test_run_small_waves_recover() {
     let out = run(&[
@@ -99,6 +101,7 @@ fn test_run_setup_fails_when_subscribe_always_times_out() {
 }
 
 /// upstream: etc/benchi/scenarios/reconnect_floods/main_test.go#TestCommandStall
+/// note: Go: the unexported commandStall is reached through the test-only scenario shim (go test -c with an overlaid _test.go; upstream files unchanged).
 #[test]
 fn test_command_stall() {
     // states[1] is Subscribing, rpc_done[1] is Command (ClientState::ALL and
@@ -123,11 +126,13 @@ fn test_command_stall() {
 }
 
 /// upstream: etc/benchi/scenarios/reconnect_floods/main_test.go#TestRun_InterruptPrintsSummary
+/// note: Go: parseFlags + runWithConfig with a 2s context, through the scenario shim. The drained check uses the gauge rule noted on TestRun_SmallWavesRecover.
 #[test]
 fn test_run_interrupt_prints_summary() {
     // Slow Disconnect calls keep the queue non-empty, so without the interrupt the run
     // would wait for the queue to drain. Upstream passes a context that is done after
     // 2s to runWithConfig.
+    prepare();
     let began = Instant::now();
     let out = run_interrupted_after(
         &[
