@@ -28,8 +28,8 @@
       "cases": 46
     },
     "translation": {
-      "reviewed": 662,
-      "translated": 159,
+      "reviewed": 703,
+      "translated": 118,
       "unreviewed": 102
     },
     "upstream_result": {
@@ -6772,7 +6772,7 @@
         "conformance::anyt_nats::broadcast_to_others",
         "conformance::anyt_nats_embedded::broadcast_to_others"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6812,7 +6812,7 @@
         "conformance::anyt_nats::whisper_to_others",
         "conformance::anyt_nats_embedded::whisper_to_others"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6977,7 +6977,7 @@
         "conformance::anyt_broker_http::presence_join_leave_on_perform",
         "conformance::anyt_broker_redis::presence_join_leave_on_perform"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -8994,7 +8994,7 @@
       "rust_cases": [
         "features::rpc_less::jwt"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9022,7 +9022,7 @@
       "rust_cases": [
         "features::with_rpc::metrics"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9050,7 +9050,7 @@
       "rust_cases": [
         "features::with_rpc::mruby_printers"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9078,7 +9078,7 @@
       "rust_cases": [
         "features::with_rpc::ping"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9106,7 +9106,7 @@
       "rust_cases": [
         "features::with_rpc::ping_pong"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9134,7 +9134,7 @@
       "rust_cases": [
         "features::pusher::pusher_presence"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9162,7 +9162,7 @@
       "rust_cases": [
         "features::pusher::pusher_private"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9246,7 +9246,7 @@
       "rust_cases": [
         "features::sse::sse"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9272,7 +9272,7 @@
       "rust_cases": [
         "features::rpc_less::standalone"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9300,7 +9300,7 @@
       "rust_cases": [
         "features::rpc_less::streams"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -9328,7 +9328,7 @@
       "rust_cases": [
         "features::rpc_less::turbo_rpc_less"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -24526,7 +24526,7 @@
         "conformance::anyt_nats::ping",
         "conformance::anyt_nats_embedded::ping"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -24568,7 +24568,7 @@
         "conformance::anyt_nats::welcome",
         "conformance::anyt_nats_embedded::welcome"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -24652,7 +24652,7 @@
         "conformance::anyt_nats::channel_state_kept_between_commands",
         "conformance::anyt_nats_embedded::channel_state_kept_between_commands"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -24783,7 +24783,7 @@
         "conformance::anyt_nats::request_channel_has_access_to_request",
         "conformance::anyt_nats_embedded::request_channel_has_access_to_request"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -24825,7 +24825,7 @@
         "conformance::anyt_nats::request_accept_with_cookies",
         "conformance::anyt_nats_embedded::request_accept_with_cookies"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -24866,7 +24866,7 @@
         "conformance::anyt_nats::request_accept_with_header",
         "conformance::anyt_nats_embedded::request_accept_with_header"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -24909,7 +24909,7 @@
         "conformance::anyt_nats::request_reject_without_cookies",
         "conformance::anyt_nats_embedded::request_reject_without_cookies"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -24952,7 +24952,7 @@
         "conformance::anyt_nats::request_reject_without_header",
         "conformance::anyt_nats_embedded::request_reject_without_header"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -24995,7 +24995,7 @@
         "conformance::anyt_nats::request_url_is_set",
         "conformance::anyt_nats_embedded::request_url_is_set"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25036,7 +25036,7 @@
         "conformance::anyt_nats::request_disconnect_message_when_rejected",
         "conformance::anyt_nats_embedded::request_disconnect_message_when_rejected"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25165,7 +25165,7 @@
         "conformance::anyt_nats::broadcast_json_string",
         "conformance::anyt_nats_embedded::broadcast_json_string"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25208,7 +25208,7 @@
         "conformance::anyt_nats::broadcast_custom_string",
         "conformance::anyt_nats_embedded::broadcast_custom_string"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25250,7 +25250,7 @@
         "conformance::anyt_nats::broadcast_object",
         "conformance::anyt_nats_embedded::broadcast_object"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25294,7 +25294,7 @@
         "conformance::anyt_nats::many_clients_one_unsubscribes",
         "conformance::anyt_nats_embedded::many_clients_one_unsubscribes"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25335,7 +25335,7 @@
         "conformance::anyt_nats::many_clients_receive",
         "conformance::anyt_nats_embedded::many_clients_receive"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25379,7 +25379,7 @@
         "conformance::anyt_nats::multiple_streams_none_after_unsubscribe",
         "conformance::anyt_nats_embedded::multiple_streams_none_after_unsubscribe"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25419,7 +25419,7 @@
         "conformance::anyt_nats::multiple_streams_receive_both",
         "conformance::anyt_nats_embedded::multiple_streams_receive_both"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25463,7 +25463,7 @@
         "conformance::anyt_nats::single_stream_none_after_unsubscribe",
         "conformance::anyt_nats_embedded::single_stream_none_after_unsubscribe"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25503,7 +25503,7 @@
         "conformance::anyt_nats::single_stream_receives",
         "conformance::anyt_nats_embedded::single_stream_receives"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25546,7 +25546,7 @@
         "conformance::anyt_nats::single_stream_same_channel_different_params",
         "conformance::anyt_nats_embedded::single_stream_same_channel_different_params"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25590,7 +25590,7 @@
         "conformance::anyt_nats::stop_streams_unsubscribes_from_stream",
         "conformance::anyt_nats_embedded::stop_streams_unsubscribes_from_stream"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25633,7 +25633,7 @@
         "conformance::anyt_nats::ack_confirmation",
         "conformance::anyt_nats_embedded::ack_confirmation"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25674,7 +25674,7 @@
         "conformance::anyt_nats::ack_rejection",
         "conformance::anyt_nats_embedded::ack_rejection"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25716,7 +25716,7 @@
         "conformance::anyt_nats::params_same_channel_different_params",
         "conformance::anyt_nats_embedded::params_same_channel_different_params"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25757,7 +25757,7 @@
         "conformance::anyt_nats::perform_with_arguments",
         "conformance::anyt_nats_embedded::perform_with_arguments"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25799,7 +25799,7 @@
         "conformance::anyt_nats::perform_without_arguments",
         "conformance::anyt_nats_embedded::perform_without_arguments"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -25840,7 +25840,7 @@
         "conformance::anyt_nats::transmissions_from_subscribed",
         "conformance::anyt_nats_embedded::transmissions_from_subscribed"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
