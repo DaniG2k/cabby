@@ -7,6 +7,7 @@
 //!   translated test calls these, so one test body verifies both implementations.
 //! * [`process`]: supervised external processes (SUT binaries, fake services).
 //! * [`ports`]: isolated local ports.
+//! * [`services`]: required external Redis/NATS services with per-test scopes.
 //! * [`sut`]: the server under test as an external process.
 
 pub mod backend;
@@ -15,6 +16,7 @@ pub mod cable_client;
 pub mod ports;
 pub mod process;
 pub mod reference;
+pub mod services;
 pub mod sut;
 
 pub use backend::{Backend, backend};
