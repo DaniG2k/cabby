@@ -2,6 +2,7 @@
 //!
 //! * [`backend`]: which implementation a test exercises (`CABBY_BACKEND=rust|go`).
 //! * [`bridge`]: client for the test-only Go reference bridge (JSON lines).
+//! * [`cable_client`]: synchronous Action Cable WebSocket client (AnyT semantics).
 //! * [`reference`]: per-upstream-package facades that dispatch to Rust or Go. Each
 //!   translated test calls these, so one test body verifies both implementations.
 //! * [`process`]: supervised external processes (SUT binaries, fake services).
@@ -10,6 +11,7 @@
 
 pub mod backend;
 pub mod bridge;
+pub mod cable_client;
 pub mod ports;
 pub mod process;
 pub mod reference;
