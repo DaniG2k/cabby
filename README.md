@@ -35,9 +35,10 @@ From `cargo xtask report` (source of truth: [`compat/test-map.json`](compat/test
 | | Count |
 |---|---:|
 | Upstream cases inventoried (Go unit, Benchi, go-mruby, features, AnyT) | 923 |
-| Translated to Rust | 22 |
-| Translated cases verified against Go | 22 |
-| Passing against Cabby | 0 |
+| Translated to Rust | 451 |
+| Translated cases verified against Go | 418 |
+| Translated cases the Go reference cannot expose (`not_observable`, tested against Rust only) | 29 |
+| Passing against Cabby | 1 (an upstream test with an empty body; no server behavior yet) |
 
 Every case is listed individually, including skipped and runtime-specific ones.
 Behavioral differences from Go, if any, are recorded in

@@ -290,7 +290,7 @@ Set measurable improvement targets after M0 establishes real baseline variance. 
 - [x] Create the Cargo workspace and lock reference/toolchain/test dependency versions (`compat/upstream.lock`, `mise.toml`, `Cargo.lock`).
 - [x] Expand `test-files.json` to a complete case-level manifest (`compat/test-map.json`, `cargo xtask inventory`).
 - [x] Execute and archive the original Go/Ruby baseline (`compat/baseline/`; the two `.benchfile` workloads remain).
-- [ ] Build Rust process/service supervision (done: `cabby-testkit::process`, `sut`) and fake HTTP/gRPC RPC services (pending).
+- [x] Build Rust process/service supervision (`cabby-testkit::process`, `sut`) and fake HTTP/gRPC RPC services (`cabby-testkit::fake_rpc`).
 - [x] Port protocol and origin cases as the first test-harness validation.
 - [x] Verify those tests against Go or documented reference bridges (`compat/reference-adapters/bridge`).
 - [ ] Complete the remaining test translations before production Rust implementation.
