@@ -3,11 +3,9 @@
 //! assertions of `broker_integration_test.go` and the helpers at the end of
 //! `node_test.go`.
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cabby_core::common::{Message, MessageData, StringMap};
-use cabby_server::node::Node;
 use cabby_testkit::reference::node::{TestNode, TestSession};
 use serde_json::Value;
 
@@ -81,17 +79,17 @@ pub fn subscribe_session_to_stream<'a>(
     identifier: &str,
     stream: &str,
 ) -> RemoveOnDrop<'a> {
-    n.hub().add_session(s.rust().clone());
+    n.hub_add_session(s);
 
-    s.subscriptions().add_channel(identifier);
-    s.subscriptions().add_channel_stream(identifier, stream);
-    n.hub().subscribe_session(s.rust(), stream, identifier);
-    n.rust().broker().subscribe(stream);
+    s.add_channel(identifier);
+    s.add_channel_stream(identifier, stream);
+    n.hub_subscribe_session(s, stream, identifier);
+    n.broker_subscribe(stream);
 
     RemoveOnDrop { node: n, session: s }
 }
 
-/// `defer node.hub.RemoveSession(session)`.
+/// `defer node.hub.RemoveSession(session)` (cleanup only).
 pub struct RemoveOnDrop<'a> {
     node: &'a TestNode,
     session: &'a TestSession,
@@ -102,11 +100,9 @@ pub fn remove_on_drop<'a>(node: &'a TestNode, session: &'a TestSession) -> Remov
 }
 
 impl Drop for RemoveOnDrop<'_> {
-    /// Cleanup only (no assertion): skipped against Go, where `node.hub` is
-    /// unexported and bridge objects live until the bridge exits.
     fn drop(&mut self) {
-        if !std::thread::panicking() && cabby_testkit::backend() == cabby_testkit::Backend::Rust {
-            self.node.hub().remove_session(self.session.rust());
+        if !std::thread::panicking() {
+            self.node.hub_remove_session(self.session);
         }
     }
 }
@@ -123,11 +119,6 @@ pub fn eventually(what: &str, deadline: Duration, tick: Duration, mut cond: impl
         assert!(Instant::now() < end, "{what}: not reached within {deadline:?}");
         std::thread::sleep(tick);
     }
-}
-
-/// A clone of the Rust node for mock callbacks (upstream closures capture `node`).
-pub fn node_handle(n: &TestNode) -> Arc<Node> {
-    n.rust().clone()
 }
 
 /// Asserts the frame is absent: the mock connection read times out
