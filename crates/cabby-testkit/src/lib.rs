@@ -2,6 +2,8 @@
 //!
 //! * [`backend`]: which implementation a test exercises (`CABBY_BACKEND=rust|go`).
 //! * [`bridge`]: client for the test-only Go reference bridge (JSON lines).
+//! * [`benchi_bridge`]: client for the Benchi Go bridge (handles, concurrent calls).
+//! * [`http_stub`]: HTTP stub server, POST client and a stalled WebSocket endpoint.
 //! * [`cable_client`]: synchronous Action Cable WebSocket client (AnyT semantics).
 //! * [`reference`]: per-upstream-package facades that dispatch to Rust or Go. Each
 //!   translated test calls these, so one test body verifies both implementations.
@@ -14,10 +16,12 @@
 //! * [`runtime`], [`sync`]: shared Tokio runtime, observable state and gates.
 
 pub mod backend;
+pub mod benchi_bridge;
 pub mod bridge;
 pub mod cable_client;
 pub mod fake_http;
 pub mod fake_rpc;
+pub mod http_stub;
 pub mod ports;
 pub mod process;
 pub mod reference;
