@@ -181,6 +181,11 @@ name = "cabby-server"
 version = "0.0.0"
 dependencies = [
  "cabby-core",
+ "http",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tonic",
 ]
 
 [[package]]
@@ -188,10 +193,20 @@ name = "cabby-testkit"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "cabby-core",
  "cabby-server",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "prost",
  "serde",
  "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
 ]
 
 [[package]]
