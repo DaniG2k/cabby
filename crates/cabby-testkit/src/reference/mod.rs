@@ -11,6 +11,7 @@ pub mod broker;
 pub mod cli;
 pub mod common;
 pub mod config;
+pub mod ds;
 pub mod enats;
 pub mod encoders;
 mod go_types;
