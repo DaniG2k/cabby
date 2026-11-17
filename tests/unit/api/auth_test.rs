@@ -65,6 +65,10 @@ mod test_authenticator {
 }
 
 /// upstream: api/auth_test.go#TestAuthenticator_Integration
+///
+/// Upstream builds this request with `http.NewRequest` instead of
+/// `httptest.NewRequest`. That makes no difference to `Authenticate`, which reads
+/// only the `Authorization` header, so it is the same request value here.
 #[test]
 fn test_authenticator_integration() {
     let auth = new_authenticator("my-secret").expect("authenticator");

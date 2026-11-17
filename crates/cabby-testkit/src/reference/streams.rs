@@ -166,7 +166,23 @@ pub fn new_cable_ready_controller(key: &str) -> Subject {
     build(Ctor::CableReady(key.into()))
 }
 
+/// Which Go `CommandResult` slices were nil. Go distinguishes nil from empty
+/// (`[]string{}`); `Vec` cannot, so the facade reports it separately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GoNilSlices {
+    pub transmissions: bool,
+    pub streams: bool,
+}
+
 impl Subject {
+    fn go_raw(&self, method: &str, sid: &str, env: Option<&SessionEnv>, ids: &str, identifier: &str) -> GoOutcome {
+        bridge::call::<_, GoOutcome>(
+            "streams.Controller",
+            json!({"ctor": self.ctor.to_go(), "method": method, "sid": sid, "env": opt_env_to_go(env),
+                   "ids": ids, "identifier": identifier}),
+        )
+    }
+
     fn go(
         &self,
         method: &str,
@@ -175,12 +191,28 @@ impl Subject {
         ids: &str,
         identifier: &str,
     ) -> Outcome<CommandResult> {
-        bridge::call::<_, GoOutcome>(
-            "streams.Controller",
-            json!({"ctor": self.ctor.to_go(), "method": method, "sid": sid, "env": opt_env_to_go(env),
-                   "ids": ids, "identifier": identifier}),
-        )
-        .map(command_result_from_go)
+        self.go_raw(method, sid, env, ids, identifier).map(command_result_from_go)
+    }
+
+    /// `subject.Unsubscribe(...)`, plus (Go only) which result slices were nil.
+    pub fn unsubscribe_observing_nil(
+        &self,
+        sid: &str,
+        env: Option<&SessionEnv>,
+        ids: &str,
+        identifier: &str,
+    ) -> (Outcome<CommandResult>, Option<GoNilSlices>) {
+        match &self.rust {
+            Some(c) => (c.unsubscribe(sid, env, ids, identifier), None),
+            None => {
+                let raw = self.go_raw("Unsubscribe", sid, env, ids, identifier);
+                let nil = (!raw.result.is_null()).then(|| GoNilSlices {
+                    transmissions: raw.result["Transmissions"].is_null(),
+                    streams: raw.result["Streams"].is_null(),
+                });
+                (raw.map(command_result_from_go), nil)
+            }
+        }
     }
 
     pub fn subscribe(
