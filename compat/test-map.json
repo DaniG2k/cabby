@@ -16,8 +16,8 @@
       "go_vendored": 57
     },
     "reference": {
-      "not_observable": 82,
-      "pass": 739,
+      "not_observable": 13,
+      "pass": 808,
       "unverified": 102
     },
     "rust": {
@@ -25,7 +25,7 @@
       "pending": 922
     },
     "rust_only": {
-      "cases": 45
+      "cases": 46
     },
     "translation": {
       "reviewed": 662,
@@ -11841,13 +11841,16 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] the controller is a bridge-built mocks.Controller on Go; sessions follow NewMockSession with exported API; Go waits in real time (2s), Rust advances a controlled clock.",
+        "[src] as Subscribe_with_history."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_history_memory::subscribe_and_history",
         "node::broker_integration_test::test_integration_history_memory::subscribe_with_history"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11870,12 +11873,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] as Subscribe_with_history."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_history_memory::subscribe_and_history"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11898,12 +11903,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] the controller is a bridge-built mocks.Controller on Go; sessions follow NewMockSession with exported API; Go waits in real time (2s), Rust advances a controlled clock."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_history_memory::subscribe_with_history"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11925,13 +11932,16 @@
       "direct_assertions": 5,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] a private nats-server process per case replaces the embedded enats service (broker.Reset() deletes the broker's streams); real waits.",
+        "[src] as Subscribe_with_history."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_history_nats::subscribe_and_history",
         "node::broker_integration_test::test_integration_history_nats::subscribe_with_history"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11954,12 +11964,14 @@
       "direct_assertions": 5,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] as Subscribe_with_history."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_history_nats::subscribe_and_history"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11982,12 +11994,14 @@
       "direct_assertions": 5,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] a private nats-server process per case replaces the embedded enats service (broker.Reset() deletes the broker's streams); real waits."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_history_nats::subscribe_with_history"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12009,13 +12023,16 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] the sessions (WithKeepaliveIntervals(0, 500ms), then startTimers) are node.NewSession on Go, so their timers start just before Authenticate rather than after it; the controller is a bridge-built mocks.Controller; Go waits in real time, Rust advances a controlled clock.",
+        "[src] as Join_and_leave."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_presence_memory::join_and_leave",
         "node::broker_integration_test::test_integration_presence_memory::presence_expiration"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12038,12 +12055,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] the sessions (WithKeepaliveIntervals(0, 500ms), then startTimers) are node.NewSession on Go, so their timers start just before Authenticate rather than after it; the controller is a bridge-built mocks.Controller; Go waits in real time, Rust advances a controlled clock."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_presence_memory::join_and_leave"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12066,12 +12085,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] as Join_and_leave."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_presence_memory::presence_expiration"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12093,14 +12114,18 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] prev_session (pingInterval = 0, startTimers) is node.NewSession(WithPingInterval(0), WithKeepaliveIntervals) on Go, which starts the timers at creation; s21 follows NewMockSession with exported API; the controller is a bridge-built mocks.Controller; Go waits in real time (its memory broker and timers use the wall clock), Rust advances a controlled clock.",
+        "[src] as Restore_hub_subscriptions; the Perform responder (Return(func...) echoing the city and locale states) is a canned responder of the mock on both backends.",
+        "[src] as Restore_hub_subscriptions; s42 follows NewMockSession with exported API."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_restore_memory::not_restored_when_cache_expired",
         "node::broker_integration_test::test_integration_restore_memory::restore_hub_subscriptions",
         "node::broker_integration_test::test_integration_restore_memory::restore_session_connection_and_channels_state"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12123,12 +12148,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] as Restore_hub_subscriptions; s42 follows NewMockSession with exported API."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_restore_memory::not_restored_when_cache_expired"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12151,12 +12178,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] prev_session (pingInterval = 0, startTimers) is node.NewSession(WithPingInterval(0), WithKeepaliveIntervals) on Go, which starts the timers at creation; s21 follows NewMockSession with exported API; the controller is a bridge-built mocks.Controller; Go waits in real time (its memory broker and timers use the wall clock), Rust advances a controlled clock."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_restore_memory::restore_hub_subscriptions"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12179,12 +12208,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] as Restore_hub_subscriptions; the Perform responder (Return(func...) echoing the city and locale states) is a canned responder of the mock on both backends."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_restore_memory::restore_session_connection_and_channels_state"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12206,14 +12237,18 @@
       "direct_assertions": 5,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] a private nats-server process per case replaces the embedded enats service (broker.Reset() deletes the broker's streams, so a shared server would interfere); prev_session is node.NewSession on Go (timers start at creation); real waits.",
+        "[src] as Restore_hub_subscriptions; the Perform responder is a canned responder of the mock on both backends.",
+        "[src] as Restore_hub_subscriptions."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_restore_nats::not_restored_when_cache_expired",
         "node::broker_integration_test::test_integration_restore_nats::restore_hub_subscriptions",
         "node::broker_integration_test::test_integration_restore_nats::restore_session_connection_and_channels_state"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12236,12 +12271,14 @@
       "direct_assertions": 5,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] as Restore_hub_subscriptions."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_restore_nats::not_restored_when_cache_expired"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12264,12 +12301,14 @@
       "direct_assertions": 5,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] a private nats-server process per case replaces the embedded enats service (broker.Reset() deletes the broker's streams, so a shared server would interfere); prev_session is node.NewSession on Go (timers start at creation); real waits."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_restore_nats::restore_hub_subscriptions"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12292,12 +12331,14 @@
       "direct_assertions": 5,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] as Restore_hub_subscriptions; the Perform responder is a canned responder of the mock on both backends."
+      ],
       "rust_cases": [
         "node::broker_integration_test::test_integration_restore_nats::restore_session_connection_and_channels_state"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12374,7 +12415,9 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] not_observable on Go at q.disconnect.Remove() (unexported, and it takes an item without invoking Disconnect, which no exported call does); Enqueue, Size and the discard counter before it run against Go."
+      ],
       "rust_cases": [
         "node::disconnect_queue_test::test_disconnect_queue_enqueue::adds_sessions_to_the_queue",
         "node::disconnect_queue_test::test_disconnect_queue_enqueue::after_shutdown",
@@ -12458,7 +12501,9 @@
       "direct_assertions": 10,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] not_observable on Go at q.disconnect.Remove() (unexported, and it takes an item without invoking Disconnect, which no exported call does); Enqueue, Size and the discard counter before it run against Go."
+      ],
       "rust_cases": [
         "node::disconnect_queue_test::test_disconnect_queue_enqueue::discards_sessions_over_the_limit"
       ],
@@ -12513,14 +12558,18 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] upstream spins on q.Size() > 0 (runtime.Gosched); Rust waits until the worker holding the session blocks on the controlled throttle, Go probes the exported Size() with a bounded poll (nothing exported signals the change).",
+        "[src] on Go the testify controller and its blocking Run callback (inflight/peak/calls, release channel) live in the bridge; the 1ms ticker is real, the 50ms wait is a real sleep, and Eventually is a bounded probe of the counters. On Rust the throttle is ticked explicitly; the extra check that no worker took the third session (ticker receivers) is Rust-only.",
+        "[src] on Go the testify controller counts calls in the bridge, and the elapsed time from `go q.Run()` to calls == 5 (Eventually, 2s) is measured inside the bridge op; on Rust the 50ms throttle is ticked explicitly, checking one call per tick, and the elapsed time is virtual."
+      ],
       "rust_cases": [
         "node::disconnect_queue_test::test_disconnect_queue_run::disconnects_sessions",
         "node::disconnect_queue_test::test_disconnect_queue_run::respects_the_rate_with_multiple_workers",
         "node::disconnect_queue_test::test_disconnect_queue_run::runs_calls_concurrently_up_to_the_number_of_workers"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12542,7 +12591,9 @@
       "direct_assertions": 2,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] upstream spins on q.Size() > 0 (runtime.Gosched); Rust waits until the worker holding the session blocks on the controlled throttle, Go probes the exported Size() with a bounded poll (nothing exported signals the change)."
+      ],
       "rust_cases": [
         "node::disconnect_queue_test::test_disconnect_queue_run::disconnects_sessions"
       ],
@@ -12569,12 +12620,14 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go the testify controller counts calls in the bridge, and the elapsed time from `go q.Run()` to calls == 5 (Eventually, 2s) is measured inside the bridge op; on Rust the 50ms throttle is ticked explicitly, checking one call per tick, and the elapsed time is virtual."
+      ],
       "rust_cases": [
         "node::disconnect_queue_test::test_disconnect_queue_run::respects_the_rate_with_multiple_workers"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12596,12 +12649,14 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go the testify controller and its blocking Run callback (inflight/peak/calls, release channel) live in the bridge; the 1ms ticker is real, the 50ms wait is a real sleep, and Eventually is a bounded probe of the counters. On Rust the throttle is ticked explicitly; the extra check that no worker took the third session (ticker receivers) is Rust-only."
+      ],
       "rust_cases": [
         "node::disconnect_queue_test::test_disconnect_queue_run::runs_calls_concurrently_up_to_the_number_of_workers"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12624,7 +12679,10 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] skipped upstream (t.Skip \"TODO: We need a trully node mock to control disconnect operation\"); this active equivalent uses an already-expired shutdown context, and the regression-for case stops_after_timeout_while_a_call_is_in_flight covers the in-flight timeout.",
+        "[src] the eight enqueuers and the 5s-bounded Shutdown run in the facade on detached threads (a blocked Shutdown fails instead of hanging); on Go they are goroutines in the bridge op."
+      ],
       "rust_cases": [
         "node::disconnect_queue_test::test_disconnect_queue_shutdown::allows_multiple_entering",
         "node::disconnect_queue_test::test_disconnect_queue_shutdown::disconnects_sessions",
@@ -12632,7 +12690,7 @@
         "node::disconnect_queue_test::test_disconnect_queue_shutdown::stops_after_timeout"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12708,12 +12766,14 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] the eight enqueuers and the 5s-bounded Shutdown run in the facade on detached threads (a blocked Shutdown fails instead of hanging); on Go they are goroutines in the bridge op."
+      ],
       "rust_cases": [
         "node::disconnect_queue_test::test_disconnect_queue_shutdown::does_not_block_when_sessions_are_enqueued_concurrently"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12738,7 +12798,9 @@
       ],
       "upstream_result": "skip",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] skipped upstream (t.Skip \"TODO: We need a trully node mock to control disconnect operation\"); this active equivalent uses an already-expired shutdown context, and the regression-for case stops_after_timeout_while_a_call_is_in_flight covers the in-flight timeout."
+      ],
       "rust_cases": [
         "node::disconnect_queue_test::test_disconnect_queue_shutdown::stops_after_timeout"
       ],
@@ -12904,12 +12966,15 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] the racing callers (1000 sessions, Authenticated and Disconnect released together, wg.Wait) run in the facade; on Go they are goroutines in the bridge.",
+        "[src] on Go, hub.FindByIdentifier is read through the exported node.LookupSession, which returns exactly it."
+      ],
       "rust_cases": [
         "node::node_test::test_authenticated_races_with_disconnect"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12932,7 +12997,10 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream] (the session also records the channel, without streams); node.broker is the legacy broker the bridge built.",
+        "[src] on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built."
+      ],
       "rust_cases": [
         "node::node_test::test_broadcasting::handle_broadcast",
         "node::node_test::test_broadcasting::handle_broadcast_batch",
@@ -12940,7 +13008,7 @@
         "node::node_test::test_broadcasting::handle_pub_sub_batch"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12962,12 +13030,14 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built."
+      ],
       "rust_cases": [
         "node::node_test::test_broadcasting::handle_broadcast"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -12989,12 +13059,14 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built."
+      ],
       "rust_cases": [
         "node::node_test::test_broadcasting::handle_broadcast_batch"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13016,12 +13088,14 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream] (the session also records the channel, without streams); node.broker is the legacy broker the bridge built."
+      ],
       "rust_cases": [
         "node::node_test::test_broadcasting::handle_pub_sub"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13043,12 +13117,14 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built."
+      ],
       "rust_cases": [
         "node::node_test::test_broadcasting::handle_pub_sub_batch"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13071,7 +13147,11 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] not_observable on Go at the last step: the queued item is read with the unexported q.disconnect.Remove(); everything before it (Authenticate, Disconnect, queue Size) runs against Go.",
+        "[src] not_observable on Go: the case resets the unexported session.disconnectInterest; the exported MarkDisconnectable can only raise it (sticky). Authenticate before it runs against Go.",
+        "[src] on Go, the testify mocks.Broker is built in the bridge from the same expectations; hub.AddSession is node.Authenticated; subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache, no broker call); session.resumeInterval = 0 is the exported option WithKeepaliveIntervals(0, 0) applied to the session."
+      ],
       "rust_cases": [
         "node::node_test::test_disconnect::disconnectable_session",
         "node::node_test::test_disconnect::non_disconnectable_session",
@@ -13100,7 +13180,9 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] not_observable on Go at the last step: the queued item is read with the unexported q.disconnect.Remove(); everything before it (Authenticate, Disconnect, queue Size) runs against Go."
+      ],
       "rust_cases": [
         "node::node_test::test_disconnect::disconnectable_session"
       ],
@@ -13127,7 +13209,9 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] not_observable on Go: the case resets the unexported session.disconnectInterest; the exported MarkDisconnectable can only raise it (sticky). Authenticate before it runs against Go."
+      ],
       "rust_cases": [
         "node::node_test::test_disconnect::non_disconnectable_session"
       ],
@@ -13154,12 +13238,14 @@
       "direct_assertions": 5,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the testify mocks.Broker is built in the bridge from the same expectations; hub.AddSession is node.Authenticated; subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache, no broker call); session.resumeInterval = 0 is the exported option WithKeepaliveIntervals(0, 0) applied to the session."
+      ],
       "rust_cases": [
         "node::node_test::test_disconnect::non_resumeable_session_unsubscribes_from_broker_streams"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13181,12 +13267,15 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] blockingDisconnector is built in the facade (Go: in the bridge) and installed with the exported SetDisconnector.",
+        "[src] on Go, session.closeCtx (unexported) is read as the context a probe controller receives from a side-effect-free node.Subscribe on the closed session; every controller call gets closeCtx."
+      ],
       "rust_cases": [
         "node::node_test::test_disconnect_now_closes_before_enqueue"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13208,12 +13297,14 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()); the session is then also marked connected, so the remote disconnect also detaches it from the node (no Disconnect call is enqueued: the session is not disconnectable)."
+      ],
       "rust_cases": [
         "node::node_test::test_handle_pub_sub_with_command"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13236,7 +13327,9 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the testify mocks.Broker is built in the bridge from the same expectations, and subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache)."
+      ],
       "rust_cases": [
         "node::node_test::test_history::error_retrieving_history",
         "node::node_test::test_history::fetching_history_with_subscribe",
@@ -13244,7 +13337,7 @@
         "node::node_test::test_history::successful_history_with_since_and_offset"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13266,12 +13359,14 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the testify mocks.Broker is built in the bridge from the same expectations, and subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache)."
+      ],
       "rust_cases": [
         "node::node_test::test_history::error_retrieving_history"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13293,12 +13388,14 @@
       "direct_assertions": 8,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the testify mocks.Broker is built in the bridge from the same expectations, and subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache)."
+      ],
       "rust_cases": [
         "node::node_test::test_history::fetching_history_with_subscribe"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13320,12 +13417,14 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the testify mocks.Broker is built in the bridge from the same expectations, and subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache)."
+      ],
       "rust_cases": [
         "node::node_test::test_history::successful_history_with_since_and_offset"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13347,12 +13446,14 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the testify mocks.Broker is built in the bridge from the same expectations, and subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache)."
+      ],
       "rust_cases": [
         "node::node_test::test_history::successful_history_with_only_since"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13374,12 +13475,14 @@
       "direct_assertions": 2,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()) (identifiers set just before); sessions are compared by identity (bridge handle)."
+      ],
       "rust_cases": [
         "node::node_test::test_lookup_session"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13402,7 +13505,10 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).",
+        "[src] on Go, hub.AddSession is node.Authenticated; subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [stop_stream] and then restores the recorded streams; hub.BroadcastMessage is node.Broadcast."
+      ],
       "rust_cases": [
         "node::node_test::test_perform::error_during_perform",
         "node::node_test::test_perform::successful_perform",
@@ -13411,7 +13517,7 @@
         "node::node_test::test_perform::with_stopped_streams"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13433,12 +13539,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache)."
+      ],
       "rust_cases": [
         "node::node_test::test_perform::error_during_perform"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13460,12 +13568,14 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache)."
+      ],
       "rust_cases": [
         "node::node_test::test_perform::successful_perform"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13487,12 +13597,14 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache)."
+      ],
       "rust_cases": [
         "node::node_test::test_perform::with_channel_state"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13514,12 +13626,14 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache)."
+      ],
       "rust_cases": [
         "node::node_test::test_perform::with_connection_state"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13541,12 +13655,14 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated; subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [stop_stream] and then restores the recorded streams; hub.BroadcastMessage is node.Broadcast."
+      ],
       "rust_cases": [
         "node::node_test::test_perform::with_stopped_streams"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13569,7 +13685,12 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the testify mocks are built in the bridge from the same expectations (Run callbacks: node.HandleJoin, node.Broadcast); node.controller = c is the exported option WithController(c) applied to the node; hub.AddSession is node.Authenticated.",
+        "[src] on Go, the testify mocks are built in the bridge from the same expectations (Run callbacks: node.HandleJoin, node.Broadcast); node.controller = c is WithController(c) applied to the node; hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).",
+        "[src] on Go, the testify mocks are built in the bridge from the same expectations; the forbidden PresenceAdd (upstream t.Error in Run) is recorded and asserted at the end; node.controller = c is WithController(c); hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry.",
+        "[src] on Go, the testify mocks are built in the bridge (Run callbacks: node.HandleLeave, node.Broadcast); node.controller = c is WithController(c); hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry; hub.SubscribeSession runs the node's Subscribe/Perform with a Streams-answering controller (calling the broker mock's Subscribe, expected with mock.Anything) and restores the recorded streams; env.MergeChannelState is called on GetEnv()."
+      ],
       "rust_cases": [
         "node::node_test::test_presence::join_on_perform",
         "node::node_test::test_presence::join_on_subscribe",
@@ -13577,7 +13698,7 @@
         "node::node_test::test_presence::no_presence_stream_configured"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13599,12 +13720,14 @@
       "direct_assertions": 2,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the testify mocks are built in the bridge from the same expectations (Run callbacks: node.HandleJoin, node.Broadcast); node.controller = c is WithController(c) applied to the node; hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry (RestoreFromCache)."
+      ],
       "rust_cases": [
         "node::node_test::test_presence::join_on_perform"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13626,12 +13749,14 @@
       "direct_assertions": 2,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the testify mocks are built in the bridge from the same expectations (Run callbacks: node.HandleJoin, node.Broadcast); node.controller = c is the exported option WithController(c) applied to the node; hub.AddSession is node.Authenticated."
+      ],
       "rust_cases": [
         "node::node_test::test_presence::join_on_subscribe"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13653,12 +13778,14 @@
       "direct_assertions": 2,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the testify mocks are built in the bridge (Run callbacks: node.HandleLeave, node.Broadcast); node.controller = c is WithController(c); hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry; hub.SubscribeSession runs the node's Subscribe/Perform with a Streams-answering controller (calling the broker mock's Subscribe, expected with mock.Anything) and restores the recorded streams; env.MergeChannelState is called on GetEnv()."
+      ],
       "rust_cases": [
         "node::node_test::test_presence::leave_on_unsubscribe"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13680,12 +13807,14 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the testify mocks are built in the bridge from the same expectations; the forbidden PresenceAdd (upstream t.Error in Run) is recorded and asserted at the end; node.controller = c is WithController(c); hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry."
+      ],
       "rust_cases": [
         "node::node_test::test_presence::no_presence_stream_configured"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13707,13 +13836,17 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, mock sessions follow NewMockSession with exported API (BuildSession, WithExecutor, SetID, Log, SetIdentifiers, options, go SendMessages; timers not started); the testify mocks.Broker is built in the bridge; subscriptions are arranged and read through the cache entry (RestoreFromCache / ToCacheEntry); env merges are called on GetEnv(); hub.Broadcast is node.Broadcast.",
+        "[src] suspicious upstream case: it never exercises a failed restore (see the doc comment); a regression-for case covers it.",
+        "[src] on Go, mock sessions follow NewMockSession with exported API and the testify mocks.Broker is built in the bridge."
+      ],
       "rust_cases": [
         "node::node_test::test_restore_session::failed_to_restore",
         "node::node_test::test_restore_session::successful_restore_via_header"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13735,12 +13868,15 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] suspicious upstream case: it never exercises a failed restore (see the doc comment); a regression-for case covers it.",
+        "[src] on Go, mock sessions follow NewMockSession with exported API and the testify mocks.Broker is built in the bridge."
+      ],
       "rust_cases": [
         "node::node_test::test_restore_session::failed_to_restore"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13762,12 +13898,14 @@
       "direct_assertions": 12,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, mock sessions follow NewMockSession with exported API (BuildSession, WithExecutor, SetID, Log, SetIdentifiers, options, go SendMessages; timers not started); the testify mocks.Broker is built in the bridge; subscriptions are arranged and read through the cache entry (RestoreFromCache / ToCacheEntry); env merges are called on GetEnv(); hub.Broadcast is node.Broadcast."
+      ],
       "rust_cases": [
         "node::node_test::test_restore_session::successful_restore_via_header"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13790,12 +13928,14 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated, subscriptions.AddChannel re-applies a cache entry (RestoreFromCache), and hub.Broadcast is node.Broadcast."
+      ],
       "rust_cases": [
         "node::node_test::test_stream_subscription_race_conditions::stop_and_start_streams_race_conditions"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13817,12 +13957,14 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated, subscriptions.AddChannel re-applies a cache entry (RestoreFromCache), and hub.Broadcast is node.Broadcast."
+      ],
       "rust_cases": [
         "node::node_test::test_stream_subscription_race_conditions::stop_and_start_streams_race_conditions"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13845,7 +13987,12 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()) (also marks the session connected), and subscriptions are read from ToCacheEntry's subs.",
+        "[src] on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()), hub.BroadcastMessage is node.Broadcast, and subscriptions are read from ToCacheEntry's subs.",
+        "[src] on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()).",
+        "[src] on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()), and subscriptions are read from ToCacheEntry's subs."
+      ],
       "rust_cases": [
         "node::node_test::test_subscribe::error_during_subscription",
         "node::node_test::test_subscribe::rejected_subscription",
@@ -13853,7 +14000,7 @@
         "node::node_test::test_subscribe::successful_subscription"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13875,12 +14022,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers())."
+      ],
       "rust_cases": [
         "node::node_test::test_subscribe::error_during_subscription"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13902,12 +14051,14 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()), and subscriptions are read from ToCacheEntry's subs."
+      ],
       "rust_cases": [
         "node::node_test::test_subscribe::rejected_subscription"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13929,12 +14080,14 @@
       "direct_assertions": 7,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()), hub.BroadcastMessage is node.Broadcast, and subscriptions are read from ToCacheEntry's subs."
+      ],
       "rust_cases": [
         "node::node_test::test_subscribe::subscription_with_a_stream"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13956,12 +14109,14 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()) (also marks the session connected), and subscriptions are read from ToCacheEntry's subs."
+      ],
       "rust_cases": [
         "node::node_test::test_subscribe::successful_subscription"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -13984,13 +14139,16 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [streamo] and then restores the recorded streams; hub.Broadcast is node.Broadcast.",
+        "[src] on Go, subscriptions.AddChannel re-applies a cache entry (RestoreFromCache)."
+      ],
       "rust_cases": [
         "node::node_test::test_unsubscribe::error_during_unsubscription",
         "node::node_test::test_unsubscribe::successful_unsubscribe"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -14012,12 +14170,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, subscriptions.AddChannel re-applies a cache entry (RestoreFromCache)."
+      ],
       "rust_cases": [
         "node::node_test::test_unsubscribe::error_during_unsubscription"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -14039,12 +14199,14 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [streamo] and then restores the recorded streams; hub.Broadcast is node.Broadcast."
+      ],
       "rust_cases": [
         "node::node_test::test_unsubscribe::successful_unsubscribe"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -14066,7 +14228,9 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] not_observable on Go: no exported call subscribes a session in the hub without calling the broker's Subscribe, which this case's testify broker does not expect (upstream calls node.hub.SubscribeSession directly). The steps before it run against Go."
+      ],
       "rust_cases": [
         "node::node_test::test_unsubscribe_releases_broker_streams"
       ],
@@ -14094,14 +14258,17 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, subscribeSessionToStream uses node.Authenticated (hub.AddSession), RestoreFromCache (subscriptions), node.Perform with a Streams-answering controller (hub.SubscribeSession), and the node's legacy broker kept by the bridge (node.broker.Subscribe).",
+        "[src] on Go, subscribeSessionToStream uses node.Authenticated, RestoreFromCache, node.Perform with a Streams-answering controller, and the node's legacy broker kept by the bridge."
+      ],
       "rust_cases": [
         "node::node_test::test_whisper::when_whispering_stream_is_configured_for_sending_subscription",
         "node::node_test::test_whisper::when_whispering_stream_is_not_configured",
         "node::node_test::test_whisper::whispering_data_as_object"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -14123,12 +14290,14 @@
       "direct_assertions": 5,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, subscribeSessionToStream uses node.Authenticated (hub.AddSession), RestoreFromCache (subscriptions), node.Perform with a Streams-answering controller (hub.SubscribeSession), and the node's legacy broker kept by the bridge (node.broker.Subscribe)."
+      ],
       "rust_cases": [
         "node::node_test::test_whisper::when_whispering_stream_is_configured_for_sending_subscription"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -14150,12 +14319,14 @@
       "direct_assertions": 5,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, subscribeSessionToStream uses node.Authenticated, RestoreFromCache, node.Perform with a Streams-answering controller, and the node's legacy broker kept by the bridge."
+      ],
       "rust_cases": [
         "node::node_test::test_whisper::when_whispering_stream_is_not_configured"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -14177,12 +14348,14 @@
       "direct_assertions": 5,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, subscribeSessionToStream uses node.Authenticated, RestoreFromCache, node.Perform with a Streams-answering controller, and the node's legacy broker kept by the bridge."
+      ],
       "rust_cases": [
         "node::node_test::test_whisper::whispering_data_as_object"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -14204,12 +14377,14 @@
       "direct_assertions": 12,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the bare sessions are node.BuildSession; subscriptions.AddChannel* re-apply a cache entry through the exported RestoreFromCache, subscriptions are read from ToCacheEntry's subs, and env merges are called on GetEnv()."
+      ],
       "rust_cases": [
         "node::session_test::test_cache_entry"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -14231,7 +14406,9 @@
       "direct_assertions": 2,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the bare sessions are node.BuildSession."
+      ],
       "rust_cases": [
         "node::session_test::test_cache_entry_empty_session"
       ],
@@ -14258,7 +14435,9 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] on Go, the bare session is node.BuildSession."
+      ],
       "rust_cases": [
         "node::session_test::test_mark_disconnectable"
       ],
@@ -14285,7 +14464,9 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] the two concurrent MergeEnv calls run on threads (Go: goroutines in the bridge). Upstream asserts on origEnv, which the Go session holds by pointer and MergeEnv mutates; the Rust session owns its env, so its snapshot stands for origEnv."
+      ],
       "rust_cases": [
         "node::session_test::test_merge_env"
       ],
@@ -14312,12 +14493,14 @@
       "direct_assertions": 0,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] the scaffolding (10 sessions, endless readers, four nested concurrent sendFrame calls each, wg.Wait) runs in the facade on detached threads, bounded by a deadline; on Go it runs as goroutines in the bridge, with sendFrame(TextFrame) as the exported SendJSONTransmission (the same frame with the JSON encoder)."
+      ],
       "rust_cases": [
         "node::session_test::test_send_race_conditions"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -14339,7 +14522,10 @@
       "direct_assertions": 2,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] session.wmu.Lock() plus a 100ms sleep is a gated mock connection (the writer blocks writing the first frame) and a wait for that write; maxPendingSize.Store(n) after creation is WithMaxPendingSize(n) at creation.",
+        "[src] session.wmu.Lock() plus a 100ms sleep is a gated mock connection and a wait for the held write; maxPendingSize.Store(n) is WithMaxPendingSize(n) at creation."
+      ],
       "rust_cases": [
         "node::session_test::test_send_max_pending_size::allow_when_max_pending_size_is_0_unlimited",
         "node::session_test::test_send_max_pending_size::allow_when_queue_size_less_than_max_pending_size",
@@ -14368,7 +14554,9 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] session.wmu.Lock() plus a 100ms sleep is a gated mock connection and a wait for the held write; maxPendingSize.Store(n) is WithMaxPendingSize(n) at creation."
+      ],
       "rust_cases": [
         "node::session_test::test_send_max_pending_size::allow_when_max_pending_size_is_0_unlimited"
       ],
@@ -14395,7 +14583,9 @@
       "direct_assertions": 4,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] session.wmu.Lock() plus a 100ms sleep is a gated mock connection and a wait for the held write; maxPendingSize.Store(n) is WithMaxPendingSize(n) at creation."
+      ],
       "rust_cases": [
         "node::session_test::test_send_max_pending_size::allow_when_queue_size_less_than_max_pending_size"
       ],
@@ -14422,7 +14612,9 @@
       "direct_assertions": 2,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] session.wmu.Lock() plus a 100ms sleep is a gated mock connection (the writer blocks writing the first frame) and a wait for that write; maxPendingSize.Store(n) after creation is WithMaxPendingSize(n) at creation."
+      ],
       "rust_cases": [
         "node::session_test::test_send_max_pending_size::disconnect_when_queue_size_at_least_max_pending_size"
       ],
@@ -14449,12 +14641,14 @@
       "direct_assertions": 2,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] session.connected.Store(true) is node.Authenticated(s, s.GetIdentifiers()) on Go (also registers the session in the hub); sendFrame(TextFrame) is SendJSONTransmission; the send and Disconnect run before the reads (upstream: in a goroutine) because Go reads go through the serialized bridge."
+      ],
       "rust_cases": [
         "node::session_test::test_session_disconnect"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -14476,12 +14670,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] upstream sends from a goroutine while reading; here the ten sends come first (the mock connection buffers ten frames, so no send blocks) because Go reads go through the serialized bridge. sendFrame(TextFrame) is the exported SendJSONTransmission on Go."
+      ],
       "rust_cases": [
         "node::session_test::test_session_send"
       ],
       "translation_status": "translated",
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -26004,7 +26200,16 @@
       "links": [
         "26a1a703:node/node_test.go#TestRestoreSession/Failed_to_restore"
       ],
-      "reference_status": "not_observable",
+      "reference_status": "pass",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "node::session_test::merge_env_produces_the_exact_union",
+      "relation": "regression",
+      "links": [
+        "26a1a703:node/session_test.go#TestMergeEnv"
+      ],
+      "reference_status": "pass",
       "rust_status": "pending"
     },
     {
