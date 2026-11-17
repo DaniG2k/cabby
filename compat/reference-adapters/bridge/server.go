@@ -10,17 +10,27 @@ import (
 	"github.com/anycable/anycable-go/server"
 )
 
-// testRequest describes an httptest.NewRequest plus header and TLS adjustments, as
-// built by the upstream server tests.
+// testRequest describes an httptest.NewRequest (or, with Plain, an http.NewRequest:
+// no host or RemoteAddr) plus header and TLS adjustments, as built by the upstream
+// server tests.
 type testRequest struct {
 	Method  string
 	Target  string
 	Headers [][2]string // applied in order with Header.Set
 	TLS     bool
+	Plain   bool
 }
 
 func (r testRequest) build() *http.Request {
-	req := httptest.NewRequest(r.Method, r.Target, nil)
+	var req *http.Request
+	if r.Plain {
+		var err error
+		if req, err = http.NewRequest(r.Method, r.Target, nil); err != nil {
+			panic(err)
+		}
+	} else {
+		req = httptest.NewRequest(r.Method, r.Target, nil)
+	}
 	for _, h := range r.Headers {
 		req.Header.Set(h[0], h[1])
 	}
