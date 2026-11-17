@@ -16,20 +16,20 @@
       "go_vendored": 57
     },
     "reference": {
-      "not_observable": 9,
-      "pass": 271,
-      "unverified": 643
+      "not_observable": 13,
+      "pass": 337,
+      "unverified": 573
     },
     "rust": {
       "pass": 1,
       "pending": 922
     },
     "rust_only": {
-      "cases": 13
+      "cases": 18
     },
     "translation": {
-      "translated": 280,
-      "unreviewed": 643
+      "translated": 351,
+      "unreviewed": 572
     },
     "upstream_result": {
       "pass": 922,
@@ -10825,9 +10825,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::config_test::test_config_to_toml"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -10850,9 +10852,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::config_test::test_http_enabled"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -10875,9 +10879,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::config_test::test_log_enabled"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -10900,9 +10906,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::counter_test::test_counter"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -10925,9 +10933,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::gauge_test::test_gauge"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -10950,9 +10960,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::gauge_test::test_gauge_inc_dec"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -10975,9 +10987,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::metrics_test::test_metrics_snapshot"
+      ],
+      "translation_status": "translated",
+      "reference_status": "not_observable",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11000,9 +11014,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::metrics_test::test_metrics_each_counter"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11025,9 +11041,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::metrics_test::test_metrics_each_gauge"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11050,9 +11068,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::metrics_test::test_run_with_dedicated_server_starts_rotation"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11075,9 +11095,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::prometheus_test::test_prometheus"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11100,9 +11122,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::prometheus_test::test_prometheus_handler"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11125,9 +11149,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::prometheus_test::test_prometheus_with_tags"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11152,8 +11178,8 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11176,9 +11202,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::statsd_writer_test::test_statsd_writer::adds_multiple_tags_in_datadog_format"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11201,9 +11229,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::statsd_writer_test::test_statsd_writer::adds_tags_in_datadog_format"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11226,9 +11256,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::statsd_writer_test::test_statsd_writer::adds_tags_in_graphite_format"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11251,9 +11283,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::statsd_writer_test::test_statsd_writer::adds_tags_in_influxdb_format"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11276,9 +11310,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::statsd_writer_test::test_statsd_writer::write_send_udp_with_metrics"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -11301,9 +11337,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "metrics::statsd_writer_test::test_statsd_writer::write_uses_custom_prefix"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17439,9 +17477,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::config_test::test_config_impl"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17464,9 +17504,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::config_test::test_config_to_toml::base"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17489,9 +17531,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::config_test::test_config_to_toml::wait_timeout"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17516,8 +17560,8 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17540,9 +17584,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::grpc_test::test_grpc_integration::exhausted"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17565,9 +17611,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::grpc_test::test_grpc_integration::success"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17590,9 +17638,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::grpc_test::test_grpc_integration::timeout"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17615,9 +17665,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::grpc_test::test_grpc_multi_host"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17640,9 +17692,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::http_test::test_http_client_helper_ready"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17667,8 +17721,8 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17691,9 +17745,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::http_test::test_http_service_authentication::authentication_failure"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17716,9 +17772,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::http_test::test_http_service_authentication::authentication_success"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17743,8 +17801,8 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17767,9 +17825,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::http_test::test_http_service_bad_requests::bad_request"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17792,9 +17852,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::http_test::test_http_service_bad_requests::unknown_url"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17819,8 +17881,8 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17843,9 +17905,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::http_test::test_http_service_rpc::command"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17868,9 +17932,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::http_test::test_http_service_rpc::connect"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17893,9 +17959,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::http_test::test_http_service_rpc::disconnect"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17918,9 +17986,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::http_test::test_http_service_request_timeout"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17943,9 +18013,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::http_test::test_http_service_reuses_connections"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -17970,7 +18042,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "unreviewed",
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -17994,9 +18066,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_authenticate::canceled_before_rpc"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18019,9 +18093,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_authenticate::canceled_during_rpc"
+      ],
+      "translation_status": "translated",
+      "reference_status": "not_observable",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18044,9 +18120,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_authenticate::error"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18069,9 +18147,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_authenticate::failure"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18094,9 +18174,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_authenticate::success"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18119,9 +18201,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_custom_dial_fun::connect"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18144,9 +18228,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_custom_dial_fun::connect"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18171,8 +18257,8 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18195,9 +18281,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_disconnect::success"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18222,8 +18310,8 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18246,9 +18334,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_perform::error"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18271,9 +18361,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_perform::failure"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18296,9 +18388,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_perform::success"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18321,9 +18415,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_perform::with_channel_state"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18346,9 +18442,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_perform::with_presence"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18371,9 +18469,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_perform::with_stopped_streams"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18398,8 +18498,8 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18422,9 +18522,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_subscribe::error"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18447,9 +18549,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_subscribe::failure"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18472,9 +18576,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_subscribe::success"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18497,9 +18603,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_subscribe::with_presence"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18522,9 +18630,15 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_wait_timeout::authenticate_times_out_waiting_for_a_slot",
+        "rpc::rpc_test::test_wait_timeout::disconnect_waits_longer_than_the_wait_timeout",
+        "rpc::rpc_test::test_wait_timeout::session_closes_while_waiting_for_a_slot",
+        "rpc::rpc_test::test_wait_timeout::subscribe_times_out_waiting_for_a_slot",
+        "rpc::rpc_test::test_wait_timeout::zero_wait_timeout_means_no_limit"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18547,9 +18661,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_wait_timeout::authenticate_times_out_waiting_for_a_slot"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18572,9 +18688,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_wait_timeout::defaults_to_the_command_timeout"
+      ],
+      "translation_status": "translated",
+      "reference_status": "not_observable",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18597,9 +18715,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_wait_timeout::disconnect_waits_longer_than_the_wait_timeout"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18622,9 +18742,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_wait_timeout::session_closes_while_waiting_for_a_slot"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18647,9 +18769,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_wait_timeout::subscribe_times_out_waiting_for_a_slot"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -18672,9 +18796,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "rpc::rpc_test::test_wait_timeout::zero_wait_timeout_means_no_limit"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -21003,9 +21129,12 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "telemetry::telemetry_test::test_tracking::boot_event",
+        "telemetry::telemetry_test::test_tracking::usage_event"
+      ],
+      "translation_status": "translated",
+      "reference_status": "not_observable",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -24172,6 +24301,51 @@
       "relation": "regression",
       "links": [
         "26a1a703:protocol/protocol_test.go#TestNewCommandMessage/Base"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "rpc::grpc_test::active_conns_reach_two",
+      "relation": "regression",
+      "links": [
+        "26a1a703:rpc/grpc_test.go#TestGRPCMultiHost"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "rpc::grpc_test::test_grpc_integration::timeout_is_deadline_exceeded",
+      "relation": "regression",
+      "links": [
+        "26a1a703:rpc/grpc_test.go#TestGRPCIntegration/Timeout"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "rpc::http_test::http_rpc_wire_format::controller_requests_and_replies",
+      "relation": "regression",
+      "links": [
+        "26a1a703:rpc/http_test.go#TestHTTPServiceRPC/Connect"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "rpc::http_test::http_rpc_wire_format::missing_status_means_error",
+      "relation": "regression",
+      "links": [
+        "26a1a703:rpc/http_test.go#TestHTTPServiceRPC/Connect"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "rpc::rpc_test::test_authenticate::error_message",
+      "relation": "regression",
+      "links": [
+        "26a1a703:rpc/rpc_test.go#TestAuthenticate/Error"
       ],
       "reference_status": "pass",
       "rust_status": "pending"

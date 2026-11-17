@@ -5,5 +5,8 @@
 pub mod api;
 pub mod cli;
 pub mod config;
+pub mod metrics;
+pub mod rpc;
 pub mod server;
+pub mod telemetry;
 pub mod ws;
