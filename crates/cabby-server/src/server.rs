@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use cabby_core::pending;
+use cabby_core::toml_config::go_quote;
 
 pub use cabby_core::logger::TomlError;
 
@@ -21,15 +22,20 @@ pub struct SslConfig {
     pub key_path: String,
 }
 
+cabby_core::toml_section!(SslConfig, "server.SSLConfig" {
+    "cert_path" => cert_path,
+    "key_path" => key_path,
+});
+
 impl SslConfig {
     /// Upstream `NewSSLConfig`.
     pub fn new() -> Self {
-        pending!("server::new_ssl_config")
+        Self::default()
     }
 
     /// Whether both the certificate and the key are configured.
     pub fn available(&self) -> bool {
-        pending!("server::ssl_available")
+        !self.cert_path.is_empty() && !self.key_path.is_empty()
     }
 }
 
@@ -44,20 +50,63 @@ pub struct Config {
     pub ssl: SslConfig,
 }
 
+cabby_core::toml_section!(Config, "server.Config" {
+    "host" => host,
+    "port" => port,
+    "allowed_origins" => allowed_origins,
+    "max_conn" => max_conn,
+    "health_path" => health_path,
+    "ssl" => ssl,
+});
+
 impl Config {
     /// Defaults (upstream `server.NewConfig`).
     pub fn new() -> Self {
-        pending!("server::new_config")
+        Self {
+            host: "localhost".to_owned(),
+            port: 8080,
+            health_path: "/health".to_owned(),
+            ssl: SslConfig::new(),
+            ..Default::default()
+        }
     }
 
     /// Renders the annotated TOML section (upstream `Config.ToToml`).
     pub fn to_toml(&self) -> String {
-        pending!("server::config_to_toml")
+        let mut out = String::new();
+        out.push_str("# Host address to bind to\n");
+        out.push_str(&format!("host = {}\n", go_quote(&self.host)));
+        out.push_str("# Port to listen on\n");
+        out.push_str(&format!("port = {}\n", self.port));
+        out.push_str("# Allowed origins (a comma-separated list)\n");
+        out.push_str(&format!("allowed_origins = \"{}\"\n", self.allowed_origins));
+        out.push_str("# Maximum number of allowed concurrent connections\n");
+        if self.max_conn == 0 {
+            out.push_str("# max_conn = 1000\n");
+        } else {
+            out.push_str(&format!("max_conn = {}\n", self.max_conn));
+        }
+        out.push_str("# Health check endpoint path\n");
+        out.push_str(&format!("health_path = {}\n", go_quote(&self.health_path)));
+        out.push_str("# SSL configuration\n");
+        if self.ssl.cert_path.is_empty() {
+            out.push_str("# ssl.cert_path =\n");
+        } else {
+            out.push_str(&format!("ssl.cert_path = {}\n", go_quote(&self.ssl.cert_path)));
+        }
+        if self.ssl.key_path.is_empty() {
+            out.push_str("# ssl.key_path =\n");
+        } else {
+            out.push_str(&format!("ssl.key_path = {}\n", go_quote(&self.ssl.key_path)));
+        }
+        out.push('\n');
+        out
     }
 
     /// Decodes TOML over the current values (upstream `toml.Decode(s, &conf)`).
-    pub fn decode_toml(&mut self, _toml: &str) -> Result<(), TomlError> {
-        pending!("server::config_decode_toml")
+    pub fn decode_toml(&mut self, toml: &str) -> Result<(), TomlError> {
+        cabby_core::toml_config::decode(self, toml).map_err(|e| TomlError(e.0))?;
+        Ok(())
     }
 }
 

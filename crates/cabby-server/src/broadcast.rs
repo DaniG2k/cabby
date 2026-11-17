@@ -8,6 +8,7 @@ use std::sync::mpsc::Sender;
 
 use cabby_core::broadcast::{BroadcastError, Broadcaster, Handler};
 use cabby_core::pending;
+use cabby_core::toml_config::{self, TomlSection};
 
 use crate::nats::NatsConfig;
 use crate::redis::RedisConfig as RedisClientConfig;
@@ -29,22 +30,58 @@ pub struct HttpConfig {
     pub max_body_size: i64,
 }
 
+/// Upstream `defaultHTTPPath`.
+pub const DEFAULT_HTTP_PATH: &str = "/_broadcast";
+/// Upstream `defaultMaxBodySize` (1 MB).
+pub const DEFAULT_MAX_BODY_SIZE: i64 = 1_048_576;
+
+fn decode(target: &mut impl TomlSection, toml: &str) -> Result<(), BroadcastError> {
+    toml_config::decode(target, toml).map_err(|e| BroadcastError(e.0))?;
+    Ok(())
+}
+
+cabby_core::toml_section!(HttpConfig, "broadcast.HTTPConfig" {
+    "port" => port,
+    "path" => path,
+    "secret" => secret,
+    "SecretBase" => secret_base,
+    "cors_headers" => add_cors_headers,
+    "cors_hosts" => cors_hosts,
+    "max_body_size" => max_body_size,
+});
+
 impl HttpConfig {
     /// Upstream `broadcast.NewHTTPConfig()`.
     pub fn new() -> Self {
-        pending!("broadcast::new_http_config")
+        Self { path: DEFAULT_HTTP_PATH.to_owned(), max_body_size: DEFAULT_MAX_BODY_SIZE, ..Default::default() }
     }
 
     pub fn is_secured(&self) -> bool {
-        pending!("broadcast::http_is_secured")
+        !self.secret.is_empty() || !self.secret_base.is_empty()
     }
 
     pub fn to_toml(&self) -> String {
-        pending!("broadcast::http_config_to_toml")
+        let mut out = String::new();
+        out.push_str("# HTTP server port (can be the same as the main server port)\n");
+        out.push_str(&format!("port = {}\n", self.port));
+        out.push_str("# HTTP endpoint path for broadcasts\n");
+        out.push_str(&format!("path = \"{}\"\n", self.path));
+        out.push_str("# Secret token to authenticate broadcasting requests\n");
+        if self.secret.is_empty() {
+            out.push_str("# secret = \"\"\n");
+        } else {
+            out.push_str(&format!("secret = \"{}\"\n", self.secret));
+        }
+        out.push_str("# Enable CORS headers (allowed origins are used as allowed hosts)\n");
+        out.push_str(if self.add_cors_headers { "cors_headers = true\n" } else { "# cors_headers = false\n" });
+        out.push_str("# Maximum allowed size of the request body (in bytes)\n");
+        out.push_str(&format!("max_body_size = {}\n", self.max_body_size));
+        out.push('\n');
+        out
     }
 
-    pub fn decode_toml(&mut self, _toml: &str) -> Result<(), BroadcastError> {
-        pending!("broadcast::http_config_decode_toml")
+    pub fn decode_toml(&mut self, toml: &str) -> Result<(), BroadcastError> {
+        decode(self, toml)
     }
 }
 
@@ -100,18 +137,38 @@ pub struct RedisConfig {
     pub redis: Option<RedisClientConfig>,
 }
 
+cabby_core::toml_section!(RedisConfig, "broadcast.RedisConfig" {
+    "stream" => stream,
+    "group" => group,
+    "stream_read_block_milliseconds" => stream_read_block_milliseconds,
+    "redis" => redis,
+});
+
 impl RedisConfig {
     /// Upstream `broadcast.NewRedisConfig()`.
     pub fn new() -> Self {
-        pending!("broadcast::new_redis_config")
+        Self {
+            stream: "__anycable__".to_owned(),
+            group: "bx".to_owned(),
+            stream_read_block_milliseconds: 2000,
+            redis: None,
+        }
     }
 
     pub fn to_toml(&self) -> String {
-        pending!("broadcast::redis_config_to_toml")
+        let mut out = String::new();
+        out.push_str("# Redis stream name for broadcasts\n");
+        out.push_str(&format!("stream = \"{}\"\n", self.stream));
+        out.push_str("# Stream consumer group name\n");
+        out.push_str(&format!("group = \"{}\"\n", self.group));
+        out.push_str("# Streams read wait time in milliseconds\n");
+        out.push_str(&format!("stream_read_block_milliseconds = {}\n", self.stream_read_block_milliseconds));
+        out.push('\n');
+        out
     }
 
-    pub fn decode_toml(&mut self, _toml: &str) -> Result<(), BroadcastError> {
-        pending!("broadcast::redis_config_decode_toml")
+    pub fn decode_toml(&mut self, toml: &str) -> Result<(), BroadcastError> {
+        decode(self, toml)
     }
 }
 
@@ -147,18 +204,23 @@ pub struct LegacyRedisConfig {
     pub redis: Option<RedisClientConfig>,
 }
 
+cabby_core::toml_section!(LegacyRedisConfig, "broadcast.LegacyRedisConfig" {
+    "channel" => channel,
+    "redis" => redis,
+});
+
 impl LegacyRedisConfig {
     /// Upstream `broadcast.NewLegacyRedisConfig()`.
     pub fn new() -> Self {
-        pending!("broadcast::new_legacy_redis_config")
+        Self { channel: "__anycable__".to_owned(), redis: None }
     }
 
     pub fn to_toml(&self) -> String {
-        pending!("broadcast::legacy_redis_config_to_toml")
+        format!("channel = \"{}\"\n\n", self.channel)
     }
 
-    pub fn decode_toml(&mut self, _toml: &str) -> Result<(), BroadcastError> {
-        pending!("broadcast::legacy_redis_config_decode_toml")
+    pub fn decode_toml(&mut self, toml: &str) -> Result<(), BroadcastError> {
+        decode(self, toml)
     }
 }
 
@@ -194,18 +256,23 @@ pub struct LegacyNatsConfig {
     pub nats: Option<NatsConfig>,
 }
 
+cabby_core::toml_section!(LegacyNatsConfig, "broadcast.LegacyNATSConfig" {
+    "channel" => channel,
+    "nats" => nats,
+});
+
 impl LegacyNatsConfig {
     /// Upstream `broadcast.NewLegacyNATSConfig()`.
     pub fn new() -> Self {
-        pending!("broadcast::new_legacy_nats_config")
+        Self { channel: "__anycable__".to_owned(), nats: None }
     }
 
     pub fn to_toml(&self) -> String {
-        pending!("broadcast::legacy_nats_config_to_toml")
+        format!("channel = \"{}\"\n\n", self.channel)
     }
 
-    pub fn decode_toml(&mut self, _toml: &str) -> Result<(), BroadcastError> {
-        pending!("broadcast::legacy_nats_config_decode_toml")
+    pub fn decode_toml(&mut self, toml: &str) -> Result<(), BroadcastError> {
+        decode(self, toml)
     }
 }
 

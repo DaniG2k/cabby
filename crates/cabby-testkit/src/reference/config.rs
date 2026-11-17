@@ -154,8 +154,13 @@ impl From<&Config> for GoConfigView {
     }
 }
 
+/// The Go view carries a subset of the settings; the others keep their zero values
+/// (`Default`) on the Rust side.
 impl From<GoConfigView> for Config {
     fn from(g: GoConfigView) -> Self {
+        let mut redis = RedisConfig::default();
+        redis.url = g.redis.url;
+        let rpc = RpcConfig { host: g.rpc.host, implementation: g.rpc.implementation, ..Default::default() };
         Config {
             secret: g.secret,
             broadcast_adapters: g.broadcast_adapters.unwrap_or_default(),
@@ -166,11 +171,15 @@ impl From<GoConfigView> for Config {
             server: g.server.into(),
             app: AppConfig { ping_interval: g.app.ping_interval, ..Default::default() },
             ws: g.ws.into(),
-            rpc: RpcConfig { host: g.rpc.host, implementation: g.rpc.implementation },
-            broker: BrokerConfig { adapter: g.broker.adapter },
-            redis: RedisConfig { url: g.redis.url },
-            http_broadcast: HttpBroadcastConfig { port: g.http_broadcast.port },
-            metrics: MetricsConfig { http: g.metrics.http, tags: g.metrics.tags.unwrap_or_default() },
+            rpc,
+            broker: BrokerConfig { adapter: g.broker.adapter, ..Default::default() },
+            redis,
+            http_broadcast: HttpBroadcastConfig { port: g.http_broadcast.port, ..Default::default() },
+            metrics: MetricsConfig {
+                http: g.metrics.http,
+                tags: g.metrics.tags.unwrap_or_default(),
+                ..Default::default()
+            },
             embedded_nats: EmbeddedNatsConfig {
                 enabled: g.embedded_nats.enabled,
                 name: g.embedded_nats.name,
@@ -178,15 +187,18 @@ impl From<GoConfigView> for Config {
                 cluster_addr: g.embedded_nats.cluster_addr,
                 cluster_name: g.embedded_nats.cluster_name,
                 routes: g.embedded_nats.routes.unwrap_or_default(),
+                ..Default::default()
             },
             sse: SseConfig {
                 enabled: g.sse.enabled,
                 comment_pings: g.sse.comment_pings,
                 ping_interval: g.sse.ping_interval,
+                ..Default::default()
             },
-            ds: DsConfig { sse_ping_interval: g.ds.sse_ping_interval },
+            ds: DsConfig { sse_ping_interval: g.ds.sse_ping_interval, ..Default::default() },
             config_file_path: (!g.config_file_path.is_empty()).then(|| PathBuf::from(g.config_file_path)),
             unknown_config_keys: g.unknown_config_keys.unwrap_or_default(),
+            ..Default::default()
         }
     }
 }

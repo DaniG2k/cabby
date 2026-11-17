@@ -42,14 +42,55 @@ impl Config {
     }
 
     pub fn enabled(&self) -> bool {
-        pending!("pusher::config_enabled")
+        !self.app_id.is_empty() && !self.app_key.is_empty()
     }
 
     /// Renders the settings as an annotated TOML section body (upstream `ToToml`).
     pub fn to_toml(&self) -> String {
-        pending!("pusher::config_to_toml")
+        fn optional(out: &mut String, key: &str, value: &str) {
+            if value.is_empty() {
+                out.push_str(&format!("# {key} = \"\"\n"));
+            } else {
+                out.push_str(&format!("{key} = \"{value}\"\n"));
+            }
+        }
+
+        let mut out = String::new();
+        out.push_str("# Pusher application ID\n");
+        optional(&mut out, "app_id", &self.app_id);
+        out.push_str("# Pusher application authentication key\n");
+        optional(&mut out, "app_key", &self.app_key);
+        out.push_str("# The secret key for Pusher clients\n");
+        optional(&mut out, "secret", &self.secret);
+        out.push_str("# Port for Pusher HTTP API (0 = use the main server port)\n");
+        if self.api_port == 0 {
+            out.push_str("# api_port = 0\n");
+        } else {
+            out.push_str(&format!("api_port = {}\n", self.api_port));
+        }
+        out.push_str("# Maximum allowed size of the HTTP API request body (in bytes)\n");
+        out.push_str(&format!("max_body_size = {}\n", self.max_body_size));
+        out.push('\n');
+        out
+    }
+
+    /// Decodes TOML over the current values (upstream `toml.Decode(s, &conf)`).
+    pub fn decode_toml(&mut self, toml: &str) -> Result<(), String> {
+        cabby_core::toml_config::decode(self, toml).map_err(|e| e.0)?;
+        Ok(())
     }
 }
+
+// Untagged upstream fields decode by their Go names (case-insensitively).
+cabby_core::toml_section!(Config, "pusher.Config" {
+    "app_id" => app_id,
+    "app_key" => app_key,
+    "secret" => secret,
+    "api_port" => api_port,
+    "AddCORSHeaders" => add_cors_headers,
+    "CORSHosts" => cors_hosts,
+    "max_body_size" => max_body_size,
+});
 
 /// Returns `uid` if it is a valid Pusher socket ID (`<digits>.<digits>`), or a newly
 /// generated one (upstream `GenerateSocketID`).
