@@ -4,7 +4,7 @@
 //! Go arm runs it in a bridge process whose environment is exactly `env` and whose
 //! working directory is a fresh empty directory.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use cabby_server::cli::{self as rs, CliError, CliOption, StringFlag};
@@ -111,13 +111,37 @@ pub fn parse_tags(s: &str) -> HashMap<String, String> {
     }
 }
 
-/// The Rust runner (its options carry closures and mocks, which cannot cross the
-/// bridge; upstream's `runNode` and `shutdownables` are unexported).
-pub fn rust_runner(config: Config, options: Vec<rs::RunnerOption>) -> Result<rs::Runner, CliError> {
+/// Observations of the upstream `TestRunnerDrainsBroadcastsBeforeBrokerShutdown`
+/// scenario: build a runner with the test doubles, run the node, shut down every
+/// shutdownable in order.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "PascalCase", default)]
+pub struct DrainOutcome {
+    /// `NewRunner` error.
+    pub new_runner_error: Option<String>,
+    /// `runNode` error.
+    pub run_node_error: Option<String>,
+    /// The first `Shutdown` error among the shutdownables (`None`: all returned nil).
+    pub shutdown_error: Option<String>,
+    /// Stream message data received by the subscriber double, in order.
+    pub delivered: Vec<String>,
+    pub broker_closed: bool,
+    pub subscriber_closed: bool,
+    pub service_closed: bool,
+    /// Failed in-callback assertions, unexpected calls and unmet mock expectations.
+    pub violations: Vec<String>,
+    /// Calls the doubles received, as `<double>.<Method>`.
+    pub calls: BTreeSet<String>,
+}
+
+/// Runs the runner drain scenario. The Rust arm is `rust`: the test's own doubles
+/// around [`rs::Runner`]. The Go arm runs the upstream test body with its mockery
+/// doubles in an isolated bridge process, through the exported `NewRunner` +
+/// `Runner.Embed()` (which calls `runNode`) + `Embedded.Shutdown` (which walks
+/// `shutdownables` in order, stopping at the first error).
+pub fn runner_drains_broadcasts_before_broker_shutdown(rust: impl FnOnce() -> DrainOutcome) -> DrainOutcome {
     match backend() {
-        Backend::Rust => rs::Runner::new(config, options),
-        Backend::Go => unimplemented!(
-            "not_observable: cli.Runner.runNode and Runner.shutdownables are unexported and the test injects Go mocks"
-        ),
+        Backend::Rust => rust(),
+        Backend::Go => bridge::call_isolated(&[], "cli.Runner.DrainsBroadcastsBeforeBrokerShutdown", json!({})),
     }
 }

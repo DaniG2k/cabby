@@ -3,7 +3,8 @@
 //! Requests are described by [`HttpRequest`]; the Go arm rebuilds them with
 //! `httptest.NewRequest(method, target)` plus `Header.Set` for each header (in
 //! order) and the TLS flag, so the request host and peer address are httptest's
-//! (`example.com` or the absolute URL's host, `192.0.2.1:1234`).
+//! (`example.com` or the absolute URL's host, `192.0.2.1:1234`). A request with
+//! neither host nor peer address is rebuilt with `http.NewRequest` instead.
 
 use std::collections::HashMap;
 
@@ -17,8 +18,11 @@ use serde_json::{Value, json};
 use crate::reference::common::GoParsed;
 use crate::{Backend, backend, bridge};
 
+/// A request without host and peer address is what `http.NewRequest` builds (the
+/// bridge then uses it instead of `httptest.NewRequest`).
 fn go_request(req: &HttpRequest) -> Value {
-    json!({"Method": req.method, "Target": req.target, "Headers": req.headers, "TLS": req.tls})
+    let plain = req.host.is_empty() && req.remote_addr.is_empty();
+    json!({"Method": req.method, "Target": req.target, "Headers": req.headers, "TLS": req.tls, "Plain": plain})
 }
 
 // --- Config -------------------------------------------------------------------------

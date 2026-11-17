@@ -224,17 +224,13 @@ pub fn to_toml(c: &Config) -> String {
     }
 }
 
-/// `config.Presets()` with the process environment `env`.
-pub fn presets(c: &Config, env: &EnvMap) -> Vec<String> {
+/// `config.Presets()` with the process environment `env`. `None` is a nil Go slice
+/// (kept distinct from an empty one; the Rust interface never returns nil).
+pub fn presets(c: &Config, env: &EnvMap) -> Option<Vec<String>> {
     match backend() {
-        Backend::Rust => c.presets(env),
+        Backend::Rust => Some(c.presets(env)),
         Backend::Go => {
-            let p: Option<Vec<String>> = bridge::call_isolated(
-                &env_pairs(env),
-                "config.Config.Presets",
-                json!({"Config": GoConfigView::from(c)}),
-            );
-            p.unwrap_or_default()
+            bridge::call_isolated(&env_pairs(env), "config.Config.Presets", json!({"Config": GoConfigView::from(c)}))
         }
     }
 }
