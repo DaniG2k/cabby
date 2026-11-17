@@ -298,6 +298,12 @@ Set measurable improvement targets after M0 establishes real baseline variance. 
 
 The next coding deliverable is the test workspace, manifest, and baseline evidence—not an initial server implementation.
 
+### Owner requests to complete at the end
+
+- [ ] Independent review of the whole project with Fable 5.2 (not anchored on the implementer's summary).
+- [ ] Fill the README's Go vs Rust comparison table with measured results from the external harness (`crates/cabby-bench`), including workloads where Rust is not faster.
+- [ ] Hand over manual testing instructions, one step at a time (server start, Rails/AnyT client, broadcast, metrics).
+
 ## Sources
 
 All repository links below refer to the pinned baseline:
