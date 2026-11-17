@@ -76,7 +76,7 @@ impl Sut {
             .arg(format!("--http_broadcast_port={broadcast_port}"))
             .args(args);
         let mut process = Supervised::spawn("sut", cmd)?;
-        process.wait_tcp(SocketAddr::from(([127, 0, 0, 1], port)), START_DEADLINE)?;
+        process.wait_listening(SocketAddr::from(([127, 0, 0, 1], port)), START_DEADLINE)?;
         Ok(Self { process, port, broadcast_port })
     }
 
