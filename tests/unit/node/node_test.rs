@@ -1,9 +1,12 @@
 //! upstream file: node/node_test.go
 //!
 //! Upstream subtests share their parent's node and sessions. Each Rust test
-//! rebuilds that setup; none of these subtests reads state an earlier subtest
-//! left behind, other than accumulated testify expectations, which only matter
-//! when their arguments match and are replicated where they do.
+//! rebuilds that setup and replays the earlier subtests' steps its own steps
+//! depend on (`TestWhisper/When_whispering_stream_is_not_configured` first
+//! configures the whisper stream it removes; `TestPerform/With_channel_state`
+//! first runs the earlier performs on `test_channel`). Accumulated testify
+//! expectations only matter when their arguments match and are replicated
+//! where they do.
 //!
 //! `assert.Nil(msg); assert.Error(err)` after a read means "no frame within
 //! the mock connection's 100ms read timeout".
@@ -13,13 +16,15 @@
 //! (`session.subscriptions.AddChannel*`). Against Go the facade reaches the
 //! same state through exported API (see each method's documentation in
 //! `cabby_testkit::reference::node`); the tests note where that applies.
+//! `hub.AddSession` also marks the session connected on both backends (Go has
+//! no hub-only call and uses `node.Authenticated`), so both exercise the same
+//! disconnect path.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use cabby_core::common::{
-    CommandResult, HistoryPosition, HistoryRequest, MessageData, PRESENCE_JOIN_TYPE, PRESENCE_STREAM_STATE,
-    PresenceEvent, Status, StreamMessage, WHISPER_STREAM_STATE,
+    CommandResult, ConnectResult, HistoryPosition, HistoryRequest, MessageData, PRESENCE_JOIN_TYPE,
+    PRESENCE_STREAM_STATE, PresenceEvent, Status, StreamMessage, WHISPER_STREAM_STATE,
 };
 use cabby_testkit::reference::common::{get_channel_state_field, get_connection_state_field};
 use cabby_testkit::reference::node::*;
@@ -156,7 +161,7 @@ fn test_authenticated_races_with_disconnect() {
 /// the session as closed meanwhile (otherwise they could re-add it to the hub).
 ///
 /// upstream: node/node_test.go#TestDisconnectNowClosesBeforeEnqueue
-/// note: blockingDisconnector is built in the facade (Go: in the bridge) and installed with the exported SetDisconnector.
+/// note: blockingDisconnector is built in the facade (Go: in the bridge) and installed with the exported SetDisconnector; it counts Enqueue calls (upstream's second close would panic) and the case asserts one.
 /// note: on Go, session.closeCtx (unexported) is read as the context a probe controller receives from a side-effect-free node.Subscribe on the closed session; every controller call gets closeCtx.
 #[test]
 fn test_disconnect_now_closes_before_enqueue() {
@@ -179,6 +184,8 @@ fn test_disconnect_now_closes_before_enqueue() {
 
     assert!(session.is_closed());
     assert!(session.close_context_cancelled(&node), "closeCtx.Err() must be non-nil");
+    // Upstream closes `enqueued` in Enqueue, so a second call would panic.
+    assert_eq!(1, disconnector.enqueues(), "Enqueue must be called once");
 
     disconnector.release();
 }
@@ -202,7 +209,7 @@ mod test_subscribe {
 
     /// upstream: node/node_test.go#TestSubscribe/Successful_subscription
     /// upstream: node/node_test.go#TestSubscribe
-    /// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()) (also marks the session connected), and subscriptions are read from ToCacheEntry's subs.
+    /// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()) (both backends mark the session connected), and subscriptions are read from ToCacheEntry's subs.
     #[test]
     fn successful_subscription() {
         setup(|node, session| {
@@ -221,7 +228,7 @@ mod test_subscribe {
 
     /// upstream: node/node_test.go#TestSubscribe/Subscription_with_a_stream
     /// upstream: node/node_test.go#TestSubscribe
-    /// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()), hub.BroadcastMessage is node.Broadcast, and subscriptions are read from ToCacheEntry's subs.
+    /// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()) (both backends mark the session connected), hub.BroadcastMessage is node.Broadcast, and subscriptions are read from ToCacheEntry's subs.
     #[test]
     fn subscription_with_a_stream() {
         setup(|node, session| {
@@ -249,7 +256,7 @@ mod test_subscribe {
 
     /// upstream: node/node_test.go#TestSubscribe/Error_during_subscription
     /// upstream: node/node_test.go#TestSubscribe
-    /// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()).
+    /// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()) (both backends mark the session connected).
     #[test]
     fn error_during_subscription() {
         setup(|node, session| {
@@ -260,7 +267,7 @@ mod test_subscribe {
 
     /// upstream: node/node_test.go#TestSubscribe/Rejected_subscription
     /// upstream: node/node_test.go#TestSubscribe
-    /// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()), and subscriptions are read from ToCacheEntry's subs.
+    /// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()) (both backends mark the session connected), and subscriptions are read from ToCacheEntry's subs.
     #[test]
     fn rejected_subscription() {
         setup(|node, _| {
@@ -297,7 +304,7 @@ mod test_unsubscribe {
 
     /// upstream: node/node_test.go#TestUnsubscribe/Successful_unsubscribe
     /// upstream: node/node_test.go#TestUnsubscribe
-    /// note: on Go, hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [streamo] and then restores the recorded streams; hub.Broadcast is node.Broadcast.
+    /// note: on Go, hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [streamo] and then restores the recorded streams; hub.Broadcast is node.Broadcast.
     #[test]
     fn successful_unsubscribe() {
         setup(|node, session| {
@@ -360,7 +367,7 @@ mod test_perform {
 
     /// upstream: node/node_test.go#TestPerform/Successful_perform
     /// upstream: node/node_test.go#TestPerform
-    /// note: on Go, hub.AddSession is node.Authenticated and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
+    /// note: on Go, hub.AddSession is node.Authenticated (both backends mark the session connected) and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
     #[test]
     fn successful_perform() {
         setup(|node, session| {
@@ -376,7 +383,7 @@ mod test_perform {
 
     /// upstream: node/node_test.go#TestPerform/With_connection_state
     /// upstream: node/node_test.go#TestPerform
-    /// note: on Go, hub.AddSession is node.Authenticated and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
+    /// note: on Go, hub.AddSession is node.Authenticated (both backends mark the session connected) and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
     #[test]
     fn with_connection_state() {
         setup(|node, session| {
@@ -394,7 +401,7 @@ mod test_perform {
 
     /// upstream: node/node_test.go#TestPerform/Error_during_perform
     /// upstream: node/node_test.go#TestPerform
-    /// note: on Go, hub.AddSession is node.Authenticated and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
+    /// note: on Go, hub.AddSession is node.Authenticated (both backends mark the session connected) and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
     #[test]
     fn error_during_perform() {
         setup(|node, session| {
@@ -407,7 +414,7 @@ mod test_perform {
 
     /// upstream: node/node_test.go#TestPerform/With_stopped_streams
     /// upstream: node/node_test.go#TestPerform
-    /// note: on Go, hub.AddSession is node.Authenticated; subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [stop_stream] and then restores the recorded streams; hub.BroadcastMessage is node.Broadcast.
+    /// note: on Go, hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [stop_stream] and then restores the recorded streams; hub.BroadcastMessage is node.Broadcast.
     #[test]
     fn with_stopped_streams() {
         setup(|node, session| {
@@ -435,10 +442,22 @@ mod test_perform {
 
     /// upstream: node/node_test.go#TestPerform/With_channel_state
     /// upstream: node/node_test.go#TestPerform
-    /// note: on Go, hub.AddSession is node.Authenticated and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
+    /// note: replays the earlier subtests' performs on test_channel before the opening empty-channel-state assertion, which guards that they leave none.
+    /// note: on Go, hub.AddSession is node.Authenticated (both backends mark the session connected) and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
     #[test]
     fn with_channel_state() {
         setup(|node, session| {
+            // The earlier subtests' performs on test_channel ("action",
+            // "session", "stop_stream" twice), which must leave no channel state.
+            for data in ["action", "session"] {
+                node.perform(session, &msg_data("test_channel", data)).expect("perform");
+                let r = session.read();
+                assert!(r.is_ok(), "{r:?}");
+            }
+            for _ in 0..2 {
+                node.perform(session, &msg_data("test_channel", "stop_stream")).expect("perform");
+            }
+
             assert_eq!(0, session.get_env().channel_states.expect("channel states").len());
 
             let res = node.perform(session, &msg_data("test_channel", "channel_state"));
@@ -481,7 +500,7 @@ mod test_whisper {
 
     /// upstream: node/node_test.go#TestWhisper/When_whispering_stream_is_configured_for_sending_subscription
     /// upstream: node/node_test.go#TestWhisper
-    /// note: on Go, subscribeSessionToStream uses node.Authenticated (hub.AddSession), RestoreFromCache (subscriptions), node.Perform with a Streams-answering controller (hub.SubscribeSession), and the node's legacy broker kept by the bridge (node.broker.Subscribe).
+    /// note: on Go, subscribeSessionToStream uses node.Authenticated (hub.AddSession; both backends mark the session connected), RestoreFromCache (subscriptions), node.Perform with a Streams-answering controller (hub.SubscribeSession), and the node's legacy broker kept by the bridge (node.broker.Subscribe).
     #[test]
     fn when_whispering_stream_is_configured_for_sending_subscription() {
         setup(|node, session, session2| {
@@ -502,10 +521,14 @@ mod test_whisper {
 
     /// upstream: node/node_test.go#TestWhisper/When_whispering_stream_is_not_configured
     /// upstream: node/node_test.go#TestWhisper
+    /// note: configures the whisper stream first, as the preceding upstream subtest leaves it, so RemoveChannelState removes a real stream.
     /// note: on Go, subscribeSessionToStream uses node.Authenticated, RestoreFromCache, node.Perform with a Streams-answering controller, and the node's legacy broker kept by the bridge.
     #[test]
     fn when_whispering_stream_is_not_configured() {
         setup(|node, session, session2| {
+            // Upstream runs after the "configured" subtest: the whisper stream exists.
+            set_whisper_stream(session);
+
             session.remove_channel_state("test_channel");
 
             let res = node.whisper(session, &msg_data("test_channel", "tshh... it's a secret"));
@@ -549,7 +572,7 @@ mod test_stream_subscription_race_conditions {
 
     /// upstream: node/node_test.go#TestStreamSubscriptionRaceConditions/stop_and_start_streams_race_conditions
     /// upstream: node/node_test.go#TestStreamSubscriptionRaceConditions
-    /// note: on Go, hub.AddSession is node.Authenticated, subscriptions.AddChannel re-applies a cache entry (RestoreFromCache), and hub.Broadcast is node.Broadcast.
+    /// note: on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), subscriptions.AddChannel re-applies a cache entry (RestoreFromCache), and hub.Broadcast is node.Broadcast.
     #[test]
     fn stop_and_start_streams_race_conditions() {
         let node = new_mock_node();
@@ -586,7 +609,7 @@ mod test_disconnect {
 
     /// upstream: node/node_test.go#TestDisconnect/Disconnectable_session
     /// upstream: node/node_test.go#TestDisconnect
-    /// note: not_observable on Go at the last step: the queued item is read with the unexported q.disconnect.Remove(); everything before it (Authenticate, Disconnect, queue Size) runs against Go.
+    /// note: q.disconnect.Remove() is unexported; the queued item is observed by draining the queue with the exported Shutdown, which invokes node.DisconnectNow, against a testify controller expecting Disconnect for sid "1" with identifiers "test_id" (installed with WithController). With one session this identifies it (by sid/ids, not pointer identity).
     #[test]
     fn disconnectable_session() {
         setup(|node| {
@@ -600,25 +623,47 @@ mod test_disconnect {
 
             assert_eq!(1, node.mock_queue().size(), "Expected disconnect to have 1 task in a queue");
 
-            let task = node.mock_queue().rust_with("DisconnectQueue.disconnect is unexported").remove();
-            let task = task.expect("a queued session");
-            assert!(Arc::ptr_eq(session.rust_with("unexported"), &task), "Expected to disconnect session");
+            // Upstream: item, ok := q.disconnect.Remove(); assert.Equal(session, item.Data)
+            let controller = new_mock_controller();
+            controller.on(Expect::new("Disconnect", vec![eq("1"), any(), eq("test_id"), any()], Ret::Unit));
+            node.set_controller(&controller);
+
+            node.mock_queue().shutdown().expect("shutdown");
+
+            let tasks: Vec<_> = controller
+                .calls()
+                .into_iter()
+                .filter(|c| c.method == "Disconnect" && c.args[0] == json!("1") && c.args[2] == json!("test_id"))
+                .collect();
+            assert_eq!(1, tasks.len(), "Expected to disconnect session");
+            controller.assert_number_of_calls("Disconnect", 1);
         });
     }
 
     /// upstream: node/node_test.go#TestDisconnect/Non-disconnectable_session
     /// upstream: node/node_test.go#TestDisconnect
-    /// note: not_observable on Go: the case resets the unexported session.disconnectInterest; the exported MarkDisconnectable can only raise it (sticky). Authenticate before it runs against Go.
+    /// note: upstream authenticates with the mock controller and then resets the unexported session.disconnectInterest (MarkDisconnectable can only raise it). Here the session is authenticated under a testify controller answering the mock controller's result with DisconnectInterest -1, so the "auto" disconnect mode never raises the flag: the same end state (authenticated, in the hub, not disconnectable).
     #[test]
     fn non_disconnectable_session() {
         setup(|node| {
             let session = new_mock_session_with_env("1", node, "/cable", Some(map(&[("id", "test_id")])), vec![]);
-            // Authenticate via controller marks session as disconnectable automatically
+            // Upstream: Authenticate via the mock controller, then
+            // session.disconnectInterest = false. Arranged as one Authenticate
+            // whose result declares no Disconnect interest.
+            let controller = new_mock_controller();
+            controller.on(Expect::new(
+                "Authenticate",
+                vec![eq("1"), any()],
+                ret_connect(&ConnectResult {
+                    identifier: "test_id".into(),
+                    transmissions: vec!["welcome".into()],
+                    disconnect_interest: -1,
+                    ..Default::default()
+                }),
+            ));
+            node.set_controller(&controller);
             node.authenticate(&session).expect("authenticate");
-
-            session
-                .rust_with("session.disconnectInterest is unexported and MarkDisconnectable cannot lower it")
-                .set_disconnect_interest(false);
+            assert!(!session.is_disconnectable(), "arrangement: no Disconnect interest");
 
             assert!(node.disconnect(&session).is_ok());
 
@@ -628,7 +673,7 @@ mod test_disconnect {
 
     /// upstream: node/node_test.go#TestDisconnect/Non-resumeable_session_unsubscribes_from_broker_streams
     /// upstream: node/node_test.go#TestDisconnect
-    /// note: on Go, the testify mocks.Broker is built in the bridge from the same expectations; hub.AddSession is node.Authenticated; subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache, no broker call); session.resumeInterval = 0 is the exported option WithKeepaliveIntervals(0, 0) applied to the session.
+    /// note: on Go, the testify mocks.Broker is built in the bridge from the same expectations; hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache, no broker call); session.resumeInterval = 0 is the exported option WithKeepaliveIntervals(0, 0) applied to the session.
     #[test]
     fn non_resumeable_session_unsubscribes_from_broker_streams() {
         setup(|node| {
@@ -917,7 +962,7 @@ mod test_presence {
 
     /// upstream: node/node_test.go#TestPresence/join_on_subscribe
     /// upstream: node/node_test.go#TestPresence
-    /// note: on Go, the testify mocks are built in the bridge from the same expectations (Run callbacks: node.HandleJoin, node.Broadcast); node.controller = c is the exported option WithController(c) applied to the node; hub.AddSession is node.Authenticated.
+    /// note: on Go, the testify mocks are built in the bridge from the same expectations (Run callbacks: node.HandleJoin, node.Broadcast); node.controller = c is the exported option WithController(c) applied to the node; hub.AddSession is node.Authenticated (both backends mark the session connected).
     #[test]
     fn join_on_subscribe() {
         setup(|node, controller, broker| {
@@ -959,7 +1004,7 @@ mod test_presence {
 
     /// upstream: node/node_test.go#TestPresence/join_on_perform
     /// upstream: node/node_test.go#TestPresence
-    /// note: on Go, the testify mocks are built in the bridge from the same expectations (Run callbacks: node.HandleJoin, node.Broadcast); node.controller = c is WithController(c) applied to the node; hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
+    /// note: on Go, the testify mocks are built in the bridge from the same expectations (Run callbacks: node.HandleJoin, node.Broadcast); node.controller = c is WithController(c) applied to the node; hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
     #[test]
     fn join_on_perform() {
         setup(|node, controller, broker| {
@@ -1000,7 +1045,7 @@ mod test_presence {
 
     /// upstream: node/node_test.go#TestPresence/no_presence_stream_configured
     /// upstream: node/node_test.go#TestPresence
-    /// note: on Go, the testify mocks are built in the bridge from the same expectations; the forbidden PresenceAdd (upstream t.Error in Run) is recorded and asserted at the end; node.controller = c is WithController(c); hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry.
+    /// note: on Go, the testify mocks are built in the bridge from the same expectations; the forbidden PresenceAdd (upstream t.Error in Run) is recorded and asserted at the end; node.controller = c is WithController(c); hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry.
     #[test]
     fn no_presence_stream_configured() {
         setup(|node, controller, broker| {
@@ -1042,7 +1087,7 @@ mod test_presence {
 
     /// upstream: node/node_test.go#TestPresence/leave_on_unsubscribe
     /// upstream: node/node_test.go#TestPresence
-    /// note: on Go, the testify mocks are built in the bridge (Run callbacks: node.HandleLeave, node.Broadcast); node.controller = c is WithController(c); hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry; hub.SubscribeSession runs the node's Subscribe/Perform with a Streams-answering controller (calling the broker mock's Subscribe, expected with mock.Anything) and restores the recorded streams; env.MergeChannelState is called on GetEnv().
+    /// note: on Go, the testify mocks are built in the bridge (Run callbacks: node.HandleLeave, node.Broadcast); node.controller = c is WithController(c); hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry; hub.SubscribeSession runs the node's Subscribe/Perform with a Streams-answering controller through a temporary legacy broker (the broker mock is not called) and restores the recorded streams; env.MergeChannelState is called on GetEnv().
     #[test]
     fn leave_on_unsubscribe() {
         setup(|node, controller, broker| {
@@ -1246,7 +1291,7 @@ mod test_broadcasting {
 
     /// upstream: node/node_test.go#TestBroadcasting/HandlePubSub
     /// upstream: node/node_test.go#TestBroadcasting
-    /// note: on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream] (the session also records the channel, without streams); node.broker is the legacy broker the bridge built.
+    /// note: on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream] (the session also records the channel, without streams); node.broker is the legacy broker the bridge built.
     #[test]
     fn handle_pub_sub() {
         setup(|node, session, session2| {
@@ -1261,7 +1306,7 @@ mod test_broadcasting {
 
     /// upstream: node/node_test.go#TestBroadcasting/HandlePubSub_Batch
     /// upstream: node/node_test.go#TestBroadcasting
-    /// note: on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built.
+    /// note: on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built.
     #[test]
     fn handle_pub_sub_batch() {
         setup(|node, session, session2| {
@@ -1284,7 +1329,7 @@ mod test_broadcasting {
 
     /// upstream: node/node_test.go#TestBroadcasting/HandleBroadcast
     /// upstream: node/node_test.go#TestBroadcasting
-    /// note: on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built.
+    /// note: on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built.
     #[test]
     fn handle_broadcast() {
         setup(|node, session, session2| {
@@ -1300,7 +1345,7 @@ mod test_broadcasting {
 
     /// upstream: node/node_test.go#TestBroadcasting/HandleBroadcast_Batch
     /// upstream: node/node_test.go#TestBroadcasting
-    /// note: on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built.
+    /// note: on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built.
     #[test]
     fn handle_broadcast_batch() {
         setup(|node, session, session2| {
@@ -1326,7 +1371,7 @@ mod test_broadcasting {
 // ------------------------------------------------------ TestHandlePubSubWithCommand
 
 /// upstream: node/node_test.go#TestHandlePubSubWithCommand
-/// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()); the session is then also marked connected, so the remote disconnect also detaches it from the node (no Disconnect call is enqueued: the session is not disconnectable).
+/// note: hub.AddSession also marks the session connected on both backends (Go: node.Authenticated(s, s.GetIdentifiers())), so the remote disconnect also detaches it from the node (no Disconnect call is enqueued: the session is not disconnectable).
 #[test]
 fn test_handle_pub_sub_with_command() {
     let node = new_mock_node();
@@ -1348,7 +1393,7 @@ fn test_handle_pub_sub_with_command() {
 // -------------------------------------------------------------- TestLookupSession
 
 /// upstream: node/node_test.go#TestLookupSession
-/// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()) (identifiers set just before); sessions are compared by identity (bridge handle).
+/// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()) (both backends mark the session connected) (identifiers set just before); sessions are compared by identity (bridge handle).
 #[test]
 fn test_lookup_session() {
     let node = new_mock_node();
@@ -1367,7 +1412,7 @@ fn test_lookup_session() {
 // ---------------------------------------------- TestUnsubscribeReleasesBrokerStreams
 
 /// upstream: node/node_test.go#TestUnsubscribeReleasesBrokerStreams
-/// note: not_observable on Go: no exported call subscribes a session in the hub without calling the broker's Subscribe, which this case's testify broker does not expect (upstream calls node.hub.SubscribeSession directly). The steps before it run against Go.
+/// note: on Go, the testify mocks.Broker is built in the bridge; hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel* re-apply a cache entry; hub.SubscribeSession runs node.Perform with a Streams-answering controller through a temporary legacy broker (the mock is not called, as upstream's hub-only call) and restores the recorded streams.
 #[test]
 fn test_unsubscribe_releases_broker_streams() {
     let node = new_mock_node();
@@ -1382,9 +1427,6 @@ fn test_unsubscribe_releases_broker_streams() {
 
     session.add_channel("test_channel");
     session.add_channel_stream("test_channel", "streamo");
-    node.rust_with(
-        "node.hub.SubscribeSession has no exported equivalent that leaves the case's testify broker uncalled",
-    );
     node.hub_subscribe_session(&session, "streamo", "test_channel");
 
     broker.on(Expect::new("Unsubscribe", vec![eq("streamo")], ret_string("streamo")));
