@@ -162,3 +162,7 @@ path = "unit/node/main.rs"
 [[test]]
 name = "features"
 path = "features/main.rs"
+
+[[test]]
+name = "ds"
+path = "unit/ds/main.rs"
