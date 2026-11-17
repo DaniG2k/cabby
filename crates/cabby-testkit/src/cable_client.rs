@@ -5,8 +5,14 @@
 //! are dropped, `receive` waits up to a deadline, and a close frame surfaces as
 //! [`ClientError::Disconnected`]. Unlike AnyT, every wait is explicit and
 //! "no further messages" checks take their window as an argument.
+//!
+//! The opening handshake is written by hand and, like Ruby's
+//! `websocket-client-simple` (used by AnyT and wsdirector), accepts any `101`
+//! response whether or not the server selected an offered subprotocol
+//! (tungstenite's own client rejects that, e.g. for `anycable-token.<jwt>`).
 
 use std::collections::VecDeque;
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
@@ -14,7 +20,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tungstenite::client::IntoClientRequest;
-use tungstenite::http::HeaderValue;
+use tungstenite::handshake::client::generate_key;
+use tungstenite::protocol::Role;
 use tungstenite::protocol::frame::coding::CloseCode;
 use tungstenite::{Message, WebSocket};
 
@@ -54,6 +61,7 @@ pub struct Options {
     /// Sent as the `cookie` header (AnyT always sends it, possibly empty).
     pub cookies: String,
     pub headers: Vec<(String, String)>,
+    /// `Sec-WebSocket-Protocol`; empty sends none (wsdirector's base protocol).
     pub protocol: String,
 }
 
@@ -99,28 +107,7 @@ impl CableClient {
             full.push(if full.contains('?') { '&' } else { '?' });
             full.push_str(&opts.qs);
         }
-        let mut req = full.as_str().into_client_request().map_err(|e| ClientError::Protocol(e.to_string()))?;
-        let h = req.headers_mut();
-        let hv = |v: &str| HeaderValue::from_str(v).map_err(|e| ClientError::Protocol(e.to_string()));
-        for (k, v) in &opts.headers {
-            let name = tungstenite::http::HeaderName::from_bytes(k.as_bytes())
-                .map_err(|e| ClientError::Protocol(e.to_string()))?;
-            h.insert(name, hv(v)?);
-        }
-        h.insert("cookie", hv(&opts.cookies)?);
-        h.insert("Sec-WebSocket-Protocol", hv(&opts.protocol)?);
-
-        let host = req.uri().host().unwrap_or("127.0.0.1").to_owned();
-        let port = req.uri().port_u16().unwrap_or(80);
-        let addr = std::net::ToSocketAddrs::to_socket_addrs(&(host.as_str(), port))
-            .map_err(|e| ClientError::Protocol(e.to_string()))?
-            .next()
-            .ok_or_else(|| ClientError::Protocol("unresolvable host".into()))?;
-        let stream =
-            TcpStream::connect_timeout(&addr, RECEIVE_DEADLINE).map_err(|e| ClientError::Protocol(e.to_string()))?;
-        stream.set_read_timeout(Some(RECEIVE_DEADLINE)).ok();
-        stream.set_write_timeout(Some(RECEIVE_DEADLINE)).ok();
-        let (ws, _resp) = tungstenite::client(req, stream).map_err(|e| ClientError::Protocol(e.to_string()))?;
+        let ws = handshake(&full, &opts)?;
         ws.get_ref().set_read_timeout(Some(POLL)).ok();
 
         let (etx, erx) = mpsc::channel();
@@ -237,6 +224,54 @@ impl Drop for CableClient {
             let _ = w.join();
         }
     }
+}
+
+/// Lenient client handshake: sends the upgrade request and accepts any `101`.
+fn handshake(url: &str, opts: &Options) -> Result<WebSocket<TcpStream>, ClientError> {
+    let err = |e: &dyn std::fmt::Display| ClientError::Protocol(e.to_string());
+    let req = url.into_client_request().map_err(|e| err(&e))?;
+    let host = req.uri().host().unwrap_or("127.0.0.1").to_owned();
+    let port = req.uri().port_u16().unwrap_or(80);
+    let target = req.uri().path_and_query().map_or("/", |p| p.as_str()).to_owned();
+    let addr = std::net::ToSocketAddrs::to_socket_addrs(&(host.as_str(), port))
+        .map_err(|e| err(&e))?
+        .next()
+        .ok_or_else(|| ClientError::Protocol("unresolvable host".into()))?;
+    let mut stream = TcpStream::connect_timeout(&addr, RECEIVE_DEADLINE).map_err(|e| err(&e))?;
+    stream.set_read_timeout(Some(RECEIVE_DEADLINE)).ok();
+    stream.set_write_timeout(Some(RECEIVE_DEADLINE)).ok();
+    let mut head = format!(
+        "GET {target} HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Key: {}\r\nSec-WebSocket-Version: 13\r\n",
+        generate_key()
+    );
+    for (k, v) in &opts.headers {
+        head.push_str(&format!("{k}: {v}\r\n"));
+    }
+    head.push_str(&format!("cookie: {}\r\n", opts.cookies));
+    if !opts.protocol.is_empty() {
+        head.push_str(&format!("Sec-WebSocket-Protocol: {}\r\n", opts.protocol));
+    }
+    head.push_str("\r\n");
+    stream.write_all(head.as_bytes()).map_err(|e| err(&e))?;
+    // Read the response head byte by byte so that no frame bytes are consumed.
+    let mut resp = Vec::new();
+    let mut byte = [0u8; 1];
+    while !resp.ends_with(b"\r\n\r\n") {
+        if resp.len() > 64 * 1024 {
+            return Err(ClientError::Protocol("oversized handshake response".into()));
+        }
+        match stream.read(&mut byte) {
+            Ok(0) => return Err(ClientError::Protocol("connection closed during the handshake".into())),
+            Ok(_) => resp.push(byte[0]),
+            Err(e) => return Err(err(&e)),
+        }
+    }
+    let text = String::from_utf8_lossy(&resp);
+    if text.split_whitespace().nth(1) != Some("101") {
+        return Err(ClientError::Protocol(format!("handshake rejected: {}", text.lines().next().unwrap_or(""))));
+    }
+    Ok(WebSocket::from_raw_socket(stream, Role::Client, None))
 }
 
 fn pump(mut ws: WebSocket<TcpStream>, events: Sender<Event>, commands: Receiver<Command>, ignore: Vec<String>) {
