@@ -70,8 +70,9 @@ Facades only convert shapes (Go JSON ↔ Cabby types); they contain no behavior.
 
 When Go functionality is **not callable** (unexported state, internal goroutines): write the
 test against the Rust interface anyway, keep the Go facade arm as
-`unimplemented!("not_observable: <reason>")`, and set `reference_status` to `not_observable` with
-a note in the manifest. Do not reimplement the behavior in the bridge.
+`unimplemented!("not_observable: <reason>")`. The runner classifies such Go runs as
+`not_observable` (not as failures), and `cargo xtask test --backend go --record` stores that
+reference status. Do not reimplement the behavior in the bridge.
 
 When behavior is **externally observable** (HTTP status, WebSocket frames, CLI output), also
 consider a `tests/conformance/` scenario using `cabby_testkit::sut::Sut`, linked with
