@@ -8,9 +8,12 @@ redis=redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287
 nats=nats@sha256:558394a23dd3c36f2d3a64b51865fd09908010e80a542cea5e75c2af543ed62a
 case "${1:-start}" in
   start)
-    docker rm -f cabby-svc-redis cabby-svc-nats >/dev/null 2>&1 || true
-    docker run -d --rm --name cabby-svc-redis -p 127.0.0.1:0:6379 "$redis" >/dev/null
-    docker run -d --rm --name cabby-svc-nats -p 127.0.0.1:0:4222 -p 127.0.0.1:0:8222 "$nats" -js -m 8222 >/dev/null
+    # Idempotent: reuse running containers so concurrent callers share them.
+    running() { [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
+    running cabby-svc-redis || { docker rm -f cabby-svc-redis >/dev/null 2>&1 || true
+      docker run -d --rm --name cabby-svc-redis -p 127.0.0.1:0:6379 "$redis" >/dev/null; }
+    running cabby-svc-nats || { docker rm -f cabby-svc-nats >/dev/null 2>&1 || true
+      docker run -d --rm --name cabby-svc-nats -p 127.0.0.1:0:4222 -p 127.0.0.1:0:8222 "$nats" -js -m 8222 >/dev/null; }
     rp=$(docker port cabby-svc-redis 6379/tcp | head -1 | cut -d: -f2)
     np=$(docker port cabby-svc-nats 4222/tcp | head -1 | cut -d: -f2)
     mp=$(docker port cabby-svc-nats 8222/tcp | head -1 | cut -d: -f2)
@@ -18,6 +21,7 @@ case "${1:-start}" in
     for _ in $(seq 1 100); do curl -sf "http://127.0.0.1:$mp/healthz" >/dev/null && break; sleep 0.1; done
     echo "export CABBY_REDIS_URL=redis://127.0.0.1:$rp/ CABBY_NATS_URL=nats://127.0.0.1:$np CABBY_NATS_MONITOR_URL=http://127.0.0.1:$mp"
     ;;
+  restart) "$0" stop; exec "$0" start ;;
   stop) docker rm -f cabby-svc-redis cabby-svc-nats >/dev/null 2>&1 || true ;;
-  *) echo "usage: $0 start|stop" >&2; exit 2 ;;
+  *) echo "usage: $0 start|stop|restart" >&2; exit 2 ;;
 esac
