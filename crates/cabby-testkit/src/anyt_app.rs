@@ -46,7 +46,7 @@ use std::sync::{Arc, Mutex};
 use cabby_core::protos;
 use serde_json::{Map, Value, json};
 
-use crate::fake_rpc::{Call, FakeRpc, Method, Reply, Transport};
+use crate::fake_rpc::{Call, FakeRpc, FakeRpcOptions, Method, Reply, Transport};
 use crate::publish::Target;
 use crate::sync::Watched;
 
@@ -75,6 +75,11 @@ pub struct AppOptions {
     /// keeps servers sharing one Redis or NATS from seeing each other's
     /// streams (the Redis pub/sub subscribes to one channel per stream).
     pub stream_prefix: String,
+    /// HTTP RPC mount path (`ANYCABLE_HTTP_RPC_MOUNT_PATH`); other paths get 404.
+    pub http_mount_path: Option<String>,
+    /// Serve gRPC over TLS with this PEM certificate and key
+    /// (`ANYCABLE_RPC_TLS_CERT`/`ANYCABLE_RPC_TLS_KEY`).
+    pub grpc_tls: Option<(Vec<u8>, Vec<u8>)>,
 }
 
 struct Shared {
@@ -91,7 +96,11 @@ pub struct AnytApp {
 
 impl AnytApp {
     pub fn start(options: AppOptions) -> Self {
-        let rpc = FakeRpc::start();
+        let rpc = FakeRpc::start_with(FakeRpcOptions {
+            grpc_tls: options.grpc_tls.clone(),
+            http_mount_path: options.http_mount_path.clone(),
+            ..Default::default()
+        });
         let shared = Arc::new(Shared { options, broadcaster: Mutex::new(None), errors: Watched::new(Vec::new()) });
         for method in [Method::Connect, Method::Command, Method::Disconnect] {
             let s = Arc::clone(&shared);

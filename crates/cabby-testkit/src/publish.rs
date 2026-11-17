@@ -107,6 +107,97 @@ pub fn redis_subscribers(addr: SocketAddr, channel: &str) -> i64 {
     lines.get(3).and_then(|l| l.strip_prefix(':')).and_then(|n| n.parse().ok()).unwrap_or(0)
 }
 
+/// A minimal NATS subscriber (readiness probes: has a message published on one
+/// cluster member reached another?).
+pub struct NatsSubscriber {
+    writer: TcpStream,
+    reader: BufReader<TcpStream>,
+}
+
+impl NatsSubscriber {
+    /// Subscribes to `subject`; returns once the server acknowledged (`PONG`).
+    pub fn subscribe(addr: SocketAddr, subject: &str) -> Result<Self> {
+        let mut writer = connect(addr)?;
+        let mut reader = BufReader::new(writer.try_clone()?);
+        let mut info = String::new();
+        reader.read_line(&mut info).context("reading NATS INFO")?;
+        let msg = format!(
+            "CONNECT {{\"verbose\":false,\"pedantic\":false,\"lang\":\"cabby-testkit\",\"version\":\"0\",\"protocol\":1}}\r\n\
+             SUB {subject} 1\r\nPING\r\n"
+        );
+        writer.write_all(msg.as_bytes())?;
+        let mut sub = Self { writer, reader };
+        loop {
+            match sub.read_line()?.as_str() {
+                "PONG" => return Ok(sub),
+                l if l.starts_with("-ERR") => bail!("NATS subscribe failed: {l}"),
+                _ => {}
+            }
+        }
+    }
+
+    fn read_line(&mut self) -> Result<String> {
+        let mut line = String::new();
+        if self.reader.read_line(&mut line)? == 0 {
+            bail!("NATS closed the connection");
+        }
+        let line = line.trim_end().to_owned();
+        if line == "PING" {
+            self.writer.write_all(b"PONG\r\n")?;
+        }
+        Ok(line)
+    }
+
+    /// The next message payload within `timeout`, or `None`.
+    pub fn next(&mut self, timeout: Duration) -> Option<String> {
+        self.writer.set_read_timeout(Some(timeout)).ok()?;
+        loop {
+            let line = self.read_line().ok()?;
+            if let Some(rest) = line.strip_prefix("MSG ") {
+                let len: usize = rest.rsplit(' ').next()?.parse().ok()?;
+                let mut body = vec![0u8; len + 2];
+                std::io::Read::read_exact(&mut self.reader, &mut body).ok()?;
+                body.truncate(len);
+                return Some(String::from_utf8_lossy(&body).into_owned());
+            }
+        }
+    }
+}
+
+/// A NATS request (`SUB` on an inbox, `PUB` with that reply subject); returns
+/// the reply payload, or an error if none arrives within the I/O deadline.
+pub fn nats_request(addr: SocketAddr, subject: &str, payload: &str) -> Result<String> {
+    let mut s = connect(addr)?;
+    let mut reader = BufReader::new(s.try_clone()?);
+    let mut info = String::new();
+    reader.read_line(&mut info).context("reading NATS INFO")?;
+    let inbox = format!("_INBOX.cabby.{}", std::process::id());
+    let msg = format!(
+        "CONNECT {{\"verbose\":false,\"pedantic\":false,\"lang\":\"cabby-testkit\",\"version\":\"0\",\"protocol\":1}}\r\n\
+         SUB {inbox} 1\r\nPUB {subject} {inbox} {}\r\n{payload}\r\n",
+        payload.len()
+    );
+    s.write_all(msg.as_bytes())?;
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line).context("waiting for the NATS reply")? == 0 {
+            bail!("NATS closed the connection before replying");
+        }
+        let line = line.trim_end();
+        if line == "PING" {
+            s.write_all(b"PONG\r\n")?;
+        } else if let Some(rest) = line.strip_prefix("MSG ") {
+            let len: usize = rest.rsplit(' ').next().and_then(|n| n.parse().ok()).context("MSG size")?;
+            let mut body = vec![0u8; len + 2];
+            std::io::Read::read_exact(&mut reader, &mut body)?;
+            body.truncate(len);
+            return Ok(String::from_utf8_lossy(&body).into_owned());
+        } else if line.starts_with("-ERR") {
+            bail!("NATS request failed: {line}");
+        }
+    }
+}
+
 /// `CONNECT`, `PUB`, then `PING`; succeeds on the `PONG` (the server processed
 /// the publish before answering the ping).
 pub fn nats_publish(addr: SocketAddr, subject: &str, payload: &str) -> Result<()> {

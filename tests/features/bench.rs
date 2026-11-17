@@ -12,11 +12,20 @@
 //! `wait_broadcasts`. Throughput and latency measurements belong to the
 //! external Benchi harness (`crates/cabby-bench`), not to these tests.
 //!
+//! Counting: websocket-bench counts the broadcast messages its clients receive
+//! while a step waits (up to `--wait-broadcasts`) and reports "Missing received
+//! broadcasts: expected N, got M" for the step. Here every broadcast carries
+//! `(step, sender, n)`, each client keeps the ids it has seen, and a delivery
+//! is credited to the step it belongs to, once per client: late arrivals can
+//! neither count toward the next step nor be double-counted. A step's count is
+//! taken when its wait ends.
+//!
 //! The upstream RPC application uses the gem's default `redis` broadcast
 //! adapter (`REDIS_URL` set by CI) and the server its default adapters
 //! (`http`, `redis`), so both use the shared Redis service here, with a
 //! per-test broadcast channel and stream name prefix.
 
+use std::collections::HashSet;
 use std::net::TcpStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -26,8 +35,10 @@ use std::time::{Duration, Instant};
 use cabby_testkit::anyt_app::{AnytApp, BENCHMARK_CHANNEL};
 use cabby_testkit::cable_client::{CableClient, Options};
 use cabby_testkit::publish::{self, Target};
+use cabby_testkit::raw_http;
 use cabby_testkit::services::{self, RedisScope, unique};
 use cabby_testkit::sut::Sut;
+use cabby_testkit::{Backend, backend};
 use serde_json::{Value, json};
 use tungstenite::client::IntoClientRequest;
 use tungstenite::{Message, WebSocket};
@@ -49,13 +60,18 @@ fn identifier() -> String {
     format!(r#"{{"channel":"{BENCHMARK_CHANNEL}"}}"#)
 }
 
-/// A subscribed client that counts `broadcast` messages on a blocking reader
-/// thread (no polling, so hundreds of them stay cheap).
+/// Deliveries per step, each `(client, broadcast id)` counted once.
+struct Ledger {
+    per_step: Vec<AtomicUsize>,
+}
+
+/// A subscribed client that records broadcast ids on a blocking reader thread
+/// (no polling, so hundreds of them stay cheap).
 struct Subscriber {
     thread: JoinHandle<()>,
 }
 
-fn subscriber(url: &str, received: Arc<AtomicUsize>, stop: Arc<AtomicBool>) -> Result<Subscriber, String> {
+fn subscriber(url: &str, ledger: Arc<Ledger>, stop: Arc<AtomicBool>) -> Result<Subscriber, String> {
     let mut req = url.into_client_request().map_err(|e| e.to_string())?;
     req.headers_mut().insert("Sec-WebSocket-Protocol", "actioncable-v1-json".parse().unwrap());
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], req.uri().port_u16().unwrap_or(80)));
@@ -75,12 +91,22 @@ fn subscriber(url: &str, received: Arc<AtomicUsize>, stop: Arc<AtomicBool>) -> R
     let thread = std::thread::Builder::new()
         .stack_size(256 * 1024)
         .spawn(move || {
+            let mut seen = HashSet::new();
             while !stop.load(Ordering::SeqCst) {
                 match ws.read() {
                     Ok(Message::Text(t)) => {
                         let v: Value = serde_json::from_str(&t).unwrap_or(Value::Null);
-                        if v["message"]["action"] == "broadcast" {
-                            received.fetch_add(1, Ordering::SeqCst);
+                        let m = &v["message"];
+                        if m["action"] != "broadcast" {
+                            continue;
+                        }
+                        let p = &m["payload"];
+                        let id = (p["step"].as_u64(), p["sender"].as_u64(), p["n"].as_u64());
+                        if let (Some(step), Some(_), Some(_)) = id
+                            && seen.insert(id)
+                            && let Some(c) = ledger.per_step.get(step as usize)
+                        {
+                            c.fetch_add(1, Ordering::SeqCst);
                         }
                     }
                     Ok(_) => {}
@@ -109,7 +135,7 @@ fn read_json(ws: &mut WebSocket<TcpStream>) -> Option<Value> {
 fn run_workload(sut: &Sut, w: Workload) -> Vec<(usize, usize)> {
     let url = ws_url(sut, "/cable");
     let stop = Arc::new(AtomicBool::new(false));
-    let received = Arc::new(AtomicUsize::new(0));
+    let ledger = Arc::new(Ledger { per_step: (0..w.total_steps).map(|_| AtomicUsize::new(0)).collect() });
     let mut subscribers = Vec::new();
     let mut senders: Vec<CableClient> = (0..w.concurrent)
         .map(|_| {
@@ -129,11 +155,9 @@ fn run_workload(sut: &Sut, w: Workload) -> Vec<(usize, usize)> {
     for step in 0..w.total_steps {
         for _ in 0..w.step_size {
             subscribers.push(
-                subscriber(&url, Arc::clone(&received), Arc::clone(&stop))
-                    .unwrap_or_else(|e| panic!("subscriber: {e}")),
+                subscriber(&url, Arc::clone(&ledger), Arc::clone(&stop)).unwrap_or_else(|e| panic!("subscriber: {e}")),
             );
         }
-        received.store(0, Ordering::SeqCst);
         // `sample_size` broadcasts, `concurrent` in flight at a time: each sender
         // waits for its `broadcastResult` before sending the next one.
         std::thread::scope(|s| {
@@ -159,10 +183,11 @@ fn run_workload(sut: &Sut, w: Workload) -> Vec<(usize, usize)> {
         });
         let expected = w.sample_size * subscribers.len();
         let until = Instant::now() + w.wait_broadcasts;
-        while received.load(Ordering::SeqCst) < expected && Instant::now() < until {
+        let count = || ledger.per_step[step].load(Ordering::SeqCst);
+        while count() < expected && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(20));
         }
-        results.push((expected, received.load(Ordering::SeqCst)));
+        results.push((expected, count()));
     }
     stop.store(true, Ordering::SeqCst);
     for s in subscribers {
@@ -184,14 +209,16 @@ fn redis_addr() -> std::net::SocketAddr {
 
 /// The server and the application on the shared Redis: a per-test ACL user,
 /// broadcast channel (`--redis_channel`) and stream name prefix.
-fn start() -> (RedisScope, AnytApp, Sut) {
+fn start(extra: &[&str]) -> (RedisScope, AnytApp, Sut) {
     let redis = services::redis().scope("bench");
     let channel = redis.name("anycable");
     let app = rpc_app_with_prefix(&format!("{}:", unique("bench")));
     let rpc = format!("--rpc_host={}", app.grpc_target());
     let channel_flag = format!("--redis_channel={channel}");
     let redis_url = redis.url();
-    let sut = launch(&[&rpc, &channel_flag], &[("REDIS_URL", &redis_url)]);
+    let mut args = vec![rpc.as_str(), channel_flag.as_str()];
+    args.extend_from_slice(extra);
+    let sut = launch(&args, &[("REDIS_URL", &redis_url)]);
     let until = Instant::now() + READY_DEADLINE;
     while publish::redis_subscribers(redis_addr(), &channel) == 0 {
         assert!(Instant::now() < until, "the server did not subscribe to Redis broadcasts");
@@ -203,12 +230,13 @@ fn start() -> (RedisScope, AnytApp, Sut) {
 
 /// upstream: features/broadcasts.benchfile#scenario
 /// note: correctness check only, same workload parameters; throughput belongs to the external Benchi harness (crates/cabby-bench); inherent window: --wait-broadcasts 30 s
+/// note: deliveries are reconciled per step by broadcast id (step, sender, n), once per client, instead of websocket-bench's per-step message count
 /// `websocket-bench broadcast --concurrent 40 --sample-size 100 --step-size 200
 /// --payload-padding 200 --total-steps 4 --wait-broadcasts 30`; fails if a step
 /// receives less than 90% of the expected broadcasts.
 #[test]
 fn broadcasts() {
-    let (_redis, app, sut) = start();
+    let (_redis, app, sut) = start(&[]);
     let workload = Workload {
         concurrent: 40,
         sample_size: 100,
@@ -229,31 +257,41 @@ fn broadcasts() {
     assert!(app.errors().is_empty(), "app errors: {:?}", app.errors());
 }
 
-/// Open file descriptors and OS threads of a process (procfs).
-fn resources(pid: u32) -> (usize, usize) {
-    let fds = std::fs::read_dir(format!("/proc/{pid}/fd")).map(|d| d.count()).unwrap_or(0);
-    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap_or_default();
-    let threads =
-        status.lines().find_map(|l| l.strip_prefix("Threads:")).and_then(|n| n.trim().parse().ok()).unwrap_or(0);
-    (fds, threads)
+/// Open file descriptors of a process (procfs).
+fn open_fds(pid: u32) -> usize {
+    std::fs::read_dir(format!("/proc/{pid}/fd")).map(|d| d.count()).unwrap_or(0)
+}
+
+/// Gauges from the Prometheus endpoint (`--metrics_http=/metrics`):
+/// `anycable_go_<name>[{tags}] <value>`.
+fn gauges(sut: &Sut) -> std::collections::HashMap<String, u64> {
+    let res = raw_http::request(sut.addr(), "GET", "/metrics", &[], None).unwrap_or_else(|e| {
+        sut.process.propagate_pending();
+        panic!("GET /metrics: {e:#}")
+    });
+    res.text()
+        .lines()
+        .filter(|l| !l.starts_with('#'))
+        .filter_map(|l| {
+            let (name, value) = l.rsplit_once(' ')?;
+            let name = name.split('{').next()?.strip_prefix("anycable_go_")?;
+            Some((name.to_owned(), value.trim().parse().ok()?))
+        })
+        .collect()
 }
 
 /// upstream: features/goroutines.benchfile#scenario
-/// note: replacement invariant for the Go-specific gops goroutine checks: server fds return to idle (+10) after load and grow at most 10% (min 2) between runs; OS threads reported only
-/// The upstream assertions are Go runtime measurements (`gops stats`: at most
-/// 200 goroutines after a 5 s cool-down, and no more than 10% growth between
-/// two runs of `websocket-bench broadcast --concurrent 10 --sample-size 100
-/// --step-size 200 --payload-padding 200 --total-steps 3`). The documented
-/// replacement invariant observes the server process from outside, for any
-/// implementation: after each run the clients disconnect and the server's open
-/// file descriptors return to their idle level (within 10; bounded wait instead
-/// of `sleep 5`), and residual descriptors after the second run exceed those
-/// after the first by at most 10% (at least 2). OS threads are reported only:
-/// runtimes keep worker threads after load (Go's grew 34 -> 40 here), which is
-/// not a leak.
+/// note: gauges come from --metrics_http with --stats_refresh_interval=1 (upstream reads goroutines with gops), so the 5 s cool-down observes fresh values
+/// note: Go backend: upstream's goroutine checks (at most 200 after the cool-down, at most 10% growth between runs) on goroutines_num; every backend: clients_num, clients_uniq_num and broadcast_streams_num back at 0 within the 5 s cool-down, and server fds back near idle (+10, growth at most 10%, min 2) as a runtime-independent leak check
+/// `websocket-bench broadcast --concurrent 10 --sample-size 100 --step-size 200
+/// --payload-padding 200 --total-steps 3`, run twice, each followed by a
+/// cool-down (upstream: `sleep 5`; here bounded at 5 s and ended as soon as
+/// the server reports no clients and no streams).
 #[test]
 fn goroutines() {
-    let (_redis, _app, sut) = start();
+    const IDLE_ROUTINES_MAX: u64 = 200;
+    const COOL_DOWN: Duration = Duration::from_secs(5);
+    let (_redis, _app, sut) = start(&["--metrics_http=/metrics", "--stats_refresh_interval=1"]);
     let pid = sut.process.pid();
     let workload = Workload {
         concurrent: 10,
@@ -263,24 +301,39 @@ fn goroutines() {
         total_steps: 3,
         wait_broadcasts: Duration::from_secs(30),
     };
-    let (idle_fds, _) = resources(pid);
+    let idle_fds = open_fds(pid);
 
-    let results: Vec<(usize, usize)> = (0..2)
+    let results: Vec<(usize, Option<u64>)> = (0..2)
         .map(|_| {
             run_workload(&sut, workload);
-            // Give some time to cool down after the benchmark (upstream: sleep 5).
-            let until = Instant::now() + Duration::from_secs(30);
-            loop {
-                let (fds, threads) = resources(pid);
-                if fds <= idle_fds + 10 || Instant::now() >= until {
-                    break (fds, threads);
-                }
+            // Give some time to cool down after the benchmark
+            let until = Instant::now() + COOL_DOWN;
+            let idle = |g: &std::collections::HashMap<String, u64>| {
+                ["clients_num", "clients_uniq_num", "broadcast_streams_num"].iter().all(|k| g.get(*k) == Some(&0))
+            };
+            let mut g = gauges(&sut);
+            while !idle(&g) && Instant::now() < until {
                 std::thread::sleep(Duration::from_millis(100));
+                g = gauges(&sut);
             }
+            assert!(idle(&g), "not idle {COOL_DOWN:?} after the benchmark: {g:?}");
+            (open_fds(pid), g.get("goroutines_num").copied())
         })
         .collect();
 
-    eprintln!("idle descriptors: {idle_fds}; after each run (descriptors, threads): {results:?}");
+    eprintln!("idle descriptors: {idle_fds}; after each run (descriptors, goroutines): {results:?}");
+    if backend() == Backend::Go {
+        let goroutines: Vec<u64> = results.iter().map(|(_, g)| g.expect("goroutines_num gauge")).collect();
+        for num in &goroutines {
+            assert!(*num <= IDLE_ROUTINES_MAX, "Too many goroutines: {num}");
+        }
+        assert!(
+            goroutines[1] as f64 / goroutines[0] as f64 <= 1.1,
+            "Go routines leak detected: {} -> {}",
+            goroutines[0],
+            goroutines[1]
+        );
+    }
     for (fds, _) in &results {
         assert!(*fds <= idle_fds + 10, "Too many open descriptors after cool-down: {fds} (idle: {idle_fds})");
     }

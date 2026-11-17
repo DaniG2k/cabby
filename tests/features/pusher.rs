@@ -49,7 +49,8 @@ fn pusher() {
         let target = signed_target("POST", "/apps/my-test-id/events", "detox", "oaugc1", &now_timestamp(), Some(body));
         let res = raw_http::request(sut.addr(), "POST", &target, &[("Content-Type", "application/json")], Some(body))
             .map_err(|e| StepError::Client(format!("trigger: {e:#}")))?;
-        if res.status != 200 {
+        // pusher-http-ruby accepts 200 and 202.
+        if !matches!(res.status, 200 | 202) {
             return Err(StepError::Client(format!("trigger returned {}: {}", res.status, res.text())));
         }
 

@@ -36,7 +36,29 @@ pub fn sut_binary() -> PathBuf {
 pub struct Sut {
     pub process: Supervised,
     pub port: u16,
+    /// The HTTP broadcast port: a separate isolated port, or `port` when
+    /// [`SutOptions::separate_broadcast_port`] is off.
     pub broadcast_port: u16,
+}
+
+/// How [`Sut::try_start_with`] passes the isolated ports.
+#[derive(Debug, Clone, Copy)]
+pub struct SutOptions {
+    /// Pass `--http_broadcast_port=<free port>` (the default). Off, the server
+    /// keeps its own default, which is the main port when a broadcast key is
+    /// configured (upstream `test-conformance-http`/`-embedded`); without a key
+    /// it is a fixed port, so turn this off only together with a key.
+    pub separate_broadcast_port: bool,
+    /// Pass host and ports as `ANYCABLE_HOST`/`ANYCABLE_PORT`/
+    /// `ANYCABLE_HTTP_BROADCAST_PORT` instead of flags (settings entirely from
+    /// the environment, like the upstream embedded target).
+    pub via_env: bool,
+}
+
+impl Default for SutOptions {
+    fn default() -> Self {
+        Self { separate_broadcast_port: true, via_env: false }
+    }
 }
 
 impl Sut {
@@ -48,10 +70,15 @@ impl Sut {
     /// Starts the server, retrying with fresh ports if a listener could not bind
     /// because another process took its port in the meantime.
     pub fn try_start(args: &[&str], env: &[(&str, &str)]) -> Result<Self> {
+        Self::try_start_with(args, env, SutOptions::default())
+    }
+
+    /// [`Sut::try_start`] with explicit [`SutOptions`].
+    pub fn try_start_with(args: &[&str], env: &[(&str, &str)], options: SutOptions) -> Result<Self> {
         const ATTEMPTS: usize = 3;
         let mut last = None;
         for _ in 0..ATTEMPTS {
-            match Self::start_once(args, env) {
+            match Self::start_once(args, env, options) {
                 Ok(sut) => return Ok(sut),
                 Err(e) if format!("{e:#}").contains("address already in use") => last = Some(e),
                 Err(e) => return Err(e),
@@ -60,9 +87,9 @@ impl Sut {
         Err(last.expect("at least one attempt")).context(format!("{ATTEMPTS} attempts hit port collisions"))
     }
 
-    fn start_once(args: &[&str], env: &[(&str, &str)]) -> Result<Self> {
+    fn start_once(args: &[&str], env: &[(&str, &str)], options: SutOptions) -> Result<Self> {
         let port = free_port();
-        let broadcast_port = free_port();
+        let broadcast_port = if options.separate_broadcast_port { free_port() } else { port };
         let mut cmd = Command::new(sut_binary());
         for (k, _) in std::env::vars() {
             if k.starts_with("ANYCABLE_") {
@@ -71,10 +98,18 @@ impl Sut {
         }
         cmd.env("ANYCABLE_DISABLE_TELEMETRY", "true");
         cmd.envs(env.iter().copied());
-        cmd.arg("--host=127.0.0.1")
-            .arg(format!("--port={port}"))
-            .arg(format!("--http_broadcast_port={broadcast_port}"))
-            .args(args);
+        if options.via_env {
+            cmd.env("ANYCABLE_HOST", "127.0.0.1").env("ANYCABLE_PORT", port.to_string());
+            if options.separate_broadcast_port {
+                cmd.env("ANYCABLE_HTTP_BROADCAST_PORT", broadcast_port.to_string());
+            }
+        } else {
+            cmd.arg("--host=127.0.0.1").arg(format!("--port={port}"));
+            if options.separate_broadcast_port {
+                cmd.arg(format!("--http_broadcast_port={broadcast_port}"));
+            }
+        }
+        cmd.args(args);
         let mut process = Supervised::spawn("sut", cmd)?;
         process.wait_listening(SocketAddr::from(([127, 0, 0, 1], port)), START_DEADLINE)?;
         Ok(Self { process, port, broadcast_port })
