@@ -12,6 +12,14 @@ fn dig<'a>(config: &'a toml::Table, path: &[&str]) -> Option<&'a Value> {
     rest.iter().try_fold(config.get(*first)?, |v, k| v.get(k))
 }
 
+/// `run` + `PerfectTOML.parse(stdout(:name))`: the runner's pipe carries stdout
+/// and stderr, so anything on stderr would have broken the parse upstream.
+fn print_config(args: &[&str], env: &[(&str, &str)], dir: &std::path::Path) -> toml::Table {
+    let out = run_sut(args, env, dir);
+    assert!(out.stderr.is_empty(), "unexpected stderr from {args:?}:\n{}", out.stderr);
+    parse(&out.stdout)
+}
+
 fn parse(out: &str) -> toml::Table {
     toml::from_str(out).unwrap_or_else(|e| panic!("PerfectTOML.parse failed: {e}\n{out}"))
 }
@@ -46,7 +54,7 @@ fn fail_on(errors: &[String]) {
 }
 
 /// upstream: features/file_config.testfile#scenario
-/// note: only stdout is parsed (upstream's pipe merges stderr); commands run in a fresh working directory with ANYCABLE_* removed
+/// note: upstream parses the runner's merged stdout+stderr; the port parses stdout and asserts stderr is empty; commands run in a fresh working directory with every ANYCABLE_* removed
 #[test]
 fn file_config() {
     let dir = TempDir::new("file-config");
@@ -76,7 +84,7 @@ fn file_config() {
     assert!(dir.0.join("anycable.toml").exists(), "Config file hasn't been generated");
 
     // Load from the default local path
-    let config = parse(&run_sut(&["--print-config"], &[], &dir.0).stdout);
+    let config = print_config(&["--print-config"], &[], &dir.0);
     let mut errors = Vec::new();
     // top-level params
     check(&mut errors, "node ID", s("node-1"), config.get("node_id"));
@@ -95,25 +103,22 @@ fn file_config() {
     fail_on(&errors);
 
     // Ignoring the config file
-    let config = parse(&run_sut(&["--ignore-config-path", "--print-config"], &[], &dir.0).stdout);
+    let config = print_config(&["--ignore-config-path", "--print-config"], &[], &dir.0);
     let mut errors = Vec::new();
     check(&mut errors, "node ID", None, config.get("node_id"));
     check(&mut errors, "secret", s("none"), config.get("secret"));
     fail_on(&errors);
 
     // Overriding config data
-    let config = parse(
-        &run_sut(
-            &["--port=2025", "--statsd_tags_format=influx", "--print-config"],
-            &[
-                ("ANYCABLE_NODE_ID", "node-2"),
-                ("ANYCABLE_PORT", "312"),
-                ("ANYCABLE_SECRET", "override"),
-                ("ANYCABLE_DEBUG", "false"),
-            ],
-            &dir.0,
-        )
-        .stdout,
+    let config = print_config(
+        &["--port=2025", "--statsd_tags_format=influx", "--print-config"],
+        &[
+            ("ANYCABLE_NODE_ID", "node-2"),
+            ("ANYCABLE_PORT", "312"),
+            ("ANYCABLE_SECRET", "override"),
+            ("ANYCABLE_DEBUG", "false"),
+        ],
+        &dir.0,
     );
     let mut errors = Vec::new();
     // top-level params
