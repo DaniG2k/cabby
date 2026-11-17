@@ -185,10 +185,14 @@ dependencies = [
 name = "cabby-core"
 version = "0.0.0"
 dependencies = [
+ "base64",
+ "hmac",
  "prost",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
+ "toml",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
