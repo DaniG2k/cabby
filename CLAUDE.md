@@ -17,20 +17,17 @@ plan and progress. Don't rely on earlier conversations.
 - M2+ (implementation) is in progress: stubs are `pending!`, and a case counts as done once it
   passes with `cargo xtask test --backend rust` and is recorded with `--record`.
 
-## Setup (Linux or macOS)
+## Setup
 ```sh
 mise install                       # Rust 1.100.0, Go 1.27.3, protoc (mise.toml)
 cargo xtask reference-checkout     # pinned upstream into compat/reference (gitignored)
-cargo xtask reference-mruby        # libmruby for the `mrb` tag (Docker, Ruby 2.7). Linux only, see below
+cargo xtask reference-mruby        # libmruby for the `mrb` tag (built in Docker, Ruby 2.7)
 cargo xtask reference-build        # Go reference binary + bridges into target/
 eval "$(compat/scripts/services.sh start)"   # Redis + NATS in Docker, prints env to export
 cargo xtask test --backend go      # translated tests against the Go reference
 cargo xtask test --backend rust    # against Cabby: pass or explicitly pending
 ```
-On macOS, `reference-mruby` builds a Linux `libmruby.a` in Docker, which a native macOS Go build
-can't link. Either build libmruby natively (Ruby < 3 and bison), or skip it: `reference-build`
-then builds without the `mrb` tag, and only the go-mruby/mrb cases can't run against Go locally.
-CI (GitHub Actions, Linux) runs everything.
+CI (GitHub Actions) runs the same steps.
 
 ## Conventions
 - Commits end with `Co-Authored-By: Claude …`, as in the existing history. Never add Claude
