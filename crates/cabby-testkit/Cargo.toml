@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+cabby-bench.workspace = true
 cabby-core.workspace = true
 cabby-server.workspace = true
 serde.workspace = true
