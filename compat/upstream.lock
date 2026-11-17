@@ -1,0 +1,48 @@
+# Pinned comparison target and environment for the Cabby migration (SPEC.md §2, §8 M0).
+# Do not move the reference silently: bump it in a dedicated change with a test/behavior diff.
+
+[reference]
+repository = "https://github.com/anycable/anycable"
+commit = "26a1a703a54b870e42f5660c3d0785db2c602764"
+commit_date = "2026-11-13"
+go_module = "github.com/anycable/anycable-go"
+license = "MIT"                      # MIT-LICENSE; notices preserved for translated tests
+checkout = "compat/reference"        # created by `cargo xtask reference-checkout`, not committed
+go_sum_sha256 = "cced6ec33fa2234a7d2ee5377f9b11aa071a3f5df638e05333d7e44f106dc275"
+rpc_proto_path = "etc/rpc.proto"
+rpc_proto_sha256 = "676df6a03e7effebbcbbc4eb894862882e5fc47e083bc462a51c44817026ae94"
+go_module_count = 118                # `go list -m all`
+
+[toolchains]                         # also in ../mise.toml
+go = "1.27.3"                        # go.mod: `go 1.27.0`, `toolchain go1.27.3`
+rust = "1.100.0"
+protoc = "36.2"
+ruby_reference = "2.7.8"             # upstream CI uses 2.7 (go-mruby Rakefile, AnyT)
+mruby = "1.2.0"                      # Makefile MRUBY_VERSION, built with etc/build_config.rb
+libmruby_a_sha256 = "6f5279914cf62329e8f322b30eddc1b565abdcda1024d5b48cc2e8c89d66d098"
+
+[ruby]
+gemfile_sha256 = "c7c7b06819e88299f67f8b7755ea5781defe24b453e656e32b63eb0dfe90cd57"
+lockfile = "compat/reference-adapters/ruby/Gemfile.lock"   # upstream ships no lockfile
+lockfile_sha256 = "9ba73d287e14b9a9ee75e7523bf19e24230a81913ea29f5e17ab6f5ede8ea9e8"
+anyt = "1.4.0"
+wsdirector-cli = "1.1.1"
+anycable = "1.6.4"
+anycable-rails = "1.6.2"
+activesupport = "7.0.10"
+
+[images]
+ruby_2_7 = "ruby@sha256:2347de892e419c7160fc21dec721d5952736909f8c3fbb7f84cb4a07aaf9ce7d"
+redis = "redis@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe"  # 7.4.12
+nats = "nats@sha256:558394a23dd3c36f2d3a64b51865fd09908010e80a542cea5e75c2af543ed62a"    # nats-server 2.15.3
+reference_env = "compat/docker/Dockerfile.reference"
+
+[platform]
+os = "linux"
+arch = "x86_64"
+kernel = "7.3.0-10-generic"
+host_gcc = "15.3.0"
+
+[unresolved]
+features_runner_gems = "features/runner.rb uses bundler/inline with unpinned jwt, childprocess ~>4.1, perfect_toml"
+benchfile_tools = "websocket-bench and gops are installed @latest by upstream CI; pin before the benchmark baseline"

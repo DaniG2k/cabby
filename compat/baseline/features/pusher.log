@@ -1,0 +1,7 @@
+[info] [2026-11-17T14:19:56+00:00]  Launching background process: ./dist/anycable-go --pusher_app_id=my-test-id --public_streams --pusher_secret=oaugc1 --pusher_app_key=detox
+[info] [2026-11-17T14:19:56+00:00]  Waiting for TCP server to start at 8080
+[info] [2026-11-17T14:19:57+00:00]  TCP server is listening at 8080
+[info] [2026-11-17T14:19:57+00:00]  Wait for 3s
+[info] [2026-11-17T14:19:57+00:00]  Running command: bundle exec wsdirector ws://localhost:8080/app/detox -i [{"receive":{"data>":{"event":"pusher:connection_established"}}},{"send":{"data":{"event":"pusher:subscribe","data":{"channel":"test-pusher-channel","auth":""}}}},{"receive":{"data>":{"event":"pusher_internal:subscription_succeeded"}}},{"receive":{"data>":{"event":"test-event","channel":"test-pusher-channel"}}}]
+[info] [2026-11-17T14:20:00+00:00]  Finished
+All OK 👍

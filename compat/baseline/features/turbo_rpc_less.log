@@ -1,0 +1,7 @@
+[info] [2026-11-17T14:20:09+00:00]  Launching background process: ./dist/anycable-go --turbo_rails_key=s3Krit --jwt_id_key=qwerty --metrics_rotate_interval=1 --metrics_log --metrics_log_filter=rpc_call_total,rpc_error_total,rpc_retries_total
+[info] [2026-11-17T14:20:09+00:00]  Waiting for TCP server to start at 8080
+[info] [2026-11-17T14:20:10+00:00]  TCP server is listening at 8080
+[info] [2026-11-17T14:20:10+00:00]  Running command: bundle exec wsdirector ws://localhost:8080/cable -i [{"client":{"protocol":"action_cable","name":"turbo","connection_options":{"query":{"jid":"eyJhbGciOiJIUzI1NiJ9.eyJleHQiOiJ7fSIsImV4cCI6MTc5NDkyNTI3MH0.E6HcuD_tkECetgWrQxMKO11f-cq1BaNfaZ7E98sgH0U"}},"actions":[{"subscribe":{"channel":"Turbo::StreamsChannel","params":{"signed_stream_name":"ImNoYXQvMjAyMyI=--2b2e054b6413bf3bc7e8bbad2f68962aa2ba19821800ccbd8de6fd7314e8320c"}}}]}}]
+[info] [2026-11-17T14:20:10+00:00]  Finished
+[info] [2026-11-17T14:20:10+00:00]  Wait for 2s
+All OK 👍

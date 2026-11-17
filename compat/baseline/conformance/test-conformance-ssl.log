@@ -1,0 +1,1144 @@
+fatal: detected dubious ownership in repository at '/src'
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory /src
+fatal: detected dubious ownership in repository at '/src'
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory /src
+go build  -tags "mrb" -race -o tmp/anycable-go-test cmd/anycable-go/main.go
+ANYCABLE_RPC_TLS_CERT=etc/ssl/server.crt \
+ANYCABLE_RPC_TLS_KEY=etc/ssl/server.key \
+bundle exec anyt -c \
+"tmp/anycable-go-test --headers=cookie,x-api-token --rpc_enable_tls --rpc_tls_verify=false --ssl_key=etc/ssl/server.key --ssl_cert=etc/ssl/server.crt --port=8443" \
+--target-url="wss://localhost:8443/cable"
+/bundle/ruby/2.7.0/gems/anyway_config-2.9.1/lib/.rbnext/3.4/anyway/type_casting.rb:120: warning: Pattern matching is experimental, and the behavior may change in future versions of Ruby!
+/bundle/ruby/2.7.0/gems/anyway_config-2.9.1/lib/anyway/rbs.rb:40: warning: Pattern matching is experimental, and the behavior may change in future versions of Ruby!
+Anyway Config was loaded before Rails. Activating Anyway Config Rails plugins now.
+NOTE: Already loaded configs were provisioned without Rails-specific sources.
+Starting AnyT v1.4.0 (pid: 59)
+D, [2026-11-17T14:07:56.623487 #59] DEBUG -- : Starting RPC server ...
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1794924476.624037      59 rb_grpc.c:331] GRPC_RUBY: grpc_ruby_init_threads g_bg_thread_init_done=0
+I0000 00:00:1794924476.624882      59 server.cc:1801] Completion queue of type 1 is being registered as a server-completion-queue
+I0000 00:00:1794924476.624914      59 rb_grpc.c:331] GRPC_RUBY: grpc_ruby_init_threads g_bg_thread_init_done=1
+RPC server is starting...
+RPC server is listening on 127.0.0.1:50051 (workers_num: 30)
+RPC server started
+Running command: tmp/anycable-go-test --headers=cookie,x-api-token --rpc_enable_tls --rpc_tls_verify=false --ssl_key=etc/ssl/server.key --ssl_cert=etc/ssl/server.crt --port=8443
+Command PID: 109
+2026-11-17 14:07:56.750 DBG 🔧 🔧 🔧 Debug mode is on 🔧 🔧 🔧 nodeid=mDQ-qV
+2026-11-17 14:07:56.751 INF Starting AnyCable 1.6.21 (with mruby 1.2.0 (2015-11-17)) (pid: 109, open file limit: 524287, gomaxprocs: 12) nodeid=mDQ-qV
+2026-11-17 14:07:56.751 INF Using channels router: $pubsub nodeid=mDQ-qV
+2026-11-17 14:07:56.752 INF Using no-op (legacy) broker nodeid=mDQ-qV
+2026-11-17 14:07:56.752 DBG calls rate nodeid=mDQ-qV context=disconnector rate=10ms workers=4
+2026-11-17 14:07:56.752 INF Starting Redis pub/sub: cabby-ref-redis:6379 nodeid=mDQ-qV context=pubsub
+2026-11-17 14:07:56.753 INF Accept broadcast requests at https://localhost:8090/_broadcast (no authorization) nodeid=mDQ-qV context=broadcast provider=http
+2026-11-17 14:07:56.753 DBG Starting Redis pub/sub: cabby-ref-redis:6379 nodeid=mDQ-qV context=broadcast provider=redis
+2026-11-17 14:07:56.753 DBG starting HTTP server nodeid=mDQ-qV context=http name="broadcasting HTTP server" addr=https://localhost:8090
+2026-11-17 14:07:56.754 INF RPC controller initialized: localhost:50051 (concurrency: 28, impl: grpc, enable_tls: true, proto_versions: v1, proxy_headers: cookie,x-api-token, proxy_cookies: <all>) nodeid=mDQ-qV context=rpc
+2026-11-17 14:07:56.754 DBG Go pools initialized (remote commands: 256) nodeid=mDQ-qV
+2026-11-17 14:07:56.755 INF Handle WebSocket connections at https://localhost:8443/cable nodeid=mDQ-qV
+2026-11-17 14:07:56.755 INF Handle health requests at https://localhost:8443/health nodeid=mDQ-qV
+2026-11-17 14:07:56.755 DBG no metrics writers, disabling metrics rotation nodeid=mDQ-qV context=metrics
+2026-11-17 14:07:56.755 DBG starting HTTP server nodeid=mDQ-qV context=http name="WebSocket server" addr=https://localhost:8443
+2026-11-17 14:07:56.758 DBG initialized pub/sub client nodeid=mDQ-qV context=pubsub
+2026-11-17 14:07:56.758 INF connected nodeid=mDQ-qV context=pubsub channel=__anycable_internal__
+2026-11-17 14:07:56.758 DBG subscribe nodeid=mDQ-qV context=pubsub channel=__anycable_internal__
+2026-11-17 14:07:56.759 DBG initialized pub/sub client nodeid=mDQ-qV context=broadcast provider=redis
+2026-11-17 14:07:56.759 INF subscribed to Redis channel nodeid=mDQ-qV context=broadcast provider=redis channel=__anycable__
+2026-11-17 14:07:56.759 DBG subscribe nodeid=mDQ-qV context=broadcast provider=redis channel=__anycable__
+Run tests against: wss://localhost:8443/cable
+Started with run options --seed 26932
+
+Remote disconnect
+2026-11-17 14:07:58.707 DBG WebSocket session established nodeid=mDQ-qV sid=UHVtszX_EA16thb35cohl
+2026-11-17 14:07:58.726 DBG connected nodeid=mDQ-qV context=rpc impl=grpc addr=127.0.0.1:50051
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable?test=uid&uid=26", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:07:58.733 DBG controller authenticate nodeid=mDQ-qV context=node sid=UHVtszX_EA16thb35cohl response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"UHVtszX_EA16thb35cohl\"}]" response.broadcasts=[] response.identifier="{\"uid\":\"26\"}" response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:07:58.734 DBG registered nodeid=mDQ-qV context=node component=hub sid=UHVtszX_EA16thb35cohl ids="{\"uid\":\"26\"}"
+Message received: {"type"=>"welcome", "sid"=>"UHVtszX_EA16thb35cohl"}
+2026-11-17 14:07:59.740 DBG received pubsub message nodeid=mDQ-qV context=broadcast provider=redis
+2026-11-17 14:07:59.740 DBG incoming remote command nodeid=mDQ-qV context=node command.ids="{\"uid\":\"26\"}" command.reconnect=true
+2026-11-17 14:07:59.740 DBG incoming pubsub command nodeid=mDQ-qV context=node data.ids="{\"uid\":\"26\"}" data.reconnect=true
+2026-11-17 14:07:59.741 DBG unregistered nodeid=mDQ-qV context=node component=hub sid=UHVtszX_EA16thb35cohl
+2026-11-17 14:07:59.741 DBG disconnect nodeid=mDQ-qV context=node sid=UHVtszX_EA16thb35cohl ids="{\"uid\":\"26\"}" url="https://localhost:8443/cable?test=***&uid=***" headers=[REMOTE_ADDR] subscriptions=0
+2026-11-17 14:07:59.741 DBG WebSocket close error nodeid=mDQ-qV context=node sid=UHVtszX_EA16thb35cohl error="read tcp 127.0.0.1:8443->127.0.0.1:46758: use of closed network connection"
+2026-11-17 14:07:59.741 DBG WebSocket session completed nodeid=mDQ-qV sid=UHVtszX_EA16thb35cohl
+Message received: {"type"=>"disconnect", "reason"=>"remote", "reconnect"=>true}
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{"uid":"26"}", subscriptions: [], env: <AnyCable::Env: url: "https://localhost:8443/cable?test=uid&uid=26", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:07:59.743 DBG controller disconnect succeeded nodeid=mDQ-qV context=node sid=UHVtszX_EA16thb35cohl
+[35m  Close single connection by id                                  [0m[32m PASS[0m (1.58s)
+
+Request
+2026-11-17 14:08:00.292 DBG WebSocket session established nodeid=mDQ-qV sid=5Gj1I27TOJOwtiphAyxdt
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable?test=reasons&reason=unauthorized", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+An unauthorized connection attempt was rejected
+2026-11-17 14:08:00.296 DBG controller authenticate nodeid=mDQ-qV context=node sid=5Gj1I27TOJOwtiphAyxdt response.status=failure response.transmissions="[{\"type\":\"disconnect\",\"reason\":\"unauthorized\",\"reconnect\":false}]" response.broadcasts=[] response.identifier="" response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:00.296 DBG WebSocket session completed nodeid=mDQ-qV sid=5Gj1I27TOJOwtiphAyxdt
+Message received: {"type"=>"disconnect", "reason"=>"unauthorized", "reconnect"=>false}
+[35m  Receives disconnect message when rejected                      [0m[32m PASS[0m (0.55s)
+
+Request
+2026-11-17 14:08:00.847 DBG WebSocket session established nodeid=mDQ-qV sid=NuTePZbaBBdPbzaZBzyRQ
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable?test=cookies", headers: {"REMOTE_ADDR"=>"127.0.0.1", "cookie"=>"username=john green"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:00.850 DBG controller authenticate nodeid=mDQ-qV context=node sid=NuTePZbaBBdPbzaZBzyRQ response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"NuTePZbaBBdPbzaZBzyRQ\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:00.850 DBG registered nodeid=mDQ-qV context=node component=hub sid=NuTePZbaBBdPbzaZBzyRQ ids={}
+Message received: {"type"=>"welcome", "sid"=>"NuTePZbaBBdPbzaZBzyRQ"}
+2026-11-17 14:08:01.353 DBG WebSocket closed nodeid=mDQ-qV context=node sid=NuTePZbaBBdPbzaZBzyRQ error="websocket: close 1000 (normal)"
+2026-11-17 14:08:01.353 DBG unregistered nodeid=mDQ-qV context=node component=hub sid=NuTePZbaBBdPbzaZBzyRQ
+[35m  Accepts when required cookies are set                          [0m[32m PASS[0m2026-11-17 14:08:01.354 DBG WebSocket session completed nodeid=mDQ-qV sid=NuTePZbaBBdPbzaZBzyRQ
+ (0.55s)
+
+Request
+2026-11-17 14:08:01.353 DBG disconnect nodeid=mDQ-qV context=node sid=NuTePZbaBBdPbzaZBzyRQ ids={} url="https://localhost:8443/cable?test=c***s" headers="[REMOTE_ADDR cookie]" subscriptions=0
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "https://localhost:8443/cable?test=cookies", headers: {"REMOTE_ADDR"=>"127.0.0.1", "cookie"=>"username=john green"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:01.359 DBG controller disconnect succeeded nodeid=mDQ-qV context=node sid=NuTePZbaBBdPbzaZBzyRQ
+2026-11-17 14:08:01.401 DBG WebSocket session established nodeid=mDQ-qV sid=DD_EENcvpf0PCYS-QEMOT
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable?test=headers", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+An unauthorized connection attempt was rejected
+2026-11-17 14:08:01.404 DBG controller authenticate nodeid=mDQ-qV context=node sid=DD_EENcvpf0PCYS-QEMOT response.status=failure response.transmissions="[{\"type\":\"disconnect\",\"reason\":\"unauthorized\",\"reconnect\":false}]" response.broadcasts=[] response.identifier="" response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:01.404 DBG WebSocket session completed nodeid=mDQ-qV sid=DD_EENcvpf0PCYS-QEMOT
+Message received: {"type"=>"disconnect", "reason"=>"unauthorized", "reconnect"=>false}
+[35m  Reject when required header is missing                         [0m[32m PASS[0m (0.55s)
+
+Request
+2026-11-17 14:08:01.955 DBG WebSocket session established nodeid=mDQ-qV sid=9Hgh1ZwHi_dK4h5dhkJIG
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable?test=cookies", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+An unauthorized connection attempt was rejected
+2026-11-17 14:08:01.958 DBG controller authenticate nodeid=mDQ-qV context=node sid=9Hgh1ZwHi_dK4h5dhkJIG response.status=failure response.transmissions="[{\"type\":\"disconnect\",\"reason\":\"unauthorized\",\"reconnect\":false}]" response.broadcasts=[] response.identifier="" response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:01.958 DBG WebSocket session completed nodeid=mDQ-qV sid=9Hgh1ZwHi_dK4h5dhkJIG
+Message received: {"type"=>"disconnect", "reason"=>"unauthorized", "reconnect"=>false}
+[35m  Reject when required cookies are not set                       [0m[32m PASS[0m (0.55s)
+
+Request
+2026-11-17 14:08:02.507 DBG WebSocket session established nodeid=mDQ-qV sid=DBnHyh9tUGyj9iUVT8kGI
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable?test=request_url", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:02.511 DBG controller authenticate nodeid=mDQ-qV context=node sid=DBnHyh9tUGyj9iUVT8kGI response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"DBnHyh9tUGyj9iUVT8kGI\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:02.511 DBG registered nodeid=mDQ-qV context=node component=hub sid=DBnHyh9tUGyj9iUVT8kGI ids={}
+Message received: {"type"=>"welcome", "sid"=>"DBnHyh9tUGyj9iUVT8kGI"}
+2026-11-17 14:08:03.013 DBG WebSocket closed nodeid=mDQ-qV context=node sid=DBnHyh9tUGyj9iUVT8kGI error="websocket: close 1000 (normal)"
+2026-11-17 14:08:03.013 DBG unregistered nodeid=mDQ-qV context=node component=hub sid=DBnHyh9tUGyj9iUVT8kGI
+2026-11-17 14:08:03.013 DBG WebSocket session completed nodeid=mDQ-qV sid=DBnHyh9tUGyj9iUVT8kGI
+[35m  Url is set during connection                                   [0m[32m PASS[0m (0.55s)
+
+Request
+2026-11-17 14:08:03.013 DBG disconnect nodeid=mDQ-qV context=node sid=DBnHyh9tUGyj9iUVT8kGI ids={} url="https://localhost:8443/cable?test=re***rl" headers=[REMOTE_ADDR] subscriptions=0
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "https://localhost:8443/cable?test=request_url", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:03.018 DBG controller disconnect succeeded nodeid=mDQ-qV context=node sid=DBnHyh9tUGyj9iUVT8kGI
+2026-11-17 14:08:03.061 DBG WebSocket session established nodeid=mDQ-qV sid=tFoES8XCyGRcABOycN4bL
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable?test=headers", headers: {"x-api-token"=>"abc", "REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:03.065 DBG controller authenticate nodeid=mDQ-qV context=node sid=tFoES8XCyGRcABOycN4bL response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"tFoES8XCyGRcABOycN4bL\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:03.065 DBG registered nodeid=mDQ-qV context=node component=hub sid=tFoES8XCyGRcABOycN4bL ids={}
+Message received: {"type"=>"welcome", "sid"=>"tFoES8XCyGRcABOycN4bL"}
+2026-11-17 14:08:03.568 DBG WebSocket closed nodeid=mDQ-qV context=node sid=tFoES8XCyGRcABOycN4bL error="websocket: close 1000 (normal)"
+2026-11-17 14:08:03.568 DBG unregistered nodeid=mDQ-qV context=node component=hub sid=tFoES8XCyGRcABOycN4bL
+2026-11-17 14:08:03.568 DBG WebSocket session completed nodeid=mDQ-qV sid=tFoES8XCyGRcABOycN4bL
+2026-11-17 14:08:03.568 DBG disconnect nodeid=mDQ-qV context=node sid=tFoES8XCyGRcABOycN4bL ids={} url="https://localhost:8443/cable?test=h***s" headers="[REMOTE_ADDR x-api-token]" subscriptions=0
+[35m  Accepts when required header is set                            [0m[32m PASS[0m (0.55s)
+
+Subscription transmissions
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "https://localhost:8443/cable?test=headers", headers: {"x-api-token"=>"abc", "REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:03.574 DBG controller disconnect succeeded nodeid=mDQ-qV context=node sid=tFoES8XCyGRcABOycN4bL
+2026-11-17 14:08:03.616 DBG WebSocket session established nodeid=mDQ-qV sid=_VFjBqzpdxiXAguyT5313
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:03.624 DBG controller authenticate nodeid=mDQ-qV context=node sid=_VFjBqzpdxiXAguyT5313 response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"_VFjBqzpdxiXAguyT5313\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:03.624 DBG registered nodeid=mDQ-qV context=node component=hub sid=_VFjBqzpdxiXAguyT5313 ids={}
+2026-11-17 14:08:03.625 DBG incoming message nodeid=mDQ-qV context=node sid=_VFjBqzpdxiXAguyT5313 data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionTransmissionsChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionTransmissionsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::SubscriptionTransmissionsChannel transmitting "hello"
+Anyt::TestChannels::SubscriptionTransmissionsChannel transmitting "world"
+Anyt::TestChannels::SubscriptionTransmissionsChannel is transmitting the subscription confirmation
+2026-11-17 14:08:03.627 DBG controller subscribe nodeid=mDQ-qV context=node sid=_VFjBqzpdxiXAguyT5313 response.status=success response.streams=[] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SubscriptionTransmissionsChannel\\\"}\",\"message\":\"he...(5) {\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SubscriptionTransmissionsChannel\\\"}\",\"message\":\"wo...(5) {\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SubscriptionTransmissionsChannel\\\"}\",\"type\":\"confi...(17)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:03.627 DBG subscribed nodeid=mDQ-qV context=node sid=_VFjBqzpdxiXAguyT5313 identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionTransmissionsChannel\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionTransmissionsChannel\"}", "message"=>"hello"}
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionTransmissionsChannel\"}", "message"=>"world"}
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionTransmissionsChannel\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:04.132 DBG WebSocket closed nodeid=mDQ-qV context=node sid=_VFjBqzpdxiXAguyT5313 error="websocket: close 1000 (normal)"
+2026-11-17 14:08:04.132 DBG unsubscribed from broker streams nodeid=mDQ-qV context=node sid=_VFjBqzpdxiXAguyT5313 channels=1
+2026-11-17 14:08:04.132 DBG unregistered nodeid=mDQ-qV context=node component=hub sid=_VFjBqzpdxiXAguyT5313
+2026-11-17 14:08:04.132 DBG WebSocket session completed nodeid=mDQ-qV sid=_VFjBqzpdxiXAguyT5313
+[35m  Client receives transmissions from #subscribed callback        [0m[32m PASS[0m (0.56s)
+2026-11-17 14:08:04.132 DBG disconnect nodeid=mDQ-qV context=node sid=_VFjBqzpdxiXAguyT5313 ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+
+Streams with many clients
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SubscriptionTransmissionsChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:04.137 DBG controller disconnect succeeded nodeid=mDQ-qV context=node sid=_VFjBqzpdxiXAguyT5313
+2026-11-17 14:08:04.179 DBG WebSocket session established nodeid=mDQ-qV sid=vOkutEIvd8cDsRYo6vm22
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:04.186 DBG controller authenticate nodeid=mDQ-qV context=node sid=vOkutEIvd8cDsRYo6vm22 response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"vOkutEIvd8cDsRYo6vm22\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:04.187 DBG registered nodeid=mDQ-qV context=node component=hub sid=vOkutEIvd8cDsRYo6vm22 ids={}
+2026-11-17 14:08:04.187 DBG incoming message nodeid=mDQ-qV context=node sid=vOkutEIvd8cDsRYo6vm22 data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::StreamsWithManyClientsChannel is transmitting the subscription confirmation
+2026-11-17 14:08:04.189 DBG controller subscribe nodeid=mDQ-qV context=node sid=vOkutEIvd8cDsRYo6vm22 response.status=success response.streams=[a] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::StreamsWithManyClientsChannel\\\"}\",\"type\":\"confirm_...(14)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:04.189 DBG subscribed nodeid=mDQ-qV context=node sid=vOkutEIvd8cDsRYo6vm22 identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}"
+2026-11-17 14:08:04.189 DBG subscribing nodeid=mDQ-qV context=pubsub channel=a
+2026-11-17 14:08:04.190 DBG subscribe nodeid=mDQ-qV context=pubsub channel=a
+2026-11-17 14:08:04.190 DBG subscribed nodeid=mDQ-qV context=node component=hub sid=vOkutEIvd8cDsRYo6vm22 identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}" stream=a
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:04.228 DBG WebSocket session established nodeid=mDQ-qV sid=2qqT9b9P6aDRuR-x9BB0e
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:04.231 DBG controller authenticate nodeid=mDQ-qV context=node sid=2qqT9b9P6aDRuR-x9BB0e response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"2qqT9b9P6aDRuR-x9BB0e\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:04.231 DBG registered nodeid=mDQ-qV context=node component=hub sid=2qqT9b9P6aDRuR-x9BB0e ids={}
+2026-11-17 14:08:04.231 DBG incoming message nodeid=mDQ-qV context=node sid=2qqT9b9P6aDRuR-x9BB0e data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::StreamsWithManyClientsChannel is transmitting the subscription confirmation
+2026-11-17 14:08:04.233 DBG controller subscribe nodeid=mDQ-qV context=node sid=2qqT9b9P6aDRuR-x9BB0e response.status=success response.streams=[a] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::StreamsWithManyClientsChannel\\\"}\",\"type\":\"confirm_...(14)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:04.233 DBG subscribed nodeid=mDQ-qV context=node sid=2qqT9b9P6aDRuR-x9BB0e identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}"
+2026-11-17 14:08:04.233 DBG subscribed nodeid=mDQ-qV context=node component=hub sid=2qqT9b9P6aDRuR-x9BB0e identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}" stream=a
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:08:04.234778 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+2026-11-17 14:08:04.236 DBG received pubsub message nodeid=mDQ-qV context=broadcast provider=redis
+2026-11-17 14:08:04.236 DBG incoming broadcast message nodeid=mDQ-qV context=node payload.stream=a payload.data="{\"data\":\"X\"}"
+2026-11-17 14:08:04.236 DBG schedule broadcast nodeid=mDQ-qV context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":\"X\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "message"=>{"data"=>"X"}}
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "message"=>{"data"=>"X"}}
+2026-11-17 14:08:04.739 DBG WebSocket closed nodeid=mDQ-qV context=node sid=vOkutEIvd8cDsRYo6vm22 error="websocket: close 1000 (normal)"
+2026-11-17 14:08:04.740 DBG unsubscribed from broker streams nodeid=mDQ-qV context=node sid=vOkutEIvd8cDsRYo6vm22 channels=1
+2026-11-17 14:08:04.740 DBG unregistered nodeid=mDQ-qV context=node component=hub sid=vOkutEIvd8cDsRYo6vm22
+2026-11-17 14:08:04.740 DBG WebSocket session completed nodeid=mDQ-qV sid=vOkutEIvd8cDsRYo6vm22
+2026-11-17 14:08:04.740 DBG disconnect nodeid=mDQ-qV context=node sid=vOkutEIvd8cDsRYo6vm22 ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:04.742 DBG controller disconnect succeeded nodeid=mDQ-qV context=node sid=vOkutEIvd8cDsRYo6vm22
+2026-11-17 14:08:05.240 DBG WebSocket closed nodeid=mDQ-qV context=node sid=2qqT9b9P6aDRuR-x9BB0e error="websocket: close 1000 (normal)"
+2026-11-17 14:08:05.240 DBG unsubscribing nodeid=mDQ-qV context=pubsub channel=a
+[35m  Multiple clients receive messages from stream                  [0m[32m PASS[0m (1.11s)
+
+Streams with many clients
+2026-11-17 14:08:05.241 DBG unsubscribe nodeid=mDQ-qV context=pubsub channel=a
+2026-11-17 14:08:05.241 DBG unsubscribed from broker streams nodeid=mDQ-qV context=node sid=2qqT9b9P6aDRuR-x9BB0e channels=1
+2026-11-17 14:08:05.241 DBG unregistered nodeid=mDQ-qV context=node component=hub sid=2qqT9b9P6aDRuR-x9BB0e
+2026-11-17 14:08:05.241 DBG WebSocket session completed nodeid=mDQ-qV sid=2qqT9b9P6aDRuR-x9BB0e
+2026-11-17 14:08:05.241 DBG disconnect nodeid=mDQ-qV context=node sid=2qqT9b9P6aDRuR-x9BB0e ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:05.243 DBG controller disconnect succeeded nodeid=mDQ-qV context=node sid=2qqT9b9P6aDRuR-x9BB0e
+2026-11-17 14:08:05.287 DBG WebSocket session established nodeid=mDQ-qV sid=6OtRx_Pts8tyJLO1q8Rq4
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:05.293 DBG controller authenticate nodeid=mDQ-qV context=node sid=6OtRx_Pts8tyJLO1q8Rq4 response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"6OtRx_Pts8tyJLO1q8Rq4\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:05.294 DBG registered nodeid=mDQ-qV context=node component=hub sid=6OtRx_Pts8tyJLO1q8Rq4 ids={}
+2026-11-17 14:08:05.294 DBG incoming message nodeid=mDQ-qV context=node sid=6OtRx_Pts8tyJLO1q8Rq4 data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::StreamsWithManyClientsChannel is transmitting the subscription confirmation
+2026-11-17 14:08:05.296 DBG controller subscribe nodeid=mDQ-qV context=node sid=6OtRx_Pts8tyJLO1q8Rq4 response.status=success response.streams=[a] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::StreamsWithManyClientsChannel\\\"}\",\"type\":\"confirm_...(14)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:05.296 DBG subscribed nodeid=mDQ-qV context=node sid=6OtRx_Pts8tyJLO1q8Rq4 identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}"
+2026-11-17 14:08:05.296 DBG subscribing nodeid=mDQ-qV context=pubsub channel=a
+2026-11-17 14:08:05.296 DBG subscribe nodeid=mDQ-qV context=pubsub channel=a
+2026-11-17 14:08:05.296 DBG subscribed nodeid=mDQ-qV context=node component=hub sid=6OtRx_Pts8tyJLO1q8Rq4 identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}" stream=a
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:05.335 DBG WebSocket session established nodeid=mDQ-qV sid=dygcgBbJqPkJc5_QT0Ysu
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:05.338 DBG controller authenticate nodeid=mDQ-qV context=node sid=dygcgBbJqPkJc5_QT0Ysu response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"dygcgBbJqPkJc5_QT0Ysu\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:05.338 DBG registered nodeid=mDQ-qV context=node component=hub sid=dygcgBbJqPkJc5_QT0Ysu ids={}
+2026-11-17 14:08:05.338 DBG incoming message nodeid=mDQ-qV context=node sid=dygcgBbJqPkJc5_QT0Ysu data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::StreamsWithManyClientsChannel is transmitting the subscription confirmation
+2026-11-17 14:08:05.340 DBG controller subscribe nodeid=mDQ-qV context=node sid=dygcgBbJqPkJc5_QT0Ysu response.status=success response.streams=[a] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::StreamsWithManyClientsChannel\\\"}\",\"type\":\"confirm_...(14)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:05.340 DBG subscribed nodeid=mDQ-qV context=node sid=dygcgBbJqPkJc5_QT0Ysu identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}"
+2026-11-17 14:08:05.341 DBG subscribed nodeid=mDQ-qV context=node component=hub sid=dygcgBbJqPkJc5_QT0Ysu identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}" stream=a
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:08:05.341953 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+2026-11-17 14:08:05.342 DBG received pubsub message nodeid=mDQ-qV context=broadcast provider=redis
+2026-11-17 14:08:05.342 DBG incoming broadcast message nodeid=mDQ-qV context=node payload.stream=a payload.data="{\"data\":\"X\"}"
+2026-11-17 14:08:05.342 DBG schedule broadcast nodeid=mDQ-qV context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":\"X\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "message"=>{"data"=>"X"}}
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "message"=>{"data"=>"X"}}
+2026-11-17 14:08:05.344 DBG incoming message nodeid=mDQ-qV context=node sid=6OtRx_Pts8tyJLO1q8Rq4 data.command=unsubscribe data.identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "unsubscribe", identifier: "{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Unsubscribing from channel: {"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}
+2026-11-17 14:08:05.345 DBG controller unsubscribe nodeid=mDQ-qV context=node sid=6OtRx_Pts8tyJLO1q8Rq4 response.status=success response.streams=[] response.transmissions=[] response.stopped_streams=[] response.stop_all_streams=true response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:05.345 DBG unsubscribed nodeid=mDQ-qV context=node sid=6OtRx_Pts8tyJLO1q8Rq4 identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}"
+2026-11-17 14:08:05.345 DBG unsubscribed nodeid=mDQ-qV context=node component=hub sid=6OtRx_Pts8tyJLO1q8Rq4 identifier="{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}"
+D, [2026-11-17T14:08:06.345334 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"Y"}
+2026-11-17 14:08:06.345 DBG received pubsub message nodeid=mDQ-qV context=broadcast provider=redis
+2026-11-17 14:08:06.346 DBG incoming broadcast message nodeid=mDQ-qV context=node payload.stream=a payload.data="{\"data\":\"Y\"}"
+2026-11-17 14:08:06.346 DBG schedule broadcast nodeid=mDQ-qV context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":\"Y\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "message"=>{"data"=>"Y"}}
+2026-11-17 14:08:07.349 DBG WebSocket closed nodeid=mDQ-qV context=node sid=6OtRx_Pts8tyJLO1q8Rq4 error="websocket: close 1000 (normal)"
+2026-11-17 14:08:07.350 DBG unregistered nodeid=mDQ-qV context=node component=hub sid=6OtRx_Pts8tyJLO1q8Rq4
+2026-11-17 14:08:07.350 DBG WebSocket session completed nodeid=mDQ-qV sid=6OtRx_Pts8tyJLO1q8Rq4
+2026-11-17 14:08:07.350 DBG disconnect nodeid=mDQ-qV context=node sid=6OtRx_Pts8tyJLO1q8Rq4 ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=0
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:07.352 DBG controller disconnect succeeded nodeid=mDQ-qV context=node sid=6OtRx_Pts8tyJLO1q8Rq4
+2026-11-17 14:08:07.851 DBG WebSocket closed nodeid=mDQ-qV context=node sid=dygcgBbJqPkJc5_QT0Ysu error="websocket: close 1000 (normal)"
+2026-11-17 14:08:07.851 DBG unsubscribing nodeid=mDQ-qV context=pubsub channel=a
+[35m  Client receive messages when another client removes subscription[0m[32m PASS[0m (2.61s)
+2026-11-17 14:08:07.852 DBG unsubscribe nodeid=mDQ-qV context=pubsub channel=a
+2026-11-17 14:08:07.852 DBG unsubscribed from broker streams nodeid=mDQ-qV context=node sid=dygcgBbJqPkJc5_QT0Ysu channels=1
+2026-11-17 14:08:07.852 DBG unregistered nodeid=mDQ-qV context=node component=hub sid=dygcgBbJqPkJc5_QT0Ysu
+
+Request
+2026-11-17 14:08:07.852 DBG WebSocket session completed nodeid=mDQ-qV sid=dygcgBbJqPkJc5_QT0Ysu
+2026-11-17 14:08:07.852 DBG disconnect nodeid=mDQ-qV context=node sid=dygcgBbJqPkJc5_QT0Ysu ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:07.857 DBG controller disconnect succeeded nodeid=mDQ-qV context=node sid=dygcgBbJqPkJc5_QT0Ysu
+2026-11-17 14:08:07.899 DBG WebSocket session established nodeid=mDQ-qV sid=91VT2VKfqmPX9DR2NhNJ0
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable?token=secret", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:07.902 DBG controller authenticate nodeid=mDQ-qV context=node sid=91VT2VKfqmPX9DR2NhNJ0 response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"91VT2VKfqmPX9DR2NhNJ0\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:07.902 DBG registered nodeid=mDQ-qV context=node component=hub sid=91VT2VKfqmPX9DR2NhNJ0 ids={}
+Message received: {"type"=>"welcome", "sid"=>"91VT2VKfqmPX9DR2NhNJ0"}
+2026-11-17 14:08:07.903 DBG incoming message nodeid=mDQ-qV context=node sid=91VT2VKfqmPX9DR2NhNJ0 data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::RequestChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable?token=secret", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::RequestChannel is transmitting the subscription confirmation
+2026-11-17 14:08:07.905 DBG controller subscribe nodeid=mDQ-qV context=node sid=91VT2VKfqmPX9DR2NhNJ0 response.status=success response.streams=[] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::RequestChannel\\\"}\",\"type\":\"confirm_subscription\"}]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:07.905 DBG subscribed nodeid=mDQ-qV context=node sid=91VT2VKfqmPX9DR2NhNJ0 identifier="{\"channel\":\"Anyt::TestChannels::RequestChannel\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestChannel\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:08.407 DBG WebSocket closed nodeid=mDQ-qV context=node sid=91VT2VKfqmPX9DR2NhNJ0 error="websocket: close 1000 (normal)"
+[35m  Channel has access to request                                  [0m2026-11-17 14:08:08.407 DBG unsubscribed from broker streams nodeid=mDQ-qV context=node sid=91VT2VKfqmPX9DR2NhNJ0 channels=1
+[32m PASS[0m2026-11-17 14:08:08.407 DBG unregistered nodeid=mDQ-qV context=node component=hub sid=91VT2VKfqmPX9DR2NhNJ0
+ (0.56s)
+2026-11-17 14:08:08.408 DBG WebSocket session completed nodeid=mDQ-qV sid=91VT2VKfqmPX9DR2NhNJ0
+
+Ping
+2026-11-17 14:08:08.408 DBG disconnect nodeid=mDQ-qV context=node sid=91VT2VKfqmPX9DR2NhNJ0 ids={} url="https://localhost:8443/cable?token=s***t" headers=[REMOTE_ADDR] subscriptions=1
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::RequestChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable?token=secret", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:08.412 DBG controller disconnect succeeded nodeid=mDQ-qV context=node sid=91VT2VKfqmPX9DR2NhNJ0
+2026-11-17 14:08:08.453 DBG WebSocket session established nodeid=mDQ-qV sid=ROaiF90PJb0wPB3h_OrQD
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:08.456 DBG controller authenticate nodeid=mDQ-qV context=node sid=ROaiF90PJb0wPB3h_OrQD response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"ROaiF90PJb0wPB3h_OrQD\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:08.456 DBG registered nodeid=mDQ-qV context=node component=hub sid=ROaiF90PJb0wPB3h_OrQD ids={}
+Message received: {"type"=>"ping", "message"=>1794924492}
+Message received: {"type"=>"ping", "message"=>1794924495}
+2026-11-17 14:08:15.802 DBG WebSocket closed nodeid=mDQ-qV context=node sid=ROaiF90PJb0wPB3h_OrQD error="websocket: close 1000 (normal)"
+[35m  Client receives pings with timestamps                          [0m[32m PASS[0m (7.39s)
+2026-11-17 14:08:15.802 DBG unregistered nodeid=mDQ-qV context=node component=hub sid=ROaiF90PJb0wPB3h_OrQD
+
+Server restart
+2026-11-17 14:08:15.802 DBG WebSocket session completed nodeid=mDQ-qV sid=ROaiF90PJb0wPB3h_OrQD
+2026-11-17 14:08:15.802 DBG disconnect nodeid=mDQ-qV context=node sid=ROaiF90PJb0wPB3h_OrQD ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=0
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:15.804 DBG controller disconnect succeeded nodeid=mDQ-qV context=node sid=ROaiF90PJb0wPB3h_OrQD
+2026-11-17 14:08:15.849 DBG WebSocket session established nodeid=mDQ-qV sid=Jt5ygwfjK4pgtusvjaxpp
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable?test=reasons&reason=server_restart", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:15.852 DBG controller authenticate nodeid=mDQ-qV context=node sid=Jt5ygwfjK4pgtusvjaxpp response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"Jt5ygwfjK4pgtusvjaxpp\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:15.852 DBG registered nodeid=mDQ-qV context=node component=hub sid=Jt5ygwfjK4pgtusvjaxpp ids={}
+Message received: {"type"=>"welcome", "sid"=>"Jt5ygwfjK4pgtusvjaxpp"}
+Restarting command PID: 109
+Terminate PID: 109
+2026-11-17 14:08:15.853 INF Shutting down... (hit Ctrl-C to stop immediately or wait for up to 30s for graceful shutdown) nodeid=mDQ-qV
+2026-11-17 14:08:15.853 INF closing active connections nodeid=mDQ-qV context=node num=1
+2026-11-17 14:08:15.853 DBG unregistered nodeid=mDQ-qV context=node component=hub sid=Jt5ygwfjK4pgtusvjaxpp
+2026-11-17 14:08:15.853 DBG disconnect nodeid=mDQ-qV context=node sid=Jt5ygwfjK4pgtusvjaxpp ids={} url="https://localhost:8443/cable?test=r***s&reason=se***rt" headers=[REMOTE_ADDR] subscriptions=0
+2026-11-17 14:08:15.853 DBG WebSocket close error nodeid=mDQ-qV context=node sid=Jt5ygwfjK4pgtusvjaxpp error="read tcp 127.0.0.1:8443->127.0.0.1:33910: use of closed network connection"
+2026-11-17 14:08:15.853 DBG WebSocket session completed nodeid=mDQ-qV sid=Jt5ygwfjK4pgtusvjaxpp
+Message received: {"type"=>"disconnect", "reason"=>"server_restart", "reconnect"=>true}
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "https://localhost:8443/cable?test=reasons&reason=server_restart", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:15.855 DBG controller disconnect succeeded nodeid=mDQ-qV context=node sid=Jt5ygwfjK4pgtusvjaxpp
+2026-11-17 14:08:15.855 INF all active connections closed nodeid=mDQ-qV context=node
+2026-11-17 14:08:15.855 INF all active RPC calls finished nodeid=mDQ-qV context=rpc
+2026-11-17 14:08:15.856 DBG disconnected nodeid=mDQ-qV context=rpc impl=grpc addr=127.0.0.1:50051
+2026-11-17 14:08:15.856 DBG shutting down Redis pub/sub nodeid=mDQ-qV context=broadcast provider=redis
+2026-11-17 14:08:15.856 DBG close pub/sub channel nodeid=mDQ-qV context=broadcast provider=redis
+2026-11-17 14:08:15.856 DBG shutting down Redis pub/sub nodeid=mDQ-qV context=pubsub
+2026-11-17 14:08:15.856 DBG close pub/sub channel nodeid=mDQ-qV context=pubsub
+Running command: tmp/anycable-go-test --headers=cookie,x-api-token --rpc_enable_tls --rpc_tls_verify=false --ssl_key=etc/ssl/server.key --ssl_cert=etc/ssl/server.crt --port=8443
+Command PID: 142
+2026-11-17 14:08:17.127 DBG 🔧 🔧 🔧 Debug mode is on 🔧 🔧 🔧 nodeid=o3H9Kk
+2026-11-17 14:08:17.129 INF Starting AnyCable 1.6.21 (with mruby 1.2.0 (2015-11-17)) (pid: 142, open file limit: 524287, gomaxprocs: 12) nodeid=o3H9Kk
+2026-11-17 14:08:17.129 INF Using channels router: $pubsub nodeid=o3H9Kk
+2026-11-17 14:08:17.130 INF Using no-op (legacy) broker nodeid=o3H9Kk
+2026-11-17 14:08:17.130 DBG calls rate nodeid=o3H9Kk context=disconnector rate=10ms workers=4
+2026-11-17 14:08:17.130 INF Starting Redis pub/sub: cabby-ref-redis:6379 nodeid=o3H9Kk context=pubsub
+2026-11-17 14:08:17.132 INF Accept broadcast requests at https://localhost:8090/_broadcast (no authorization) nodeid=o3H9Kk context=broadcast provider=http
+2026-11-17 14:08:17.132 DBG Starting Redis pub/sub: cabby-ref-redis:6379 nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:17.132 DBG starting HTTP server nodeid=o3H9Kk context=http name="broadcasting HTTP server" addr=https://localhost:8090
+2026-11-17 14:08:17.132 INF RPC controller initialized: localhost:50051 (concurrency: 28, impl: grpc, enable_tls: true, proto_versions: v1, proxy_headers: cookie,x-api-token, proxy_cookies: <all>) nodeid=o3H9Kk context=rpc
+2026-11-17 14:08:17.132 DBG Go pools initialized (remote commands: 256) nodeid=o3H9Kk
+2026-11-17 14:08:17.134 INF Handle WebSocket connections at https://localhost:8443/cable nodeid=o3H9Kk
+2026-11-17 14:08:17.134 INF Handle health requests at https://localhost:8443/health nodeid=o3H9Kk
+2026-11-17 14:08:17.134 DBG no metrics writers, disabling metrics rotation nodeid=o3H9Kk context=metrics
+2026-11-17 14:08:17.134 DBG starting HTTP server nodeid=o3H9Kk context=http name="WebSocket server" addr=https://localhost:8443
+2026-11-17 14:08:17.138 DBG initialized pub/sub client nodeid=o3H9Kk context=pubsub
+2026-11-17 14:08:17.138 DBG initialized pub/sub client nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:17.139 INF connected nodeid=o3H9Kk context=pubsub channel=__anycable_internal__
+2026-11-17 14:08:17.139 DBG subscribe nodeid=o3H9Kk context=pubsub channel=__anycable_internal__
+2026-11-17 14:08:17.139 INF subscribed to Redis channel nodeid=o3H9Kk context=broadcast provider=redis channel=__anycable__
+2026-11-17 14:08:17.139 DBG subscribe nodeid=o3H9Kk context=broadcast provider=redis channel=__anycable__
+[35m  Client receives disconnect message                             [0m[32m PASS[0m (3.67s)
+
+Request
+2026-11-17 14:08:19.520 DBG WebSocket session established nodeid=o3H9Kk sid=HNCSHQCsdBeGy59jkNV5N
+2026-11-17 14:08:19.540 DBG connected nodeid=o3H9Kk context=rpc impl=grpc addr=127.0.0.1:50051
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:19.542 DBG controller authenticate nodeid=o3H9Kk context=node sid=HNCSHQCsdBeGy59jkNV5N response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"HNCSHQCsdBeGy59jkNV5N\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:19.543 DBG registered nodeid=o3H9Kk context=node component=hub sid=HNCSHQCsdBeGy59jkNV5N ids={}
+2026-11-17 14:08:19.543 DBG incoming message nodeid=o3H9Kk context=node sid=HNCSHQCsdBeGy59jkNV5N data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::RequestCChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestCChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::RequestCChannel is transmitting the subscription confirmation
+2026-11-17 14:08:19.545 DBG controller subscribe nodeid=o3H9Kk context=node sid=HNCSHQCsdBeGy59jkNV5N response.status=success response.streams=[request_c] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::RequestCChannel\\\"}\",\"type\":\"confirm_subscription\"}]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:19.545 DBG subscribed nodeid=o3H9Kk context=node sid=HNCSHQCsdBeGy59jkNV5N identifier="{\"channel\":\"Anyt::TestChannels::RequestCChannel\"}"
+2026-11-17 14:08:19.545 DBG subscribing nodeid=o3H9Kk context=pubsub channel=request_c
+2026-11-17 14:08:19.545 DBG subscribe nodeid=o3H9Kk context=pubsub channel=request_c
+2026-11-17 14:08:19.545 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=HNCSHQCsdBeGy59jkNV5N identifier="{\"channel\":\"Anyt::TestChannels::RequestCChannel\"}" stream=request_c
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestCChannel\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:19.593 DBG WebSocket session established nodeid=o3H9Kk sid=Z4Xk_gHGFrh-GFgDTQY3S
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:19.596 DBG controller authenticate nodeid=o3H9Kk context=node sid=Z4Xk_gHGFrh-GFgDTQY3S response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"Z4Xk_gHGFrh-GFgDTQY3S\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:19.596 DBG registered nodeid=o3H9Kk context=node component=hub sid=Z4Xk_gHGFrh-GFgDTQY3S ids={}
+2026-11-17 14:08:19.596 DBG incoming message nodeid=o3H9Kk context=node sid=Z4Xk_gHGFrh-GFgDTQY3S data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::RequestCChannel\",\"id\":1}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestCChannel","id":1}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::RequestCChannel is transmitting the subscription confirmation
+2026-11-17 14:08:19.598 DBG controller subscribe nodeid=o3H9Kk context=node sid=Z4Xk_gHGFrh-GFgDTQY3S response.status=success response.streams=[request_c] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::RequestCChannel\\\",\\\"id\\\":1}\",\"type\":\"confirm_subsc...(9)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:19.598 DBG subscribed nodeid=o3H9Kk context=node sid=Z4Xk_gHGFrh-GFgDTQY3S identifier="{\"channel\":\"Anyt::TestChannels::RequestCChannel\",\"id\":1}"
+2026-11-17 14:08:19.598 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=Z4Xk_gHGFrh-GFgDTQY3S identifier="{\"channel\":\"Anyt::TestChannels::RequestCChannel\",\"id\":1}" stream=request_c
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestCChannel\",\"id\":1}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:19.600 DBG incoming message nodeid=o3H9Kk context=node sid=Z4Xk_gHGFrh-GFgDTQY3S data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::RequestCChannel\",\"id\":2}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestCChannel","id":2}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::RequestCChannel is transmitting the subscription confirmation
+2026-11-17 14:08:19.601 DBG controller subscribe nodeid=o3H9Kk context=node sid=Z4Xk_gHGFrh-GFgDTQY3S response.status=success response.streams=[request_c] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::RequestCChannel\\\",\\\"id\\\":2}\",\"type\":\"confirm_subsc...(9)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:19.601 DBG subscribed nodeid=o3H9Kk context=node sid=Z4Xk_gHGFrh-GFgDTQY3S identifier="{\"channel\":\"Anyt::TestChannels::RequestCChannel\",\"id\":2}"
+2026-11-17 14:08:19.601 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=Z4Xk_gHGFrh-GFgDTQY3S identifier="{\"channel\":\"Anyt::TestChannels::RequestCChannel\",\"id\":2}" stream=request_c
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestCChannel\",\"id\":2}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:20.103 DBG WebSocket closed nodeid=o3H9Kk context=node sid=Z4Xk_gHGFrh-GFgDTQY3S error="websocket: close 1000 (normal)"
+2026-11-17 14:08:20.104 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=Z4Xk_gHGFrh-GFgDTQY3S channels=2
+2026-11-17 14:08:20.104 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=Z4Xk_gHGFrh-GFgDTQY3S
+2026-11-17 14:08:20.104 DBG WebSocket session completed nodeid=o3H9Kk sid=Z4Xk_gHGFrh-GFgDTQY3S
+2026-11-17 14:08:20.104 DBG disconnect nodeid=o3H9Kk context=node sid=Z4Xk_gHGFrh-GFgDTQY3S ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=2
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::RequestCChannel","id":2}", "{"channel":"Anyt::TestChannels::RequestCChannel","id":1}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:08:20.106593 #59] DEBUG -- : [ActionCable] Broadcasting to request_c: {:data=>"user left2"}
+2026-11-17 14:08:20.106 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+D, [2026-11-17T14:08:20.106951 #59] DEBUG -- : [ActionCable] Broadcasting to request_c: {:data=>"user left1"}
+Disconnected
+2026-11-17 14:08:20.107 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=request_c payload.data="{\"data\":\"user left2\"}"
+2026-11-17 14:08:20.107 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:20.107 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=request_c payload.data="{\"data\":\"user left1\"}"
+2026-11-17 14:08:20.107 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=request_c message.stream=request_c message.data="{\"data\":\"user left2\"}"
+2026-11-17 14:08:20.107 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=request_c message.stream=request_c message.data="{\"data\":\"user left1\"}"
+2026-11-17 14:08:20.107 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=Z4Xk_gHGFrh-GFgDTQY3S
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestCChannel\"}", "message"=>{"data"=>"user left2"}}
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestCChannel\"}", "message"=>{"data"=>"user left1"}}
+2026-11-17 14:08:20.610 DBG WebSocket closed nodeid=o3H9Kk context=node sid=HNCSHQCsdBeGy59jkNV5N error="websocket: close 1000 (normal)"
+2026-11-17 14:08:20.611 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=request_c
+2026-11-17 14:08:20.611 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=request_c
+2026-11-17 14:08:20.611 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=HNCSHQCsdBeGy59jkNV5N channels=1
+2026-11-17 14:08:20.611 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=HNCSHQCsdBeGy59jkNV5N
+2026-11-17 14:08:20.611 DBG WebSocket session completed nodeid=o3H9Kk sid=HNCSHQCsdBeGy59jkNV5N
+2026-11-17 14:08:20.611 DBG disconnect nodeid=o3H9Kk context=node sid=HNCSHQCsdBeGy59jkNV5N ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::RequestCChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:08:20.613571 #59] DEBUG -- : [ActionCable] Broadcasting to request_c: {:data=>"user left"}
+Disconnected
+2026-11-17 14:08:20.613 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:20.613 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=request_c payload.data="{\"data\":\"user left\"}"
+2026-11-17 14:08:20.614 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=request_c message.stream=request_c message.data="{\"data\":\"user left\"}"
+2026-11-17 14:08:20.614 DBG no sessions nodeid=o3H9Kk context=node component=hub gate=12 stream=request_c
+2026-11-17 14:08:20.614 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=HNCSHQCsdBeGy59jkNV5N
+[35m  Client disconnect invokes #unsubscribe callbacks
+    for multiple subscriptions from the same channel[0m[32m PASS[0m (1.64s)
+
+Request
+2026-11-17 14:08:21.157 DBG WebSocket session established nodeid=o3H9Kk sid=sWNDy45oUVFH92Qchqxk5
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:21.160 DBG controller authenticate nodeid=o3H9Kk context=node sid=sWNDy45oUVFH92Qchqxk5 response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"sWNDy45oUVFH92Qchqxk5\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:21.160 DBG registered nodeid=o3H9Kk context=node component=hub sid=sWNDy45oUVFH92Qchqxk5 ids={}
+2026-11-17 14:08:21.161 DBG incoming message nodeid=o3H9Kk context=node sid=sWNDy45oUVFH92Qchqxk5 data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::RequestAChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestAChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::RequestAChannel is transmitting the subscription confirmation
+2026-11-17 14:08:21.162 DBG controller subscribe nodeid=o3H9Kk context=node sid=sWNDy45oUVFH92Qchqxk5 response.status=success response.streams=[request_a] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::RequestAChannel\\\"}\",\"type\":\"confirm_subscription\"}]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:21.162 DBG subscribed nodeid=o3H9Kk context=node sid=sWNDy45oUVFH92Qchqxk5 identifier="{\"channel\":\"Anyt::TestChannels::RequestAChannel\"}"
+2026-11-17 14:08:21.162 DBG subscribing nodeid=o3H9Kk context=pubsub channel=request_a
+2026-11-17 14:08:21.162 DBG subscribe nodeid=o3H9Kk context=pubsub channel=request_a
+2026-11-17 14:08:21.163 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=sWNDy45oUVFH92Qchqxk5 identifier="{\"channel\":\"Anyt::TestChannels::RequestAChannel\"}" stream=request_a
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestAChannel\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:21.164 DBG incoming message nodeid=o3H9Kk context=node sid=sWNDy45oUVFH92Qchqxk5 data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::RequestBChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestBChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::RequestBChannel is transmitting the subscription confirmation
+2026-11-17 14:08:21.165 DBG controller subscribe nodeid=o3H9Kk context=node sid=sWNDy45oUVFH92Qchqxk5 response.status=success response.streams=[request_b] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::RequestBChannel\\\"}\",\"type\":\"confirm_subscription\"}]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:21.165 DBG subscribed nodeid=o3H9Kk context=node sid=sWNDy45oUVFH92Qchqxk5 identifier="{\"channel\":\"Anyt::TestChannels::RequestBChannel\"}"
+2026-11-17 14:08:21.165 DBG subscribing nodeid=o3H9Kk context=pubsub channel=request_b
+2026-11-17 14:08:21.165 DBG subscribe nodeid=o3H9Kk context=pubsub channel=request_b
+2026-11-17 14:08:21.166 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=sWNDy45oUVFH92Qchqxk5 identifier="{\"channel\":\"Anyt::TestChannels::RequestBChannel\"}" stream=request_b
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestBChannel\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:21.213 DBG WebSocket session established nodeid=o3H9Kk sid=FX8GOarGIhpTQ629id-BE
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:21.216 DBG controller authenticate nodeid=o3H9Kk context=node sid=FX8GOarGIhpTQ629id-BE response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"FX8GOarGIhpTQ629id-BE\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:21.216 DBG registered nodeid=o3H9Kk context=node component=hub sid=FX8GOarGIhpTQ629id-BE ids={}
+2026-11-17 14:08:21.217 DBG incoming message nodeid=o3H9Kk context=node sid=FX8GOarGIhpTQ629id-BE data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::RequestAChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestAChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::RequestAChannel is transmitting the subscription confirmation
+2026-11-17 14:08:21.219 DBG controller subscribe nodeid=o3H9Kk context=node sid=FX8GOarGIhpTQ629id-BE response.status=success response.streams=[request_a] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::RequestAChannel\\\"}\",\"type\":\"confirm_subscription\"}]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:21.219 DBG subscribed nodeid=o3H9Kk context=node sid=FX8GOarGIhpTQ629id-BE identifier="{\"channel\":\"Anyt::TestChannels::RequestAChannel\"}"
+2026-11-17 14:08:21.219 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=FX8GOarGIhpTQ629id-BE identifier="{\"channel\":\"Anyt::TestChannels::RequestAChannel\"}" stream=request_a
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestAChannel\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:21.220 DBG incoming message nodeid=o3H9Kk context=node sid=FX8GOarGIhpTQ629id-BE data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::RequestBChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestBChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::RequestBChannel is transmitting the subscription confirmation
+2026-11-17 14:08:21.221 DBG controller subscribe nodeid=o3H9Kk context=node sid=FX8GOarGIhpTQ629id-BE response.status=success response.streams=[request_b] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::RequestBChannel\\\"}\",\"type\":\"confirm_subscription\"}]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:21.221 DBG subscribed nodeid=o3H9Kk context=node sid=FX8GOarGIhpTQ629id-BE identifier="{\"channel\":\"Anyt::TestChannels::RequestBChannel\"}"
+2026-11-17 14:08:21.221 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=FX8GOarGIhpTQ629id-BE identifier="{\"channel\":\"Anyt::TestChannels::RequestBChannel\"}" stream=request_b
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestBChannel\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:21.723 DBG WebSocket closed nodeid=o3H9Kk context=node sid=FX8GOarGIhpTQ629id-BE error="websocket: close 1000 (normal)"
+2026-11-17 14:08:21.724 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=FX8GOarGIhpTQ629id-BE channels=2
+2026-11-17 14:08:21.724 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=FX8GOarGIhpTQ629id-BE
+2026-11-17 14:08:21.724 DBG WebSocket session completed nodeid=o3H9Kk sid=FX8GOarGIhpTQ629id-BE
+2026-11-17 14:08:21.724 DBG disconnect nodeid=o3H9Kk context=node sid=FX8GOarGIhpTQ629id-BE ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=2
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::RequestAChannel"}", "{"channel":"Anyt::TestChannels::RequestBChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:08:21.726079 #59] DEBUG -- : [ActionCable] Broadcasting to request_a: {:data=>"user left"}
+D, [2026-11-17T14:08:21.726468 #59] DEBUG -- : [ActionCable] Broadcasting to request_b: {:data=>"user left"}
+2026-11-17 14:08:21.726 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+Disconnected
+2026-11-17 14:08:21.726 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=request_a payload.data="{\"data\":\"user left\"}"
+2026-11-17 14:08:21.726 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:21.726 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=2 stream=request_a message.stream=request_a message.data="{\"data\":\"user left\"}"
+2026-11-17 14:08:21.726 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=request_b payload.data="{\"data\":\"user left\"}"
+2026-11-17 14:08:21.726 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=15 stream=request_b message.stream=request_b message.data="{\"data\":\"user left\"}"
+2026-11-17 14:08:21.727 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=FX8GOarGIhpTQ629id-BE
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestAChannel\"}", "message"=>{"data"=>"user left"}}
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestBChannel\"}", "message"=>{"data"=>"user left"}}
+2026-11-17 14:08:22.230 DBG WebSocket closed nodeid=o3H9Kk context=node sid=sWNDy45oUVFH92Qchqxk5 error="websocket: close 1000 (normal)"
+2026-11-17 14:08:22.230 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=request_b
+2026-11-17 14:08:22.230 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=request_b
+2026-11-17 14:08:22.230 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=request_a
+2026-11-17 14:08:22.230 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=request_a
+2026-11-17 14:08:22.230 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=sWNDy45oUVFH92Qchqxk5 channels=2
+2026-11-17 14:08:22.230 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=sWNDy45oUVFH92Qchqxk5
+2026-11-17 14:08:22.231 DBG WebSocket session completed nodeid=o3H9Kk sid=sWNDy45oUVFH92Qchqxk5
+2026-11-17 14:08:22.231 DBG disconnect nodeid=o3H9Kk context=node sid=sWNDy45oUVFH92Qchqxk5 ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=2
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::RequestAChannel"}", "{"channel":"Anyt::TestChannels::RequestBChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:08:22.232641 #59] DEBUG -- : [ActionCable] Broadcasting to request_a: {:data=>"user left"}
+2026-11-17 14:08:22.232 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+D, [2026-11-17T14:08:22.232944 #59] DEBUG -- : [ActionCable] Broadcasting to request_b: {:data=>"user left"}
+2026-11-17 14:08:22.233 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=request_a payload.data="{\"data\":\"user left\"}"
+Disconnected
+2026-11-17 14:08:22.233 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:22.233 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=2 stream=request_a message.stream=request_a message.data="{\"data\":\"user left\"}"
+2026-11-17 14:08:22.233 DBG no sessions nodeid=o3H9Kk context=node component=hub gate=2 stream=request_a
+2026-11-17 14:08:22.233 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=request_b payload.data="{\"data\":\"user left\"}"
+2026-11-17 14:08:22.233 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=15 stream=request_b message.stream=request_b message.data="{\"data\":\"user left\"}"
+2026-11-17 14:08:22.233 DBG no sessions nodeid=o3H9Kk context=node component=hub gate=15 stream=request_b
+2026-11-17 14:08:22.233 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=sWNDy45oUVFH92Qchqxk5
+[35m  Client disconnect invokes #unsubscribe callbacks
+    for different channels[0m[32m PASS[0m (1.62s)
+
+Multiple streams
+2026-11-17 14:08:22.779 DBG WebSocket session established nodeid=o3H9Kk sid=MK1Bj7QkLkgKOK2cvzlt4
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:22.782 DBG controller authenticate nodeid=o3H9Kk context=node sid=MK1Bj7QkLkgKOK2cvzlt4 response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"MK1Bj7QkLkgKOK2cvzlt4\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:22.782 DBG registered nodeid=o3H9Kk context=node component=hub sid=MK1Bj7QkLkgKOK2cvzlt4 ids={}
+2026-11-17 14:08:22.782 DBG incoming message nodeid=o3H9Kk context=node sid=MK1Bj7QkLkgKOK2cvzlt4 data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::MultipleStreamsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::MultipleStreamsChannel is transmitting the subscription confirmation
+2026-11-17 14:08:22.784 DBG controller subscribe nodeid=o3H9Kk context=node sid=MK1Bj7QkLkgKOK2cvzlt4 response.status=success response.streams="[a b]" response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::MultipleStreamsChannel\\\"}\",\"type\":\"confirm_subscri...(7)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:22.784 DBG subscribed nodeid=o3H9Kk context=node sid=MK1Bj7QkLkgKOK2cvzlt4 identifier="{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}"
+2026-11-17 14:08:22.784 DBG subscribing nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:22.784 DBG subscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:22.784 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=MK1Bj7QkLkgKOK2cvzlt4 identifier="{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}" stream=a
+2026-11-17 14:08:22.784 DBG subscribing nodeid=o3H9Kk context=pubsub channel=b
+2026-11-17 14:08:22.784 DBG subscribe nodeid=o3H9Kk context=pubsub channel=b
+2026-11-17 14:08:22.784 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=MK1Bj7QkLkgKOK2cvzlt4 identifier="{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}" stream=b
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:08:22.785818 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+2026-11-17 14:08:22.786 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:22.786 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=a payload.data="{\"data\":\"X\"}"
+2026-11-17 14:08:22.786 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":\"X\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}", "message"=>{"data"=>"X"}}
+D, [2026-11-17T14:08:22.787301 #59] DEBUG -- : [ActionCable] Broadcasting to b: {:data=>"Y"}
+2026-11-17 14:08:22.787 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:22.787 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=b payload.data="{\"data\":\"Y\"}"
+2026-11-17 14:08:22.787 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=5 stream=b message.stream=b message.data="{\"data\":\"Y\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}", "message"=>{"data"=>"Y"}}
+2026-11-17 14:08:23.289 DBG WebSocket closed nodeid=o3H9Kk context=node sid=MK1Bj7QkLkgKOK2cvzlt4 error="websocket: close 1000 (normal)"
+2026-11-17 14:08:23.289 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=b
+[35m  Client receives messages from both streams                     [0m[32m PASS[0m (0.56s)
+
+Multiple streams
+2026-11-17 14:08:23.290 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=b
+2026-11-17 14:08:23.290 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:23.290 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:23.290 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=MK1Bj7QkLkgKOK2cvzlt4 channels=1
+2026-11-17 14:08:23.290 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=MK1Bj7QkLkgKOK2cvzlt4
+2026-11-17 14:08:23.290 DBG WebSocket session completed nodeid=o3H9Kk sid=MK1Bj7QkLkgKOK2cvzlt4
+2026-11-17 14:08:23.290 DBG disconnect nodeid=o3H9Kk context=node sid=MK1Bj7QkLkgKOK2cvzlt4 ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::MultipleStreamsChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:23.292 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=MK1Bj7QkLkgKOK2cvzlt4
+2026-11-17 14:08:23.337 DBG WebSocket session established nodeid=o3H9Kk sid=4r5RMr06lWBYXoe7-Md4d
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:23.340 DBG controller authenticate nodeid=o3H9Kk context=node sid=4r5RMr06lWBYXoe7-Md4d response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"4r5RMr06lWBYXoe7-Md4d\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:23.341 DBG registered nodeid=o3H9Kk context=node component=hub sid=4r5RMr06lWBYXoe7-Md4d ids={}
+2026-11-17 14:08:23.341 DBG incoming message nodeid=o3H9Kk context=node sid=4r5RMr06lWBYXoe7-Md4d data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::MultipleStreamsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::MultipleStreamsChannel is transmitting the subscription confirmation
+2026-11-17 14:08:23.342 DBG controller subscribe nodeid=o3H9Kk context=node sid=4r5RMr06lWBYXoe7-Md4d response.status=success response.streams="[a b]" response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::MultipleStreamsChannel\\\"}\",\"type\":\"confirm_subscri...(7)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:23.343 DBG subscribed nodeid=o3H9Kk context=node sid=4r5RMr06lWBYXoe7-Md4d identifier="{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}"
+2026-11-17 14:08:23.343 DBG subscribing nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:23.343 DBG subscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:23.343 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=4r5RMr06lWBYXoe7-Md4d identifier="{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}" stream=a
+2026-11-17 14:08:23.343 DBG subscribing nodeid=o3H9Kk context=pubsub channel=b
+2026-11-17 14:08:23.343 DBG subscribe nodeid=o3H9Kk context=pubsub channel=b
+2026-11-17 14:08:23.343 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=4r5RMr06lWBYXoe7-Md4d identifier="{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}" stream=b
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:08:23.344536 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+2026-11-17 14:08:23.344 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:23.344 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=a payload.data="{\"data\":\"X\"}"
+2026-11-17 14:08:23.344 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":\"X\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}", "message"=>{"data"=>"X"}}
+2026-11-17 14:08:23.346 DBG incoming message nodeid=o3H9Kk context=node sid=4r5RMr06lWBYXoe7-Md4d data.command=unsubscribe data.identifier="{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "unsubscribe", identifier: "{"channel":"Anyt::TestChannels::MultipleStreamsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Unsubscribing from channel: {"channel":"Anyt::TestChannels::MultipleStreamsChannel"}
+2026-11-17 14:08:23.347 DBG controller unsubscribe nodeid=o3H9Kk context=node sid=4r5RMr06lWBYXoe7-Md4d response.status=success response.streams=[] response.transmissions=[] response.stopped_streams=[] response.stop_all_streams=true response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:23.347 DBG unsubscribed nodeid=o3H9Kk context=node sid=4r5RMr06lWBYXoe7-Md4d identifier="{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}"
+2026-11-17 14:08:23.347 DBG unsubscribed nodeid=o3H9Kk context=node component=hub sid=4r5RMr06lWBYXoe7-Md4d identifier="{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}"
+2026-11-17 14:08:23.347 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=b
+2026-11-17 14:08:23.348 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=b
+2026-11-17 14:08:23.348 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:23.348 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=a
+D, [2026-11-17T14:08:24.347130 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"Y"}
+D, [2026-11-17T14:08:24.348015 #59] DEBUG -- : [ActionCable] Broadcasting to b: {:data=>"Z"}
+2026-11-17 14:08:24.348 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:24.348 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=a payload.data="{\"data\":\"Y\"}"
+2026-11-17 14:08:24.348 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":\"Y\"}"
+2026-11-17 14:08:24.348 DBG no sessions nodeid=o3H9Kk context=node component=hub gate=12 stream=a
+2026-11-17 14:08:24.348 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:24.348 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=b payload.data="{\"data\":\"Z\"}"
+2026-11-17 14:08:24.348 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=5 stream=b message.stream=b message.data="{\"data\":\"Z\"}"
+2026-11-17 14:08:24.348 DBG no sessions nodeid=o3H9Kk context=node component=hub gate=5 stream=b
+2026-11-17 14:08:25.351 DBG WebSocket closed nodeid=o3H9Kk context=node sid=4r5RMr06lWBYXoe7-Md4d error="websocket: close 1000 (normal)"
+2026-11-17 14:08:25.351 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=4r5RMr06lWBYXoe7-Md4d
+[35m  Client does not receive messages from any stream after removing subscription[0m[32m PASS[0m (2.06s)
+2026-11-17 14:08:25.351 DBG WebSocket session completed nodeid=o3H9Kk sid=4r5RMr06lWBYXoe7-Md4d
+2026-11-17 14:08:25.351 DBG disconnect nodeid=o3H9Kk context=node sid=4r5RMr06lWBYXoe7-Md4d ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=0
+
+Subscription aknowledgement
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:25.357 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=4r5RMr06lWBYXoe7-Md4d
+2026-11-17 14:08:25.399 DBG WebSocket session established nodeid=o3H9Kk sid=tSM04l5WJxVNXzBIcPciG
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:25.403 DBG controller authenticate nodeid=o3H9Kk context=node sid=tSM04l5WJxVNXzBIcPciG response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"tSM04l5WJxVNXzBIcPciG\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:25.403 DBG registered nodeid=o3H9Kk context=node component=hub sid=tSM04l5WJxVNXzBIcPciG ids={}
+2026-11-17 14:08:25.403 DBG incoming message nodeid=o3H9Kk context=node sid=tSM04l5WJxVNXzBIcPciG data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionAknowledgementRejectorChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionAknowledgementRejectorChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::SubscriptionAknowledgementRejectorChannel is transmitting the subscription rejection
+2026-11-17 14:08:25.405 DBG controller subscribe nodeid=o3H9Kk context=node sid=tSM04l5WJxVNXzBIcPciG response.status=failure response.streams=[] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SubscriptionAknowledgementRejectorChannel\\\"}\",\"typ...(25)]" response.stopped_streams=[] response.stop_all_streams=true response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:25.405 DBG subscription rejected nodeid=o3H9Kk context=node sid=tSM04l5WJxVNXzBIcPciG identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionAknowledgementRejectorChannel\"}"
+2026-11-17 14:08:25.405 DBG unsubscribed nodeid=o3H9Kk context=node component=hub sid=tSM04l5WJxVNXzBIcPciG identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionAknowledgementRejectorChannel\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionAknowledgementRejectorChannel\"}", "type"=>"reject_subscription"}
+2026-11-17 14:08:25.908 DBG WebSocket closed nodeid=o3H9Kk context=node sid=tSM04l5WJxVNXzBIcPciG error="websocket: close 1000 (normal)"
+2026-11-17 14:08:25.908 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=tSM04l5WJxVNXzBIcPciG
+2026-11-17 14:08:25.908 DBG WebSocket session completed nodeid=o3H9Kk sid=tSM04l5WJxVNXzBIcPciG
+[35m  Client receives subscription rejection                         [0m[32m PASS[0m (0.56s)
+
+2026-11-17 14:08:25.908 DBG disconnect nodeid=o3H9Kk context=node sid=tSM04l5WJxVNXzBIcPciG ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=0
+Subscription aknowledgement
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:25.913 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=tSM04l5WJxVNXzBIcPciG
+2026-11-17 14:08:25.955 DBG WebSocket session established nodeid=o3H9Kk sid=5vRGO6bEB4CjtUeHVsnhO
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:25.960 DBG controller authenticate nodeid=o3H9Kk context=node sid=5vRGO6bEB4CjtUeHVsnhO response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"5vRGO6bEB4CjtUeHVsnhO\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:25.960 DBG registered nodeid=o3H9Kk context=node component=hub sid=5vRGO6bEB4CjtUeHVsnhO ids={}
+2026-11-17 14:08:25.961 DBG incoming message nodeid=o3H9Kk context=node sid=5vRGO6bEB4CjtUeHVsnhO data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionAknowledgementChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionAknowledgementChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::SubscriptionAknowledgementChannel is transmitting the subscription confirmation
+2026-11-17 14:08:25.962 DBG controller subscribe nodeid=o3H9Kk context=node sid=5vRGO6bEB4CjtUeHVsnhO response.status=success response.streams=[] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SubscriptionAknowledgementChannel\\\"}\",\"type\":\"conf...(18)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:25.962 DBG subscribed nodeid=o3H9Kk context=node sid=5vRGO6bEB4CjtUeHVsnhO identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionAknowledgementChannel\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionAknowledgementChannel\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:26.464 DBG WebSocket closed nodeid=o3H9Kk context=node sid=5vRGO6bEB4CjtUeHVsnhO error="websocket: close 1000 (normal)"
+2026-11-17 14:08:26.465 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=5vRGO6bEB4CjtUeHVsnhO channels=1
+2026-11-17 14:08:26.465 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=5vRGO6bEB4CjtUeHVsnhO
+[35m  Client receives subscription confirmation                      [0m[32m PASS[0m2026-11-17 14:08:26.465 DBG WebSocket session completed nodeid=o3H9Kk sid=5vRGO6bEB4CjtUeHVsnhO
+ (0.56s)
+2026-11-17 14:08:26.465 DBG disconnect nodeid=o3H9Kk context=node sid=5vRGO6bEB4CjtUeHVsnhO ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+
+Channel state
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SubscriptionAknowledgementChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:26.470 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=5vRGO6bEB4CjtUeHVsnhO
+2026-11-17 14:08:26.512 DBG WebSocket session established nodeid=o3H9Kk sid=W9oBDyXsMYj7TxEPB9vNs
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:26.515 DBG controller authenticate nodeid=o3H9Kk context=node sid=W9oBDyXsMYj7TxEPB9vNs response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"W9oBDyXsMYj7TxEPB9vNs\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:26.515 DBG registered nodeid=o3H9Kk context=node component=hub sid=W9oBDyXsMYj7TxEPB9vNs ids={}
+2026-11-17 14:08:26.515 DBG incoming message nodeid=o3H9Kk context=node sid=W9oBDyXsMYj7TxEPB9vNs data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::ChannelStateChannel is transmitting the subscription confirmation
+2026-11-17 14:08:26.517 DBG controller subscribe nodeid=o3H9Kk context=node sid=W9oBDyXsMYj7TxEPB9vNs response.status=success response.streams=[state_counts] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::ChannelStateChannel\\\",\\\"name\\\":\\\"chipolino\\\"}\",\"ty...(27)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate="[count user]" err=<nil>
+2026-11-17 14:08:26.517 DBG subscribed nodeid=o3H9Kk context=node sid=W9oBDyXsMYj7TxEPB9vNs identifier="{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}"
+2026-11-17 14:08:26.517 DBG subscribing nodeid=o3H9Kk context=pubsub channel=state_counts
+2026-11-17 14:08:26.517 DBG subscribe nodeid=o3H9Kk context=pubsub channel=state_counts
+2026-11-17 14:08:26.518 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=W9oBDyXsMYj7TxEPB9vNs identifier="{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}" stream=state_counts
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:26.519 DBG incoming message nodeid=o3H9Kk context=node sid=W9oBDyXsMYj7TxEPB9vNs data.command=message data.identifier="{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}" data.data="{\"action\":\"tick\"}" data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "message", identifier: "{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}", connection_identifiers: "{}", data: "{"action":"tick"}", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {"user"=>"{"name":"chipolino"}", "count"=>"1"}>>
+Anyt::TestChannels::ChannelStateChannel#tick
+Anyt::TestChannels::ChannelStateChannel transmitting {:count=>3, :name=>"chipolino"}
+2026-11-17 14:08:26.521 DBG controller perform nodeid=o3H9Kk context=node sid=W9oBDyXsMYj7TxEPB9vNs response.status=success response.streams=[] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::ChannelStateChannel\\\",\\\"name\\\":\\\"chipolino\\\"}\",\"me...(38)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[count] err=<nil>
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}", "message"=>{"count"=>3, "name"=>"chipolino"}}
+2026-11-17 14:08:27.022 DBG WebSocket closed nodeid=o3H9Kk context=node sid=W9oBDyXsMYj7TxEPB9vNs error="websocket: close 1000 (normal)"
+2026-11-17 14:08:27.022 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=state_counts
+[35m  Channel state is kept between commands                         [0m[32m PASS[0m (0.56s)
+
+2026-11-17 14:08:27.023 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=state_counts
+Channel state
+2026-11-17 14:08:27.023 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=W9oBDyXsMYj7TxEPB9vNs channels=1
+2026-11-17 14:08:27.023 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=W9oBDyXsMYj7TxEPB9vNs
+2026-11-17 14:08:27.023 DBG disconnect nodeid=o3H9Kk context=node sid=W9oBDyXsMYj7TxEPB9vNs ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+2026-11-17 14:08:27.023 DBG WebSocket session completed nodeid=o3H9Kk sid=W9oBDyXsMYj7TxEPB9vNs
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {"{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}"=>"{"count":"3","user":"{\"name\":\"chipolino\"}"}"}>>
+Disconnected
+2026-11-17 14:08:27.028 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=W9oBDyXsMYj7TxEPB9vNs
+2026-11-17 14:08:27.069 DBG WebSocket session established nodeid=o3H9Kk sid=zkBnXu_ZQEZ67hMBSYyBD
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:27.073 DBG controller authenticate nodeid=o3H9Kk context=node sid=zkBnXu_ZQEZ67hMBSYyBD response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"zkBnXu_ZQEZ67hMBSYyBD\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:27.073 DBG registered nodeid=o3H9Kk context=node component=hub sid=zkBnXu_ZQEZ67hMBSYyBD ids={}
+2026-11-17 14:08:27.073 DBG incoming message nodeid=o3H9Kk context=node sid=zkBnXu_ZQEZ67hMBSYyBD data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::ChannelStateChannel is transmitting the subscription confirmation
+2026-11-17 14:08:27.074 DBG controller subscribe nodeid=o3H9Kk context=node sid=zkBnXu_ZQEZ67hMBSYyBD response.status=success response.streams=[state_counts] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::ChannelStateChannel\\\",\\\"name\\\":\\\"chipolino\\\"}\",\"ty...(27)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate="[count user]" err=<nil>
+2026-11-17 14:08:27.075 DBG subscribed nodeid=o3H9Kk context=node sid=zkBnXu_ZQEZ67hMBSYyBD identifier="{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}"
+2026-11-17 14:08:27.075 DBG subscribing nodeid=o3H9Kk context=pubsub channel=state_counts
+2026-11-17 14:08:27.075 DBG subscribe nodeid=o3H9Kk context=pubsub channel=state_counts
+2026-11-17 14:08:27.075 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=zkBnXu_ZQEZ67hMBSYyBD identifier="{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}" stream=state_counts
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:27.123 DBG WebSocket session established nodeid=o3H9Kk sid=lVwpPFh1puKrIvyv8_xiq
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:27.126 DBG controller authenticate nodeid=o3H9Kk context=node sid=lVwpPFh1puKrIvyv8_xiq response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"lVwpPFh1puKrIvyv8_xiq\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:27.126 DBG registered nodeid=o3H9Kk context=node component=hub sid=lVwpPFh1puKrIvyv8_xiq ids={}
+2026-11-17 14:08:27.126 DBG incoming message nodeid=o3H9Kk context=node sid=lVwpPFh1puKrIvyv8_xiq data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipollone\",\"notify_disconnect\":true}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipollone","notify_disconnect":true}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::ChannelStateChannel is transmitting the subscription confirmation
+2026-11-17 14:08:27.128 DBG controller subscribe nodeid=o3H9Kk context=node sid=lVwpPFh1puKrIvyv8_xiq response.status=success response.streams=[state_counts] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::ChannelStateChannel\\\",\\\"name\\\":\\\"chipollone\\\",\\\"no...(55)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate="[count user]" err=<nil>
+2026-11-17 14:08:27.128 DBG subscribed nodeid=o3H9Kk context=node sid=lVwpPFh1puKrIvyv8_xiq identifier="{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipollone\",\"notify_disconnect\":true}"
+2026-11-17 14:08:27.128 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=lVwpPFh1puKrIvyv8_xiq identifier="{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipollone\",\"notify_disconnect\":true}" stream=state_counts
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipollone\",\"notify_disconnect\":true}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:27.630 DBG WebSocket closed nodeid=o3H9Kk context=node sid=lVwpPFh1puKrIvyv8_xiq error="websocket: close 1000 (normal)"
+2026-11-17 14:08:27.630 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=lVwpPFh1puKrIvyv8_xiq channels=1
+2026-11-17 14:08:27.630 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=lVwpPFh1puKrIvyv8_xiq
+2026-11-17 14:08:27.630 DBG disconnect nodeid=o3H9Kk context=node sid=lVwpPFh1puKrIvyv8_xiq ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+2026-11-17 14:08:27.631 DBG WebSocket session completed nodeid=o3H9Kk sid=lVwpPFh1puKrIvyv8_xiq
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipollone","notify_disconnect":true}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {"{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipollone","notify_disconnect":true}"=>"{"count":"1","user":"{\"name\":\"chipollone\"}"}"}>>
+D, [2026-11-17T14:08:27.632596 #59] DEBUG -- : [ActionCable] Broadcasting to state_counts: {:data=>"user left: chipollone"}
+Disconnected
+2026-11-17 14:08:27.632 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:27.633 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=state_counts payload.data="{\"data\":\"user left: chipollone\"}"
+2026-11-17 14:08:27.633 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=11 stream=state_counts message.stream=state_counts message.data="{\"data\":\"user left: chipollone\"}"
+2026-11-17 14:08:27.633 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=lVwpPFh1puKrIvyv8_xiq
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}", "message"=>{"data"=>"user left: chipollone"}}
+2026-11-17 14:08:28.136 DBG WebSocket closed nodeid=o3H9Kk context=node sid=zkBnXu_ZQEZ67hMBSYyBD error="websocket: close 1000 (normal)"
+2026-11-17 14:08:28.136 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=state_counts
+2026-11-17 14:08:28.136 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=state_counts
+2026-11-17 14:08:28.136 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=zkBnXu_ZQEZ67hMBSYyBD channels=1
+2026-11-17 14:08:28.137 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=zkBnXu_ZQEZ67hMBSYyBD
+2026-11-17 14:08:28.137 DBG WebSocket session completed nodeid=o3H9Kk sid=zkBnXu_ZQEZ67hMBSYyBD
+2026-11-17 14:08:28.137 DBG disconnect nodeid=o3H9Kk context=node sid=zkBnXu_ZQEZ67hMBSYyBD ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {"{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}"=>"{"count":"1","user":"{\"name\":\"chipolino\"}"}"}>>
+Disconnected
+2026-11-17 14:08:28.139 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=zkBnXu_ZQEZ67hMBSYyBD
+[35m  Channel state is available in #unsubscribe callbacks           [0m[32m PASS[0m (1.61s)
+
+Broadcast data to stream
+2026-11-17 14:08:28.684 DBG WebSocket session established nodeid=o3H9Kk sid=z-njNWD-xATML5mX5TWE7
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:28.687 DBG controller authenticate nodeid=o3H9Kk context=node sid=z-njNWD-xATML5mX5TWE7 response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"z-njNWD-xATML5mX5TWE7\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:28.687 DBG registered nodeid=o3H9Kk context=node component=hub sid=z-njNWD-xATML5mX5TWE7 ids={}
+2026-11-17 14:08:28.688 DBG incoming message nodeid=o3H9Kk context=node sid=z-njNWD-xATML5mX5TWE7 data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::BroadcastDataToStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::BroadcastDataToStreamChannel is transmitting the subscription confirmation
+2026-11-17 14:08:28.689 DBG controller subscribe nodeid=o3H9Kk context=node sid=z-njNWD-xATML5mX5TWE7 response.status=success response.streams=[a] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::BroadcastDataToStreamChannel\\\"}\",\"type\":\"confirm_s...(13)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:28.690 DBG subscribed nodeid=o3H9Kk context=node sid=z-njNWD-xATML5mX5TWE7 identifier="{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}"
+2026-11-17 14:08:28.690 DBG subscribing nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:28.690 DBG subscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:28.690 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=z-njNWD-xATML5mX5TWE7 identifier="{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}" stream=a
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:08:28.691260 #59] DEBUG -- : [ActionCable] Broadcasting to a: "{\"script\":{\"alert\":\"Message!\"}}"
+2026-11-17 14:08:28.691 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:28.691 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=a payload.data="\"{\\\"script\\\":{\\\"alert\\\":\\\"Message!\\\"}}\""
+2026-11-17 14:08:28.691 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=a message.stream=a message.data="\"{\\\"script\\\":{\\\"alert\\\":\\\"Message!\\\"}}\""
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}", "message"=>"{\"script\":{\"alert\":\"Message!\"}}"}
+2026-11-17 14:08:29.193 DBG WebSocket closed nodeid=o3H9Kk context=node sid=z-njNWD-xATML5mX5TWE7 error="websocket: close 1000 (normal)"
+2026-11-17 14:08:29.194 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=a
+[35m  Broadcast JSON string                                          [0m[32m PASS[0m (0.56s)
+
+Broadcast data to stream
+2026-11-17 14:08:29.194 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:29.194 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=z-njNWD-xATML5mX5TWE7 channels=1
+2026-11-17 14:08:29.194 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=z-njNWD-xATML5mX5TWE7
+2026-11-17 14:08:29.194 DBG disconnect nodeid=o3H9Kk context=node sid=z-njNWD-xATML5mX5TWE7 ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+2026-11-17 14:08:29.194 DBG WebSocket session completed nodeid=o3H9Kk sid=z-njNWD-xATML5mX5TWE7
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::BroadcastDataToStreamChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:29.199 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=z-njNWD-xATML5mX5TWE7
+2026-11-17 14:08:29.241 DBG WebSocket session established nodeid=o3H9Kk sid=9fZXpAZaiSQf9h83OW-Mh
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:29.243 DBG controller authenticate nodeid=o3H9Kk context=node sid=9fZXpAZaiSQf9h83OW-Mh response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"9fZXpAZaiSQf9h83OW-Mh\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:29.243 DBG registered nodeid=o3H9Kk context=node component=hub sid=9fZXpAZaiSQf9h83OW-Mh ids={}
+2026-11-17 14:08:29.244 DBG incoming message nodeid=o3H9Kk context=node sid=9fZXpAZaiSQf9h83OW-Mh data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::BroadcastDataToStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::BroadcastDataToStreamChannel is transmitting the subscription confirmation
+2026-11-17 14:08:29.245 DBG controller subscribe nodeid=o3H9Kk context=node sid=9fZXpAZaiSQf9h83OW-Mh response.status=success response.streams=[a] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::BroadcastDataToStreamChannel\\\"}\",\"type\":\"confirm_s...(13)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:29.245 DBG subscribed nodeid=o3H9Kk context=node sid=9fZXpAZaiSQf9h83OW-Mh identifier="{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}"
+2026-11-17 14:08:29.245 DBG subscribing nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:29.246 DBG subscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:29.246 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=9fZXpAZaiSQf9h83OW-Mh identifier="{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}" stream=a
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:08:29.247085 #59] DEBUG -- : [ActionCable] Broadcasting to a: "<script>alert('Message!');</script>"
+2026-11-17 14:08:29.247 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:29.247 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=a payload.data="\"\\u003cscript\\u003ealert('Message!');\\u003c/script\\u003e\""
+2026-11-17 14:08:29.247 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=a message.stream=a message.data="\"\\u003cscript\\u003ealert('Message!');\\u003c/script\\u003e\""
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}", "message"=>"<script>alert('Message!');</script>"}
+2026-11-17 14:08:29.750 DBG WebSocket closed nodeid=o3H9Kk context=node sid=9fZXpAZaiSQf9h83OW-Mh error="websocket: close 1000 (normal)"
+2026-11-17 14:08:29.750 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=a
+[35m  Broadcast custom string                                        [0m[32m PASS[0m (0.56s)
+
+Broadcast data to stream
+2026-11-17 14:08:29.750 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:29.750 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=9fZXpAZaiSQf9h83OW-Mh channels=1
+2026-11-17 14:08:29.751 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=9fZXpAZaiSQf9h83OW-Mh
+2026-11-17 14:08:29.751 DBG WebSocket session completed nodeid=o3H9Kk sid=9fZXpAZaiSQf9h83OW-Mh
+2026-11-17 14:08:29.751 DBG disconnect nodeid=o3H9Kk context=node sid=9fZXpAZaiSQf9h83OW-Mh ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::BroadcastDataToStreamChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:29.755 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=9fZXpAZaiSQf9h83OW-Mh
+2026-11-17 14:08:29.797 DBG WebSocket session established nodeid=o3H9Kk sid=yQznZC3XU-rNo0ac4VL8X
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:29.800 DBG controller authenticate nodeid=o3H9Kk context=node sid=yQznZC3XU-rNo0ac4VL8X response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"yQznZC3XU-rNo0ac4VL8X\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:29.800 DBG registered nodeid=o3H9Kk context=node component=hub sid=yQznZC3XU-rNo0ac4VL8X ids={}
+2026-11-17 14:08:29.800 DBG incoming message nodeid=o3H9Kk context=node sid=yQznZC3XU-rNo0ac4VL8X data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::BroadcastDataToStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::BroadcastDataToStreamChannel is transmitting the subscription confirmation
+2026-11-17 14:08:29.802 DBG controller subscribe nodeid=o3H9Kk context=node sid=yQznZC3XU-rNo0ac4VL8X response.status=success response.streams=[a] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::BroadcastDataToStreamChannel\\\"}\",\"type\":\"confirm_s...(13)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:29.802 DBG subscribed nodeid=o3H9Kk context=node sid=yQznZC3XU-rNo0ac4VL8X identifier="{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}"
+2026-11-17 14:08:29.802 DBG subscribing nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:29.802 DBG subscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:29.802 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=yQznZC3XU-rNo0ac4VL8X identifier="{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}" stream=a
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:08:29.803534 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>{:user_id=>1, :status=>"left", :meta=>{:connection_time=>"10s"}}}
+2026-11-17 14:08:29.803 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:29.803 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=a payload.data="{\"data\":{\"user_id\":1,\"status\":\"left\",\"meta\":{\"connection_time\":\"10s\"}}}"
+2026-11-17 14:08:29.803 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":{\"user_id\":1,\"status\":\"left\",\"meta\":{\"connection_time\":\"10s\"}}}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}", "message"=>{"data"=>{"meta"=>{"connection_time"=>"10s"}, "status"=>"left", "user_id"=>1}}}
+2026-11-17 14:08:30.308 DBG WebSocket closed nodeid=o3H9Kk context=node sid=yQznZC3XU-rNo0ac4VL8X error="websocket: close 1000 (normal)"
+2026-11-17 14:08:30.308 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=a
+[35m  Broadcast object                                               [0m[32m PASS[0m (0.56s)
+2026-11-17 14:08:30.309 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=a
+
+Subscription with params
+2026-11-17 14:08:30.309 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=yQznZC3XU-rNo0ac4VL8X channels=1
+2026-11-17 14:08:30.309 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=yQznZC3XU-rNo0ac4VL8X
+2026-11-17 14:08:30.309 DBG WebSocket session completed nodeid=o3H9Kk sid=yQznZC3XU-rNo0ac4VL8X
+2026-11-17 14:08:30.309 DBG disconnect nodeid=o3H9Kk context=node sid=yQznZC3XU-rNo0ac4VL8X ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::BroadcastDataToStreamChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:30.314 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=yQznZC3XU-rNo0ac4VL8X
+2026-11-17 14:08:30.356 DBG WebSocket session established nodeid=o3H9Kk sid=OWOj3wpz0XTWdnHH4V4eF
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:30.358 DBG controller authenticate nodeid=o3H9Kk context=node sid=OWOj3wpz0XTWdnHH4V4eF response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"OWOj3wpz0XTWdnHH4V4eF\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:30.358 DBG registered nodeid=o3H9Kk context=node component=hub sid=OWOj3wpz0XTWdnHH4V4eF ids={}
+2026-11-17 14:08:30.359 DBG incoming message nodeid=o3H9Kk context=node sid=OWOj3wpz0XTWdnHH4V4eF data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionWithParamsChannel\",\"id\":1}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionWithParamsChannel","id":1}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::SubscriptionWithParamsChannel is transmitting the subscription confirmation
+2026-11-17 14:08:30.360 DBG controller subscribe nodeid=o3H9Kk context=node sid=OWOj3wpz0XTWdnHH4V4eF response.status=success response.streams=[] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SubscriptionWithParamsChannel\\\",\\\"id\\\":1}\",\"type\":...(23)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:30.360 DBG subscribed nodeid=o3H9Kk context=node sid=OWOj3wpz0XTWdnHH4V4eF identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionWithParamsChannel\",\"id\":1}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionWithParamsChannel\",\"id\":1}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:30.361 DBG incoming message nodeid=o3H9Kk context=node sid=OWOj3wpz0XTWdnHH4V4eF data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionWithParamsChannel\",\"id\":2}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionWithParamsChannel","id":2}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::SubscriptionWithParamsChannel is transmitting the subscription confirmation
+2026-11-17 14:08:30.363 DBG controller subscribe nodeid=o3H9Kk context=node sid=OWOj3wpz0XTWdnHH4V4eF response.status=success response.streams=[] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SubscriptionWithParamsChannel\\\",\\\"id\\\":2}\",\"type\":...(23)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:30.363 DBG subscribed nodeid=o3H9Kk context=node sid=OWOj3wpz0XTWdnHH4V4eF identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionWithParamsChannel\",\"id\":2}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionWithParamsChannel\",\"id\":2}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:30.866 DBG WebSocket closed nodeid=o3H9Kk context=node sid=OWOj3wpz0XTWdnHH4V4eF error="websocket: close 1000 (normal)"
+2026-11-17 14:08:30.866 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=OWOj3wpz0XTWdnHH4V4eF channels=2
+2026-11-17 14:08:30.866 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=OWOj3wpz0XTWdnHH4V4eF
+[35m  Client subscribes to the same channel with different params    [0m[32m PASS[0m (0.56s)
+2026-11-17 14:08:30.866 DBG WebSocket session completed nodeid=o3H9Kk sid=OWOj3wpz0XTWdnHH4V4eF
+
+2026-11-17 14:08:30.866 DBG disconnect nodeid=o3H9Kk context=node sid=OWOj3wpz0XTWdnHH4V4eF ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=2
+Stop streams
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SubscriptionWithParamsChannel","id":2}", "{"channel":"Anyt::TestChannels::SubscriptionWithParamsChannel","id":1}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:30.871 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=OWOj3wpz0XTWdnHH4V4eF
+2026-11-17 14:08:30.913 DBG WebSocket session established nodeid=o3H9Kk sid=o-G1biGV_drH5jCAZU4-4
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:30.916 DBG controller authenticate nodeid=o3H9Kk context=node sid=o-G1biGV_drH5jCAZU4-4 response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"o-G1biGV_drH5jCAZU4-4\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:30.916 DBG registered nodeid=o3H9Kk context=node component=hub sid=o-G1biGV_drH5jCAZU4-4 ids={}
+2026-11-17 14:08:30.916 DBG incoming message nodeid=o3H9Kk context=node sid=o-G1biGV_drH5jCAZU4-4 data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::StopStreamsChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::StopStreamsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::StopStreamsChannel is transmitting the subscription confirmation
+2026-11-17 14:08:30.918 DBG controller subscribe nodeid=o3H9Kk context=node sid=o-G1biGV_drH5jCAZU4-4 response.status=success response.streams="[a b]" response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::StopStreamsChannel\\\"}\",\"type\":\"confirm_subscriptio...(3)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:30.918 DBG subscribed nodeid=o3H9Kk context=node sid=o-G1biGV_drH5jCAZU4-4 identifier="{\"channel\":\"Anyt::TestChannels::StopStreamsChannel\"}"
+2026-11-17 14:08:30.918 DBG subscribing nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:30.918 DBG subscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:30.918 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=o-G1biGV_drH5jCAZU4-4 identifier="{\"channel\":\"Anyt::TestChannels::StopStreamsChannel\"}" stream=a
+2026-11-17 14:08:30.918 DBG subscribing nodeid=o3H9Kk context=pubsub channel=b
+2026-11-17 14:08:30.918 DBG subscribe nodeid=o3H9Kk context=pubsub channel=b
+2026-11-17 14:08:30.918 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=o-G1biGV_drH5jCAZU4-4 identifier="{\"channel\":\"Anyt::TestChannels::StopStreamsChannel\"}" stream=b
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StopStreamsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:08:30.919803 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+2026-11-17 14:08:30.920 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:30.920 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=a payload.data="{\"data\":\"X\"}"
+2026-11-17 14:08:30.920 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":\"X\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StopStreamsChannel\"}", "message"=>{"data"=>"X"}}
+2026-11-17 14:08:30.921 DBG incoming message nodeid=o3H9Kk context=node sid=o-G1biGV_drH5jCAZU4-4 data.command=message data.identifier="{\"channel\":\"Anyt::TestChannels::StopStreamsChannel\"}" data.data="{\"action\":\"unfollow\",\"name\":\"a\"}" data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "message", identifier: "{"channel":"Anyt::TestChannels::StopStreamsChannel"}", connection_identifiers: "{}", data: "{"action":"unfollow","name":"a"}", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::StopStreamsChannel#unfollow({"name"=>"a"})
+2026-11-17 14:08:30.922 DBG controller perform nodeid=o3H9Kk context=node sid=o-G1biGV_drH5jCAZU4-4 response.status=success response.streams=[] response.transmissions=[] response.stopped_streams=[a] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:30.922 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:30.923 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:30.923 DBG unsubscribed nodeid=o3H9Kk context=node component=hub sid=o-G1biGV_drH5jCAZU4-4 identifier="{\"channel\":\"Anyt::TestChannels::StopStreamsChannel\"}" stream=a
+D, [2026-11-17T14:08:31.121661 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"Y"}
+2026-11-17 14:08:31.122 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:31.122 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=a payload.data="{\"data\":\"Y\"}"
+2026-11-17 14:08:31.122 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":\"Y\"}"
+2026-11-17 14:08:31.122 DBG no sessions nodeid=o3H9Kk context=node component=hub gate=12 stream=a
+D, [2026-11-17T14:08:31.322858 #59] DEBUG -- : [ActionCable] Broadcasting to b: {:data=>"Z"}
+2026-11-17 14:08:31.323 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:31.323 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=b payload.data="{\"data\":\"Z\"}"
+2026-11-17 14:08:31.323 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=5 stream=b message.stream=b message.data="{\"data\":\"Z\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StopStreamsChannel\"}", "message"=>{"data"=>"Z"}}
+2026-11-17 14:08:31.826 DBG WebSocket closed nodeid=o3H9Kk context=node sid=o-G1biGV_drH5jCAZU4-4 error="websocket: close 1000 (normal)"
+2026-11-17 14:08:31.826 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=b
+[35m  Client unsubscribes from the stream                            [0m[32m PASS[0m (0.96s)
+2026-11-17 14:08:31.826 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=b
+
+Subscription perform methods
+2026-11-17 14:08:31.827 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=o-G1biGV_drH5jCAZU4-4 channels=1
+2026-11-17 14:08:31.827 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=o-G1biGV_drH5jCAZU4-4
+2026-11-17 14:08:31.827 DBG WebSocket session completed nodeid=o3H9Kk sid=o-G1biGV_drH5jCAZU4-4
+2026-11-17 14:08:31.827 DBG disconnect nodeid=o3H9Kk context=node sid=o-G1biGV_drH5jCAZU4-4 ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::StopStreamsChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:31.832 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=o-G1biGV_drH5jCAZU4-4
+2026-11-17 14:08:31.874 DBG WebSocket session established nodeid=o3H9Kk sid=AAwlwxKFF5CpjGcV0YRUs
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:31.876 DBG controller authenticate nodeid=o3H9Kk context=node sid=AAwlwxKFF5CpjGcV0YRUs response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"AAwlwxKFF5CpjGcV0YRUs\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:31.877 DBG registered nodeid=o3H9Kk context=node component=hub sid=AAwlwxKFF5CpjGcV0YRUs ids={}
+2026-11-17 14:08:31.877 DBG incoming message nodeid=o3H9Kk context=node sid=AAwlwxKFF5CpjGcV0YRUs data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionPerformMethodsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::SubscriptionPerformMethodsChannel is transmitting the subscription confirmation
+2026-11-17 14:08:31.878 DBG controller subscribe nodeid=o3H9Kk context=node sid=AAwlwxKFF5CpjGcV0YRUs response.status=success response.streams=[] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\\\"}\",\"type\":\"conf...(18)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:31.879 DBG subscribed nodeid=o3H9Kk context=node sid=AAwlwxKFF5CpjGcV0YRUs identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:31.880 DBG incoming message nodeid=o3H9Kk context=node sid=AAwlwxKFF5CpjGcV0YRUs data.command=message data.identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}" data.data="{\"action\":\"tick\"}" data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "message", identifier: "{"channel":"Anyt::TestChannels::SubscriptionPerformMethodsChannel"}", connection_identifiers: "{}", data: "{"action":"tick"}", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::SubscriptionPerformMethodsChannel#tick
+Anyt::TestChannels::SubscriptionPerformMethodsChannel transmitting "tock"
+2026-11-17 14:08:31.881 DBG controller perform nodeid=o3H9Kk context=node sid=AAwlwxKFF5CpjGcV0YRUs response.status=success response.streams=[] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\\\"}\",\"message\":\"t...(5)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}", "message"=>"tock"}
+2026-11-17 14:08:32.384 DBG WebSocket closed nodeid=o3H9Kk context=node sid=AAwlwxKFF5CpjGcV0YRUs error="websocket: close 1000 (normal)"
+2026-11-17 14:08:32.384 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=AAwlwxKFF5CpjGcV0YRUs channels=1
+[35m  Client perform actions without arguments                       [0m2026-11-17 14:08:32.384 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=AAwlwxKFF5CpjGcV0YRUs
+[32m PASS[0m (0.56s)
+
+Subscription perform methods
+2026-11-17 14:08:32.384 DBG WebSocket session completed nodeid=o3H9Kk sid=AAwlwxKFF5CpjGcV0YRUs
+2026-11-17 14:08:32.384 DBG disconnect nodeid=o3H9Kk context=node sid=AAwlwxKFF5CpjGcV0YRUs ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SubscriptionPerformMethodsChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:32.389 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=AAwlwxKFF5CpjGcV0YRUs
+2026-11-17 14:08:32.431 DBG WebSocket session established nodeid=o3H9Kk sid=P-tIzFE9q4uJGClq9ijow
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:32.434 DBG controller authenticate nodeid=o3H9Kk context=node sid=P-tIzFE9q4uJGClq9ijow response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"P-tIzFE9q4uJGClq9ijow\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:32.434 DBG registered nodeid=o3H9Kk context=node component=hub sid=P-tIzFE9q4uJGClq9ijow ids={}
+2026-11-17 14:08:32.434 DBG incoming message nodeid=o3H9Kk context=node sid=P-tIzFE9q4uJGClq9ijow data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionPerformMethodsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::SubscriptionPerformMethodsChannel is transmitting the subscription confirmation
+2026-11-17 14:08:32.436 DBG controller subscribe nodeid=o3H9Kk context=node sid=P-tIzFE9q4uJGClq9ijow response.status=success response.streams=[] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\\\"}\",\"type\":\"conf...(18)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:32.436 DBG subscribed nodeid=o3H9Kk context=node sid=P-tIzFE9q4uJGClq9ijow identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:32.437 DBG incoming message nodeid=o3H9Kk context=node sid=P-tIzFE9q4uJGClq9ijow data.command=message data.identifier="{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}" data.data="{\"action\":\"echo\",\"text\":\"hello\"}" data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "message", identifier: "{"channel":"Anyt::TestChannels::SubscriptionPerformMethodsChannel"}", connection_identifiers: "{}", data: "{"action":"echo","text":"hello"}", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::SubscriptionPerformMethodsChannel#echo({"text"=>"hello"})
+Anyt::TestChannels::SubscriptionPerformMethodsChannel transmitting {:response=>"hello"}
+2026-11-17 14:08:32.438 DBG controller perform nodeid=o3H9Kk context=node sid=P-tIzFE9q4uJGClq9ijow response.status=success response.streams=[] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\\\"}\",\"message\":{\"...(19)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}", "message"=>{"response"=>"hello"}}
+[35m  Client perform actions with arguments                          [0m[32m PASS[0m (0.56s)
+2026-11-17 14:08:32.940 DBG WebSocket closed nodeid=o3H9Kk context=node sid=P-tIzFE9q4uJGClq9ijow error="websocket: close 1000 (normal)"
+2026-11-17 14:08:32.940 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=P-tIzFE9q4uJGClq9ijow channels=1
+2026-11-17 14:08:32.941 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=P-tIzFE9q4uJGClq9ijow
+
+Single stream
+2026-11-17 14:08:32.941 DBG WebSocket session completed nodeid=o3H9Kk sid=P-tIzFE9q4uJGClq9ijow
+2026-11-17 14:08:32.941 DBG disconnect nodeid=o3H9Kk context=node sid=P-tIzFE9q4uJGClq9ijow ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SubscriptionPerformMethodsChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:32.945 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=P-tIzFE9q4uJGClq9ijow
+2026-11-17 14:08:32.987 DBG WebSocket session established nodeid=o3H9Kk sid=F6q44lys2Rjm0U6bhspvq
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:32.990 DBG controller authenticate nodeid=o3H9Kk context=node sid=F6q44lys2Rjm0U6bhspvq response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"F6q44lys2Rjm0U6bhspvq\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:32.990 DBG registered nodeid=o3H9Kk context=node component=hub sid=F6q44lys2Rjm0U6bhspvq ids={}
+2026-11-17 14:08:32.990 DBG incoming message nodeid=o3H9Kk context=node sid=F6q44lys2Rjm0U6bhspvq data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SingleStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::SingleStreamChannel is transmitting the subscription confirmation
+2026-11-17 14:08:32.992 DBG controller subscribe nodeid=o3H9Kk context=node sid=F6q44lys2Rjm0U6bhspvq response.status=success response.streams=[a] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SingleStreamChannel\\\"}\",\"type\":\"confirm_subscripti...(4)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:32.992 DBG subscribed nodeid=o3H9Kk context=node sid=F6q44lys2Rjm0U6bhspvq identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}"
+2026-11-17 14:08:32.992 DBG subscribing nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:32.992 DBG subscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:32.992 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=F6q44lys2Rjm0U6bhspvq identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}" stream=a
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:08:32.993550 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+2026-11-17 14:08:32.993 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:32.993 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=a payload.data="{\"data\":\"X\"}"
+2026-11-17 14:08:32.994 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":\"X\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "message"=>{"data"=>"X"}}
+2026-11-17 14:08:32.994 DBG incoming message nodeid=o3H9Kk context=node sid=F6q44lys2Rjm0U6bhspvq data.command=unsubscribe data.identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "unsubscribe", identifier: "{"channel":"Anyt::TestChannels::SingleStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Unsubscribing from channel: {"channel":"Anyt::TestChannels::SingleStreamChannel"}
+2026-11-17 14:08:32.996 DBG controller unsubscribe nodeid=o3H9Kk context=node sid=F6q44lys2Rjm0U6bhspvq response.status=success response.streams=[] response.transmissions=[] response.stopped_streams=[] response.stop_all_streams=true response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:32.996 DBG unsubscribed nodeid=o3H9Kk context=node sid=F6q44lys2Rjm0U6bhspvq identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}"
+2026-11-17 14:08:32.996 DBG unsubscribed nodeid=o3H9Kk context=node component=hub sid=F6q44lys2Rjm0U6bhspvq identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}"
+2026-11-17 14:08:32.996 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:32.996 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=a
+D, [2026-11-17T14:08:33.995404 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"Y"}
+2026-11-17 14:08:33.996 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:33.996 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=a payload.data="{\"data\":\"Y\"}"
+2026-11-17 14:08:33.996 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":\"Y\"}"
+2026-11-17 14:08:33.996 DBG no sessions nodeid=o3H9Kk context=node component=hub gate=12 stream=a
+2026-11-17 14:08:34.997 DBG WebSocket closed nodeid=o3H9Kk context=node sid=F6q44lys2Rjm0U6bhspvq error="websocket: close 1000 (normal)"
+2026-11-17 14:08:34.997 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=F6q44lys2Rjm0U6bhspvq
+2026-11-17 14:08:34.997 DBG WebSocket session completed nodeid=o3H9Kk sid=F6q44lys2Rjm0U6bhspvq
+2026-11-17 14:08:34.997 DBG disconnect nodeid=o3H9Kk context=node sid=F6q44lys2Rjm0U6bhspvq ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=0
+[35m  Client does not receive messages from the stream after removing subscription[0m[32m PASS[0m (2.06s)
+
+Single stream
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:35.002 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=F6q44lys2Rjm0U6bhspvq
+2026-11-17 14:08:35.044 DBG WebSocket session established nodeid=o3H9Kk sid=MlQtBqN3SNaQsph-KWp3k
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:35.047 DBG controller authenticate nodeid=o3H9Kk context=node sid=MlQtBqN3SNaQsph-KWp3k response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"MlQtBqN3SNaQsph-KWp3k\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:35.047 DBG registered nodeid=o3H9Kk context=node component=hub sid=MlQtBqN3SNaQsph-KWp3k ids={}
+2026-11-17 14:08:35.047 DBG incoming message nodeid=o3H9Kk context=node sid=MlQtBqN3SNaQsph-KWp3k data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SingleStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::SingleStreamChannel is transmitting the subscription confirmation
+2026-11-17 14:08:35.049 DBG controller subscribe nodeid=o3H9Kk context=node sid=MlQtBqN3SNaQsph-KWp3k response.status=success response.streams=[a] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SingleStreamChannel\\\"}\",\"type\":\"confirm_subscripti...(4)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:35.049 DBG subscribed nodeid=o3H9Kk context=node sid=MlQtBqN3SNaQsph-KWp3k identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}"
+2026-11-17 14:08:35.049 DBG subscribing nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:35.049 DBG subscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:35.049 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=MlQtBqN3SNaQsph-KWp3k identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}" stream=a
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:08:35.050506 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+2026-11-17 14:08:35.050 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:35.050 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=a payload.data="{\"data\":\"X\"}"
+2026-11-17 14:08:35.050 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":\"X\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "message"=>{"data"=>"X"}}
+D, [2026-11-17T14:08:35.051724 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"Y"}
+2026-11-17 14:08:35.051 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:35.051 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=a payload.data="{\"data\":\"Y\"}"
+2026-11-17 14:08:35.052 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":\"Y\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "message"=>{"data"=>"Y"}}
+2026-11-17 14:08:35.554 DBG WebSocket closed nodeid=o3H9Kk context=node sid=MlQtBqN3SNaQsph-KWp3k error="websocket: close 1000 (normal)"
+2026-11-17 14:08:35.554 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=a
+[35m  Client receives messages from the stream                       [0m[32m PASS[0m (0.56s)
+
+Single stream
+2026-11-17 14:08:35.554 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:35.554 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=MlQtBqN3SNaQsph-KWp3k channels=1
+2026-11-17 14:08:35.554 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=MlQtBqN3SNaQsph-KWp3k
+2026-11-17 14:08:35.555 DBG WebSocket session completed nodeid=o3H9Kk sid=MlQtBqN3SNaQsph-KWp3k
+2026-11-17 14:08:35.555 DBG disconnect nodeid=o3H9Kk context=node sid=MlQtBqN3SNaQsph-KWp3k ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=1
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SingleStreamChannel"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:35.559 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=MlQtBqN3SNaQsph-KWp3k
+2026-11-17 14:08:35.600 DBG WebSocket session established nodeid=o3H9Kk sid=t1zN5nhfop1qSFfFdhLV3
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:35.603 DBG controller authenticate nodeid=o3H9Kk context=node sid=t1zN5nhfop1qSFfFdhLV3 response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"t1zN5nhfop1qSFfFdhLV3\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:35.603 DBG registered nodeid=o3H9Kk context=node component=hub sid=t1zN5nhfop1qSFfFdhLV3 ids={}
+2026-11-17 14:08:35.603 DBG incoming message nodeid=o3H9Kk context=node sid=t1zN5nhfop1qSFfFdhLV3 data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SingleStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::SingleStreamChannel is transmitting the subscription confirmation
+2026-11-17 14:08:35.605 DBG controller subscribe nodeid=o3H9Kk context=node sid=t1zN5nhfop1qSFfFdhLV3 response.status=success response.streams=[a] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SingleStreamChannel\\\"}\",\"type\":\"confirm_subscripti...(4)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:35.605 DBG subscribed nodeid=o3H9Kk context=node sid=t1zN5nhfop1qSFfFdhLV3 identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}"
+2026-11-17 14:08:35.605 DBG subscribing nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:35.606 DBG subscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:35.606 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=t1zN5nhfop1qSFfFdhLV3 identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}" stream=a
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "type"=>"confirm_subscription"}
+2026-11-17 14:08:35.607 DBG incoming message nodeid=o3H9Kk context=node sid=t1zN5nhfop1qSFfFdhLV3 data.command=subscribe data.identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\",\"some_param\":\"test\"}" data.data=<nil> data.history="{Since:0 Streams:map[]}"
+RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SingleStreamChannel","some_param":"test"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Anyt::TestChannels::SingleStreamChannel is transmitting the subscription confirmation
+2026-11-17 14:08:35.609 DBG controller subscribe nodeid=o3H9Kk context=node sid=t1zN5nhfop1qSFfFdhLV3 response.status=success response.streams=[a] response.transmissions="[{\"identifier\":\"{\\\"channel\\\":\\\"Anyt::TestChannels::SingleStreamChannel\\\",\\\"some_param\\\":\\\"test\\\"}\",\"t...(28)]" response.stopped_streams=[] response.stop_all_streams=false response.broadcasts=[] response.disconnect=false response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:35.609 DBG subscribed nodeid=o3H9Kk context=node sid=t1zN5nhfop1qSFfFdhLV3 identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\",\"some_param\":\"test\"}"
+2026-11-17 14:08:35.609 DBG subscribed nodeid=o3H9Kk context=node component=hub sid=t1zN5nhfop1qSFfFdhLV3 identifier="{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\",\"some_param\":\"test\"}" stream=a
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\",\"some_param\":\"test\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:08:35.612397 #59] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"XX"}
+2026-11-17 14:08:35.612 DBG received pubsub message nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:35.612 DBG incoming broadcast message nodeid=o3H9Kk context=node payload.stream=a payload.data="{\"data\":\"XX\"}"
+2026-11-17 14:08:35.612 DBG schedule broadcast nodeid=o3H9Kk context=node component=hub gate=12 stream=a message.stream=a message.data="{\"data\":\"XX\"}"
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "message"=>{"data"=>"XX"}}
+Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\",\"some_param\":\"test\"}", "message"=>{"data"=>"XX"}}
+2026-11-17 14:08:36.115 DBG WebSocket closed nodeid=o3H9Kk context=node sid=t1zN5nhfop1qSFfFdhLV3 error="websocket: close 1000 (normal)"
+2026-11-17 14:08:36.116 DBG unsubscribing nodeid=o3H9Kk context=pubsub channel=a
+[35m  Client receives multiple messages when subscribed to the same channel
+    with different params[0m[32m PASS[0m (0.56s)
+
+Welcome
+2026-11-17 14:08:36.116 DBG unsubscribe nodeid=o3H9Kk context=pubsub channel=a
+2026-11-17 14:08:36.116 DBG unsubscribed from broker streams nodeid=o3H9Kk context=node sid=t1zN5nhfop1qSFfFdhLV3 channels=2
+2026-11-17 14:08:36.117 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=t1zN5nhfop1qSFfFdhLV3
+2026-11-17 14:08:36.117 DBG WebSocket session completed nodeid=o3H9Kk sid=t1zN5nhfop1qSFfFdhLV3
+2026-11-17 14:08:36.117 DBG disconnect nodeid=o3H9Kk context=node sid=t1zN5nhfop1qSFfFdhLV3 ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=2
+RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SingleStreamChannel"}", "{"channel":"Anyt::TestChannels::SingleStreamChannel","some_param":"test"}"], env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Disconnected
+2026-11-17 14:08:36.121 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=t1zN5nhfop1qSFfFdhLV3
+2026-11-17 14:08:36.163 DBG WebSocket session established nodeid=o3H9Kk sid=FhjxDzX-PqJ1g10YSnaS2
+RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "https://localhost:8443/cable", headers: {"REMOTE_ADDR"=>"127.0.0.1"}, cstate: {}, istate: {}>>
+Connected
+2026-11-17 14:08:36.166 DBG controller authenticate nodeid=o3H9Kk context=node sid=FhjxDzX-PqJ1g10YSnaS2 response.status=success response.transmissions="[{\"type\":\"welcome\",\"sid\":\"FhjxDzX-PqJ1g10YSnaS2\"}]" response.broadcasts=[] response.identifier={} response.disconnect_interest=0 response.cstate=[] response.istate=[] err=<nil>
+2026-11-17 14:08:36.166 DBG registered nodeid=o3H9Kk context=node component=hub sid=FhjxDzX-PqJ1g10YSnaS2 ids={}
+Message received: {"type"=>"welcome", "sid"=>"FhjxDzX-PqJ1g10YSnaS2"}
+2026-11-17 14:08:36.668 DBG WebSocket closed nodeid=o3H9Kk context=node sid=FhjxDzX-PqJ1g10YSnaS2 error="websocket: close 1000 (normal)"
+2026-11-17 14:08:36.668 DBG unregistered nodeid=o3H9Kk context=node component=hub sid=FhjxDzX-PqJ1g10YSnaS2
+[35m  Client receives "welcome" message                              [0m[32m PASS[0m (0.55s)
+2026-11-17 14:08:36.668 DBG WebSocket session completed nodeid=o3H9Kk sid=FhjxDzX-PqJ1g10YSnaS2
+2026-11-17 14:08:36.668 DBG disconnect nodeid=o3H9Kk context=node sid=FhjxDzX-PqJ1g10YSnaS2 ids={} url=https://localhost:8443/cable headers=[REMOTE_ADDR] subscriptions=0
+
+Finished in 38.00932s
+32 tests, 83 assertions, [32m0 failures, 0 errors, [0m[33m0 skips[0m
+2026-11-17 14:08:36.669 ERR controller disconnect failed nodeid=o3H9Kk context=node sid=FhjxDzX-PqJ1g10YSnaS2 error="rpc error: code = Canceled desc = CANCELLED"
+2026-11-17 14:08:36.669 DBG controller disconnect succeeded nodeid=o3H9Kk context=node sid=FhjxDzX-PqJ1g10YSnaS2
+2026-11-17 14:08:36.670 DBG disconnected nodeid=o3H9Kk context=rpc impl=grpc addr=127.0.0.1:50051
+RPC server stopped
+Terminate PID: 142
+2026-11-17 14:08:36.671 INF Shutting down... (hit Ctrl-C to stop immediately or wait for up to 30s for graceful shutdown) nodeid=o3H9Kk
+2026-11-17 14:08:36.672 WRN connection is lost, trying to reconnect immediately nodeid=o3H9Kk context=rpc impl=grpc
+2026-11-17 14:08:36.672 INF all active RPC calls finished nodeid=o3H9Kk context=rpc
+2026-11-17 14:08:36.672 DBG shutting down Redis pub/sub nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:36.672 DBG close pub/sub channel nodeid=o3H9Kk context=broadcast provider=redis
+2026-11-17 14:08:36.672 DBG shutting down Redis pub/sub nodeid=o3H9Kk context=pubsub
+2026-11-17 14:08:36.673 DBG close pub/sub channel nodeid=o3H9Kk context=pubsub

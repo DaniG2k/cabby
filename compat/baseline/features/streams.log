@@ -1,0 +1,7 @@
+[info] [2026-11-17T14:20:06+00:00]  Launching background process: ./dist/anycable-go --public --metrics_rotate_interval=1 --metrics_log --metrics_log_filter=rpc_call_total,rpc_error_total,rpc_retries_total
+[info] [2026-11-17T14:20:06+00:00]  Waiting for TCP server to start at 8080
+[info] [2026-11-17T14:20:07+00:00]  TCP server is listening at 8080
+[info] [2026-11-17T14:20:07+00:00]  Running command: bundle exec wsdirector ws://localhost:8080/cable -i [{"client":{"protocol":"action_cable","name":"streamer","actions":[{"subscribe":{"channel":"$pubsub","params":{"stream_name":"stream/2023"}}}]}}]
+[info] [2026-11-17T14:20:07+00:00]  Finished
+[info] [2026-11-17T14:20:07+00:00]  Wait for 2s
+All OK 👍

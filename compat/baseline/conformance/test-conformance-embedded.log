@@ -1,0 +1,744 @@
+fatal: detected dubious ownership in repository at '/src'
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory /src
+fatal: detected dubious ownership in repository at '/src'
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory /src
+go build  -tags "mrb" -race -o tmp/anycable-embedded-test cmd/embedded-cable/main.go
+\
+ANYCABLE_BROADCAST_ADAPTER=http ANYCABLE_HTTP_BROADCAST_SECRET=any_secret \
+ANYCABLE_HTTP_BROADCAST_URL=http://localhost:8080/broadcast \
+ANYCABLE_HTTP_RPC_SECRET=rpc_secret ANYCABLE_HTTP_RPC_MOUNT_PATH=/_anycable \
+ANYCABLE_RPC_HOST=http://localhost:9292/_anycable \
+ANYCABLE_HEADERS=cookie,x-api-token \
+bundle exec anyt -c "tmp/anycable-embedded-test" --target-url="ws://localhost:8080/cable" --require=etc/anyt/broadcast_tests/*.rb
+/bundle/ruby/2.7.0/gems/anyway_config-2.9.1/lib/.rbnext/3.4/anyway/type_casting.rb:120: warning: Pattern matching is experimental, and the behavior may change in future versions of Ruby!
+/bundle/ruby/2.7.0/gems/anyway_config-2.9.1/lib/anyway/rbs.rb:40: warning: Pattern matching is experimental, and the behavior may change in future versions of Ruby!
+Anyway Config was loaded before Rails. Activating Anyway Config Rails plugins now.
+NOTE: Already loaded configs were provisioned without Rails-specific sources.
+Starting AnyT v1.4.0 (pid: 58)
+D, [2026-11-17T14:13:52.194253 #58] DEBUG -- : Running command: bundle exec puma /bundle/ruby/2.7.0/gems/anyt-core-1.4.0/lib/anyt/dummy/config.ru -t 5
+D, [2026-11-17T14:13:52.200083 #58] DEBUG -- : Command PID: 59
+Puma starting in single mode...
+* Puma version: 6.6.1 ("Return to Forever")
+* Ruby version: ruby 2.7.8p225 (2023-03-30 revision 1f4d455848) [x86_64-linux]
+*  Min threads: 5
+*  Max threads: 5
+*  Environment: development
+*          PID: 59
+/bundle/ruby/2.7.0/gems/anyway_config-2.9.1/lib/.rbnext/3.4/anyway/type_casting.rb:120: warning: Pattern matching is experimental, and the behavior may change in future versions of Ruby!
+/bundle/ruby/2.7.0/gems/anyway_config-2.9.1/lib/anyway/rbs.rb:40: warning: Pattern matching is experimental, and the behavior may change in future versions of Ruby!
+* Listening on http://0.0.0.0:9292
+Use Ctrl-C to stop
+D, [2026-11-17T14:13:54.202950 #58] DEBUG -- : Running command: tmp/anycable-embedded-test
+D, [2026-11-17T14:13:54.209646 #58] DEBUG -- : Command PID: 70
+DEPRECATION WARNING: http_broadcast_secret option is deprecated
+and will be removed in the next major release of anycable-go.
+Use broadcast_key instead.
+{"time":"2026-11-17T14:13:54.366484552Z","level":"INFO","msg":"Starting embedded AnyCable 1.6.21 (with mruby 1.2.0 (2015-11-17)) (open file limit: 524287)"}
+{"time":"2026-11-17T14:13:54.366681889Z","level":"INFO","msg":"Using channels router: $pubsub"}
+{"time":"2026-11-17T14:13:54.367249946Z","level":"INFO","msg":"Using no-op (legacy) broker"}
+{"time":"2026-11-17T14:13:54.367370781Z","level":"INFO","msg":"Starting Redis pub/sub: cabby-ref-redis:6379","context":"pubsub"}
+{"time":"2026-11-17T14:13:54.36763892Z","level":"INFO","msg":"RPC controller initialized: http://localhost:9292/_anycable (concurrency: 28, impl: http, enable_tls: false, proto_versions: v1, proxy_headers: cookie,x-api-token, proxy_cookies: <all>)","context":"rpc"}
+{"time":"2026-11-17T14:13:54.37421201Z","level":"INFO","msg":"connected","context":"pubsub","channel":"__anycable_internal__"}
+D, [2026-11-17T14:13:56.212619 #58] DEBUG -- : Run tests against: ws://localhost:8080/cable
+Started with run options --seed 53942
+
+Welcome
+I, [2026-11-17T14:13:56.254034 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:13:56 +0000
+D, [2026-11-17T14:13:56.254712 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:56.255254 #59] DEBUG -- : Connected
+D, [2026-11-17T14:13:56.257169 #58] DEBUG -- : Message received: {"type"=>"welcome"}
+[35m  Client receives "welcome" message                              [0m[32m PASS[0m (0.52s)
+
+Subscription perform methods
+I, [2026-11-17T14:13:56.760635 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:13:56 +0000
+D, [2026-11-17T14:13:56.761377 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:56.761641 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:13:56.762487 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:13:56 +0000
+D, [2026-11-17T14:13:56.762924 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:56.763024 #59] DEBUG -- : Connected
+I, [2026-11-17T14:13:56.764928 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:13:56 +0000
+D, [2026-11-17T14:13:56.765388 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionPerformMethodsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:56.765673 #59] DEBUG -- : Anyt::TestChannels::SubscriptionPerformMethodsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:13:56.767439 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:13:56.768606 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:13:56 +0000
+D, [2026-11-17T14:13:56.769010 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "message", identifier: "{"channel":"Anyt::TestChannels::SubscriptionPerformMethodsChannel"}", connection_identifiers: "{}", data: "{"action":"tick"}", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+I, [2026-11-17T14:13:56.769396 #59]  INFO -- : Anyt::TestChannels::SubscriptionPerformMethodsChannel#tick
+D, [2026-11-17T14:13:56.769428 #59] DEBUG -- : Anyt::TestChannels::SubscriptionPerformMethodsChannel transmitting "tock"
+D, [2026-11-17T14:13:56.770826 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}", "message"=>"tock"}
+[35m  Client perform actions without arguments                       [0m[32m PASS[0m (0.51s)
+
+Subscription perform methods
+I, [2026-11-17T14:13:57.274205 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:13:57 +0000
+I, [2026-11-17T14:13:57.274743 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:13:57 +0000
+D, [2026-11-17T14:13:57.275567 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SubscriptionPerformMethodsChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:57.275902 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:13:57.276381 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:57.276497 #59] DEBUG -- : Connected
+I, [2026-11-17T14:13:57.281003 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:13:57 +0000
+D, [2026-11-17T14:13:57.281566 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionPerformMethodsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:57.281840 #59] DEBUG -- : Anyt::TestChannels::SubscriptionPerformMethodsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:13:57.283251 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:13:57.284729 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:13:57 +0000
+D, [2026-11-17T14:13:57.285232 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "message", identifier: "{"channel":"Anyt::TestChannels::SubscriptionPerformMethodsChannel"}", connection_identifiers: "{}", data: "{"action":"echo","text":"hello"}", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+I, [2026-11-17T14:13:57.285503 #59]  INFO -- : Anyt::TestChannels::SubscriptionPerformMethodsChannel#echo({"text"=>"hello"})
+D, [2026-11-17T14:13:57.285543 #59] DEBUG -- : Anyt::TestChannels::SubscriptionPerformMethodsChannel transmitting {:response=>"hello"}
+D, [2026-11-17T14:13:57.286996 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionPerformMethodsChannel\"}", "message"=>{"response"=>"hello"}}
+[35m  Client perform actions with arguments                          [0m[32m PASS[0m (0.52s)
+
+Request
+I, [2026-11-17T14:13:57.790578 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:13:57 +0000
+D, [2026-11-17T14:13:57.791120 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SubscriptionPerformMethodsChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:57.791407 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:13:57.792148 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:13:57 +0000
+D, [2026-11-17T14:13:57.792551 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:57.792640 #59] DEBUG -- : Connected
+I, [2026-11-17T14:13:57.794252 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:13:57 +0000
+D, [2026-11-17T14:13:57.794673 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestCChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:57.794875 #59] DEBUG -- : Anyt::TestChannels::RequestCChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:13:57.796389 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestCChannel\"}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:13:57.798303 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:13:57 +0000
+D, [2026-11-17T14:13:57.798769 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:57.798899 #59] DEBUG -- : Connected
+I, [2026-11-17T14:13:57.800377 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:13:57 +0000
+D, [2026-11-17T14:13:57.800778 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestCChannel","id":1}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:57.801028 #59] DEBUG -- : Anyt::TestChannels::RequestCChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:13:57.802312 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestCChannel\",\"id\":1}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:13:57.803902 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:13:57 +0000
+D, [2026-11-17T14:13:57.804378 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestCChannel","id":2}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:57.804612 #59] DEBUG -- : Anyt::TestChannels::RequestCChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:13:57.805857 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestCChannel\",\"id\":2}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:13:58.308958 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:13:58 +0000
+D, [2026-11-17T14:13:58.309616 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::RequestCChannel","id":2}", "{"channel":"Anyt::TestChannels::RequestCChannel","id":1}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:58.310001 #59] DEBUG -- : [ActionCable] Broadcasting to request_c: {:data=>"user left2"}
+DEPRECATION WARNING: `http_broadcast_secret` is deprecated, use `broadcast_key` instead
+I, [2026-11-17T14:13:58.325441 #59]  INFO -- : Enqueue: {"stream":"request_c","data":"{\"data\":\"user left2\"}"}
+D, [2026-11-17T14:13:58.325547 #59] DEBUG -- : [ActionCable] Broadcasting to request_c: {:data=>"user left1"}
+I, [2026-11-17T14:13:58.325613 #59]  INFO -- : Enqueue: {"stream":"request_c","data":"{\"data\":\"user left1\"}"}
+D, [2026-11-17T14:13:58.325641 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:13:58.325864 #59]  INFO -- : Perform: {"stream":"request_c","data":"{\"data\":\"user left2\"}"}
+I, [2026-11-17T14:13:58.328290 #59]  INFO -- : Perform: {"stream":"request_c","data":"{\"data\":\"user left1\"}"}
+D, [2026-11-17T14:13:58.329102 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestCChannel\"}", "message"=>{"data"=>"user left2"}}
+D, [2026-11-17T14:13:58.330031 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestCChannel\"}", "message"=>{"data"=>"user left1"}}
+I, [2026-11-17T14:13:58.833942 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:13:58 +0000
+D, [2026-11-17T14:13:58.834658 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::RequestCChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:58.835011 #59] DEBUG -- : [ActionCable] Broadcasting to request_c: {:data=>"user left"}
+I, [2026-11-17T14:13:58.835118 #59]  INFO -- : Enqueue: {"stream":"request_c","data":"{\"data\":\"user left\"}"}
+D, [2026-11-17T14:13:58.835155 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:13:58.835289 #59]  INFO -- : Perform: {"stream":"request_c","data":"{\"data\":\"user left\"}"}
+[35m  Client disconnect invokes #unsubscribe callbacks
+    for multiple subscriptions from the same channel[0m[32m PASS[0m (1.54s)
+
+Request
+I, [2026-11-17T14:13:59.335488 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:13:59 +0000
+D, [2026-11-17T14:13:59.336086 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:59.336265 #59] DEBUG -- : Connected
+I, [2026-11-17T14:13:59.337696 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:13:59 +0000
+D, [2026-11-17T14:13:59.338169 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestAChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:59.338486 #59] DEBUG -- : Anyt::TestChannels::RequestAChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:13:59.344383 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestAChannel\"}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:13:59.345529 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:13:59 +0000
+D, [2026-11-17T14:13:59.345936 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestBChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:59.346199 #59] DEBUG -- : Anyt::TestChannels::RequestBChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:13:59.347606 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestBChannel\"}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:13:59.349543 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:13:59 +0000
+D, [2026-11-17T14:13:59.349987 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:59.350094 #59] DEBUG -- : Connected
+I, [2026-11-17T14:13:59.351348 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:13:59 +0000
+D, [2026-11-17T14:13:59.351757 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestAChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:59.351955 #59] DEBUG -- : Anyt::TestChannels::RequestAChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:13:59.352987 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestAChannel\"}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:13:59.353846 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:13:59 +0000
+D, [2026-11-17T14:13:59.354253 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestBChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:59.354458 #59] DEBUG -- : Anyt::TestChannels::RequestBChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:13:59.355569 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestBChannel\"}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:13:59.858999 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:13:59 +0000
+D, [2026-11-17T14:13:59.859686 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::RequestAChannel"}", "{"channel":"Anyt::TestChannels::RequestBChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:13:59.860045 #59] DEBUG -- : [ActionCable] Broadcasting to request_a: {:data=>"user left"}
+I, [2026-11-17T14:13:59.860143 #59]  INFO -- : Enqueue: {"stream":"request_a","data":"{\"data\":\"user left\"}"}
+D, [2026-11-17T14:13:59.860287 #59] DEBUG -- : [ActionCable] Broadcasting to request_b: {:data=>"user left"}
+I, [2026-11-17T14:13:59.860393 #59]  INFO -- : Perform: {"stream":"request_a","data":"{\"data\":\"user left\"}"}
+I, [2026-11-17T14:13:59.860543 #59]  INFO -- : Enqueue: {"stream":"request_b","data":"{\"data\":\"user left\"}"}
+D, [2026-11-17T14:13:59.860669 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:13:59.861877 #59]  INFO -- : Perform: {"stream":"request_b","data":"{\"data\":\"user left\"}"}
+D, [2026-11-17T14:13:59.862830 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestAChannel\"}", "message"=>{"data"=>"user left"}}
+D, [2026-11-17T14:13:59.863436 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestBChannel\"}", "message"=>{"data"=>"user left"}}
+I, [2026-11-17T14:14:00.367136 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:00 +0000
+D, [2026-11-17T14:14:00.367850 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::RequestAChannel"}", "{"channel":"Anyt::TestChannels::RequestBChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:00.368269 #59] DEBUG -- : [ActionCable] Broadcasting to request_a: {:data=>"user left"}
+I, [2026-11-17T14:14:00.368372 #59]  INFO -- : Enqueue: {"stream":"request_a","data":"{\"data\":\"user left\"}"}
+D, [2026-11-17T14:14:00.368472 #59] DEBUG -- : [ActionCable] Broadcasting to request_b: {:data=>"user left"}
+I, [2026-11-17T14:14:00.368614 #59]  INFO -- : Perform: {"stream":"request_a","data":"{\"data\":\"user left\"}"}
+I, [2026-11-17T14:14:00.368731 #59]  INFO -- : Enqueue: {"stream":"request_b","data":"{\"data\":\"user left\"}"}
+D, [2026-11-17T14:14:00.368848 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:14:00.370007 #59]  INFO -- : Perform: {"stream":"request_b","data":"{\"data\":\"user left\"}"}
+[35m  Client disconnect invokes #unsubscribe callbacks
+    for different channels[0m[32m PASS[0m (1.53s)
+
+Request
+I, [2026-11-17T14:14:00.868967 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:00 +0000
+D, [2026-11-17T14:14:00.869534 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable?test=headers", headers: {"REMOTE_ADDR"=>"::1", "x-api-token"=>"abc"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:00.869688 #59] DEBUG -- : Connected
+D, [2026-11-17T14:14:00.870748 #58] DEBUG -- : Message received: {"type"=>"welcome"}
+[35m  Accepts when required header is set                            [0m[32m PASS[0m (0.51s)
+
+Request
+I, [2026-11-17T14:14:01.373751 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:01 +0000
+I, [2026-11-17T14:14:01.374489 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:01 +0000
+D, [2026-11-17T14:14:01.374856 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "http://localhost:8080/cable?test=headers", headers: {"REMOTE_ADDR"=>"::1", "x-api-token"=>"abc"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:01.375045 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:01.375688 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable?test=cookies", headers: {"REMOTE_ADDR"=>"::1", "cookie"=>"username=john green"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:01.375807 #59] DEBUG -- : Connected
+D, [2026-11-17T14:14:01.376785 #58] DEBUG -- : Message received: {"type"=>"welcome"}
+[35m  Accepts when required cookies are set                          [0m[32m PASS[0m (0.51s)
+
+Request
+I, [2026-11-17T14:14:01.880186 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:01 +0000
+I, [2026-11-17T14:14:01.880514 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:01 +0000
+D, [2026-11-17T14:14:01.881576 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "http://localhost:8080/cable?test=cookies", headers: {"REMOTE_ADDR"=>"::1", "cookie"=>"username=john green"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:01.881792 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:01.882205 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable?test=request_url", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:01.882330 #59] DEBUG -- : Connected
+D, [2026-11-17T14:14:01.883422 #58] DEBUG -- : Message received: {"type"=>"welcome"}
+[35m  Url is set during connection                                   [0m[32m PASS[0m (0.51s)
+
+Request
+I, [2026-11-17T14:14:02.386411 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:02 +0000
+I, [2026-11-17T14:14:02.386914 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:02 +0000
+D, [2026-11-17T14:14:02.387783 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "http://localhost:8080/cable?test=request_url", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:02.387974 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:02.388402 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable?test=headers", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:02.388499 #59] DEBUG -- : Connected
+E, [2026-11-17T14:14:02.388673 #59] ERROR -- : An unauthorized connection attempt was rejected
+D, [2026-11-17T14:14:02.389662 #58] DEBUG -- : Message received: {"type"=>"disconnect", "reason"=>"unauthorized", "reconnect"=>false}
+[35m  Reject when required header is missing                         [0m[32m PASS[0m (0.51s)
+
+Request
+I, [2026-11-17T14:14:02.893674 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:02 +0000
+D, [2026-11-17T14:14:02.894284 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable?test=cookies", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:02.894437 #59] DEBUG -- : Connected
+E, [2026-11-17T14:14:02.894648 #59] ERROR -- : An unauthorized connection attempt was rejected
+D, [2026-11-17T14:14:02.897574 #58] DEBUG -- : Message received: {"type"=>"disconnect", "reason"=>"unauthorized", "reconnect"=>false}
+[35m  Reject when required cookies are not set                       [0m[32m PASS[0m (0.51s)
+
+Request
+I, [2026-11-17T14:14:03.401205 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:03 +0000
+D, [2026-11-17T14:14:03.401756 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable?test=reasons&reason=unauthorized", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:03.401971 #59] DEBUG -- : Connected
+E, [2026-11-17T14:14:03.402165 #59] ERROR -- : An unauthorized connection attempt was rejected
+D, [2026-11-17T14:14:03.403378 #58] DEBUG -- : Message received: {"type"=>"disconnect", "reason"=>"unauthorized", "reconnect"=>false}
+[35m  Receives disconnect message when rejected                      [0m[32m PASS[0m (0.51s)
+
+Remote disconnect
+I, [2026-11-17T14:14:03.908021 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:03 +0000
+D, [2026-11-17T14:14:03.908865 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable?test=uid&uid=26", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:03.909096 #59] DEBUG -- : Connected
+D, [2026-11-17T14:14:03.910285 #58] DEBUG -- : Message received: {"type"=>"welcome"}
+I, [2026-11-17T14:14:04.927012 #58]  INFO -- : Enqueue: {"command":"disconnect","payload":{"identifier":"{\"uid\":\"26\"}","reconnect":true}}
+DEPRECATION WARNING: `http_broadcast_secret` is deprecated, use `broadcast_key` instead
+I, [2026-11-17T14:14:04.927417 #58]  INFO -- : Perform: {"command":"disconnect","payload":{"identifier":"{\"uid\":\"26\"}","reconnect":true}}
+D, [2026-11-17T14:14:04.930294 #58] DEBUG -- : Message received: {"type"=>"disconnect", "reason"=>"remote", "reconnect"=>true}
+I, [2026-11-17T14:14:04.931227 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:04 +0000
+D, [2026-11-17T14:14:04.931832 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{"uid":"26"}", subscriptions: [], env: <AnyCable::Env: url: "http://localhost:8080/cable?test=uid&uid=26", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:04.932046 #59] DEBUG -- : Disconnected
+[35m  Close single connection by id                                  [0m[32m PASS[0m (1.53s)
+
+Subscription aknowledgement
+I, [2026-11-17T14:14:05.434856 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:05 +0000
+D, [2026-11-17T14:14:05.435445 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:05.435626 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:05.437531 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:05 +0000
+D, [2026-11-17T14:14:05.438018 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionAknowledgementRejectorChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:05.438299 #59] DEBUG -- : Anyt::TestChannels::SubscriptionAknowledgementRejectorChannel is transmitting the subscription rejection
+D, [2026-11-17T14:14:05.439431 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionAknowledgementRejectorChannel\"}", "type"=>"reject_subscription"}
+[35m  Client receives subscription rejection                         [0m[32m PASS[0m (0.51s)
+
+Subscription aknowledgement
+I, [2026-11-17T14:14:05.942644 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:05 +0000
+I, [2026-11-17T14:14:05.943581 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:05 +0000
+D, [2026-11-17T14:14:05.943825 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:05.944045 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:05.944719 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:05.944824 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:05.946125 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:05 +0000
+D, [2026-11-17T14:14:05.946589 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionAknowledgementChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:05.946817 #59] DEBUG -- : Anyt::TestChannels::SubscriptionAknowledgementChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:05.948063 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionAknowledgementChannel\"}", "type"=>"confirm_subscription"}
+[35m  Client receives subscription confirmation                      [0m[32m PASS[0m (0.51s)
+
+Streams with many clients
+I, [2026-11-17T14:14:06.451137 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:06 +0000
+D, [2026-11-17T14:14:06.451749 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SubscriptionAknowledgementChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:06.452110 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:14:06.452819 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:06 +0000
+I, [2026-11-17T14:14:06.453407 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:06 +0000
+D, [2026-11-17T14:14:06.453759 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:06.453880 #59] DEBUG -- : Connected
+D, [2026-11-17T14:14:06.454578 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:06.454676 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:06.455354 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:06 +0000
+D, [2026-11-17T14:14:06.455863 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+I, [2026-11-17T14:14:06.456150 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:06 +0000
+D, [2026-11-17T14:14:06.456427 #59] DEBUG -- : Anyt::TestChannels::StreamsWithManyClientsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:06.457257 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:06.457512 #59] DEBUG -- : Anyt::TestChannels::StreamsWithManyClientsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:06.457837 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:06.458524 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:06.458662 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+I, [2026-11-17T14:14:06.459935 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":\"X\"}"}
+I, [2026-11-17T14:14:06.460113 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":\"X\"}"}
+D, [2026-11-17T14:14:06.461809 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "message"=>{"data"=>"X"}}
+D, [2026-11-17T14:14:06.462350 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "message"=>{"data"=>"X"}}
+I, [2026-11-17T14:14:06.965698 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:06 +0000
+D, [2026-11-17T14:14:06.966366 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:06.966680 #59] DEBUG -- : Disconnected
+[35m  Multiple clients receive messages from stream                  [0m[32m PASS[0m (1.02s)
+
+Streams with many clients
+I, [2026-11-17T14:14:07.467017 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:07 +0000
+I, [2026-11-17T14:14:07.467473 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:07 +0000
+D, [2026-11-17T14:14:07.468304 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:07.468804 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:14:07.469666 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:07 +0000
+D, [2026-11-17T14:14:07.469872 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:07.469972 #59] DEBUG -- : Connected
+D, [2026-11-17T14:14:07.470719 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:07.470829 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:07.471481 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:07 +0000
+I, [2026-11-17T14:14:07.472116 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:07 +0000
+D, [2026-11-17T14:14:07.472348 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:07.472594 #59] DEBUG -- : Anyt::TestChannels::StreamsWithManyClientsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:07.473160 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:07.473380 #59] DEBUG -- : Anyt::TestChannels::StreamsWithManyClientsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:07.476213 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:07.476832 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:07.477028 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+I, [2026-11-17T14:14:07.477167 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":\"X\"}"}
+I, [2026-11-17T14:14:07.477326 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":\"X\"}"}
+D, [2026-11-17T14:14:07.478875 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "message"=>{"data"=>"X"}}
+D, [2026-11-17T14:14:07.479404 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "message"=>{"data"=>"X"}}
+I, [2026-11-17T14:14:07.480434 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:07 +0000
+D, [2026-11-17T14:14:07.480948 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "unsubscribe", identifier: "{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+I, [2026-11-17T14:14:07.481206 #59]  INFO -- : Unsubscribing from channel: {"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}
+D, [2026-11-17T14:14:08.480972 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"Y"}
+I, [2026-11-17T14:14:08.481344 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":\"Y\"}"}
+I, [2026-11-17T14:14:08.481781 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":\"Y\"}"}
+D, [2026-11-17T14:14:08.484354 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StreamsWithManyClientsChannel\"}", "message"=>{"data"=>"Y"}}
+I, [2026-11-17T14:14:09.488116 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:09 +0000
+D, [2026-11-17T14:14:09.488761 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:09.489004 #59] DEBUG -- : Disconnected
+[35m  Client receive messages when another client removes subscription[0m[32m PASS[0m (2.52s)
+
+Broadcast with options
+I, [2026-11-17T14:14:09.989857 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:09 +0000
+I, [2026-11-17T14:14:09.990598 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:09 +0000
+D, [2026-11-17T14:14:09.991055 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::StreamsWithManyClientsChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:09.991419 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:14:09.992282 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:09 +0000
+D, [2026-11-17T14:14:09.992632 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:09.992809 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:09.993109 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:09 +0000
+D, [2026-11-17T14:14:09.994459 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:09.994557 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:09.995283 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:09 +0000
+D, [2026-11-17T14:14:09.995645 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:09.995763 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:09.996081 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:09 +0000
+I, [2026-11-17T14:14:09.997435 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:09 +0000
+D, [2026-11-17T14:14:09.997650 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::BroadcastWithOptionsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:09.997928 #59] DEBUG -- : Anyt::TestChannels::BroadcastWithOptionsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:09.998442 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::BroadcastWithOptionsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:09.998686 #59] DEBUG -- : Anyt::TestChannels::BroadcastWithOptionsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:09.999184 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastWithOptionsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:09.999226 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::BroadcastWithOptionsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:09.999443 #59] DEBUG -- : Anyt::TestChannels::BroadcastWithOptionsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:09.999729 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastWithOptionsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:10.000424 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastWithOptionsChannel\"}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:14:10.001412 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:10 +0000
+D, [2026-11-17T14:14:10.001857 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "message", identifier: "{"channel":"Anyt::TestChannels::BroadcastWithOptionsChannel"}", connection_identifiers: "{}", data: "{"action":"speak","content":"The Other Side"}", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+I, [2026-11-17T14:14:10.002252 #59]  INFO -- : Anyt::TestChannels::BroadcastWithOptionsChannel#speak({"content"=>"The Other Side"})
+D, [2026-11-17T14:14:10.002325 #59] DEBUG -- : [ActionCable] Broadcasting to a: {"content"=>"The Other Side"}
+I, [2026-11-17T14:14:10.002432 #59]  INFO -- : Enqueue: {"stream":"a","data":"{\"content\":\"The Other Side\"}","meta":{"exclude_socket":"KwoQGq9E7DhlBWfI_DlxW"}}
+I, [2026-11-17T14:14:10.002766 #59]  INFO -- : Perform: {"stream":"a","data":"{\"content\":\"The Other Side\"}","meta":{"exclude_socket":"KwoQGq9E7DhlBWfI_DlxW"}}
+D, [2026-11-17T14:14:10.004781 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastWithOptionsChannel\"}", "message"=>{"content"=>"The Other Side"}}
+D, [2026-11-17T14:14:10.005291 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastWithOptionsChannel\"}", "message"=>{"content"=>"The Other Side"}}
+I, [2026-11-17T14:14:11.009167 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:11 +0000
+D, [2026-11-17T14:14:11.009828 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::BroadcastWithOptionsChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:11.010185 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:14:11.510500 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:11 +0000
+D, [2026-11-17T14:14:11.511167 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::BroadcastWithOptionsChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:11.511472 #59] DEBUG -- : Disconnected
+[35m  Only other clients receive the message when broadcasted to others[0m[32m PASS[0m (2.02s)
+
+Multiple streams
+I, [2026-11-17T14:14:12.012778 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:12 +0000
+I, [2026-11-17T14:14:12.013145 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:12 +0000
+D, [2026-11-17T14:14:12.014547 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:12.014761 #59] DEBUG -- : Connected
+D, [2026-11-17T14:14:12.015411 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::BroadcastWithOptionsChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:12.015731 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:14:12.016587 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:12 +0000
+D, [2026-11-17T14:14:12.017099 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::MultipleStreamsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:12.017391 #59] DEBUG -- : Anyt::TestChannels::MultipleStreamsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:12.018916 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:12.019110 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+I, [2026-11-17T14:14:12.019238 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":\"X\"}"}
+I, [2026-11-17T14:14:12.019399 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":\"X\"}"}
+D, [2026-11-17T14:14:12.021135 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}", "message"=>{"data"=>"X"}}
+D, [2026-11-17T14:14:12.021238 #58] DEBUG -- : [ActionCable] Broadcasting to b: {:data=>"Y"}
+I, [2026-11-17T14:14:12.021309 #58]  INFO -- : Enqueue: {"stream":"b","data":"{\"data\":\"Y\"}"}
+I, [2026-11-17T14:14:12.021409 #58]  INFO -- : Perform: {"stream":"b","data":"{\"data\":\"Y\"}"}
+D, [2026-11-17T14:14:12.022804 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}", "message"=>{"data"=>"Y"}}
+[35m  Client receives messages from both streams                     [0m[32m PASS[0m (0.51s)
+
+Multiple streams
+I, [2026-11-17T14:14:12.526668 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:12 +0000
+I, [2026-11-17T14:14:12.527012 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:12 +0000
+D, [2026-11-17T14:14:12.527724 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:12.527898 #59] DEBUG -- : Connected
+D, [2026-11-17T14:14:12.528742 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::MultipleStreamsChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:12.529021 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:14:12.529546 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:12 +0000
+D, [2026-11-17T14:14:12.530002 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::MultipleStreamsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:12.530200 #59] DEBUG -- : Anyt::TestChannels::MultipleStreamsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:12.531727 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:12.531882 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+I, [2026-11-17T14:14:12.532012 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":\"X\"}"}
+I, [2026-11-17T14:14:12.532173 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":\"X\"}"}
+D, [2026-11-17T14:14:12.533785 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::MultipleStreamsChannel\"}", "message"=>{"data"=>"X"}}
+I, [2026-11-17T14:14:12.534969 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:12 +0000
+D, [2026-11-17T14:14:12.535559 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "unsubscribe", identifier: "{"channel":"Anyt::TestChannels::MultipleStreamsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+I, [2026-11-17T14:14:12.535797 #59]  INFO -- : Unsubscribing from channel: {"channel":"Anyt::TestChannels::MultipleStreamsChannel"}
+D, [2026-11-17T14:14:13.535680 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"Y"}
+I, [2026-11-17T14:14:13.536019 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":\"Y\"}"}
+D, [2026-11-17T14:14:13.536110 #58] DEBUG -- : [ActionCable] Broadcasting to b: {:data=>"Z"}
+I, [2026-11-17T14:14:13.536448 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":\"Y\"}"}
+I, [2026-11-17T14:14:13.536600 #58]  INFO -- : Enqueue: {"stream":"b","data":"{\"data\":\"Z\"}"}
+I, [2026-11-17T14:14:13.538279 #58]  INFO -- : Perform: {"stream":"b","data":"{\"data\":\"Z\"}"}
+[35m  Client does not receive messages from any stream after removing subscription[0m[32m PASS[0m (2.01s)
+
+Ping
+I, [2026-11-17T14:14:14.540631 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:14 +0000
+I, [2026-11-17T14:14:14.541024 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:14 +0000
+D, [2026-11-17T14:14:14.542084 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:14.542160 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:14.542363 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:14.542475 #59] DEBUG -- : Connected
+D, [2026-11-17T14:14:17.023148 #58] DEBUG -- : Message received: {"type"=>"ping", "message"=>1794924857}
+D, [2026-11-17T14:14:20.024121 #58] DEBUG -- : Message received: {"type"=>"ping", "message"=>1794924860}
+[35m  Client receives pings with timestamps                          [0m[32m PASS[0m (5.99s)
+
+Stop streams
+I, [2026-11-17T14:14:20.527089 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:20 +0000
+D, [2026-11-17T14:14:20.527781 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:20.528066 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:14:20.528794 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:20 +0000
+D, [2026-11-17T14:14:20.529328 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:20.529433 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:20.530792 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:20 +0000
+D, [2026-11-17T14:14:20.531299 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::StopStreamsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:20.531547 #59] DEBUG -- : Anyt::TestChannels::StopStreamsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:20.532975 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StopStreamsChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:20.533132 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+I, [2026-11-17T14:14:20.533271 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":\"X\"}"}
+I, [2026-11-17T14:14:20.533400 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":\"X\"}"}
+D, [2026-11-17T14:14:20.534839 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StopStreamsChannel\"}", "message"=>{"data"=>"X"}}
+I, [2026-11-17T14:14:20.535888 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:20 +0000
+D, [2026-11-17T14:14:20.536330 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "message", identifier: "{"channel":"Anyt::TestChannels::StopStreamsChannel"}", connection_identifiers: "{}", data: "{"action":"unfollow","name":"a"}", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+I, [2026-11-17T14:14:20.536664 #59]  INFO -- : Anyt::TestChannels::StopStreamsChannel#unfollow({"name"=>"a"})
+D, [2026-11-17T14:14:20.735416 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"Y"}
+I, [2026-11-17T14:14:20.735663 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":\"Y\"}"}
+I, [2026-11-17T14:14:20.735942 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":\"Y\"}"}
+D, [2026-11-17T14:14:20.936491 #58] DEBUG -- : [ActionCable] Broadcasting to b: {:data=>"Z"}
+I, [2026-11-17T14:14:20.936806 #58]  INFO -- : Enqueue: {"stream":"b","data":"{\"data\":\"Z\"}"}
+I, [2026-11-17T14:14:20.937239 #58]  INFO -- : Perform: {"stream":"b","data":"{\"data\":\"Z\"}"}
+D, [2026-11-17T14:14:20.939926 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::StopStreamsChannel\"}", "message"=>{"data"=>"Z"}}
+[35m  Client unsubscribes from the stream                            [0m[32m PASS[0m (0.91s)
+
+Whisper
+I, [2026-11-17T14:14:21.442766 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:21 +0000
+I, [2026-11-17T14:14:21.443128 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:21 +0000
+D, [2026-11-17T14:14:21.444275 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::StopStreamsChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:21.444620 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:21.445009 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:21.445260 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:21.446275 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:21 +0000
+D, [2026-11-17T14:14:21.446752 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:21.447197 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:21.447051 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:21 +0000
+I, [2026-11-17T14:14:21.447573 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:21 +0000
+I, [2026-11-17T14:14:21.449052 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:21 +0000
+D, [2026-11-17T14:14:21.449307 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:21.449460 #59] DEBUG -- : Connected
+D, [2026-11-17T14:14:21.449975 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::WhisperChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:21.450264 #59] DEBUG -- : Anyt::TestChannels::WhisperChannel is transmitting the subscription confirmation
+I, [2026-11-17T14:14:21.450980 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:21 +0000
+D, [2026-11-17T14:14:21.451327 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::WhisperChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:21.451555 #59] DEBUG -- : Anyt::TestChannels::WhisperChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:21.451553 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::WhisperChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:21.452191 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::WhisperChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:21.452387 #59] DEBUG -- : Anyt::TestChannels::WhisperChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:21.452602 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::WhisperChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:21.453366 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::WhisperChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:21.454574 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::WhisperChannel\"}", "message"=>{"event"=>"typing", "user"=>"Vova"}}
+D, [2026-11-17T14:14:21.455155 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::WhisperChannel\"}", "message"=>{"event"=>"typing", "user"=>"Vova"}}
+I, [2026-11-17T14:14:22.459494 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:22 +0000
+D, [2026-11-17T14:14:22.460128 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::WhisperChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {"{"channel":"Anyt::TestChannels::WhisperChannel"}"=>"{"$w":"a"}"}>>
+D, [2026-11-17T14:14:22.460467 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:14:22.961112 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:22 +0000
+D, [2026-11-17T14:14:22.961723 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::WhisperChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {"{"channel":"Anyt::TestChannels::WhisperChannel"}"=>"{"$w":"a"}"}>>
+D, [2026-11-17T14:14:22.962029 #59] DEBUG -- : Disconnected
+[35m  Only other clients receive the whisper message                 [0m[32m PASS[0m (2.02s)
+
+Single stream
+I, [2026-11-17T14:14:23.462900 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:23 +0000
+I, [2026-11-17T14:14:23.463497 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:23 +0000
+D, [2026-11-17T14:14:23.464424 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::WhisperChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {"{"channel":"Anyt::TestChannels::WhisperChannel"}"=>"{"$w":"a"}"}>>
+D, [2026-11-17T14:14:23.464748 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:23.465204 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:23.465315 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:23.466847 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:23 +0000
+D, [2026-11-17T14:14:23.467347 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SingleStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:23.467604 #59] DEBUG -- : Anyt::TestChannels::SingleStreamChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:23.469011 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:23.469167 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+I, [2026-11-17T14:14:23.469292 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":\"X\"}"}
+I, [2026-11-17T14:14:23.469461 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":\"X\"}"}
+D, [2026-11-17T14:14:23.470979 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "message"=>{"data"=>"X"}}
+I, [2026-11-17T14:14:23.471936 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:23 +0000
+D, [2026-11-17T14:14:23.472502 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "unsubscribe", identifier: "{"channel":"Anyt::TestChannels::SingleStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+I, [2026-11-17T14:14:23.472717 #59]  INFO -- : Unsubscribing from channel: {"channel":"Anyt::TestChannels::SingleStreamChannel"}
+D, [2026-11-17T14:14:24.472399 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"Y"}
+I, [2026-11-17T14:14:24.472643 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":\"Y\"}"}
+I, [2026-11-17T14:14:24.473075 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":\"Y\"}"}
+[35m  Client does not receive messages from the stream after removing subscription[0m[32m PASS[0m (2.01s)
+
+Single stream
+I, [2026-11-17T14:14:25.477004 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:25 +0000
+I, [2026-11-17T14:14:25.477793 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:25 +0000
+D, [2026-11-17T14:14:25.478356 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:25.478563 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:25.479102 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:25.479301 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:25.480683 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:25 +0000
+D, [2026-11-17T14:14:25.481247 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SingleStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:25.481561 #59] DEBUG -- : Anyt::TestChannels::SingleStreamChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:25.482946 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:25.483113 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"X"}
+I, [2026-11-17T14:14:25.483226 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":\"X\"}"}
+I, [2026-11-17T14:14:25.483369 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":\"X\"}"}
+D, [2026-11-17T14:14:25.484818 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "message"=>{"data"=>"X"}}
+D, [2026-11-17T14:14:25.484892 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"Y"}
+I, [2026-11-17T14:14:25.484951 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":\"Y\"}"}
+I, [2026-11-17T14:14:25.485038 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":\"Y\"}"}
+D, [2026-11-17T14:14:25.486514 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "message"=>{"data"=>"Y"}}
+[35m  Client receives messages from the stream                       [0m[32m PASS[0m (0.51s)
+
+Single stream
+I, [2026-11-17T14:14:25.990260 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:25 +0000
+I, [2026-11-17T14:14:25.990716 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:25 +0000
+D, [2026-11-17T14:14:25.991774 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SingleStreamChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:25.992056 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:25.992524 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:25.992629 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:25.994087 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:25 +0000
+D, [2026-11-17T14:14:25.994591 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SingleStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:25.994805 #59] DEBUG -- : Anyt::TestChannels::SingleStreamChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:25.995947 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:14:25.996890 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:25 +0000
+D, [2026-11-17T14:14:25.997329 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SingleStreamChannel","some_param":"test"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:25.997557 #59] DEBUG -- : Anyt::TestChannels::SingleStreamChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:25.998722 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\",\"some_param\":\"test\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:25.998819 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>"XX"}
+I, [2026-11-17T14:14:25.998904 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":\"XX\"}"}
+I, [2026-11-17T14:14:25.999042 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":\"XX\"}"}
+D, [2026-11-17T14:14:26.000554 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\"}", "message"=>{"data"=>"XX"}}
+D, [2026-11-17T14:14:26.001006 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SingleStreamChannel\",\"some_param\":\"test\"}", "message"=>{"data"=>"XX"}}
+[35m  Client receives multiple messages when subscribed to the same channel
+    with different params[0m[32m PASS[0m (0.51s)
+
+Server restart
+I, [2026-11-17T14:14:26.505057 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:26 +0000
+I, [2026-11-17T14:14:26.505448 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:26 +0000
+D, [2026-11-17T14:14:26.506510 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SingleStreamChannel","some_param":"test"}", "{"channel":"Anyt::TestChannels::SingleStreamChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:26.506853 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:26.506910 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable?test=reasons&reason=server_restart", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:26.507342 #59] DEBUG -- : Connected
+D, [2026-11-17T14:14:26.508342 #58] DEBUG -- : Message received: {"type"=>"welcome"}
+D, [2026-11-17T14:14:26.508502 #58] DEBUG -- : Restarting command PID: 70
+D, [2026-11-17T14:14:26.508567 #58] DEBUG -- : Terminate PID: 70
+{"time":"2026-11-17T14:14:26.50873463Z","level":"INFO","msg":"Shutting down... (hit Ctrl-C to stop immediately or wait for up to 10s for graceful shutdown)"}
+{"time":"2026-11-17T14:14:26.508776217Z","level":"INFO","msg":"closing active connections","context":"node","num":1}
+D, [2026-11-17T14:14:26.509305 #58] DEBUG -- : Message received: {"type"=>"disconnect", "reason"=>"server_restart", "reconnect"=>true}
+I, [2026-11-17T14:14:26.509588 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:26 +0000
+D, [2026-11-17T14:14:26.510044 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: [], env: <AnyCable::Env: url: "http://localhost:8080/cable?test=reasons&reason=server_restart", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:26.510163 #59] DEBUG -- : Disconnected
+{"time":"2026-11-17T14:14:26.510542944Z","level":"INFO","msg":"all active connections closed","context":"node"}
+{"time":"2026-11-17T14:14:26.510639173Z","level":"INFO","msg":"all active RPC calls finished","context":"rpc"}
+D, [2026-11-17T14:14:27.614213 #58] DEBUG -- : Running command: tmp/anycable-embedded-test
+D, [2026-11-17T14:14:27.622453 #58] DEBUG -- : Command PID: 111
+DEPRECATION WARNING: http_broadcast_secret option is deprecated
+and will be removed in the next major release of anycable-go.
+Use broadcast_key instead.
+{"time":"2026-11-17T14:14:27.781687498Z","level":"INFO","msg":"Starting embedded AnyCable 1.6.21 (with mruby 1.2.0 (2015-11-17)) (open file limit: 524287)"}
+{"time":"2026-11-17T14:14:27.781897158Z","level":"INFO","msg":"Using channels router: $pubsub"}
+{"time":"2026-11-17T14:14:27.782494289Z","level":"INFO","msg":"Using no-op (legacy) broker"}
+{"time":"2026-11-17T14:14:27.782932635Z","level":"INFO","msg":"Starting Redis pub/sub: cabby-ref-redis:6379","context":"pubsub"}
+{"time":"2026-11-17T14:14:27.783248463Z","level":"INFO","msg":"RPC controller initialized: http://localhost:9292/_anycable (concurrency: 28, impl: http, enable_tls: false, proto_versions: v1, proxy_headers: cookie,x-api-token, proxy_cookies: <all>)","context":"rpc"}
+{"time":"2026-11-17T14:14:27.788988082Z","level":"INFO","msg":"connected","context":"pubsub","channel":"__anycable_internal__"}
+[35m  Client receives disconnect message                             [0m[32m PASS[0m (3.62s)
+
+Subscription transmissions
+I, [2026-11-17T14:14:30.131962 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:30 +0000
+D, [2026-11-17T14:14:30.134893 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:30.135054 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:30.138457 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:30 +0000
+D, [2026-11-17T14:14:30.138929 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionTransmissionsChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:30.139217 #59] DEBUG -- : Anyt::TestChannels::SubscriptionTransmissionsChannel transmitting "hello"
+D, [2026-11-17T14:14:30.139285 #59] DEBUG -- : Anyt::TestChannels::SubscriptionTransmissionsChannel transmitting "world"
+D, [2026-11-17T14:14:30.139345 #59] DEBUG -- : Anyt::TestChannels::SubscriptionTransmissionsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:30.140741 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionTransmissionsChannel\"}", "message"=>"hello"}
+D, [2026-11-17T14:14:30.141433 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionTransmissionsChannel\"}", "message"=>"world"}
+D, [2026-11-17T14:14:30.141922 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionTransmissionsChannel\"}", "type"=>"confirm_subscription"}
+[35m  Client receives transmissions from #subscribed callback        [0m[32m PASS[0m (0.52s)
+
+Channel state
+I, [2026-11-17T14:14:30.644862 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:30 +0000
+I, [2026-11-17T14:14:30.645998 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:30 +0000
+D, [2026-11-17T14:14:30.646150 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SubscriptionTransmissionsChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:30.646498 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:30.647208 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:30.647298 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:30.648811 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:30 +0000
+D, [2026-11-17T14:14:30.649222 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:30.649534 #59] DEBUG -- : Anyt::TestChannels::ChannelStateChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:30.651210 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:14:30.652245 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:30 +0000
+D, [2026-11-17T14:14:30.652651 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "message", identifier: "{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}", connection_identifiers: "{}", data: "{"action":"tick"}", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {"user"=>"{"name":"chipolino"}", "count"=>"1"}>>
+I, [2026-11-17T14:14:30.652967 #59]  INFO -- : Anyt::TestChannels::ChannelStateChannel#tick
+D, [2026-11-17T14:14:30.653159 #59] DEBUG -- : Anyt::TestChannels::ChannelStateChannel transmitting {:count=>3, :name=>"chipolino"}
+D, [2026-11-17T14:14:30.654874 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}", "message"=>{"count"=>3, "name"=>"chipolino"}}
+[35m  Channel state is kept between commands                         [0m[32m PASS[0m (0.51s)
+
+Channel state
+I, [2026-11-17T14:14:31.158801 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:31 +0000
+I, [2026-11-17T14:14:31.159526 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:31 +0000
+D, [2026-11-17T14:14:31.159875 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {"{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}"=>"{"count":"3","user":"{\"name\":\"chipolino\"}"}"}>>
+D, [2026-11-17T14:14:31.160249 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:31.160841 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:31.160942 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:31.162347 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:31 +0000
+D, [2026-11-17T14:14:31.162773 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:31.163034 #59] DEBUG -- : Anyt::TestChannels::ChannelStateChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:31.164892 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:14:31.166691 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:31 +0000
+D, [2026-11-17T14:14:31.167227 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:31.167326 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:31.168697 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:31 +0000
+D, [2026-11-17T14:14:31.169103 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipollone","notify_disconnect":true}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:31.169367 #59] DEBUG -- : Anyt::TestChannels::ChannelStateChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:31.170969 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipollone\",\"notify_disconnect\":true}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:14:31.674508 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:31 +0000
+D, [2026-11-17T14:14:31.675161 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipollone","notify_disconnect":true}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {"{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipollone","notify_disconnect":true}"=>"{"count":"1","user":"{\"name\":\"chipollone\"}"}"}>>
+D, [2026-11-17T14:14:31.675651 #59] DEBUG -- : [ActionCable] Broadcasting to state_counts: {:data=>"user left: chipollone"}
+I, [2026-11-17T14:14:31.675742 #59]  INFO -- : Enqueue: {"stream":"state_counts","data":"{\"data\":\"user left: chipollone\"}"}
+D, [2026-11-17T14:14:31.675776 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:14:31.676202 #59]  INFO -- : Perform: {"stream":"state_counts","data":"{\"data\":\"user left: chipollone\"}"}
+D, [2026-11-17T14:14:31.678714 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::ChannelStateChannel\",\"name\":\"chipolino\"}", "message"=>{"data"=>"user left: chipollone"}}
+I, [2026-11-17T14:14:32.182281 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:32 +0000
+D, [2026-11-17T14:14:32.182884 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {"{"channel":"Anyt::TestChannels::ChannelStateChannel","name":"chipolino"}"=>"{"count":"1","user":"{\"name\":\"chipolino\"}"}"}>>
+D, [2026-11-17T14:14:32.183144 #59] DEBUG -- : Disconnected
+[35m  Channel state is available in #unsubscribe callbacks           [0m[32m PASS[0m (1.52s)
+
+Subscription with params
+I, [2026-11-17T14:14:32.684142 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:32 +0000
+D, [2026-11-17T14:14:32.685123 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:32.685276 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:32.686801 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:32 +0000
+D, [2026-11-17T14:14:32.687254 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionWithParamsChannel","id":1}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:32.687475 #59] DEBUG -- : Anyt::TestChannels::SubscriptionWithParamsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:32.690137 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionWithParamsChannel\",\"id\":1}", "type"=>"confirm_subscription"}
+I, [2026-11-17T14:14:32.691185 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:32 +0000
+D, [2026-11-17T14:14:32.691596 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::SubscriptionWithParamsChannel","id":2}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:32.691789 #59] DEBUG -- : Anyt::TestChannels::SubscriptionWithParamsChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:32.692842 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::SubscriptionWithParamsChannel\",\"id\":2}", "type"=>"confirm_subscription"}
+[35m  Client subscribes to the same channel with different params    [0m[32m PASS[0m (0.51s)
+
+Broadcast data to stream
+I, [2026-11-17T14:14:33.196014 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:33 +0000
+D, [2026-11-17T14:14:33.196631 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::SubscriptionWithParamsChannel","id":1}", "{"channel":"Anyt::TestChannels::SubscriptionWithParamsChannel","id":2}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:33.197024 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:14:33.197776 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:33 +0000
+D, [2026-11-17T14:14:33.198221 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:33.198340 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:33.199696 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:33 +0000
+D, [2026-11-17T14:14:33.200119 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::BroadcastDataToStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:33.200371 #59] DEBUG -- : Anyt::TestChannels::BroadcastDataToStreamChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:33.201659 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:33.201820 #58] DEBUG -- : [ActionCable] Broadcasting to a: "{\"script\":{\"alert\":\"Message!\"}}"
+I, [2026-11-17T14:14:33.201946 #58]  INFO -- : Enqueue: {"stream":"a","data":"\"{\\\"script\\\":{\\\"alert\\\":\\\"Message!\\\"}}\""}
+I, [2026-11-17T14:14:33.202196 #58]  INFO -- : Perform: {"stream":"a","data":"\"{\\\"script\\\":{\\\"alert\\\":\\\"Message!\\\"}}\""}
+D, [2026-11-17T14:14:33.204497 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}", "message"=>"{\"script\":{\"alert\":\"Message!\"}}"}
+[35m  Broadcast JSON string                                          [0m[32m PASS[0m (0.51s)
+
+Broadcast data to stream
+I, [2026-11-17T14:14:33.707911 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:33 +0000
+I, [2026-11-17T14:14:33.708298 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:33 +0000
+D, [2026-11-17T14:14:33.709355 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::BroadcastDataToStreamChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:33.709424 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:33.709811 #59] DEBUG -- : Connected
+D, [2026-11-17T14:14:33.709714 #59] DEBUG -- : Disconnected
+I, [2026-11-17T14:14:33.711302 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:33 +0000
+D, [2026-11-17T14:14:33.711668 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::BroadcastDataToStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:33.711849 #59] DEBUG -- : Anyt::TestChannels::BroadcastDataToStreamChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:33.713192 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:33.713324 #58] DEBUG -- : [ActionCable] Broadcasting to a: "<script>alert('Message!');</script>"
+I, [2026-11-17T14:14:33.713433 #58]  INFO -- : Enqueue: {"stream":"a","data":"\"\\u003cscript\\u003ealert('Message!');\\u003c/script\\u003e\""}
+I, [2026-11-17T14:14:33.713597 #58]  INFO -- : Perform: {"stream":"a","data":"\"\\u003cscript\\u003ealert('Message!');\\u003c/script\\u003e\""}
+D, [2026-11-17T14:14:33.715504 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}", "message"=>"<script>alert('Message!');</script>"}
+[35m  Broadcast custom string                                        [0m[32m PASS[0m (0.51s)
+
+Broadcast data to stream
+I, [2026-11-17T14:14:34.218694 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:34 +0000
+I, [2026-11-17T14:14:34.219531 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:34 +0000
+D, [2026-11-17T14:14:34.219893 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::BroadcastDataToStreamChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:34.220263 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:34.220927 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:34.221011 #59] DEBUG -- : Connected
+I, [2026-11-17T14:14:34.222412 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:34 +0000
+D, [2026-11-17T14:14:34.222884 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::BroadcastDataToStreamChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:34.223077 #59] DEBUG -- : Anyt::TestChannels::BroadcastDataToStreamChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:34.224714 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}", "type"=>"confirm_subscription"}
+D, [2026-11-17T14:14:34.224872 #58] DEBUG -- : [ActionCable] Broadcasting to a: {:data=>{:user_id=>1, :status=>"left", :meta=>{:connection_time=>"10s"}}}
+I, [2026-11-17T14:14:34.225016 #58]  INFO -- : Enqueue: {"stream":"a","data":"{\"data\":{\"user_id\":1,\"status\":\"left\",\"meta\":{\"connection_time\":\"10s\"}}}"}
+I, [2026-11-17T14:14:34.225173 #58]  INFO -- : Perform: {"stream":"a","data":"{\"data\":{\"user_id\":1,\"status\":\"left\",\"meta\":{\"connection_time\":\"10s\"}}}"}
+D, [2026-11-17T14:14:34.227153 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::BroadcastDataToStreamChannel\"}", "message"=>{"data"=>{"meta"=>{"connection_time"=>"10s"}, "status"=>"left", "user_id"=>1}}}
+[35m  Broadcast object                                               [0m[32m PASS[0m (0.51s)
+
+Request
+I, [2026-11-17T14:14:34.731324 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:34 +0000
+I, [2026-11-17T14:14:34.731698 #59]  INFO -- : Started POST "/_anycable/connect" for 127.0.0.1 at 2026-11-17 14:14:34 +0000
+D, [2026-11-17T14:14:34.732669 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::BroadcastDataToStreamChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:34.732964 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:34.733404 #59] DEBUG -- : RPC Connect: <AnyCable::ConnectionRequest: env: <AnyCable::Env: url: "http://localhost:8080/cable?token=secret", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:34.733509 #59] DEBUG -- : Connected
+D, [2026-11-17T14:14:34.734489 #58] DEBUG -- : Message received: {"type"=>"welcome"}
+I, [2026-11-17T14:14:34.735436 #59]  INFO -- : Started POST "/_anycable/command" for 127.0.0.1 at 2026-11-17 14:14:34 +0000
+D, [2026-11-17T14:14:34.735861 #59] DEBUG -- : RPC Command: <AnyCable::CommandMessage: command: "subscribe", identifier: "{"channel":"Anyt::TestChannels::RequestChannel"}", connection_identifiers: "{}", data: "", env: <AnyCable::Env: url: "http://localhost:8080/cable?token=secret", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:34.736162 #59] DEBUG -- : Anyt::TestChannels::RequestChannel is transmitting the subscription confirmation
+D, [2026-11-17T14:14:34.737169 #58] DEBUG -- : Message received: {"identifier"=>"{\"channel\":\"Anyt::TestChannels::RequestChannel\"}", "type"=>"confirm_subscription"}
+[35m  Channel has access to request                                  [0m[32m PASS[0m (0.51s)
+
+Finished in 39.00164s
+34 tests, 95 assertions, [32m0 failures, 0 errors, [0m[33m0 skips[0m
+D, [2026-11-17T14:14:35.239574 #58] DEBUG -- : Terminate PID: 59
+I, [2026-11-17T14:14:35.240243 #59]  INFO -- : Started POST "/_anycable/disconnect" for 127.0.0.1 at 2026-11-17 14:14:35 +0000
+- Gracefully stopping, waiting for requests to finish
+D, [2026-11-17T14:14:35.241379 #59] DEBUG -- : RPC Disconnect: <AnyCable::DisconnectRequest: identifiers: "{}", subscriptions: ["{"channel":"Anyt::TestChannels::RequestChannel"}"], env: <AnyCable::Env: url: "http://localhost:8080/cable?token=secret", headers: {"REMOTE_ADDR"=>"::1"}, cstate: {}, istate: {}>>
+D, [2026-11-17T14:14:35.241706 #59] DEBUG -- : Disconnected
+D, [2026-11-17T14:14:35.340347 #58] DEBUG -- : Terminate PID: 111
+{"time":"2026-11-17T14:14:35.340907826Z","level":"INFO","msg":"Shutting down... (hit Ctrl-C to stop immediately or wait for up to 10s for graceful shutdown)"}
+{"time":"2026-11-17T14:14:35.34114672Z","level":"INFO","msg":"all active RPC calls finished","context":"rpc"}

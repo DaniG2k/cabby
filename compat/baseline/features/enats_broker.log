@@ -1,0 +1,21 @@
+[info] [2026-11-17T14:16:51+00:00]  Launching background process: bundle exec anyt --only-rpc
+[info] [2026-11-17T14:16:51+00:00]  Waiting for TCP server to start at 50051
+[info] [2026-11-17T14:16:52+00:00]  TCP server is listening at 50051
+[info] [2026-11-17T14:16:52+00:00]  Launching background process: ./dist/anycable-go --port 8080 --broker=nats --pubsub=nats --broadcast_adapter=http --embed_nats --enats_addr=nats://localhost:4242 --enats_cluster=nats://localhost:4342 --enats_gateway=nats://localhost:4442 --enats_cluster_routes=nats://localhost:4342 --enats_store_dir=/src/tmp/nats-data/one
+[info] [2026-11-17T14:16:52+00:00]  Wait for 1s
+[info] [2026-11-17T14:16:53+00:00]  Launching background process: ./dist/anycable-go --port 8081 --broker=nats --pubsub=nats --broadcast_adapter=nats --embed_nats --enats_addr=nats://localhost:4243 --enats_cluster=nats://localhost:4343 --enats_cluster_routes=nats://localhost:4342 --enats_store_dir=/src/tmp/nats-data/two
+[info] [2026-11-17T14:16:53+00:00]  Wait for 1s
+[info] [2026-11-17T14:16:54+00:00]  Launching background process: ./dist/anycable-go --port 8082 --broker=nats --pubsub=nats --broadcast_adapter=nats --embed_nats --enats_addr=nats://localhost:4244 --enats_cluster=nats://localhost:4344 --enats_cluster_routes=nats://localhost:4342 --enats_store_dir=/src/tmp/nats-data/three
+[info] [2026-11-17T14:16:54+00:00]  Waiting for TCP server to start at 8080
+[info] [2026-11-17T14:16:54+00:00]  TCP server is listening at 8080
+[info] [2026-11-17T14:16:54+00:00]  Waiting for TCP server to start at 8081
+[info] [2026-11-17T14:16:54+00:00]  TCP server is listening at 8081
+[info] [2026-11-17T14:16:54+00:00]  Waiting for TCP server to start at 8082
+[info] [2026-11-17T14:16:55+00:00]  TCP server is listening at 8082
+[info] [2026-11-17T14:16:55+00:00]  Waiting for JetStream to be ready
+[info] [2026-11-17T14:17:01+00:00]  Wait for 2s
+[info] [2026-11-17T14:17:03+00:00]  Running command: bundle exec wsdirector ws://localhost:8080/cable -i [{"client":{"protocol":"action_cable","actions":[{"subscribe":{"channel":"BenchmarkChannel"}},{"perform":{"channel":"BenchmarkChannel","action":"broadcast","data":{"message":"hello"}}},{"receive":{"channel":"BenchmarkChannel","data>":{"message":"hello","action":"broadcast"},"stream_id":"all","print":true}}]}}]
+[info] [2026-11-17T14:17:04+00:00]  Finished
+[info] [2026-11-17T14:17:04+00:00]  Running command: bundle exec wsdirector ws://localhost:8080/cable -i [{"client":{"protocol":"action_cable","name":"publisher","actions":[{"subscribe":{"channel":"BenchmarkChannel"}},"wait_all",{"perform":{"channel":"BenchmarkChannel","action":"broadcast","data":{"message":"hello"}}},{"receive":{"channel":"BenchmarkChannel","data>":{"message":"hello","action":"broadcast"},"stream_id":"all","epoch":"1lvI"}},{"receive":{"channel":"BenchmarkChannel","data":{"message":"hello","action":"broadcastResult"}}}]}},{"client":{"protocol":"action_cable","name":"subscriber","multiplier":":scale","connection_options":{"url":"http://localhost:8081/cable"},"actions":[{"subscribe":{"channel":"BenchmarkChannel"}},"wait_all",{"receive":{"channel":"BenchmarkChannel","data>":{"message":"hello","action":"broadcast"},"stream_id":"all","epoch":"1lvI"}}]}},{"client":{"protocol":"action_cable","name":"another_subscriber","multiplier":":scale","connection_options":{"url":"http://localhost:8082/cable"},"actions":[{"subscribe":{"channel":"BenchmarkChannel"}},"wait_all",{"receive":{"channel":"BenchmarkChannel","data>":{"message":"hello","action":"broadcast"},"stream_id":"all","epoch":"1lvI"}}]}}] -s 4
+[info] [2026-11-17T14:17:04+00:00]  Finished
+All OK 👍

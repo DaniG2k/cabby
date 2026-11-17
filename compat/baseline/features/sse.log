@@ -1,0 +1,4 @@
+[info] [2026-11-17T14:20:04+00:00]  Launching background process: ./dist/anycable-go --sse --public_streams --secret=qwerty --api_port=8082 --broadcast_adapter=http --presets=broker
+[info] [2026-11-17T14:20:04+00:00]  Waiting for TCP server to start at 8080
+[info] [2026-11-17T14:20:04+00:00]  TCP server is listening at 8080
+All OK 👍

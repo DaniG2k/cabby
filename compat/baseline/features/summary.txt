@@ -1,0 +1,16 @@
+enats_broker exit=0
+enats_clusters exit=0
+file_config exit=0  # re-run as non-root; root-in-container hits pipe-user-pages-soft (8 KiB pipes) and deadlocks the runner, see baseline/README.md
+jwt exit=0
+metrics exit=0
+mruby_printers exit=0
+ping exit=0
+ping_pong exit=0
+pusher-presence exit=0
+pusher-private exit=0
+pusher exit=0
+shutdown exit=0
+sse exit=0
+standalone exit=0
+streams exit=0
+turbo_rpc_less exit=0
