@@ -9,8 +9,75 @@ pub use cabby_core::logger::TomlError;
 
 /// Whether an `Origin` header value matches one of the allowed host patterns
 /// (exact host, `*` for any, `*.example.com` or `*example.com` wildcards).
-pub fn origin_allowed(_origin: &str, _hosts: &[&str]) -> bool {
-    pending!("server::origin_allowed")
+///
+/// Both `*.example.com` and `*example.com` match subdomains (the latter also
+/// matches the apex), but never a different domain sharing the suffix. The
+/// origin's host keeps its port, as Go's `url.URL.Host` does.
+pub fn origin_allowed(origin: &str, hosts: &[&str]) -> bool {
+    let origin = origin.to_lowercase();
+    let Some(host) = url_host(&origin) else {
+        return false;
+    };
+
+    for pattern in hosts {
+        let pattern = pattern.trim().to_lowercase();
+        if pattern.is_empty() {
+            continue;
+        }
+        if host == pattern {
+            return true;
+        }
+        let Some(suffix) = pattern.strip_prefix('*') else {
+            continue;
+        };
+        if suffix.is_empty() {
+            return true;
+        }
+        if suffix.starts_with('.') {
+            if host.ends_with(suffix) {
+                return true;
+            }
+        } else if host == suffix || host.ends_with(&format!(".{suffix}")) {
+            return true;
+        }
+    }
+    false
+}
+
+/// The non-empty host (with port) of an absolute URL; `None` where Go's
+/// `url.Parse` fails or yields no host.
+fn url_host(raw: &str) -> Option<&str> {
+    let raw = raw.split('#').next().unwrap_or_default();
+    // Scheme: a letter, then letters, digits, `+`, `-` or `.`, then `:`.
+    let colon = raw.find(':')?;
+    let mut scheme = raw[..colon].chars();
+    if !scheme.next().is_some_and(|c| c.is_ascii_alphabetic())
+        || !scheme.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    {
+        return None;
+    }
+    let rest = raw[colon + 1..].split('?').next().unwrap_or_default();
+    let authority = rest.strip_prefix("//")?.split('/').next().unwrap_or_default();
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    (!host.is_empty() && valid_host(host)).then_some(host)
+}
+
+/// Go `parseHost` plus host-mode unescaping: an optional numeric port, and
+/// only characters a URL host may carry unescaped.
+fn valid_host(host: &str) -> bool {
+    let (name, port) = if host.starts_with('[') {
+        match host.find(']') {
+            Some(end) => host.split_at(end + 1),
+            None => return false,
+        }
+    } else {
+        match host.rfind(':') {
+            Some(i) => host.split_at(i),
+            None => (host, ""),
+        }
+    };
+    let port_ok = port.is_empty() || port.strip_prefix(':').is_some_and(|p| p.bytes().all(|b| b.is_ascii_digit()));
+    port_ok && name.bytes().all(|b| b >= 0x80 || b.is_ascii_alphanumeric() || b"-_.~!$&'()*+,;=:[]<>\"".contains(&b))
 }
 
 // --- Configuration ------------------------------------------------------------
