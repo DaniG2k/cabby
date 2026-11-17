@@ -11,6 +11,7 @@ pub mod metrics;
 pub mod mrb;
 pub mod nats;
 pub mod pubsub;
+pub mod node;
 pub mod pusher;
 pub mod pusher_sse_deps;
 pub mod redis;

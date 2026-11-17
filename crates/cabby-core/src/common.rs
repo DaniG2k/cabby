@@ -84,8 +84,9 @@ pub struct CommandResult {
 // --- added for identity, streams, broker, api ---
 //
 // Mirrors of upstream `common` definitions these packages use, plus the
-// `node.Controller` interface (placed here because identity and streams both
-// implement or wrap it; move it to the `node` module when that lands).
+// `node.Controller` interface (placed here because identity and streams, which
+// live in `cabby-core`, implement or wrap it; `cabby_server::node::Controller`
+// re-exports it as the canonical name).
 
 /// Channel state key carrying the whisper stream (upstream `WHISPER_STREAM_STATE`).
 pub const WHISPER_STREAM_STATE: &str = "$w";
@@ -189,6 +190,11 @@ impl SessionEnv {
     /// The field of the connection state (`""` when missing).
     pub fn get_connection_state_field(&self, _field: &str) -> String {
         crate::pending!("common::get_connection_state_field")
+    }
+
+    /// Drops one channel's state (upstream `RemoveChannelState`).
+    pub fn remove_channel_state(&mut self, _id: &str) {
+        crate::pending!("common::remove_channel_state")
     }
 }
 

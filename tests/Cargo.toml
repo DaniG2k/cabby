@@ -151,3 +151,5 @@ path = "unit/nats/main.rs"
 [[test]]
 name = "enats"
 path = "unit/enats/main.rs"
+name = "node"
+path = "unit/node/main.rs"
