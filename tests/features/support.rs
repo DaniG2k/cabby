@@ -36,7 +36,12 @@ pub fn rpc_app() -> AnytApp {
 /// [`rpc_app`] with a stream name prefix (`AppOptions::stream_prefix`), for
 /// servers that share a Redis or NATS service with other tests.
 pub fn rpc_app_with_prefix(prefix: &str) -> AnytApp {
-    AnytApp::start(AppOptions { http_rpc_secret: None, target_host: "127.0.0.1".into(), stream_prefix: prefix.into() })
+    AnytApp::start(AppOptions {
+        http_rpc_secret: None,
+        target_host: "127.0.0.1".into(),
+        stream_prefix: prefix.into(),
+        ..Default::default()
+    })
 }
 
 /// `launch :anycable, "./dist/anycable-go <args>"` + `wait_tcp`.
@@ -74,6 +79,7 @@ pub struct Output {
 }
 
 /// `run :name, cmd, env:, clean_env: true`: runs the SUT binary to completion
+/// with every `ANYCABLE_*` variable removed (nothing injected),
 /// within [`RUN_TIMEOUT`], draining both pipes concurrently (see
 /// compat/baseline/README.md on the runner's pipe deadlock). A pending marker
 /// from the Rust stub is re-raised.
@@ -84,7 +90,7 @@ pub fn run_sut(args: &[&str], env: &[(&str, &str)], dir: &std::path::Path) -> Ou
             cmd.env_remove(k);
         }
     }
-    cmd.env("ANYCABLE_DISABLE_TELEMETRY", "true").envs(env.iter().copied()).args(args).current_dir(dir);
+    cmd.envs(env.iter().copied()).args(args).current_dir(dir);
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -156,19 +162,34 @@ pub fn assert_groups(results: &[(&str, Result<(), StepError>)]) {
     assert!(failures.is_empty(), "Unexpected scenario result:\n{}", failures.join("\n"));
 }
 
-/// `retrying(delay:, attempts:)` with a bounded total window: runs `f` until it
-/// succeeds, sleeping `delay` between attempts, failing with the last error
-/// once `window` has passed.
-pub fn retrying<T>(delay: Duration, window: Duration, mut f: impl FnMut() -> Result<T, String>) -> T {
-    let until = Instant::now() + window;
+/// `BenchRunner#retrying(delay:, attempts:)`: runs `f` up to `attempts` times,
+/// sleeping `delay` after a failure, and fails with the last error.
+pub fn retrying<T>(delay: Duration, attempts: usize, mut f: impl FnMut() -> Result<T, String>) -> T {
+    let mut left = attempts;
     loop {
         match f() {
             Ok(v) => return v,
-            Err(e) if Instant::now() + delay < until => {
+            Err(e) if left > 1 => {
+                left -= 1;
                 eprintln!("Retrying after error: {e}");
                 std::thread::sleep(delay);
             }
             Err(e) => panic!("{e}"),
+        }
+    }
+}
+
+/// Polls `probe` until it succeeds (readiness), failing after `deadline`.
+pub fn await_ready<T>(what: &str, deadline: Duration, mut probe: impl FnMut() -> Result<T, String>) -> T {
+    let until = Instant::now() + deadline;
+    loop {
+        match probe() {
+            Ok(v) => return v,
+            Err(e) if Instant::now() < until => {
+                let _ = e;
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            Err(e) => panic!("{what} not ready within {deadline:?}: {e}"),
         }
     }
 }

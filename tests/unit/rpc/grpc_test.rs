@@ -13,7 +13,7 @@ use cabby_testkit::reference::rpc::*;
 use super::helpers::{map, strings};
 
 fn run_grpc_server() -> FakeRpc {
-    FakeRpc::start_with(FakeRpcOptions { grpc_max_concurrent_streams: Some(1) })
+    FakeRpc::start_with(FakeRpcOptions { grpc_max_concurrent_streams: Some(1), ..Default::default() })
 }
 
 fn session() -> SessionEnv {

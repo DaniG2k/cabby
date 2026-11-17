@@ -26,11 +26,8 @@ struct Fixture {
 }
 
 fn fixture() -> Fixture {
-    let app = AnytApp::start(AppOptions {
-        http_rpc_secret: None,
-        target_host: "localhost".into(),
-        stream_prefix: String::new(),
-    });
+    let app =
+        AnytApp::start(AppOptions { http_rpc_secret: None, target_host: "localhost".into(), ..Default::default() });
     let broadcasts = HttpRecorder::start();
     broadcasts.respond_with(201);
     app.set_broadcaster(Target::Http { addr: broadcasts.addr(), path: "/_broadcast".into(), key: None });
@@ -304,7 +301,7 @@ fn http_rpc_requires_the_secret() {
     let app = AnytApp::start(AppOptions {
         http_rpc_secret: Some("rpc_secret".into()),
         target_host: "h".into(),
-        stream_prefix: String::new(),
+        ..Default::default()
     });
     let body = br#"{"env":{"url":"ws://h/cable"}}"#;
     let addr = app.rpc().http_addr();
@@ -317,6 +314,18 @@ fn http_rpc_requires_the_secret() {
 }
 
 #[test]
+fn http_rpc_mount_path_is_required_when_configured() {
+    let app = AnytApp::start(AppOptions { http_mount_path: Some("/_anycable".into()), ..Default::default() });
+    let body = br#"{"env":{"url":"ws://h/cable"}}"#;
+    let addr = app.rpc().http_addr();
+    let post = |path: &str| raw_http::request(addr, "POST", path, &[], Some(body)).expect("HTTP RPC").status;
+
+    assert_eq!(200, post("/_anycable/connect"));
+    assert_eq!(404, post("/connect"));
+    assert_eq!(404, post("/other/connect"));
+}
+
+#[test]
 fn active_support_json_escapes_html_entities() {
     let expected = "\"\\u003cscript\\u003ea \\u0026 b\\u003c/script\\u003e\"";
     assert_eq!(expected, active_support_json(&json!("<script>a & b</script>")));
@@ -324,8 +333,12 @@ fn active_support_json_escapes_html_entities() {
 
 #[test]
 fn stream_prefix_applies_to_streams_and_broadcasts() {
-    let app =
-        AnytApp::start(AppOptions { http_rpc_secret: None, target_host: "h".into(), stream_prefix: "t1:".into() });
+    let app = AnytApp::start(AppOptions {
+        http_rpc_secret: None,
+        target_host: "h".into(),
+        stream_prefix: "t1:".into(),
+        ..Default::default()
+    });
     let broadcasts = HttpRecorder::start();
     broadcasts.respond_with(201);
     app.set_broadcaster(Target::Http { addr: broadcasts.addr(), path: "/_broadcast".into(), key: None });
