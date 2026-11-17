@@ -11,6 +11,8 @@ use tungstenite::protocol::frame::coding::CloseCode;
 
 /// Serves one connection: echoes the subprotocol, sends `frames`, then waits for
 /// one client message and replies with it, then closes with 1000/"bye".
+// tungstenite fixes the callback signature (its error type is the full response).
+#[allow(clippy::result_large_err)]
 fn server(frames: Vec<Message>) -> (u16, std::thread::JoinHandle<Option<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
