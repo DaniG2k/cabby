@@ -1,0 +1,9 @@
+[info] [2026-11-17T14:19:30+00:00]  Launching background process: bundle exec anyt --only-rpc
+[info] [2026-11-17T14:19:30+00:00]  Waiting for TCP server to start at 50051
+[info] [2026-11-17T14:19:31+00:00]  TCP server is listening at 50051
+[info] [2026-11-17T14:19:31+00:00]  Launching background process: ./dist/anycable-go --broadcast_adapter=http --metrics_log_formatter=features/simple_logger.rb --metrics_rotate_interval=1 --ping_interval=3
+[info] [2026-11-17T14:19:31+00:00]  Waiting for TCP server to start at 8080
+[info] [2026-11-17T14:19:31+00:00]  TCP server is listening at 8080
+[info] [2026-11-17T14:19:31+00:00]  Running command: bundle exec wsdirector ws://localhost:8080/cable -i [{"client":{"multiplier":2,"actions":[{"receive":{"data>":{"type":"welcome"}}},{"receive":{"data>":{"type":"ping"}}},{"receive":{"data>":{"type":"ping"}}}]}}]
+[info] [2026-11-17T14:19:39+00:00]  Finished
+All OK 👍
