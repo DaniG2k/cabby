@@ -31,7 +31,13 @@ enum Outcome {
     Pending,
     Fail,
     Ignored,
+    /// The Go facade reported `unimplemented!("not_observable: <reason>")`: the
+    /// behavior cannot be reached through the reference (SPEC.md §5).
+    NotObservable,
 }
+
+/// Marker used by Go facade arms for behavior the reference cannot expose.
+pub const NOT_OBSERVABLE: &str = "not_observable:";
 
 /// (test target name, executable path)
 fn test_binaries() -> Result<Vec<(String, String)>> {
@@ -127,8 +133,12 @@ fn parse(output: &str) -> BTreeMap<String, Outcome> {
         }
     }
     for (name, text) in sections {
-        if results.get(&name) == Some(&Outcome::Fail) && pending_id(&text).is_some() {
-            results.insert(name, Outcome::Pending);
+        if results.get(&name) == Some(&Outcome::Fail) {
+            if pending_id(&text).is_some() {
+                results.insert(name, Outcome::Pending);
+            } else if text.contains(&format!("not implemented: {NOT_OBSERVABLE}")) {
+                results.insert(name, Outcome::NotObservable);
+            }
         }
     }
     results
@@ -139,12 +149,15 @@ fn status_str(o: Outcome) -> &'static str {
         Outcome::Pass => "pass",
         Outcome::Pending => "pending",
         Outcome::Fail | Outcome::Ignored => "fail",
+        Outcome::NotObservable => "not_observable",
     }
 }
 
 fn combine(outcomes: &[Outcome]) -> Outcome {
     if outcomes.iter().any(|o| matches!(o, Outcome::Fail | Outcome::Ignored)) {
         Outcome::Fail
+    } else if outcomes.contains(&Outcome::NotObservable) {
+        Outcome::NotObservable
     } else if outcomes.iter().all(|o| *o == Outcome::Pass) {
         Outcome::Pass
     } else {
@@ -189,6 +202,9 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
             }
             if o == Outcome::Ignored {
                 errors.push(format!("IGNORED {name}::{t}: ignore attributes are not allowed"));
+            }
+            if o == Outcome::NotObservable && backend == Backend::Rust {
+                errors.push(format!("NOT-OBSERVABLE-ON-RUST {name}::{t}: only Go facade arms may use this marker"));
             }
             results.insert(format!("{name}::{t}"), o);
         }
@@ -236,6 +252,8 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
                     // already reported as FAIL above
                 } else if o == Outcome::Pending {
                     errors.push(format!("PENDING-ON-GO {label}: the Go reference cannot be pending"));
+                } else if o == Outcome::NotObservable && record {
+                    *ref_status = "not_observable".into();
                 }
             }
             Backend::Rust => match (rust_status.as_str(), o) {
@@ -275,6 +293,7 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
             Outcome::Pending => "pending",
             Outcome::Fail => "fail",
             Outcome::Ignored => "ignored",
+            Outcome::NotObservable => "not_observable",
         })
         .or_default() += 1;
         acc
@@ -345,6 +364,12 @@ test result: FAILED. 1 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out
         let out = OUTPUT.replace("---- a::pending stdout ----", "---- a::other stdout ----");
         let r = parse(&out);
         assert_eq!(r["a::pending"], Outcome::Fail);
+    }
+
+    #[test]
+    fn not_observable_go_arms_are_recognized() {
+        let out = "test b::hidden ... FAILED\n\nfailures:\n\n---- b::hidden stdout ----\n\nthread 'b::hidden' panicked at x.rs:1:1:\nnot implemented: not_observable: unexported state\n\nfailures:\n    b::hidden\n";
+        assert_eq!(parse(out)["b::hidden"], Outcome::NotObservable);
     }
 
     #[test]
