@@ -7,6 +7,7 @@ pub mod broadcast;
 pub mod broker;
 pub mod common;
 pub mod encoders;
+pub mod gojson;
 pub mod hub;
 pub mod identity;
 pub mod logger;

@@ -5,24 +5,11 @@
 
 use std::sync::Arc;
 
-use crate::common::{DisconnectMessage, RemoteDisconnectMessage, Reply, StreamMessage};
+/// The messages a hub hands to sessions (upstream `encoders.EncodedMessage`); its
+/// `to_json` is the `encoders.JSON` payload.
+pub use crate::common::EncodedMessage;
+use crate::common::{RemoteDisconnectMessage, StreamMessage};
 use crate::pending;
-
-// TODO(merge): owned by encoders. Minimal stand-in for `encoders.EncodedMessage`
-// (a reply or disconnect notification that is encoded once per encoder).
-#[derive(Debug, Clone, PartialEq)]
-#[allow(clippy::large_enum_variant)] // TODO(merge) placeholder for encoders::EncodedMessage; boxing only adds noise
-pub enum EncodedMessage {
-    Reply(Reply),
-    Disconnect(DisconnectMessage),
-}
-
-impl EncodedMessage {
-    // TODO(merge): owned by encoders (`encoders.JSON.Encode`, payload of the frame).
-    pub fn to_json(&self) -> Vec<u8> {
-        pending!("encoders::json_encode")
-    }
-}
 
 /// A session as seen by the hub (upstream `hub.HubSession`).
 pub trait HubSession: Send + Sync {
