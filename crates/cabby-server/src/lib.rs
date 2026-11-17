@@ -6,6 +6,7 @@ pub mod api;
 pub mod broadcast;
 pub mod cli;
 pub mod config;
+pub mod ds;
 pub mod enats;
 pub mod metrics;
 pub mod mrb;
