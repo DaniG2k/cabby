@@ -1,8 +1,0 @@
-# Cabby mascot, version 2
-
-A softer, rounder Cabby with peach-coral, butter-yellow, cream, and rosy-pink colors.
-Created with the built-in image generation tool on 2026-11-17, using the original mascot as a reference. The transparent PNG is shown in the README at 320 pixels wide.
-
-## Generation prompt
-
-Use case: style-transfer / logo-brand mascot redesign. Edit the supplied Cabby mascot into a MUCH CUTER minimal kawaii character for a Rust realtime messaging project. Preserve only its concept: an orange crab taxi driver with a yellow cap and network cable. Completely redesign proportions and drawing style. A tiny squishy peach-coral crab with an oversized pillowy rounded body, two small shiny black dot eyes set wide apart directly on the face (no large protruding eyeballs), tiny happy curved mouth and soft pink circular blush cheeks. Six very short rounded little legs and two small mitten-like rounded claws, one waving, the other hugging a small cream network plug. A short golden cable curls into a little heart beside it. Oversized soft butter-yellow cab-driver cap with a minimal dark-brown and cream checker band, tilted slightly. Flat sticker-like 2D illustration, smooth medium-weight warm dark-brown outline, extremely simple shapes, mostly flat pastel fills, only tiny restrained highlights. Gentle, cuddly, shy cheerful personality. Strong compact silhouette legible at 120 pixels. Centered full body square composition with generous margins. Actual transparent background. No text or letters, no scenery or props beyond cap and cable, no realistic anatomy, no sharp pointed feet, no huge claws, no teeth, no open mouth, no gloss or dramatic shading. Aim for the charm of a tiny collectible sticker.
