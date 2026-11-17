@@ -67,8 +67,35 @@ type dsHarness struct {
 	controller *mocks.Controller
 	mockBroker *mocks.Broker  // buildNode() (handler_test.go)
 	memBroker  *broker.Memory // setupIntegrationServer() / auth_test.go
-	mu         sync.Mutex
-	panics     []string
+	// Guards panics and the call records. The calls are recorded through each
+	// expectation's Run, so they are read without touching testify's unexported
+	// mutex (mock.Calls is appended to by handler goroutines).
+	mu              sync.Mutex
+	panics          []string
+	controllerCalls [][]string
+	brokerCalls     [][]string
+}
+
+// record returns a mock.Call Run function that appends the call (method plus its
+// string/integer arguments) to the controller or broker records.
+func (h *dsHarness) record(broker bool, method string) func(mock.Arguments) {
+	return func(args mock.Arguments) {
+		entry := dsCallEntry(method, args)
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if broker {
+			h.brokerCalls = append(h.brokerCalls, entry)
+		} else {
+			h.controllerCalls = append(h.controllerCalls, entry)
+		}
+	}
+}
+
+// calls copies the call records.
+func (h *dsHarness) calls() (controller, broker [][]string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([][]string{}, h.controllerCalls...), append([][]string{}, h.brokerCalls...)
 }
 
 func (h *dsHarness) recordPanic(r interface{}) {
@@ -193,21 +220,17 @@ func (o *dsHandlerObj) streamsController(k dsStreamsKind) (*streams.Controller, 
 	return nil, fmt.Errorf("unknown streams controller kind %q", k.Kind)
 }
 
-func dsCalls(calls []mock.Call) [][]string {
-	out := [][]string{}
-	for _, c := range calls {
-		entry := []string{c.Method}
-		for _, arg := range c.Arguments {
-			switch v := arg.(type) {
-			case string:
-				entry = append(entry, v)
-			case int64, uint64:
-				entry = append(entry, fmt.Sprint(v))
-			}
+func dsCallEntry(method string, args mock.Arguments) []string {
+	entry := []string{method}
+	for _, arg := range args {
+		switch v := arg.(type) {
+		case string:
+			entry = append(entry, v)
+		case int64, uint64:
+			entry = append(entry, fmt.Sprint(v))
 		}
-		out = append(out, entry)
 	}
-	return out
+	return entry
 }
 
 func init() {
@@ -349,8 +372,8 @@ func init() {
 			return nil, err
 		}
 		controller := &mocks.Controller{}
-		controller.On("Shutdown").Return(nil)
 		h := &dsHarness{controller: controller}
+		controller.On("Shutdown").Return(nil).Run(h.record(false, "Shutdown"))
 		config := node.NewConfig()
 		config.HubGopoolSize = 2
 		start := func() {
@@ -368,7 +391,7 @@ func init() {
 			h.n = node.NewNode(&config, node.WithController(controller), node.WithInstrumenter(metrics.NewMetrics(nil, 10, quietLog)))
 			start()
 			brk := &mocks.Broker{}
-			brk.On("Peak", "test-stream").Return(nil, nil)
+			brk.On("Peak", "test-stream").Return(nil, nil).Run(h.record(true, "Peak"))
 			h.mockBroker = brk
 			h.n.SetBroker(brk)
 		case "memory": // setupIntegrationServer() / auth_test.go
@@ -425,6 +448,7 @@ func init() {
 		default:
 			return nil, fmt.Errorf("unknown controller expectation %q", e.Method)
 		}
+		call.Run(h.record(false, e.Method))
 		switch e.Times {
 		case 0:
 		case 1:
@@ -469,37 +493,36 @@ func init() {
 		if e.History != nil {
 			history = *e.History
 		}
+		var call *mock.Call
 		switch e.Method {
 		case "Peak":
 			var msg interface{}
 			if e.Message != nil {
 				msg = e.Message
 			}
-			h.mockBroker.On("Peak", e.Stream).Return(msg, rerr)
+			call = h.mockBroker.On("Peak", e.Stream).Return(msg, rerr)
 		case "HistorySince":
-			h.mockBroker.On("HistorySince", e.Stream, e.Ts).Return(history, rerr)
+			call = h.mockBroker.On("HistorySince", e.Stream, e.Ts).Return(history, rerr)
 		case "HistoryFrom":
-			h.mockBroker.On("HistoryFrom", e.Stream, e.Epoch, e.Offset).Return(history, rerr)
+			call = h.mockBroker.On("HistoryFrom", e.Stream, e.Epoch, e.Offset).Return(history, rerr)
 		default:
 			return nil, fmt.Errorf("unknown broker expectation %q", e.Method)
 		}
+		call.Run(h.record(true, e.Method))
 		return nil, nil
 	})
-	// Controller and mock broker calls (method plus string/integer arguments) and
-	// the recovered testify failures.
+	// Controller and mock broker calls (method plus string/integer arguments, as
+	// recorded by the expectations' Run) and the recovered testify failures.
 	register("ds.Harness.Calls", func(raw json.RawMessage) (interface{}, error) {
 		h, err := dsHarnessGet(raw)
 		if err != nil {
 			return nil, err
 		}
-		brokerCalls := [][]string{}
-		if h.mockBroker != nil {
-			brokerCalls = dsCalls(h.mockBroker.Calls)
-		}
+		controllerCalls, brokerCalls := h.calls()
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		return map[string]interface{}{
-			"controller": dsCalls(h.controller.Calls),
+			"controller": controllerCalls,
 			"broker":     brokerCalls,
 			"unexpected": append([]string{}, h.panics...),
 		}, nil
@@ -550,12 +573,13 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		for _, c := range h.controller.Calls {
-			if c.Method != "Subscribe" || len(c.Arguments) < 4 {
+		controllerCalls, _ := h.calls()
+		for _, c := range controllerCalls {
+			// [Subscribe, sid, ids, identifier]
+			if c[0] != "Subscribe" || len(c) < 4 {
 				continue
 			}
-			ids, _ := c.Arguments[3].(string)
-			s := h.n.LookupSession(ids)
+			s := h.n.LookupSession(c[2])
 			if s == nil {
 				continue
 			}
@@ -579,11 +603,20 @@ func init() {
 		}
 		return false, nil
 	})
-	register("ds.Harness.Shutdown", func(raw json.RawMessage) (interface{}, error) {
+	// n.Shutdown(context.Background()). A testify failure (an unexpected mock
+	// call during shutdown) is recovered and reported with the harness's
+	// unexpected calls.
+	register("ds.Harness.Shutdown", func(raw json.RawMessage) (res interface{}, err error) {
 		h, err := dsHarnessGet(raw)
 		if err != nil {
 			return nil, err
 		}
+		defer func() {
+			if r := recover(); r != nil {
+				h.recordPanic(r)
+				res, err = nil, nil
+			}
+		}()
 		return errString(h.n.Shutdown(context.Background())), nil
 	})
 
