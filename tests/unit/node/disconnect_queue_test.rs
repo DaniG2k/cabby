@@ -3,25 +3,18 @@
 //! Upstream drives the queue on wall-clock time: `Rate` sets a real
 //! `time.Ticker` shared by the workers, and the tests sleep or poll
 //! (`require.Eventually`, `runtime.Gosched`) around it. Here the Rust node runs
-//! on a [`ManualTimers`] clock: the throttle only ticks when the test advances
-//! time, and the observable readiness points are "N workers wait for a tick"
-//! (the ticker's receivers) and "N Disconnect calls are in flight" (a gate in
-//! the controller). The original Go timings are kept in comments.
-//!
-//! Against Go, cases that only use exported API (`NewDisconnectQueue`,
-//! `Enqueue`, `Size`, `Run`, `Shutdown`, metrics) run through the bridge; cases
-//! built on testify controller callbacks, the unexported queue, or concurrent
-//! callers are `not_observable` there.
+//! on a [`ManualTimers`](cabby_testkit::timers::ManualTimers) clock: the
+//! throttle only ticks when the test advances time, and the observable
+//! readiness points are "N workers wait for a tick" (the ticker's receivers)
+//! and "N Disconnect calls are in flight" (a barrier in the controller). The Go
+//! reference keeps its real ticker, so on Go the same steps wait on the
+//! controller's counters (bounded probes, as upstream's `require.Eventually`)
+//! and sleeps stay real ([`Pace`]). The original Go timings are kept in comments.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use cabby_core::common::ControllerError;
 use cabby_server::node::Disconnector;
 use cabby_testkit::reference::node::*;
-use cabby_testkit::sync::Watched;
-use cabby_testkit::timers::ManualTimers;
 
 use super::support::DEADLINE;
 
@@ -44,16 +37,12 @@ impl Drop for ShutdownOnDrop<'_, '_> {
     }
 }
 
-fn timers_of<'a>(q: &'a TestQueue<'_>) -> &'a ManualTimers {
-    q.node().timers()
-}
-
-/// In-flight bookkeeping of upstream's blocking `Disconnect` mock.
-#[derive(Debug, Default)]
-struct Inflight {
-    inflight: i32,
-    peak: i32,
-    calls: i32,
+/// Upstream's queue-test controller: `&mocks.Controller{}` expecting
+/// `Disconnect(Anything x5)` with the given `Run` callback.
+fn disconnect_controller(run: Run) -> TestMock {
+    let controller = new_mock_controller();
+    controller.on(Expect::new("Disconnect", vec![any(), any(), any(), any()], Ret::Unit).run(run));
+    controller
 }
 
 mod test_disconnect_queue_run {
@@ -61,6 +50,7 @@ mod test_disconnect_queue_run {
 
     /// upstream: node/disconnect_queue_test.go#TestDisconnectQueue_Run/Disconnects_sessions
     /// upstream: node/disconnect_queue_test.go#TestDisconnectQueue_Run
+    /// note: upstream spins on q.Size() > 0 (runtime.Gosched); Rust waits until the worker holding the session blocks on the controlled throttle, Go probes the exported Size() with a bounded poll (nothing exported signals the change).
     #[test]
     fn disconnects_sessions() {
         let node = new_mock_node();
@@ -81,39 +71,19 @@ mod test_disconnect_queue_run {
 
     /// upstream: node/disconnect_queue_test.go#TestDisconnectQueue_Run/Runs_calls_concurrently_up_to_the_number_of_workers
     /// upstream: node/disconnect_queue_test.go#TestDisconnectQueue_Run
+    /// note: on Go the testify controller and its blocking Run callback (inflight/peak/calls, release channel) live in the bridge; the 1ms ticker is real, the 50ms wait is a real sleep, and Eventually is a bounded probe of the counters. On Rust the throttle is ticked explicitly; the extra check that no worker took the third session (ticker receivers) is Rust-only.
     #[test]
     fn runs_calls_concurrently_up_to_the_number_of_workers() {
-        let controller = MockNodeController::new();
+        let controller = disconnect_controller(Run::InflightGate);
         let config = new_config();
-        let node = new_node_with_controller(config, controller.clone());
-
-        let release = BlockingGate::new();
-        let state = Arc::new(Watched::new(Inflight::default()));
-
-        {
-            let release = release.clone();
-            let state = state.clone();
-            controller.on("Disconnect", vec![any(), any(), any(), any()], move |_| {
-                state.update(|s| {
-                    s.inflight += 1;
-                    if s.inflight > s.peak {
-                        s.peak = s.inflight;
-                    }
-                });
-                release.pass();
-                state.update(|s| {
-                    s.inflight -= 1;
-                    s.calls += 1;
-                });
-                Ok::<(), ControllerError>(())
-            });
-        }
+        let node = new_node_with_controller(config, &controller);
 
         let mut dconfig = new_disconnect_queue_config();
         dconfig.rate = 1000;
         dconfig.workers_num = 2;
         let q = new_disconnect_queue(&node, &dconfig);
-        let timers = timers_of(&q);
+        let pace = node.pace();
+        let period = Duration::from_millis(1);
 
         for i in 0..3 {
             q.enqueue(&new_mock_session(&i.to_string(), &node, vec![])).expect("enqueue");
@@ -124,79 +94,75 @@ mod test_disconnect_queue_run {
         // Upstream: require.Eventually(inflight == 2, 1s, 1ms) on a 1ms ticker.
         // Both workers hold a session and wait for the throttle; each tick lets
         // one call through.
-        timers.await_ticker_waiters(2, DEADLINE);
-        timers.advance(Duration::from_millis(1));
-        release.await_held(1, DEADLINE);
-        timers.advance(Duration::from_millis(1));
-        release.await_held(2, DEADLINE);
-        assert_eq!(2, state.read(|s| s.inflight));
+        pace.workers_waiting(2);
+        pace.tick(period);
+        controller.await_inflight(1, Duration::from_secs(1));
+        pace.tick(period);
+        controller.await_inflight(2, Duration::from_secs(1));
+        assert_eq!(2, controller.inflight());
 
         // The third call waits for a free worker (upstream: time.Sleep(50ms),
         // i.e. 50 throttle periods).
-        for _ in 0..50 {
-            timers.advance(Duration::from_millis(1));
+        pace.elapse(Duration::from_millis(50), period);
+        assert_eq!(2, controller.inflight());
+        assert_eq!(2, controller.arrived(), "no third Disconnect call may start while both workers are busy");
+        if let Some(timers) = node.manual_timers() {
+            assert_eq!(0, timers.ticker_waiters(), "the third session is not taken while both workers are busy");
         }
-        assert_eq!(2, state.read(|s| s.inflight));
-        assert_eq!(2, release.arrived(), "no third Disconnect call may start while both workers are busy");
-        assert_eq!(0, timers.ticker_waiters(), "the third session is not taken while both workers are busy");
 
-        release.open();
+        controller.release();
 
-        // Upstream: require.Eventually(calls == 3, 1s, 1ms). The tick the ticker
-        // buffered while both workers were busy (Go tickers buffer one) lets the
-        // freed worker run the third call without another advance.
-        assert!(state.wait_until(DEADLINE, |s| s.calls == 3), "3 calls expected, {:?}", state.read(|s| s.calls));
-        assert_eq!(2, state.read(|s| s.peak));
+        // Upstream: require.Eventually(calls == 3, 1s, 1ms). On Rust the tick
+        // the ticker buffered while both workers were busy (Go tickers buffer
+        // one) lets the freed worker run the third call without another advance.
+        controller.await_completed_calls(3, Duration::from_secs(1));
+        assert_eq!(2, controller.peak());
 
         q.shutdown().expect("shutdown");
     }
 
     /// upstream: node/disconnect_queue_test.go#TestDisconnectQueue_Run/Respects_the_rate_with_multiple_workers
     /// upstream: node/disconnect_queue_test.go#TestDisconnectQueue_Run
+    /// note: on Go the testify controller counts calls in the bridge, and the elapsed time from `go q.Run()` to calls == 5 (Eventually, 2s) is measured inside the bridge op; on Rust the 50ms throttle is ticked explicitly, checking one call per tick, and the elapsed time is virtual.
     #[test]
     fn respects_the_rate_with_multiple_workers() {
-        let controller = MockNodeController::new();
+        let controller = disconnect_controller(Run::Count);
         let config = new_config();
-        let node = new_node_with_controller(config, controller.clone());
-
-        let calls = Arc::new(Watched::new(0usize));
-        {
-            let calls = calls.clone();
-            controller.on("Disconnect", vec![any(), any(), any(), any()], move |_| {
-                calls.update(|c| *c += 1);
-                Ok::<(), ControllerError>(())
-            });
-        }
+        let node = new_node_with_controller(config, &controller);
 
         let mut dconfig = new_disconnect_queue_config();
         dconfig.rate = 20;
         dconfig.workers_num = 4;
         let q = new_disconnect_queue(&node, &dconfig);
-        let timers = timers_of(&q);
 
         for i in 0..5 {
             q.enqueue(&new_mock_session(&i.to_string(), &node, vec![])).expect("enqueue");
         }
 
-        let start = timers.elapsed();
-        q.run_in_background();
+        // Upstream: start := time.Now(); go q.Run();
+        // require.Eventually(calls == 5, 2s, 1ms), then "5 calls at 20 calls/s
+        // take at least 5 ticks of 50ms": elapsed >= 240ms.
+        let elapsed = match node.manual_timers() {
+            Some(timers) => {
+                let start = timers.elapsed();
+                q.run_in_background();
+                // All four workers hold a session and wait for the shared 50ms
+                // throttle; every tick admits exactly one call, whichever worker gets it.
+                timers.await_ticker_waiters(4, DEADLINE);
+                assert_eq!(0, controller.completed_calls());
+                for k in 1..=5i32 {
+                    timers.advance(Duration::from_millis(50));
+                    controller.await_completed_calls(k, DEADLINE);
+                    // Quiescence: the remaining sessions are held by workers waiting for a tick.
+                    timers.await_ticker_waiters(4.min(5 - k as usize), DEADLINE);
+                    assert_eq!(k, controller.completed_calls(), "the workers share one rate: one call per tick");
+                }
+                timers.elapsed() - start
+            }
+            None => q.run_until_calls(&controller, 5, Duration::from_secs(2)).expect("5 calls within 2s"),
+        };
 
-        // Upstream: require.Eventually(calls == 5, 2s, 1ms), then "5 calls at
-        // 20 calls/s take at least 5 ticks of 50ms": elapsed >= 240ms.
-        //
-        // Here: all four workers hold a session and wait for the shared 50ms
-        // throttle; every tick admits exactly one call, whichever worker gets it.
-        timers.await_ticker_waiters(4, DEADLINE);
-        assert_eq!(0, calls.read(|c| *c));
-        for k in 1..=5usize {
-            timers.advance(Duration::from_millis(50));
-            assert!(calls.wait_until(DEADLINE, |c| *c >= k), "call {k} expected after tick {k}");
-            // Quiescence: the remaining sessions are held by workers waiting for a tick.
-            timers.await_ticker_waiters(4.min(5 - k), DEADLINE);
-            assert_eq!(k, calls.read(|c| *c), "the workers share one rate: one call per tick");
-        }
-
-        assert!(timers.elapsed() - start >= Duration::from_millis(240));
+        assert!(elapsed >= Duration::from_millis(240), "5 calls took only {elapsed:?}");
 
         q.shutdown().expect("shutdown");
     }
@@ -232,6 +198,7 @@ mod test_disconnect_queue_shutdown {
     ///
     /// upstream: node/disconnect_queue_test.go#TestDisconnectQueue_Shutdown/Stops_after_timeout
     /// upstream: node/disconnect_queue_test.go#TestDisconnectQueue_Shutdown
+    /// note: skipped upstream (t.Skip "TODO: We need a trully node mock to control disconnect operation"); this active equivalent uses an already-expired shutdown context, and the regression-for case stops_after_timeout_while_a_call_is_in_flight covers the in-flight timeout.
     #[test]
     fn stops_after_timeout() {
         let node = new_mock_node();
@@ -249,47 +216,44 @@ mod test_disconnect_queue_shutdown {
     /// `TestDisconnectQueue_Shutdown/Stops_after_timeout`, skipped upstream with
     /// "TODO: We need a trully node mock to control disconnect operation").
     ///
-    /// The controller's Disconnect is held at a gate, so the first remaining
+    /// The controller's Disconnect is held at a barrier, so the first remaining
     /// call is in flight when the shutdown context ends (cancellation stands in
     /// for the deadline firing; upstream checks `ctx.Done()` before each call).
     /// `Shutdown` must finish that call, invoke no further ones, and report the
     /// two it had no time for.
     ///
     /// regression-for: node/disconnect_queue_test.go#TestDisconnectQueue_Shutdown/Stops_after_timeout
+    /// note: not_observable on Go: the shutdown context is cancelled while Shutdown runs, which needs a Rust-side context; the bridge's Shutdown op takes a fixed timeout.
     #[test]
     fn stops_after_timeout_while_a_call_is_in_flight() {
-        let controller = MockNodeController::new();
-        let node = new_node_with_controller(new_config(), controller.clone());
-        let hold = BlockingGate::new();
-        {
-            let hold = hold.clone();
-            controller.on("Disconnect", vec![any(), any(), any(), any()], move |_| {
-                hold.pass();
-                Ok::<(), ControllerError>(())
-            });
-        }
+        let controller = disconnect_controller(Run::InflightGate);
+        let node = new_node_with_controller(new_config(), &controller);
 
         let q = new_queue(&node);
+        let rq = q.rust_with("the shutdown context is cancelled while Shutdown runs").clone();
         for i in 1..=3 {
             q.enqueue(&new_mock_session(&i.to_string(), &node, vec![])).expect("enqueue");
         }
         assert_eq!(3, q.size());
 
         let ctx = background();
-        let result = std::thread::scope(|sc| {
-            let shutdown = sc.spawn(|| q.rust_with("testify controller").shutdown(&ctx));
+        let (tx, rx) = std::sync::mpsc::channel();
+        {
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(rq.shutdown(&ctx));
+            });
+        }
 
-            hold.await_held(1, DEADLINE);
-            assert_eq!(0, q.size(), "Shutdown takes every queued session before invoking them");
+        controller.await_inflight(1, DEADLINE);
+        assert_eq!(0, q.size(), "Shutdown takes every queued session before invoking them");
 
-            ctx.cancel.cancel();
-            hold.open();
+        ctx.cancel.cancel();
+        controller.release();
 
-            shutdown.join().expect("shutdown thread")
-        });
-
+        let result = rx.recv_timeout(DEADLINE).expect("Shutdown returns");
         assert_eq!(Err(NodeError("had no time to invoke Disconnect calls: ~2".into())), result);
-        controller.mock.assert_number_of_calls("Disconnect", 1);
+        assert_eq!(1, controller.completed_calls());
         assert_eq!(0, q.size());
     }
 
@@ -322,12 +286,12 @@ mod test_disconnect_queue_shutdown {
 
     /// upstream: node/disconnect_queue_test.go#TestDisconnectQueue_Shutdown/Does_not_block_when_sessions_are_enqueued_concurrently
     /// upstream: node/disconnect_queue_test.go#TestDisconnectQueue_Shutdown
+    /// note: the eight enqueuers and the 5s-bounded Shutdown run in the facade on detached threads (a blocked Shutdown fails instead of hanging); on Go they are goroutines in the bridge op.
     #[test]
     fn does_not_block_when_sessions_are_enqueued_concurrently() {
         for _ in 0..100 {
             let node = new_mock_node();
             let q = new_queue(&node);
-            q.rust_with("the bridge serializes calls, so Enqueue cannot race Shutdown in the Go reference");
 
             for j in 0..100 {
                 q.enqueue(&new_mock_session(&j.to_string(), q.node(), vec![])).expect("enqueue");
@@ -335,33 +299,10 @@ mod test_disconnect_queue_shutdown {
 
             // Keep enqueueing until shutdown completes, so some Enqueue calls
             // pass the stopped check before Shutdown and add items during it
-            let stop = AtomicBool::new(false);
-
-            std::thread::scope(|sc| {
-                for j in 0..8 {
-                    let (q, stop) = (&q, &stop);
-                    sc.spawn(move || {
-                        let s = new_mock_session(&format!("c-{j}"), q.node(), vec![]);
-
-                        while !stop.load(Ordering::Acquire) {
-                            let _ = q.enqueue(&s);
-                        }
-                    });
-                }
-
-                let (tx, rx) = std::sync::mpsc::channel();
-                let q = &q;
-                sc.spawn(move || {
-                    let _ = tx.send(q.shutdown());
-                });
-
-                let result = rx.recv_timeout(Duration::from_secs(5));
-                stop.store(true, Ordering::Release);
-                match result {
-                    Ok(r) => r.expect("shutdown"),
-                    Err(_) => panic!("Shutdown is blocked"),
-                }
-            });
+            match q.shutdown_while_enqueueing() {
+                ShutdownRace::Returned(r) => r.expect("shutdown"),
+                ShutdownRace::Blocked => panic!("Shutdown is blocked"),
+            }
         }
     }
 }
@@ -394,6 +335,7 @@ mod test_disconnect_queue_enqueue {
 
     /// upstream: node/disconnect_queue_test.go#TestDisconnectQueue_Enqueue/Discards_sessions_over_the_limit
     /// upstream: node/disconnect_queue_test.go#TestDisconnectQueue_Enqueue
+    /// note: not_observable on Go at q.disconnect.Remove() (unexported, and it takes an item without invoking Disconnect, which no exported call does); Enqueue, Size and the discard counter before it run against Go.
     #[test]
     fn discards_sessions_over_the_limit() {
         let node = new_mock_node();

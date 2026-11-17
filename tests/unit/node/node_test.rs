@@ -1,34 +1,31 @@
 //! upstream file: node/node_test.go
 //!
 //! Upstream subtests share their parent's node and sessions. Each Rust test
-//! rebuilds that setup; where a subtest depends on an earlier one's effects the
-//! dependency is noted (none of these subtests reads state an earlier subtest
+//! rebuilds that setup; none of these subtests reads state an earlier subtest
 //! left behind, other than accumulated testify expectations, which only matter
-//! when their arguments match and are replicated where they do).
+//! when their arguments match and are replicated where they do.
 //!
 //! `assert.Nil(msg); assert.Error(err)` after a read means "no frame within
 //! the mock connection's 100ms read timeout".
+//!
+//! Upstream arranges hub state directly (`node.hub.AddSession`,
+//! `node.hub.SubscribeSession`) and session subscriptions directly
+//! (`session.subscriptions.AddChannel*`). Against Go the facade reaches the
+//! same state through exported API (see each method's documentation in
+//! `cabby_testkit::reference::node`); the tests note where that applies.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use cabby_core::broker::BrokerError;
 use cabby_core::common::{
-    CommandResult, HistoryPosition, HistoryRequest, MessageData, Outcome, PRESENCE_JOIN_TYPE, PRESENCE_STREAM_STATE,
+    CommandResult, HistoryPosition, HistoryRequest, MessageData, PRESENCE_JOIN_TYPE, PRESENCE_STREAM_STATE,
     PresenceEvent, Status, StreamMessage, WHISPER_STREAM_STATE,
 };
-use cabby_server::node::{Disconnector, NoopDisconnectQueue, Session};
-use cabby_server::rpc::Context;
-use cabby_testkit::reference::common::get_channel_state_field;
+use cabby_testkit::reference::common::{get_channel_state_field, get_connection_state_field};
 use cabby_testkit::reference::node::*;
-use cabby_testkit::sync::Watched;
 use serde_json::json;
 
 use super::support::*;
-
-fn ok<T>(r: T) -> Outcome<T> {
-    Outcome { result: Some(r), error: None }
-}
 
 fn sm(stream: &str, data: &str) -> StreamMessage {
     StreamMessage { stream: stream.into(), data: data.into(), ..Default::default() }
@@ -132,109 +129,58 @@ mod test_authenticate {
 /// can stay registered in the hub forever.
 ///
 /// upstream: node/node_test.go#TestAuthenticatedRacesWithDisconnect
+/// note: the racing callers (1000 sessions, Authenticated and Disconnect released together, wg.Wait) run in the facade; on Go they are goroutines in the bridge.
+/// note: on Go, hub.FindByIdentifier is read through the exported node.LookupSession, which returns exactly it.
 #[test]
 fn test_authenticated_races_with_disconnect() {
     let node = new_mock_node();
     let _hub = node.run_hub();
-    let n_node = node.rust().clone();
 
     const N: usize = 1000;
-    let sessions: Vec<TestSession> = (0..N).map(|i| new_mock_session(&format!("s{i}"), &node, vec![])).collect();
+    let sessions = authenticated_races_with_disconnect(&node, N, DEADLINE);
 
-    std::thread::scope(|sc| {
-        for s in &sessions {
-            // Both calls start together (upstream: both goroutines wait on `start`).
-            let start = Arc::new(std::sync::Barrier::new(2));
-            let (s1, s2) = (s.rust().clone(), s.rust().clone());
-            let (b1, b2) = (start.clone(), start);
-            let node = n_node.clone();
-            sc.spawn(move || {
-                b1.wait();
-                node.authenticated(&s1, &s1.get_id());
-            });
-            sc.spawn(move || {
-                b2.wait();
-                // Like a failed ping write while the Connect call completes
-                s2.disconnect("Ping failed", CLOSE_ABNORMAL_CLOSURE);
-            });
-        }
-    });
+    let leaked =
+        || sessions.iter().filter(|s| s.is_closed() && node.hub_find_by_identifier(&s.get_id()).is_some()).count();
 
     // Upstream: assert.EventuallyWithT(..., time.Second, 10*time.Millisecond)
     eventually("closed sessions removed from the hub", Duration::from_secs(1), Duration::from_millis(10), || {
-        let leaked =
-            sessions.iter().filter(|s| s.is_closed() && node.hub().find_by_identifier(&s.get_id()).is_some()).count();
-        leaked == 0 && node.hub().size() == 0
+        leaked() == 0 && node.size() == 0
     });
-    let leaked =
-        sessions.iter().filter(|s| s.is_closed() && node.hub().find_by_identifier(&s.get_id()).is_some()).count();
-    assert_eq!(0, leaked, "closed sessions left in the hub");
-    assert_eq!(0, node.hub().size());
+    assert_eq!(0, leaked(), "closed sessions left in the hub");
+    assert_eq!(0, node.size());
 }
 
 // ---------------------------------------------- TestDisconnectNowClosesBeforeEnqueue
-
-/// Upstream `blockingDisconnector`: a `NoopDisconnectQueue` whose `Enqueue`
-/// signals `enqueued` and blocks until `release`.
-struct BlockingDisconnector {
-    noop: NoopDisconnectQueue,
-    enqueued: Watched<bool>,
-    release: BlockingGate,
-}
-
-impl Disconnector for BlockingDisconnector {
-    fn run(&self) -> Result<(), NodeError> {
-        self.noop.run()
-    }
-    fn shutdown(&self, ctx: &Context) -> Result<(), NodeError> {
-        self.noop.shutdown(ctx)
-    }
-    fn enqueue(&self, _session: Arc<Session>) -> Result<(), NodeError> {
-        self.enqueued.update(|e| *e = true);
-        self.release.pass();
-        Ok(())
-    }
-    fn size(&self) -> usize {
-        self.noop.size()
-    }
-}
 
 /// A full disconnect queue blocks Enqueue; in-flight commands must see
 /// the session as closed meanwhile (otherwise they could re-add it to the hub).
 ///
 /// upstream: node/node_test.go#TestDisconnectNowClosesBeforeEnqueue
+/// note: blockingDisconnector is built in the facade (Go: in the bridge) and installed with the exported SetDisconnector.
+/// note: on Go, session.closeCtx (unexported) is read as the context a probe controller receives from a side-effect-free node.Subscribe on the closed session; every controller call gets closeCtx.
 #[test]
 fn test_disconnect_now_closes_before_enqueue() {
     let node = new_mock_node();
     let _hub = node.run_hub();
 
-    let disconnector = Arc::new(BlockingDisconnector {
-        noop: NoopDisconnectQueue,
-        enqueued: Watched::new(false),
-        release: BlockingGate::new(),
-    });
-    set_disconnector(&node, disconnector.clone());
+    let disconnector = node.set_blocking_disconnector();
 
     let session = new_mock_session("1", &node, vec![]);
     session.mark_disconnectable(true);
-    node.rust().authenticated(session.rust(), "ids");
+    node.authenticated(&session, "ids");
 
-    std::thread::scope(|sc| {
-        let s = session.rust().clone();
-        sc.spawn(move || s.disconnect_now("Read failed", CLOSE_ABNORMAL_CLOSURE));
+    session.disconnect_now_in_background("Read failed", CLOSE_ABNORMAL_CLOSURE);
 
-        // Upstream: select on `enqueued` with a 1s timeout.
-        let enqueued = disconnector.enqueued.wait_until(Duration::from_secs(1), |e| *e);
-        if !enqueued {
-            disconnector.release.open();
-            panic!("session was not enqueued for disconnect");
-        }
+    // Upstream: select on `enqueued` with a 1s timeout.
+    if !disconnector.await_enqueued(Duration::from_secs(1)) {
+        disconnector.release();
+        panic!("session was not enqueued for disconnect");
+    }
 
-        assert!(session.is_closed());
-        assert!(session.rust().close_context().is_cancelled(), "closeCtx.Err() must be non-nil");
+    assert!(session.is_closed());
+    assert!(session.close_context_cancelled(&node), "closeCtx.Err() must be non-nil");
 
-        disconnector.release.open();
-    });
+    disconnector.release();
 }
 
 // ---------------------------------------------------------------- TestSubscribe
@@ -246,7 +192,7 @@ mod test_subscribe {
         let node = new_mock_node();
         let session = new_mock_session("14", &node, vec![]);
 
-        node.hub().add_session(session.rust().clone());
+        node.hub_add_session(&session);
         let _remove = remove_on_drop(&node, &session);
 
         let _hub = node.run_hub();
@@ -256,14 +202,15 @@ mod test_subscribe {
 
     /// upstream: node/node_test.go#TestSubscribe/Successful_subscription
     /// upstream: node/node_test.go#TestSubscribe
+    /// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()) (also marks the session connected), and subscriptions are read from ToCacheEntry's subs.
     #[test]
     fn successful_subscription() {
         setup(|node, session| {
-            let res = node.rust().subscribe(session.rust(), &msg("test_channel"));
+            let res = node.subscribe(session, &msg("test_channel"));
             assert!(res.is_ok(), "Error must be nil: {res:?}");
 
             // Adds subscription to session
-            assert!(session.subscriptions().has_channel("test_channel"), "Session subscription must be set");
+            assert!(session.has_channel("test_channel"), "Session subscription must be set");
 
             let msg = session.read();
             assert!(msg.is_ok(), "{msg:?}");
@@ -274,21 +221,22 @@ mod test_subscribe {
 
     /// upstream: node/node_test.go#TestSubscribe/Subscription_with_a_stream
     /// upstream: node/node_test.go#TestSubscribe
+    /// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()), hub.BroadcastMessage is node.Broadcast, and subscriptions are read from ToCacheEntry's subs.
     #[test]
     fn subscription_with_a_stream() {
         setup(|node, session| {
-            let res = node.rust().subscribe(session.rust(), &msg("with_stream"));
+            let res = node.subscribe(session, &msg("with_stream"));
             assert!(res.is_ok(), "Error must be nil: {res:?}");
 
             // Adds subscription and stream to session
-            assert!(session.subscriptions().has_channel("with_stream"), "Session subsription must be set");
-            assert_eq!(Some(strings(&["stream"])), session.subscriptions().streams_for("with_stream"));
+            assert!(session.has_channel("with_stream"), "Session subsription must be set");
+            assert_eq!(Some(strings(&["stream"])), session.streams_for("with_stream"));
 
             let msg = session.read_string();
             assert_eq!(Ok("14".to_owned()), msg, "Sent message is invalid");
 
             // Make sure session is subscribed
-            node.hub().broadcast_message(&sm("stream", "41"));
+            node.hub_broadcast_message(&sm("stream", "41"));
 
             let msg = session.read_string();
             assert_eq!(
@@ -301,29 +249,31 @@ mod test_subscribe {
 
     /// upstream: node/node_test.go#TestSubscribe/Error_during_subscription
     /// upstream: node/node_test.go#TestSubscribe
+    /// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()).
     #[test]
     fn error_during_subscription() {
         setup(|node, session| {
-            let res = node.rust().subscribe(session.rust(), &msg("error"));
+            let res = node.subscribe(session, &msg("error"));
             assert!(res.is_err());
         });
     }
 
     /// upstream: node/node_test.go#TestSubscribe/Rejected_subscription
     /// upstream: node/node_test.go#TestSubscribe
+    /// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()), and subscriptions are read from ToCacheEntry's subs.
     #[test]
     fn rejected_subscription() {
         setup(|node, _| {
             let session = new_mock_session("15", node, vec![]);
 
-            node.hub().add_session(session.rust().clone());
+            node.hub_add_session(&session);
             let _remove = remove_on_drop(node, &session);
 
-            let res = node.rust().subscribe(session.rust(), &msg("failure"));
+            let res = node.subscribe(&session, &msg("failure"));
 
             let res = res.expect("no error");
             assert_eq!(Status::Failure, res.expect("a result").status);
-            assert_eq!(0, session.subscriptions().channels().len());
+            assert_eq!(0, session.channels().len());
         });
     }
 }
@@ -337,7 +287,7 @@ mod test_unsubscribe {
         let node = new_mock_node();
         let session = new_mock_session("14", &node, vec![]);
 
-        node.hub().add_session(session.rust().clone());
+        node.hub_add_session(&session);
         let _remove = remove_on_drop(&node, &session);
 
         let _hub = node.run_hub();
@@ -347,24 +297,25 @@ mod test_unsubscribe {
 
     /// upstream: node/node_test.go#TestUnsubscribe/Successful_unsubscribe
     /// upstream: node/node_test.go#TestUnsubscribe
+    /// note: on Go, hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [streamo] and then restores the recorded streams; hub.Broadcast is node.Broadcast.
     #[test]
     fn successful_unsubscribe() {
         setup(|node, session| {
-            session.subscriptions().add_channel("test_channel");
-            node.hub().subscribe_session(session.rust(), "streamo", "test_channel");
+            session.add_channel("test_channel");
+            node.hub_subscribe_session(session, "streamo", "test_channel");
 
-            node.hub().broadcast("streamo", r#""before""#);
+            node.hub_broadcast("streamo", r#""before""#);
             let msg = session.read_string().expect("a broadcast");
 
             assert_eq!(r#"{"identifier":"test_channel","message":"before"}"#, msg, "Broadcasted message is invalid");
 
-            let res = node.rust().unsubscribe(session.rust(), &msg_ident("test_channel"));
+            let res = node.unsubscribe(session, &msg_ident("test_channel"));
             assert!(res.is_ok(), "Error must be nil: {res:?}");
 
             // Removes subscription from session
-            assert!(!session.subscriptions().has_channel("test_channel"), "Shouldn't contain test_channel");
+            assert!(!session.has_channel("test_channel"), "Shouldn't contain test_channel");
 
-            node.hub().broadcast_message(&sm("streamo", "41"));
+            node.hub_broadcast_message(&sm("streamo", "41"));
 
             assert_no_message(session, "Session hasn't received any messages");
         });
@@ -372,12 +323,13 @@ mod test_unsubscribe {
 
     /// upstream: node/node_test.go#TestUnsubscribe/Error_during_unsubscription
     /// upstream: node/node_test.go#TestUnsubscribe
+    /// note: on Go, subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
     #[test]
     fn error_during_unsubscription() {
         setup(|node, session| {
-            session.subscriptions().add_channel("failure");
+            session.add_channel("failure");
 
-            let res = node.rust().unsubscribe(session.rust(), &msg_ident("failure"));
+            let res = node.unsubscribe(session, &msg_ident("failure"));
             assert!(res.is_err());
         });
     }
@@ -396,10 +348,10 @@ mod test_perform {
         let node = new_mock_node();
         let session = new_mock_session("14", &node, vec![]);
 
-        node.hub().add_session(session.rust().clone());
+        node.hub_add_session(&session);
         let _remove = remove_on_drop(&node, &session);
 
-        session.subscriptions().add_channel("test_channel");
+        session.add_channel("test_channel");
 
         let _hub = node.run_hub();
 
@@ -408,10 +360,11 @@ mod test_perform {
 
     /// upstream: node/node_test.go#TestPerform/Successful_perform
     /// upstream: node/node_test.go#TestPerform
+    /// note: on Go, hub.AddSession is node.Authenticated and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
     #[test]
     fn successful_perform() {
         setup(|node, session| {
-            let res = node.rust().perform(session.rust(), &msg_data("test_channel", "action"));
+            let res = node.perform(session, &msg_data("test_channel", "action"));
             assert!(res.is_ok(), "{res:?}");
 
             let msg = session.read();
@@ -423,10 +376,11 @@ mod test_perform {
 
     /// upstream: node/node_test.go#TestPerform/With_connection_state
     /// upstream: node/node_test.go#TestPerform
+    /// note: on Go, hub.AddSession is node.Authenticated and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
     #[test]
     fn with_connection_state() {
         setup(|node, session| {
-            let res = node.rust().perform(session.rust(), &msg_data("test_channel", "session"));
+            let res = node.perform(session, &msg_data("test_channel", "session"));
             assert!(res.is_ok(), "{res:?}");
 
             let r = session.read();
@@ -440,38 +394,40 @@ mod test_perform {
 
     /// upstream: node/node_test.go#TestPerform/Error_during_perform
     /// upstream: node/node_test.go#TestPerform
+    /// note: on Go, hub.AddSession is node.Authenticated and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
     #[test]
     fn error_during_perform() {
         setup(|node, session| {
-            session.subscriptions().add_channel("failure");
+            session.add_channel("failure");
 
-            let res = node.rust().perform(session.rust(), &msg_data("failure", "test"));
+            let res = node.perform(session, &msg_data("failure", "test"));
             assert!(res.is_err(), "Error must not be nil");
         });
     }
 
     /// upstream: node/node_test.go#TestPerform/With_stopped_streams
     /// upstream: node/node_test.go#TestPerform
+    /// note: on Go, hub.AddSession is node.Authenticated; subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [stop_stream] and then restores the recorded streams; hub.BroadcastMessage is node.Broadcast.
     #[test]
     fn with_stopped_streams() {
         setup(|node, session| {
-            session.subscriptions().add_channel_stream("test_channel", "stop_stream");
-            node.hub().subscribe_session(session.rust(), "stop_stream", "test_channel");
+            session.add_channel_stream("test_channel", "stop_stream");
+            node.hub_subscribe_session(session, "stop_stream", "test_channel");
 
-            node.hub().broadcast_message(&sm("stop_stream", "40"));
+            node.hub_broadcast_message(&sm("stop_stream", "40"));
 
             let msg = session.read();
             assert!(msg.is_ok(), "a broadcast must arrive: {msg:?}");
 
-            let res = node.rust().perform(session.rust(), &msg_data("test_channel", "stop_stream"));
+            let res = node.perform(session, &msg_data("test_channel", "stop_stream"));
             assert!(res.is_ok(), "{res:?}");
 
-            assert!(session.subscriptions().streams_for("test_channel").unwrap_or_default().is_empty());
+            assert!(session.streams_for("test_channel").unwrap_or_default().is_empty());
 
-            let res = node.rust().perform(session.rust(), &msg_data("test_channel", "stop_stream"));
+            let res = node.perform(session, &msg_data("test_channel", "stop_stream"));
             assert!(res.is_ok(), "{res:?}");
 
-            node.hub().broadcast_message(&sm("stop_stream", "41"));
+            node.hub_broadcast_message(&sm("stop_stream", "41"));
 
             assert_no_message(session, "Session hasn't received any messages");
         });
@@ -479,12 +435,13 @@ mod test_perform {
 
     /// upstream: node/node_test.go#TestPerform/With_channel_state
     /// upstream: node/node_test.go#TestPerform
+    /// note: on Go, hub.AddSession is node.Authenticated and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
     #[test]
     fn with_channel_state() {
         setup(|node, session| {
             assert_eq!(0, session.get_env().channel_states.expect("channel states").len());
 
-            let res = node.rust().perform(session.rust(), &msg_data("test_channel", "channel_state"));
+            let res = node.perform(session, &msg_data("test_channel", "channel_state"));
             assert!(res.is_ok(), "{res:?}");
 
             let r = session.read();
@@ -519,19 +476,18 @@ mod test_whisper {
     }
 
     fn set_whisper_stream(session: &TestSession) {
-        session.rust().update_env(&mut |e| {
-            e.merge_channel_state("test_channel", &map(&[(WHISPER_STREAM_STATE, "test_whisper")]))
-        });
+        session.merge_channel_state("test_channel", &map(&[(WHISPER_STREAM_STATE, "test_whisper")]));
     }
 
     /// upstream: node/node_test.go#TestWhisper/When_whispering_stream_is_configured_for_sending_subscription
     /// upstream: node/node_test.go#TestWhisper
+    /// note: on Go, subscribeSessionToStream uses node.Authenticated (hub.AddSession), RestoreFromCache (subscriptions), node.Perform with a Streams-answering controller (hub.SubscribeSession), and the node's legacy broker kept by the bridge (node.broker.Subscribe).
     #[test]
     fn when_whispering_stream_is_configured_for_sending_subscription() {
         setup(|node, session, session2| {
             set_whisper_stream(session);
 
-            let res = node.rust().whisper(session.rust(), &msg_data("test_channel", "tshh... it's a secret"));
+            let res = node.whisper(session, &msg_data("test_channel", "tshh... it's a secret"));
             assert!(res.is_ok(), "{res:?}");
 
             let expected = r#"{"identifier":"test_channel_2","message":"tshh... it's a secret"}"#;
@@ -546,12 +502,13 @@ mod test_whisper {
 
     /// upstream: node/node_test.go#TestWhisper/When_whispering_stream_is_not_configured
     /// upstream: node/node_test.go#TestWhisper
+    /// note: on Go, subscribeSessionToStream uses node.Authenticated, RestoreFromCache, node.Perform with a Streams-answering controller, and the node's legacy broker kept by the bridge.
     #[test]
     fn when_whispering_stream_is_not_configured() {
         setup(|node, session, session2| {
-            session.rust().update_env(&mut |e| e.remove_channel_state("test_channel"));
+            session.remove_channel_state("test_channel");
 
-            let res = node.rust().whisper(session.rust(), &msg_data("test_channel", "tshh... it's a secret"));
+            let res = node.whisper(session, &msg_data("test_channel", "tshh... it's a secret"));
             assert!(res.is_ok(), "{res:?}");
 
             assert_no_message(session2, "the receiver gets nothing");
@@ -563,6 +520,7 @@ mod test_whisper {
 
     /// upstream: node/node_test.go#TestWhisper/whispering_data_as_object
     /// upstream: node/node_test.go#TestWhisper
+    /// note: on Go, subscribeSessionToStream uses node.Authenticated, RestoreFromCache, node.Perform with a Streams-answering controller, and the node's legacy broker kept by the bridge.
     #[test]
     fn whispering_data_as_object() {
         setup(|node, session, session2| {
@@ -570,7 +528,7 @@ mod test_whisper {
 
             let mut m = msg("test_channel");
             m.data = Some(MessageData::Json(json!({"msg": "test"})));
-            let res = node.rust().whisper(session.rust(), &m);
+            let res = node.whisper(session, &m);
             assert!(res.is_ok(), "{res:?}");
 
             let expected = r#"{"identifier":"test_channel_2","message":{"msg":"test"}}"#;
@@ -591,22 +549,23 @@ mod test_stream_subscription_race_conditions {
 
     /// upstream: node/node_test.go#TestStreamSubscriptionRaceConditions/stop_and_start_streams_race_conditions
     /// upstream: node/node_test.go#TestStreamSubscriptionRaceConditions
+    /// note: on Go, hub.AddSession is node.Authenticated, subscriptions.AddChannel re-applies a cache entry (RestoreFromCache), and hub.Broadcast is node.Broadcast.
     #[test]
     fn stop_and_start_streams_race_conditions() {
         let node = new_mock_node();
         let session = new_mock_session("14", &node, vec![]);
 
-        node.hub().add_session(session.rust().clone());
-        session.subscriptions().add_channel("test_channel");
+        node.hub_add_session(&session);
+        session.add_channel("test_channel");
 
         // We need a real hub here to catch a race condition
         let _hub = node.run_hub();
 
-        let res = node.rust().perform(session.rust(), &msg_data("test_channel", "stop_and_start_streams"));
+        let res = node.perform(&session, &msg_data("test_channel", "stop_and_start_streams"));
         assert!(res.is_ok(), "{res:?}");
 
         // Make sure session is subscribed to the stream
-        node.hub().broadcast("all", "2022");
+        node.hub_broadcast("all", "2022");
 
         let msg = session.read_string().expect("a broadcast");
 
@@ -627,6 +586,7 @@ mod test_disconnect {
 
     /// upstream: node/node_test.go#TestDisconnect/Disconnectable_session
     /// upstream: node/node_test.go#TestDisconnect
+    /// note: not_observable on Go at the last step: the queued item is read with the unexported q.disconnect.Remove(); everything before it (Authenticate, Disconnect, queue Size) runs against Go.
     #[test]
     fn disconnectable_session() {
         setup(|node| {
@@ -642,12 +602,13 @@ mod test_disconnect {
 
             let task = node.mock_queue().rust_with("DisconnectQueue.disconnect is unexported").remove();
             let task = task.expect("a queued session");
-            assert!(Arc::ptr_eq(session.rust(), &task), "Expected to disconnect session");
+            assert!(Arc::ptr_eq(session.rust_with("unexported"), &task), "Expected to disconnect session");
         });
     }
 
     /// upstream: node/node_test.go#TestDisconnect/Non-disconnectable_session
     /// upstream: node/node_test.go#TestDisconnect
+    /// note: not_observable on Go: the case resets the unexported session.disconnectInterest; the exported MarkDisconnectable can only raise it (sticky). Authenticate before it runs against Go.
     #[test]
     fn non_disconnectable_session() {
         setup(|node| {
@@ -655,7 +616,9 @@ mod test_disconnect {
             // Authenticate via controller marks session as disconnectable automatically
             node.authenticate(&session).expect("authenticate");
 
-            session.rust().set_disconnect_interest(false);
+            session
+                .rust_with("session.disconnectInterest is unexported and MarkDisconnectable cannot lower it")
+                .set_disconnect_interest(false);
 
             assert!(node.disconnect(&session).is_ok());
 
@@ -665,35 +628,36 @@ mod test_disconnect {
 
     /// upstream: node/node_test.go#TestDisconnect/Non-resumeable_session_unsubscribes_from_broker_streams
     /// upstream: node/node_test.go#TestDisconnect
+    /// note: on Go, the testify mocks.Broker is built in the bridge from the same expectations; hub.AddSession is node.Authenticated; subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache, no broker call); session.resumeInterval = 0 is the exported option WithKeepaliveIntervals(0, 0) applied to the session.
     #[test]
     fn non_resumeable_session_unsubscribes_from_broker_streams() {
         setup(|node| {
-            let mock_broker = MockBroker::new();
-            set_broker(node, mock_broker.clone());
+            let mock_broker = new_mock_broker();
+            node.set_mock_broker(&mock_broker);
 
             let session = new_mock_session("2", node, vec![]);
-            node.hub().add_session(session.rust().clone());
+            node.hub_add_session(&session);
 
-            session.subscriptions().add_channel("test_channel_1");
-            session.subscriptions().add_channel_stream("test_channel_1", "stream1");
-            session.subscriptions().add_channel_stream("test_channel_1", "stream2");
+            session.add_channel("test_channel_1");
+            session.add_channel_stream("test_channel_1", "stream1");
+            session.add_channel_stream("test_channel_1", "stream2");
 
-            session.subscriptions().add_channel("test_channel_2");
-            session.subscriptions().add_channel_stream("test_channel_2", "stream3");
+            session.add_channel("test_channel_2");
+            session.add_channel_stream("test_channel_2", "stream3");
 
-            session.rust().set_resume_interval(Duration::ZERO);
+            session.set_resume_interval(Duration::ZERO);
 
-            mock_broker.on("TouchPresence", vec![any()], |_| Ok::<(), BrokerError>(()));
+            mock_broker.on(Expect::new("TouchPresence", vec![any()], Ret::Unit));
             for s in ["stream1", "stream2", "stream3"] {
-                mock_broker.on("Unsubscribe", vec![eq(s)], move |_| s.to_owned());
+                mock_broker.on(Expect::new("Unsubscribe", vec![eq(s)], ret_string(s)));
             }
 
             node.disconnect(&session).expect("disconnect");
 
             for s in ["stream1", "stream2", "stream3"] {
-                mock_broker.mock.assert_called("Unsubscribe", &[json!(s)]);
+                mock_broker.assert_called("Unsubscribe", &[json!(s)]);
             }
-            mock_broker.mock.assert_number_of_calls("Unsubscribe", 3);
+            mock_broker.assert_number_of_calls("Unsubscribe", 3);
         });
     }
 }
@@ -722,21 +686,21 @@ mod test_history {
         ]
     }
 
-    fn setup(f: impl FnOnce(&TestNode, &MockBroker, &TestSession)) {
+    fn setup(f: impl FnOnce(&TestNode, &TestMock, &TestSession)) {
         let node = new_mock_node();
 
-        let broker = MockBroker::new();
-        set_broker(&node, broker.clone());
+        let broker = new_mock_broker();
+        node.set_mock_broker(&broker);
 
-        broker.on("CommitSession", vec![any(), any()], |_| Ok::<(), BrokerError>(()));
+        broker.on(Expect::new("CommitSession", vec![any(), any()], Ret::Unit));
 
         let _hub = node.run_hub();
 
         let session = new_mock_session("14", &node, vec![]);
 
-        session.subscriptions().add_channel("test_channel");
-        session.subscriptions().add_channel_stream("test_channel", "streamo");
-        session.subscriptions().add_channel_stream("test_channel", "emptissimo");
+        session.add_channel("test_channel");
+        session.add_channel_stream("test_channel", "streamo");
+        session.add_channel_stream("test_channel", "emptissimo");
 
         f(&node, &broker, &session);
     }
@@ -759,18 +723,16 @@ mod test_history {
 
     /// upstream: node/node_test.go#TestHistory/Successful_history_with_only_Since
     /// upstream: node/node_test.go#TestHistory
+    /// note: on Go, the testify mocks.Broker is built in the bridge from the same expectations, and subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache).
     #[test]
     fn successful_history_with_only_since() {
         setup(|node, broker, session| {
             let ts: i64 = 100200;
 
-            let s = stream();
-            broker.on("HistorySince", vec![eq("streamo"), eq(ts)], move |_| Ok::<_, BrokerError>(Some(s.clone())));
-            broker.on("HistorySince", vec![eq("emptissimo"), eq(ts)], |_| {
-                Ok::<Option<Vec<StreamMessage>>, BrokerError>(None)
-            });
+            broker.on(Expect::new("HistorySince", vec![eq("streamo"), eq(ts)], ret_messages(&stream())));
+            broker.on(Expect::new("HistorySince", vec![eq("emptissimo"), eq(ts)], ret_nil()));
 
-            node.rust().history(session.rust(), &history_msg("test_channel", history(ts, &[]))).expect("history");
+            node.history(session, &history_msg("test_channel", history(ts, &[]))).expect("history");
 
             let history = [
                 "{\"identifier\":\"test_channel\",\"message\":\"ciao\",\"stream_id\":\"streamo\",\"epoch\":\"test\",\"offset\":22}",
@@ -792,27 +754,26 @@ mod test_history {
 
     /// upstream: node/node_test.go#TestHistory/Successful_history_with_Since_and_Offset
     /// upstream: node/node_test.go#TestHistory
+    /// note: on Go, the testify mocks.Broker is built in the bridge from the same expectations, and subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache).
     #[test]
     fn successful_history_with_since_and_offset() {
         setup(|node, broker, session| {
             let ts: i64 = 100300;
 
-            let s = stream();
-            broker.on("HistoryFrom", vec![eq("streamo"), eq("test"), eq(20u64)], move |_| {
-                Ok::<_, BrokerError>(s.clone())
-            });
-            broker.on("HistorySince", vec![eq("emptissimo"), eq(ts)], |_| {
-                Ok::<_, BrokerError>(Some(vec![StreamMessage {
+            broker.on(Expect::new("HistoryFrom", vec![eq("streamo"), eq("test"), eq(20u64)], ret_messages(&stream())));
+            broker.on(Expect::new(
+                "HistorySince",
+                vec![eq("emptissimo"), eq(ts)],
+                ret_messages(&[StreamMessage {
                     stream: "emptissimo".into(),
                     data: "zer0".into(),
                     offset: 2,
                     epoch: "test_zero".into(),
                     meta: None,
-                }]))
-            });
+                }]),
+            ));
 
-            node.rust()
-                .history(session.rust(), &history_msg("test_channel", history(ts, &[("streamo", "test", 20)])))
+            node.history(session, &history_msg("test_channel", history(ts, &[("streamo", "test", 20)])))
                 .expect("history");
 
             let history = [
@@ -843,28 +804,27 @@ mod test_history {
 
     /// upstream: node/node_test.go#TestHistory/Fetching_history_with_Subscribe
     /// upstream: node/node_test.go#TestHistory
+    /// note: on Go, the testify mocks.Broker is built in the bridge from the same expectations, and subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache).
     #[test]
     fn fetching_history_with_subscribe() {
         setup(|node, broker, session| {
             let ts: i64 = 100400;
 
-            let s = stream();
-            broker.on("HistoryFrom", vec![eq("streamo"), eq("test"), eq(21u64)], move |_| {
-                Ok::<_, BrokerError>(s.clone())
-            });
-            broker.on("HistorySince", vec![eq("s1"), eq(ts)], |_| {
-                Ok::<_, BrokerError>(Some(vec![StreamMessage {
+            broker.on(Expect::new("HistoryFrom", vec![eq("streamo"), eq("test"), eq(21u64)], ret_messages(&stream())));
+            broker.on(Expect::new(
+                "HistorySince",
+                vec![eq("s1"), eq(ts)],
+                ret_messages(&[StreamMessage {
                     stream: "s1".into(),
                     data: "{\"foo\":\"bar\"}".into(),
                     offset: 10,
                     epoch: "test".into(),
                     meta: None,
-                }]))
-            });
-            broker.on("Subscribe", vec![eq("stream")], |_| "s1".to_owned());
+                }]),
+            ));
+            broker.on(Expect::new("Subscribe", vec![eq("stream")], ret_string("s1")));
 
-            node.rust()
-                .subscribe(session.rust(), &history_msg("with_stream", history(ts, &[("streamo", "test", 21)])))
+            node.subscribe(session, &history_msg("with_stream", history(ts, &[("streamo", "test", 21)])))
                 .expect("subscribe");
 
             let msg = session.read_string().expect("a confirmation");
@@ -890,18 +850,20 @@ mod test_history {
 
     /// upstream: node/node_test.go#TestHistory/Error_retrieving_history
     /// upstream: node/node_test.go#TestHistory
+    /// note: on Go, the testify mocks.Broker is built in the bridge from the same expectations, and subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache).
     #[test]
     fn error_retrieving_history() {
         setup(|node, broker, session| {
             let ts: i64 = 200100;
 
-            broker.on("HistorySince", vec![eq("streamo"), eq(ts)], |_| {
-                Err::<Option<Vec<StreamMessage>>, _>(BrokerError { message: "Couldn't restore history".into() })
-            });
-            let s = stream();
-            broker.on("HistorySince", vec![eq("emptissimo"), eq(ts)], move |_| Ok::<_, BrokerError>(Some(s.clone())));
+            broker.on(Expect::new(
+                "HistorySince",
+                vec![eq("streamo"), eq(ts)],
+                Ret::Err("Couldn't restore history".into()),
+            ));
+            broker.on(Expect::new("HistorySince", vec![eq("emptissimo"), eq(ts)], ret_messages(&stream())));
 
-            let err = node.rust().history(session.rust(), &history_msg("test_channel", history(ts, &[])));
+            let err = node.history(session, &history_msg("test_channel", history(ts, &[])));
 
             // assert.Error(t, err, "Couldn't restore history") (the text is the failure message)
             assert!(err.is_err(), "Couldn't restore history");
@@ -922,26 +884,20 @@ mod test_presence {
         PresenceEvent { kind: PRESENCE_JOIN_TYPE.into(), id: id.into(), info: Some(json!(info)) }
     }
 
-    fn setup(f: impl FnOnce(&TestNode, &MockNodeController, &MockBroker)) {
+    fn setup(f: impl FnOnce(&TestNode, &TestMock, &TestMock)) {
         let node = new_mock_node();
 
-        let controller = MockNodeController::new();
-        node.rust().set_controller(controller.clone());
+        let controller = new_mock_controller();
+        node.set_controller(&controller);
 
-        let broker = MockBroker::new();
-        set_broker(&node, broker.clone());
+        let broker = new_mock_broker();
+        node.set_mock_broker(&broker);
 
-        broker.on("CommitSession", vec![any(), any()], |_| Ok::<(), BrokerError>(()));
+        broker.on(Expect::new("CommitSession", vec![any(), any()], Ret::Unit));
 
-        broker.on("Subscribe", vec![any()], |a| a[0].as_str().expect("stream").to_owned());
+        broker.on(Expect::new("Subscribe", vec![any()], Ret::EchoFirst));
 
-        {
-            let n = node_handle(&node);
-            broker.on("HandleBroadcast", vec![any()], move |a| {
-                n.broadcast(&stream_message_arg(&a[0]));
-                Ok::<(), BrokerError>(())
-            });
-        }
+        broker.on(Expect::new("HandleBroadcast", vec![any()], Ret::Unit).run(Run::Broadcast));
 
         let _hub = node.run_hub();
 
@@ -950,38 +906,42 @@ mod test_presence {
 
     /// `broker.On("PresenceAdd", "test_presence", "24", "user_24", "J. Bond")`
     /// running `node.HandleJoin(...)`.
-    fn expect_join_24(node: &TestNode, broker: &MockBroker) {
-        let n = node_handle(node);
-        broker.on("PresenceAdd", vec![eq("test_presence"), eq("24"), eq("user_24"), eq("J. Bond")], move |_| {
-            n.handle_join("test_presence", &join_event("user_24", "J. Bond"));
-            Ok::<_, BrokerError>(Some(join_event("user_24", "J. Bond")))
-        });
+    fn expect_join_24(broker: &TestMock) {
+        broker.on(Expect::new(
+            "PresenceAdd",
+            vec![eq("test_presence"), eq("24"), eq("user_24"), eq("J. Bond")],
+            ret_presence(&join_event("user_24", "J. Bond")),
+        )
+        .run(Run::HandleJoin("test_presence".into(), join_event("user_24", "J. Bond"))));
     }
 
     /// upstream: node/node_test.go#TestPresence/join_on_subscribe
     /// upstream: node/node_test.go#TestPresence
+    /// note: on Go, the testify mocks are built in the bridge from the same expectations (Run callbacks: node.HandleJoin, node.Broadcast); node.controller = c is the exported option WithController(c) applied to the node; hub.AddSession is node.Authenticated.
     #[test]
     fn join_on_subscribe() {
         setup(|node, controller, broker| {
             let session = new_mock_session("24", node, vec![]);
 
-            node.hub().add_session(session.rust().clone());
+            node.hub_add_session(&session);
             let _remove = remove_on_drop(node, &session);
 
-            controller.on("Subscribe", vec![eq("24"), any(), eq("24"), eq("test_channel")], |_| {
-                ok(CommandResult {
+            controller.on(Expect::new(
+                "Subscribe",
+                vec![eq("24"), any(), eq("24"), eq("test_channel")],
+                ret_command(&CommandResult {
                     status: Status::Success,
                     transmissions: vec![r#"{"type":"confirm","identifier":"test_channel"}"#.into()],
                     streams: vec!["test_presence".into()],
                     istate: Some(map(&[(PRESENCE_STREAM_STATE, "test_presence")])),
                     presence: Some(join_event("user_24", "J. Bond")),
                     ..Default::default()
-                })
-            });
+                }),
+            ));
 
-            expect_join_24(node, broker);
+            expect_join_24(broker);
 
-            node.rust().subscribe(session.rust(), &msg("test_channel")).expect("subscribe");
+            node.subscribe(&session, &msg("test_channel")).expect("subscribe");
 
             assert_eq!(
                 "test_presence",
@@ -999,35 +959,32 @@ mod test_presence {
 
     /// upstream: node/node_test.go#TestPresence/join_on_perform
     /// upstream: node/node_test.go#TestPresence
+    /// note: on Go, the testify mocks are built in the bridge from the same expectations (Run callbacks: node.HandleJoin, node.Broadcast); node.controller = c is WithController(c) applied to the node; hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).
     #[test]
     fn join_on_perform() {
         setup(|node, controller, broker| {
             let session = new_mock_session("24", node, vec![]);
 
-            node.hub().add_session(session.rust().clone());
+            node.hub_add_session(&session);
             let _remove = remove_on_drop(node, &session);
 
-            session.subscriptions().add_channel("subscribed_channel");
+            session.add_channel("subscribed_channel");
 
-            controller.on(
+            controller.on(Expect::new(
                 "Perform",
                 vec![eq("24"), any(), eq("24"), eq("subscribed_channel"), eq(r#"{"action":"follow"}"#)],
-                |_| {
-                    ok(CommandResult {
-                        status: Status::Success,
-                        streams: vec!["test_presence".into()],
-                        istate: Some(map(&[(PRESENCE_STREAM_STATE, "test_presence")])),
-                        presence: Some(join_event("user_24", "J. Bond")),
-                        ..Default::default()
-                    })
-                },
-            );
+                ret_command(&CommandResult {
+                    status: Status::Success,
+                    streams: vec!["test_presence".into()],
+                    istate: Some(map(&[(PRESENCE_STREAM_STATE, "test_presence")])),
+                    presence: Some(join_event("user_24", "J. Bond")),
+                    ..Default::default()
+                }),
+            ));
 
-            expect_join_24(node, broker);
+            expect_join_24(broker);
 
-            node.rust()
-                .perform(session.rust(), &msg_data("subscribed_channel", r#"{"action":"follow"}"#))
-                .expect("perform");
+            node.perform(&session, &msg_data("subscribed_channel", r#"{"action":"follow"}"#)).expect("perform");
 
             assert_eq!(
                 "test_presence",
@@ -1043,89 +1000,80 @@ mod test_presence {
 
     /// upstream: node/node_test.go#TestPresence/no_presence_stream_configured
     /// upstream: node/node_test.go#TestPresence
+    /// note: on Go, the testify mocks are built in the bridge from the same expectations; the forbidden PresenceAdd (upstream t.Error in Run) is recorded and asserted at the end; node.controller = c is WithController(c); hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry.
     #[test]
     fn no_presence_stream_configured() {
         setup(|node, controller, broker| {
             let session = new_mock_session("25", node, vec![]);
 
-            node.hub().add_session(session.rust().clone());
+            node.hub_add_session(&session);
             let _remove = remove_on_drop(node, &session);
 
-            session.subscriptions().add_channel("subscribed_channel");
+            session.add_channel("subscribed_channel");
 
-            controller.on(
+            controller.on(Expect::new(
                 "Perform",
                 vec![eq("25"), any(), eq("25"), eq("subscribed_channel"), eq(r#"{"action":"follow"}"#)],
-                |_| {
-                    ok(CommandResult {
-                        status: Status::Success,
-                        streams: vec!["test_presence".into()],
-                        presence: Some(PresenceEvent {
-                            kind: PRESENCE_JOIN_TYPE.into(),
-                            id: "user_25".into(),
-                            info: Some(json!("Fantomas")),
-                        }),
-                        ..Default::default()
-                    })
-                },
-            );
+                ret_command(&CommandResult {
+                    status: Status::Success,
+                    streams: vec!["test_presence".into()],
+                    presence: Some(PresenceEvent {
+                        kind: PRESENCE_JOIN_TYPE.into(),
+                        id: "user_25".into(),
+                        info: Some(json!("Fantomas")),
+                    }),
+                    ..Default::default()
+                }),
+            ));
 
             // Earlier subtests registered PresenceAdd for sid "24" only.
-            expect_join_24(node, broker);
-            broker.on(
-                "PresenceAdd",
-                vec![any(), any(), any(), any()],
-                |_| -> Result<Option<PresenceEvent>, BrokerError> { panic!("PresenceAdd should not be called") },
-            );
+            expect_join_24(broker);
+            broker.on(Expect::new("PresenceAdd", vec![any(), any(), any(), any()], ret_nil())
+                .run(Run::Forbidden("PresenceAdd should not be called".into())));
 
-            node.rust()
-                .perform(session.rust(), &msg_data("subscribed_channel", r#"{"action":"follow"}"#))
-                .expect("perform");
+            node.perform(&session, &msg_data("subscribed_channel", r#"{"action":"follow"}"#)).expect("perform");
 
             assert_eq!("", get_channel_state_field(&session.get_env(), "subscribed_channel", PRESENCE_STREAM_STATE));
 
             assert!(session.read().is_err());
+            broker.assert_no_forbidden_calls();
         });
     }
 
     /// upstream: node/node_test.go#TestPresence/leave_on_unsubscribe
     /// upstream: node/node_test.go#TestPresence
+    /// note: on Go, the testify mocks are built in the bridge (Run callbacks: node.HandleLeave, node.Broadcast); node.controller = c is WithController(c); hub.AddSession is node.Authenticated; subscriptions.AddChannel re-applies a cache entry; hub.SubscribeSession runs the node's Subscribe/Perform with a Streams-answering controller (calling the broker mock's Subscribe, expected with mock.Anything) and restores the recorded streams; env.MergeChannelState is called on GetEnv().
     #[test]
     fn leave_on_unsubscribe() {
         setup(|node, controller, broker| {
             let session = new_mock_session("25", node, vec![]);
             let session2 = new_mock_session("251", node, vec![]);
 
-            node.hub().add_session(session.rust().clone());
+            node.hub_add_session(&session);
             let _remove = remove_on_drop(node, &session);
 
-            node.hub().add_session(session2.rust().clone());
+            node.hub_add_session(&session2);
             let _remove2 = remove_on_drop(node, &session2);
 
             // Register subscription and stream
-            session.subscriptions().add_channel("test_channel");
-            node.hub().subscribe_session(session.rust(), "test_presence", "test_channel");
-            node.hub().subscribe_session(session2.rust(), "test_presence", "test_channel");
+            session.add_channel("test_channel");
+            node.hub_subscribe_session(&session, "test_presence", "test_channel");
+            node.hub_subscribe_session(&session2, "test_presence", "test_channel");
 
             // Make sure presence stream is defined for the session
-            session.rust().update_env(&mut |e| {
-                e.merge_channel_state("test_channel", &map(&[(PRESENCE_STREAM_STATE, "test_presence")]))
-            });
+            session.merge_channel_state("test_channel", &map(&[(PRESENCE_STREAM_STATE, "test_presence")]));
 
-            controller.on("Unsubscribe", vec![eq("25"), any(), eq("25"), eq("test_channel")], |_| {
-                ok(CommandResult { status: Status::Success, ..Default::default() })
-            });
+            controller.on(Expect::new(
+                "Unsubscribe",
+                vec![eq("25"), any(), eq("25"), eq("test_channel")],
+                ret_command(&CommandResult { status: Status::Success, ..Default::default() }),
+            ));
 
             let leave = PresenceEvent { kind: "leave".into(), id: "user_25".into(), info: None };
-            {
-                let (n, leave) = (node_handle(node), leave.clone());
-                broker.on("PresenceRemove", vec![eq("test_presence"), eq("25")], move |_| {
-                    n.handle_leave("test_presence", &leave);
-                    Ok::<_, BrokerError>(Some(leave.clone()))
-                });
-            }
+            broker.on(Expect::new("PresenceRemove", vec![eq("test_presence"), eq("25")], ret_presence(&leave))
+                .run(Run::HandleLeave("test_presence".into(), leave.clone())));
 
-            node.rust().unsubscribe(session.rust(), &msg("test_channel")).expect("unsubscribe");
+            node.unsubscribe(&session, &msg("test_channel")).expect("unsubscribe");
 
             assert_eq!("", get_channel_state_field(&session.get_env(), "test_channel", PRESENCE_STREAM_STATE));
 
@@ -1145,28 +1093,26 @@ mod test_restore_session {
     const KEEPALIVE: Duration = Duration::from_millis(500);
 
     /// Upstream's shared setup. Returns the session that restores from "114".
-    fn setup(f: impl FnOnce(&TestNode, &MockBroker, TestSession)) {
+    fn setup(f: impl FnOnce(&TestNode, &TestMock, TestSession)) {
         let node = new_mock_node();
 
-        let broker = MockBroker::new();
-        set_broker(&node, broker.clone());
+        let broker = new_mock_broker();
+        node.set_mock_broker(&broker);
 
         let _hub = node.run_hub();
 
         let prev_session = new_mock_session("114", &node, vec![SessionOpt::KeepaliveIntervals(KEEPALIVE, KEEPALIVE)]);
-        prev_session.subscriptions().add_channel("fruits_channel");
-        prev_session.subscriptions().add_channel_stream("fruits_channel", "arancia");
-        prev_session.subscriptions().add_channel_stream("fruits_channel", "limoni");
-        prev_session.rust().update_env(&mut |e| {
-            e.merge_connection_state(&map(&[("tenant_id", "71")]));
-            e.merge_channel_state("fruits_channel", &map(&[("gardini", "ischia")]));
-        });
+        prev_session.add_channel("fruits_channel");
+        prev_session.add_channel_stream("fruits_channel", "arancia");
+        prev_session.add_channel_stream("fruits_channel", "limoni");
+        prev_session.merge_connection_state(&map(&[("tenant_id", "71")]));
+        prev_session.merge_channel_state("fruits_channel", &map(&[("gardini", "ischia")]));
 
         let cached = prev_session.to_cache_entry().expect("cache entry");
 
-        broker.on("RestoreSession", vec![eq("114")], move |_| Ok::<_, BrokerError>(Some(cached.clone())));
-        broker.on("CommitSession", vec![any(), any()], |_| Ok::<(), BrokerError>(()));
-        broker.on("Subscribe", vec![any()], |a| a[0].as_str().expect("stream").to_owned());
+        broker.on(Expect::new("RestoreSession", vec![eq("114")], ret_cache(&cached)));
+        broker.on(Expect::new("CommitSession", vec![any(), any()], Ret::Unit));
+        broker.on(Expect::new("Subscribe", vec![any()], Ret::EchoFirst));
 
         let session = new_mock_session(
             "214",
@@ -1179,18 +1125,19 @@ mod test_restore_session {
 
     /// upstream: node/node_test.go#TestRestoreSession/Successful_restore_via_header
     /// upstream: node/node_test.go#TestRestoreSession
+    /// note: on Go, mock sessions follow NewMockSession with exported API (BuildSession, WithExecutor, SetID, Log, SetIdentifiers, options, go SendMessages; timers not started); the testify mocks.Broker is built in the bridge; subscriptions are arranged and read through the cache entry (RestoreFromCache / ToCacheEntry); env merges are called on GetEnv(); hub.Broadcast is node.Broadcast.
     #[test]
     fn successful_restore_via_header() {
         setup(|node, _, session| {
             let res = node.authenticate(&session).expect("authenticate");
             assert_eq!(Status::Success, res.expect("a result").status);
 
-            let streams = session.subscriptions().streams_for("fruits_channel").unwrap_or_default();
+            let streams = session.streams_for("fruits_channel").unwrap_or_default();
             assert!(streams.contains(&"arancia".to_owned()));
             assert!(streams.contains(&"limoni".to_owned()));
 
             let env = session.get_env();
-            assert_eq!("71", cabby_testkit::reference::common::get_connection_state_field(&env, "tenant_id"));
+            assert_eq!("71", get_connection_state_field(&env, "tenant_id"));
             assert_eq!("ischia", get_channel_state_field(&env, "fruits_channel", "gardini"));
 
             let welcome = session.read_string().expect("welcome");
@@ -1200,13 +1147,13 @@ mod test_restore_session {
                 "Sent message is invalid"
             );
 
-            node.hub().broadcast("arancia", "delissimo");
+            node.hub_broadcast("arancia", "delissimo");
 
             let msg = session.read_string().expect("a broadcast");
 
             assert_eq!(r#"{"identifier":"fruits_channel","message":"delissimo"}"#, msg, "Sent message is invalid");
 
-            node.hub().broadcast("limoni", "acido");
+            node.hub_broadcast("limoni", "acido");
 
             let msg = session.read_string().expect("a broadcast");
 
@@ -1223,10 +1170,12 @@ mod test_restore_session {
     ///
     /// upstream: node/node_test.go#TestRestoreSession/Failed_to_restore
     /// upstream: node/node_test.go#TestRestoreSession
+    /// note: suspicious upstream case: it never exercises a failed restore (see the doc comment); a regression-for case covers it.
+    /// note: on Go, mock sessions follow NewMockSession with exported API and the testify mocks.Broker is built in the bridge.
     #[test]
     fn failed_to_restore() {
         setup(|node, broker, _| {
-            broker.on("RestoreSession", vec![eq("114")], |_| Ok::<Option<Vec<u8>>, BrokerError>(None));
+            broker.on(Expect::new("RestoreSession", vec![eq("114")], ret_nil()));
 
             let session = new_mock_session("154", node, vec![]);
 
@@ -1246,12 +1195,12 @@ mod test_restore_session {
     #[test]
     fn restore_falls_back_to_authenticate_when_cache_is_missing() {
         let node = new_mock_node();
-        let broker = MockBroker::new();
-        set_broker(&node, broker.clone());
+        let broker = new_mock_broker();
+        node.set_mock_broker(&broker);
         let _hub = node.run_hub();
 
-        broker.on("RestoreSession", vec![eq("114")], |_| Ok::<Option<Vec<u8>>, BrokerError>(None));
-        broker.on("CommitSession", vec![any(), any()], |_| Ok::<(), BrokerError>(()));
+        broker.on(Expect::new("RestoreSession", vec![eq("114")], ret_nil()));
+        broker.on(Expect::new("CommitSession", vec![any(), any()], Ret::Unit));
 
         let session = new_mock_session(
             "154",
@@ -1262,9 +1211,9 @@ mod test_restore_session {
         let res = node.authenticate(&session).expect("authenticate");
         assert_eq!(Status::Success, res.expect("a result").status);
 
-        broker.mock.assert_called("RestoreSession", &[json!("114")]);
+        broker.assert_called("RestoreSession", &[json!("114")]);
         assert_eq!("welcome", session.read_string().expect("welcome"));
-        assert!(session.subscriptions().channels().is_empty());
+        assert!(session.channels().is_empty());
     }
 }
 
@@ -1281,26 +1230,27 @@ mod test_broadcasting {
         let session = new_mock_session("14", &node, vec![]);
         let session2 = new_mock_session("15", &node, vec![]);
 
-        node.hub().add_session(session.rust().clone());
-        node.hub().subscribe_session(session.rust(), "test", "test_channel");
-        node.hub().subscribe_session(session.rust(), "staind_2023", "music_channel");
+        node.hub_add_session(&session);
+        node.hub_subscribe_session(&session, "test", "test_channel");
+        node.hub_subscribe_session(&session, "staind_2023", "music_channel");
 
-        node.hub().add_session(session2.rust().clone());
-        node.hub().subscribe_session(session2.rust(), "test", "test_channel");
-        node.hub().subscribe_session(session2.rust(), "staind_2023", "music_channel");
+        node.hub_add_session(&session2);
+        node.hub_subscribe_session(&session2, "test", "test_channel");
+        node.hub_subscribe_session(&session2, "staind_2023", "music_channel");
 
-        node.rust().broker().subscribe("test");
-        node.rust().broker().subscribe("staind_2023");
+        node.broker_subscribe("test");
+        node.broker_subscribe("staind_2023");
 
         f(&node, &session, &session2);
     }
 
     /// upstream: node/node_test.go#TestBroadcasting/HandlePubSub
     /// upstream: node/node_test.go#TestBroadcasting
+    /// note: on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream] (the session also records the channel, without streams); node.broker is the legacy broker the bridge built.
     #[test]
     fn handle_pub_sub() {
         setup(|node, session, session2| {
-            node.rust().handle_pub_sub(b"{\"stream\":\"test\",\"data\":\"\\\"abc123\\\"\"}");
+            node.handle_pub_sub(b"{\"stream\":\"test\",\"data\":\"\\\"abc123\\\"\"}");
 
             let expected = r#"{"identifier":"test_channel","message":"abc123"}"#;
 
@@ -1311,10 +1261,11 @@ mod test_broadcasting {
 
     /// upstream: node/node_test.go#TestBroadcasting/HandlePubSub_Batch
     /// upstream: node/node_test.go#TestBroadcasting
+    /// note: on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built.
     #[test]
     fn handle_pub_sub_batch() {
         setup(|node, session, session2| {
-            node.rust().handle_pub_sub(
+            node.handle_pub_sub(
                 b"[{\"stream\":\"test\",\"data\":\"\\\"follow me\\\"\"},{\"stream\":\"untest\",\"data\":\"\\\"missing\\\"\"},{\"stream\":\"staind_2023\",\"data\":\"{\\\"num\\\":7,\\\"title\\\":\\\"The Fray\\\"}\"}]",
             );
 
@@ -1333,12 +1284,12 @@ mod test_broadcasting {
 
     /// upstream: node/node_test.go#TestBroadcasting/HandleBroadcast
     /// upstream: node/node_test.go#TestBroadcasting
+    /// note: on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built.
     #[test]
     fn handle_broadcast() {
         setup(|node, session, session2| {
-            let _ = node
-                .rust()
-                .handle_broadcast(br#"{"stream":"staind_2023","data":"{\"num\":5,\"title\":\"Out of time\"}"}"#);
+            let _ =
+                node.handle_broadcast(br#"{"stream":"staind_2023","data":"{\"num\":5,\"title\":\"Out of time\"}"}"#);
 
             let expected = r#"{"identifier":"music_channel","message":{"num":5,"title":"Out of time"}}"#;
 
@@ -1349,10 +1300,11 @@ mod test_broadcasting {
 
     /// upstream: node/node_test.go#TestBroadcasting/HandleBroadcast_Batch
     /// upstream: node/node_test.go#TestBroadcasting
+    /// note: on Go, hub.AddSession is node.Authenticated, and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built.
     #[test]
     fn handle_broadcast_batch() {
         setup(|node, session, session2| {
-            let _ = node.rust().handle_broadcast(
+            let _ = node.handle_broadcast(
                 br#"[{"stream":"staind_2023","data":"{\"num\":9,\"title\":\"Hate me too\"}"},{"stream":"untest","data":"\"missing\""},{"stream":"staind_2023","data":"{\"num\":10,\"title\":\"Confessions of Fallen\"}"}]"#,
             );
 
@@ -1374,6 +1326,7 @@ mod test_broadcasting {
 // ------------------------------------------------------ TestHandlePubSubWithCommand
 
 /// upstream: node/node_test.go#TestHandlePubSubWithCommand
+/// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()); the session is then also marked connected, so the remote disconnect also detaches it from the node (no Disconnect call is enqueued: the session is not disconnectable).
 #[test]
 fn test_handle_pub_sub_with_command() {
     let node = new_mock_node();
@@ -1381,9 +1334,9 @@ fn test_handle_pub_sub_with_command() {
     let _hub = node.run_hub();
 
     let session = new_mock_session("14", &node, vec![]);
-    node.hub().add_session(session.rust().clone());
+    node.hub_add_session(&session);
 
-    node.rust().handle_pub_sub(b"{\"command\":\"disconnect\",\"payload\":{\"identifier\":\"14\",\"reconnect\":false}}");
+    node.handle_pub_sub(b"{\"command\":\"disconnect\",\"payload\":{\"identifier\":\"14\",\"reconnect\":false}}");
 
     // toJSON(common.NewDisconnectMessage("remote", false))
     let expected = r#"{"type":"disconnect","reason":"remote","reconnect":false}"#;
@@ -1395,45 +1348,49 @@ fn test_handle_pub_sub_with_command() {
 // -------------------------------------------------------------- TestLookupSession
 
 /// upstream: node/node_test.go#TestLookupSession
+/// note: on Go, hub.AddSession is node.Authenticated(s, s.GetIdentifiers()) (identifiers set just before); sessions are compared by identity (bridge handle).
 #[test]
 fn test_lookup_session() {
     let node = new_mock_node();
 
     let _hub = node.run_hub();
 
-    assert!(node.rust().lookup_session("{\"foo\":\"bar\"}").is_none());
+    assert!(node.lookup_session("{\"foo\":\"bar\"}").is_none());
 
     let session = new_mock_session("14", &node, vec![]);
     session.set_identifiers("{\"foo\":\"bar\"}");
-    node.hub().add_session(session.rust().clone());
+    node.hub_add_session(&session);
 
-    let found = node.rust().lookup_session("{\"foo\":\"bar\"}").expect("a session");
-    assert!(Arc::ptr_eq(session.rust(), &found));
+    assert_eq!(Some(session.id_ref()), node.lookup_session("{\"foo\":\"bar\"}"));
 }
 
 // ---------------------------------------------- TestUnsubscribeReleasesBrokerStreams
 
 /// upstream: node/node_test.go#TestUnsubscribeReleasesBrokerStreams
+/// note: not_observable on Go: no exported call subscribes a session in the hub without calling the broker's Subscribe, which this case's testify broker does not expect (upstream calls node.hub.SubscribeSession directly). The steps before it run against Go.
 #[test]
 fn test_unsubscribe_releases_broker_streams() {
     let node = new_mock_node();
-    let broker = MockBroker::new();
-    set_broker(&node, broker.clone());
+    let broker = new_mock_broker();
+    node.set_mock_broker(&broker);
     let session = new_mock_session("14", &node, vec![]);
 
-    node.hub().add_session(session.rust().clone());
+    node.hub_add_session(&session);
     let _remove = remove_on_drop(&node, &session);
 
     let _hub = node.run_hub();
 
-    session.subscriptions().add_channel("test_channel");
-    session.subscriptions().add_channel_stream("test_channel", "streamo");
-    node.hub().subscribe_session(session.rust(), "streamo", "test_channel");
+    session.add_channel("test_channel");
+    session.add_channel_stream("test_channel", "streamo");
+    node.rust_with(
+        "node.hub.SubscribeSession has no exported equivalent that leaves the case's testify broker uncalled",
+    );
+    node.hub_subscribe_session(&session, "streamo", "test_channel");
 
-    broker.on("Unsubscribe", vec![eq("streamo")], |_| "streamo".to_owned());
+    broker.on(Expect::new("Unsubscribe", vec![eq("streamo")], ret_string("streamo")));
 
-    node.rust().unsubscribe(session.rust(), &msg("test_channel")).expect("unsubscribe");
+    node.unsubscribe(&session, &msg("test_channel")).expect("unsubscribe");
 
-    broker.mock.assert_called("Unsubscribe", &[json!("streamo")]);
-    assert!(!session.subscriptions().has_channel("test_channel"));
+    broker.assert_called("Unsubscribe", &[json!("streamo")]);
+    assert!(!session.has_channel("test_channel"));
 }
