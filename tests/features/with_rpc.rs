@@ -187,7 +187,8 @@ fn shutdown() {
         clients.push(c);
     }
 
-    stop(&mut sut, Duration::from_secs(30));
+    // `stop :anycable`: ChildProcess sends SIGTERM and SIGKILL after 3 s.
+    stop(&mut sut, Duration::from_secs(3));
     let disconnect_calls = app.rpc().call_count(Method::Disconnect);
     drop(app); // stop :rpc
 

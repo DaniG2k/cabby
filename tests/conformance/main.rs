@@ -33,6 +33,8 @@ mod anyt_broker_http;
 mod anyt_broker_nats;
 mod anyt_broker_redis;
 mod anyt_default;
+mod anyt_embedded;
 mod anyt_http;
 mod anyt_nats;
 mod anyt_nats_embedded;
+mod anyt_ssl;

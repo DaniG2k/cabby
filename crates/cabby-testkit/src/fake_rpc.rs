@@ -328,6 +328,12 @@ impl ExpectationBuilder<'_> {
 pub struct FakeRpcOptions {
     /// gRPC `MaxConcurrentStreams` per connection (upstream test servers use 1).
     pub grpc_max_concurrent_streams: Option<u32>,
+    /// Serve gRPC over TLS with this PEM certificate chain and private key.
+    pub grpc_tls: Option<(Vec<u8>, Vec<u8>)>,
+    /// HTTP RPC mount path (e.g. `/_anycable`): when set, only
+    /// `POST <mount>/connect|command|disconnect` are RPC calls and every other
+    /// path gets 404 (otherwise any prefix is accepted).
+    pub http_mount_path: Option<String>,
 }
 
 struct Inner {
@@ -337,6 +343,7 @@ struct Inner {
     shutdown: CancellationToken,
     /// Remote addresses of accepted gRPC connections, in accept order.
     grpc_peers: Watched<Vec<SocketAddr>>,
+    http_mount_path: Option<String>,
 }
 
 /// The fake RPC application. Dropping it shuts both servers down and unblocks
@@ -538,12 +545,14 @@ fn decode<T: serde::de::DeserializeOwned + Default>(body: &[u8]) -> Result<T, St
 }
 
 async fn handle_http(inner: Arc<Inner>, req: RecordedRequest) -> fake_http::HttpResponse {
-    let method = match req.path.rsplit('/').next() {
-        Some("connect") => Some(Method::Connect),
-        Some("command") => Some(Method::Command),
-        Some("disconnect") => Some(Method::Disconnect),
+    let (prefix, last) = req.path.rsplit_once('/').unwrap_or(("", req.path.as_str()));
+    let method = match last {
+        "connect" => Some(Method::Connect),
+        "command" => Some(Method::Command),
+        "disconnect" => Some(Method::Disconnect),
         _ => None,
-    };
+    }
+    .filter(|_| inner.http_mount_path.as_deref().is_none_or(|m| m.trim_end_matches('/') == prefix));
     let Some(method) = method.filter(|_| req.method == "POST") else {
         let status = if req.method == "POST" { 404 } else { 405 };
         inner.stray_http.update(|v| v.push(req));
@@ -580,6 +589,7 @@ impl FakeRpc {
             stray_http: Watched::new(Vec::new()),
             shutdown: shutdown.clone(),
             grpc_peers: Watched::new(Vec::new()),
+            http_mount_path: options.http_mount_path.clone(),
         });
 
         // gRPC
@@ -603,6 +613,11 @@ impl FakeRpc {
         let mut builder = tonic::transport::Server::builder();
         if let Some(n) = options.grpc_max_concurrent_streams {
             builder = builder.max_concurrent_streams(n);
+        }
+        if let Some((cert, key)) = &options.grpc_tls {
+            let tls =
+                tonic::transport::ServerTlsConfig::new().identity(tonic::transport::Identity::from_pem(cert, key));
+            builder = builder.tls_config(tls).expect("valid gRPC TLS configuration");
         }
         let router = builder.add_service(RpcServer::new(endpoint));
         let token = shutdown.clone();

@@ -5,17 +5,19 @@
 //! to a per-test directory.
 //!
 //! Readiness: upstream sleeps (1 s between launches, 2 s for the servers to
-//! find each other / for the epoch to propagate) and then retries the
-//! wsdirector run once after 2 s. Here each node is launched after the
-//! previous one listens on its cluster port, and the scenario is retried every
-//! 2 s within a bounded window until the cluster delivers.
+//! find each other / for the epoch to propagate), then runs the wsdirector
+//! scenario with `retrying(delay: 2)` (2 attempts). Here each node is launched
+//! after the previous one listens on its cluster port, the sleeps become
+//! probes (a NATS message published on the first node reaches the others; the
+//! epoch seen on every node is the same), and the scenario keeps upstream's 2
+//! attempts with a 2 s delay.
 
 use std::path::Path;
 use std::time::Duration;
 
 use cabby_testkit::anyt_app::BENCHMARK_CHANNEL;
 use cabby_testkit::ports::free_port;
-use cabby_testkit::publish::Target;
+use cabby_testkit::publish::{self, NatsSubscriber, Target};
 use cabby_testkit::sut::Sut;
 use cabby_testkit::wsdirector::{Client, Connection, Protocol, StepError};
 use serde_json::{Value, json};
@@ -23,7 +25,26 @@ use serde_json::{Value, json};
 use crate::support::*;
 
 const RETRY_DELAY: Duration = Duration::from_secs(2);
-const CLUSTER_WINDOW: Duration = Duration::from_secs(40);
+const ATTEMPTS: usize = 2;
+const CLUSTER_DEADLINE: Duration = Duration::from_secs(40);
+
+/// Readiness of the NATS cluster/super-cluster: a message published on
+/// `from`'s embedded NATS reaches subscribers on every node in `to`.
+fn await_nats_relay(from: u16, to: &[u16]) {
+    let subject = cabby_testkit::services::unique("cabby_probe");
+    let mut subs: Vec<_> = to
+        .iter()
+        .map(|p| NatsSubscriber::subscribe(local(*p), &subject).unwrap_or_else(|e| panic!("NATS probe: {e:#}")))
+        .collect();
+    let mut seen = vec![false; subs.len()];
+    await_ready("the NATS cluster", CLUSTER_DEADLINE, || {
+        publish::nats_publish(local(from), &subject, "probe").map_err(|e| format!("{e:#}"))?;
+        for (s, seen) in subs.iter_mut().zip(seen.iter_mut()) {
+            *seen = *seen || s.next(Duration::from_millis(200)).is_some();
+        }
+        if seen.iter().all(|s| *s) { Ok(()) } else { Err(format!("relayed to {seen:?}")) }
+    });
+}
 
 fn nats(port: u16) -> String {
     format!("nats://127.0.0.1:{port}")
@@ -44,7 +65,7 @@ fn hello() -> Value {
 }
 
 /// upstream: features/enats_clusters.testfile#scenario
-/// note: sleeps replaced by launching after cluster ports listen and retrying every 2 s within 40 s; the publisher performs after the subscribers subscribed (upstream race absorbed by its retry)
+/// note: sleeps replaced by launching after cluster ports listen and a NATS relay probe across the super-cluster, then upstream's 2 attempts with a 2 s delay; the publisher performs after the subscribers subscribed (upstream race absorbed by its retry)
 /// Adaptation: the publisher performs its broadcast after the subscribers have
 /// subscribed (upstream runs the three clients concurrently without a
 /// barrier, a race its retry absorbs).
@@ -94,8 +115,10 @@ fn enats_clusters() {
     );
     // ANYCABLE_BROADCAST_ADAPTER=nats ANYCABLE_NATS_SERVERS=nats://localhost:4242
     app.set_broadcaster(Target::Nats { addr: local(a1), subject: "__anycable__".into() });
+    // "We need to wait a bit for the NATS servers to find each other" (sleep 2)
+    await_nats_relay(a1, &[a2, a3]);
 
-    retrying(RETRY_DELAY, CLUSTER_WINDOW, || {
+    retrying(RETRY_DELAY, ATTEMPTS, || {
         let exact = |c: &mut Client, action: &str| {
             c.receive_channel(BENCHMARK_CHANNEL, &[], false, json!({"message": "hello", "action": action}), &[])
                 .map(drop)
@@ -133,7 +156,7 @@ fn contains_epoch_kv(dir: &Path) -> bool {
 }
 
 /// upstream: features/enats_broker.testfile#scenario
-/// note: sleeps replaced by cluster-port readiness and retrying every 2 s within 40 s; JetStream readiness via KV__anycable_epoch_ store files as upstream
+/// note: sleeps replaced by cluster-port readiness, a NATS relay probe and an epoch-propagation probe (nodes 2 and 3 deliver a broadcast with node 1's epoch), then upstream's 2 attempts with a 2 s delay; JetStream readiness via KV__anycable_epoch_ store files as upstream
 #[test]
 fn enats_broker() {
     let app = rpc_app();
@@ -187,8 +210,10 @@ fn enats_broker() {
         c.receive_channel(BENCHMARK_CHANNEL, &[], true, json!({"message": "hello", "action": "broadcast"}), extra)
     };
 
+    await_nats_relay(a1, &[a2, a3]);
+
     // We need to obtain epoch first
-    let epoch = retrying(RETRY_DELAY, CLUSTER_WINDOW, || {
+    let epoch = retrying(RETRY_DELAY, ATTEMPTS, || {
         let mut c = step(ac_client(&node1))?;
         step(c.subscribe(BENCHMARK_CHANNEL, &[]))?;
         c.perform(BENCHMARK_CHANNEL, &[], "broadcast", &hello());
@@ -199,9 +224,30 @@ fn enats_broker() {
         }
     });
 
+    // "Let's wait for epoch to be propagated to all nodes" (sleep 2): a broadcast
+    // from node 1 arrives on nodes 2 and 3 carrying the same epoch.
+    await_ready("epoch propagation", CLUSTER_DEADLINE, || {
+        let mut probes = Vec::new();
+        for n in [&node2, &node3] {
+            let mut c = step(ac_client(n))?;
+            step(c.subscribe(BENCHMARK_CHANNEL, &[]))?;
+            probes.push(c);
+        }
+        let mut c = step(ac_client(&node1))?;
+        step(c.subscribe(BENCHMARK_CHANNEL, &[]))?;
+        c.perform(BENCHMARK_CHANNEL, &[], "broadcast", &hello());
+        for p in &mut probes {
+            let got = step(broadcast_from(p, &[("stream_id", json!("all"))]))?;
+            if got.get("epoch") != Some(&json!(epoch)) {
+                return Err(format!("epoch not propagated yet: {got}"));
+            }
+        }
+        Ok(())
+    });
+
     // `-s 4`: the subscriber groups have `multiplier: ":scale"`.
     let scale = 4;
-    retrying(RETRY_DELAY, CLUSTER_WINDOW, || {
+    retrying(RETRY_DELAY, ATTEMPTS, || {
         let with_epoch = [("stream_id", json!("all")), ("epoch", json!(epoch))];
         let mut publisher = step(ac_client(&node1))?;
         step(publisher.subscribe(BENCHMARK_CHANNEL, &[]))?;
