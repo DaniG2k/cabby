@@ -104,6 +104,7 @@ mod test_redis_common {
     }
 
     /// upstream: pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast_-_Unsubscribe_-_Broadcast
+    /// note: replays the subscriptions of the earlier shared subtests first, so "a" is subscribed twice before one unsubscribe (Subscribe is idempotent).
     /// upstream: pubsub/redis_test.go#TestRedisCommon
     #[test]
     fn subscribe_broadcast_unsubscribe_broadcast() {
@@ -112,6 +113,7 @@ mod test_redis_common {
 }
 
 /// upstream: pubsub/redis_test.go#TestRedisReconnect
+/// note: only this test's ACL user is killed (upstream: CLIENT KILL TYPE pubsub on every client); restoration is observed as the subscriber's channels subscribed again.
 ///
 /// Upstream drops connections with `CLIENT KILL TYPE pubsub` (every pub/sub
 /// client on the server) and waits until `PUBSUB CHANNELS` is non-empty again.

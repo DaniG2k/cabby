@@ -2,8 +2,12 @@
 //!
 //! `SharedSubscriberTests` is translated as [`Shared`] plus one function per
 //! subtest; `redis_test` and `nats_test` reuse them with their own [`Harness`].
-//! Upstream subtests share one pair of subscribers; here every Rust test starts
-//! its own (the earlier subtests leave no state the later ones depend on).
+//! Upstream subtests run in sequence on one pair of subscribers, so later
+//! subtests see the subscriptions made by earlier ones (e.g. `"a"` is already
+//! subscribed when "Subscribe - Broadcast - Unsubscribe - Broadcast" subscribes it
+//! again and then unsubscribes once). Every Rust test starts its own subscribers
+//! and first replays the subscriptions of the subtests before it
+//! ([`replay_broadcast`], [`replay_subscribe_broadcast`]).
 //!
 //! Waiting for subscriptions: upstream `wait(subscriber, stream)` reads
 //! subscriber internals (`RedisSubscriber.getEvent`, `NATSSubscriber.subscriptions`
@@ -130,6 +134,22 @@ impl<'h> Shared<'h> {
     }
 }
 
+/// Subscriptions left by subtest "Broadcast".
+fn replay_broadcast(s: &Shared) {
+    s.subscribe(0, "test");
+    s.wait(0, "test").expect("wait test");
+}
+
+/// Subscriptions left by subtest "Subscribe - Broadcast".
+fn replay_subscribe_broadcast(s: &Shared) {
+    s.subscribe(0, "a");
+    s.subscribe(1, "b");
+    s.subscribe(1, "a");
+    s.wait(0, "a").expect("wait a");
+    s.wait(1, "a").expect("wait a");
+    s.wait(1, "b").expect("wait b");
+}
+
 fn smsg(stream: &str, data: &str) -> StreamMessage {
     StreamMessage { stream: stream.into(), data: data.into(), ..Default::default() }
 }
@@ -152,6 +172,7 @@ pub(crate) fn broadcast(h: &dyn Harness) {
 /// Subtest "Broadcast commands".
 pub(crate) fn broadcast_commands(h: &dyn Harness) {
     let s = Shared::start(h);
+    replay_broadcast(&s);
 
     s.sub(0).broadcast_command(&RemoteCommandMessage { command: "test".into(), payload: "{\"foo\":\"bar\"}".into() });
 
@@ -162,6 +183,7 @@ pub(crate) fn broadcast_commands(h: &dyn Harness) {
 /// Subtest "Subscribe - Broadcast".
 pub(crate) fn subscribe_broadcast(h: &dyn Harness) {
     let s = Shared::start_multi(h);
+    replay_broadcast(&s);
     let (a, b) = (s.stream("a"), s.stream("b"));
 
     s.subscribe(0, "a");
@@ -201,6 +223,8 @@ pub(crate) fn subscribe_broadcast(h: &dyn Harness) {
 /// Subtest "Re-transmit commands".
 pub(crate) fn retransmit_commands(h: &dyn Harness) {
     let s = Shared::start_multi(h);
+    replay_broadcast(&s);
+    replay_subscribe_broadcast(&s);
 
     s.sub(0).broadcast_command(&RemoteCommandMessage { command: "test".into(), ..Default::default() });
 
@@ -214,8 +238,12 @@ pub(crate) fn retransmit_commands(h: &dyn Harness) {
 /// Subtest "Subscribe - Broadcast - Unsubscribe - Broadcast".
 pub(crate) fn subscribe_broadcast_unsubscribe_broadcast(h: &dyn Harness) {
     let s = Shared::start_multi(h);
+    replay_broadcast(&s);
+    replay_subscribe_broadcast(&s);
     let a = s.stream("a");
 
+    // Already subscribed by the replayed subtest: subscribing again must be
+    // idempotent, so the single unsubscribe below stops delivery.
     s.subscribe(0, "a");
     s.subscribe(1, "a");
 
@@ -272,15 +300,26 @@ mod test_legacy_subscriber {
 
     /// upstream: pubsub/subscriber_test.go#TestLegacySubscriber/Broadcast
     /// upstream: pubsub/subscriber_test.go#TestLegacySubscriber
+    /// note: also asserts `!IsMultiNode()`, which upstream's early return before the multi-node subtests implies.
     #[test]
     fn broadcast() {
         super::broadcast(&Legacy);
+        assert_single_node();
     }
 
     /// upstream: pubsub/subscriber_test.go#TestLegacySubscriber/Broadcast_commands
     /// upstream: pubsub/subscriber_test.go#TestLegacySubscriber
+    /// note: also asserts `!IsMultiNode()`, which upstream's early return before the multi-node subtests implies.
     #[test]
     fn broadcast_commands() {
         super::broadcast_commands(&Legacy);
+        assert_single_node();
+    }
+
+    /// Upstream: `if !subscriber.IsMultiNode() { return }`, so no multi-node
+    /// subtests exist for the legacy subscriber.
+    fn assert_single_node() {
+        let handler = TestHandler::new();
+        assert!(!Subscriber::legacy(&handler).is_multi_node());
     }
 }
