@@ -43,6 +43,9 @@ arch = "x86_64"
 kernel = "7.3.0-10-generic"
 host_gcc = "15.3.0"
 
+[bench_tools]                        # upstream CI installs these @latest
+websocket-bench = "github.com/anycable/websocket-bench@v0.4.0"
+gops = "github.com/google/gops@v0.3.29"
+
 [unresolved]
 features_runner_gems = "features/runner.rb uses bundler/inline with unpinned jwt, childprocess ~>4.1, perfect_toml"
-benchfile_tools = "websocket-bench and gops are installed @latest by upstream CI; pin before the benchmark baseline"
