@@ -226,7 +226,10 @@ impl Message {
 pub struct Reply {
     pub kind: String,
     pub identifier: String,
-    /// Arbitrary JSON (`None`: absent).
+    /// Arbitrary JSON (`None`: absent). Upstream decodes stream data with
+    /// `UseNumber` and re-encodes it: keys come out sorted (as with serde_json's
+    /// default map) and number text is preserved exactly. The implementation must
+    /// enable serde_json's `arbitrary_precision` to keep the latter.
     pub message: Option<serde_json::Value>,
     pub presence: Option<PresenceEvent>,
     pub reason: String,
@@ -416,3 +419,9 @@ pub struct Message {
     pub history: HistoryRequest,
     pub presence: Option<PresenceEvent>,
 }
+// --- added for hub/pubsub/broadcast ---
+// (RemoteCommandMessage, RemoteDisconnectMessage, DisconnectMessage and Reply are
+// defined above.)
+
+/// Disconnect reason used by remote (broadcast) disconnects (upstream `common.REMOTE_DISCONNECT_REASON`).
+pub const REMOTE_DISCONNECT_REASON: &str = "remote";
