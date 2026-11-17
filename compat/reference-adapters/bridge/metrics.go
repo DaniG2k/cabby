@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -22,6 +23,43 @@ type signalWriter struct{ ran chan struct{} }
 func (w *signalWriter) Run(interval int) error         { close(w.ran); return nil }
 func (w *signalWriter) Write(m *metrics.Metrics) error { return nil }
 func (w *signalWriter) Stop()                          {}
+
+// rotationWriter turns the exported Run loop into a rotation the test can step.
+// Run calls m.rotate() and then each writer's Write on the same goroutine, so a
+// Write that blocks right after reporting is a barrier just after a rotation:
+// nothing rotates again until the test releases it.
+type rotationWriter struct {
+	written chan struct{}
+	proceed chan struct{}
+}
+
+func (w *rotationWriter) Run(interval int) error { return nil }
+func (w *rotationWriter) Write(m *metrics.Metrics) error {
+	w.written <- struct{}{}
+	<-w.proceed
+	return nil
+}
+func (w *rotationWriter) Stop() {}
+
+var rotationWriters = struct {
+	sync.Mutex
+	m map[int]*rotationWriter
+}{m: map[int]*rotationWriter{}}
+
+// gaugeConcurrently is the upstream TestGaugeIncDec body: inc goroutines calling
+// Inc and dec goroutines calling Dec at once, joined with a WaitGroup.
+func gaugeConcurrently(g *metrics.Gauge, inc, dec int) {
+	var wg sync.WaitGroup
+	for i := 0; i < inc; i++ {
+		wg.Add(1)
+		go func() { g.Inc(); wg.Done() }()
+	}
+	for i := 0; i < dec; i++ {
+		wg.Add(1)
+		go func() { g.Dec(); wg.Done() }()
+	}
+	wg.Wait()
+}
 
 func init() {
 	register("metrics.NewMetrics", func(raw json.RawMessage) (interface{}, error) {
@@ -237,6 +275,51 @@ func init() {
 		default:
 			return nil, fmt.Errorf("unknown metrics.Metrics op %q", a.Op)
 		}
+		return true, nil
+	})
+	// Steps one rotation of a registry through the exported Run loop: the first
+	// call registers a rotationWriter and starts Run; later calls release the
+	// writer's previous Write. Returns once Run has rotated and called Write
+	// again (the registry then stays frozen until the next step).
+	register("metrics.Metrics.StepRotation", func(raw json.RawMessage) (interface{}, error) {
+		var a struct{ Handle, TimeoutMs int }
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return nil, err
+		}
+		m, err := rpcmGet[*metrics.Metrics](a.Handle)
+		if err != nil {
+			return nil, err
+		}
+		rotationWriters.Lock()
+		w, running := rotationWriters.m[a.Handle]
+		if !running {
+			w = &rotationWriter{written: make(chan struct{}), proceed: make(chan struct{})}
+			rotationWriters.m[a.Handle] = w
+		}
+		rotationWriters.Unlock()
+		if running {
+			w.proceed <- struct{}{}
+		} else {
+			m.RegisterWriter(w)
+			go m.Run() // nolint: errcheck
+		}
+		select {
+		case <-w.written:
+			return true, nil
+		case <-time.After(time.Duration(a.TimeoutMs) * time.Millisecond):
+			return nil, fmt.Errorf("no rotation within %dms", a.TimeoutMs)
+		}
+	})
+	register("metrics.Gauge.Concurrently", func(raw json.RawMessage) (interface{}, error) {
+		var a struct{ Handle, Inc, Dec int }
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return nil, err
+		}
+		g, err := rpcmGet[*metrics.Gauge](a.Handle)
+		if err != nil {
+			return nil, err
+		}
+		gaugeConcurrently(g, a.Inc, a.Dec)
 		return true, nil
 	})
 	register("metrics.SignalWriter.AwaitRun", func(raw json.RawMessage) (interface{}, error) {

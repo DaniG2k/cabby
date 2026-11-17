@@ -5,9 +5,10 @@ use std::time::Duration;
 use cabby_testkit::reference::metrics::*;
 
 /// upstream: metrics/metrics_test.go#TestMetricsSnapshot
+/// note: rotate interval 1s instead of upstream's 10 (no assertion depends on it): on Go, rotate() is driven through the exported Run loop with a bridge writer that blocks in Write after each rotation, so each rotate() costs one interval of wall time.
 #[test]
 fn test_metrics_snapshot() {
-    let m = Metrics::new(10);
+    let m = Metrics::new(1);
 
     m.register_counter("test_count", "");
     m.register_gauge("test_gauge", "");

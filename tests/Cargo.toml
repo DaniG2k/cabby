@@ -14,6 +14,7 @@ cabby-bench.workspace = true
 cabby-core.workspace = true
 cabby-server.workspace = true
 cabby-testkit.workspace = true
+regex = "1.13.1"
 serde.workspace = true
 serde_json.workspace = true
 tokio-util.workspace = true

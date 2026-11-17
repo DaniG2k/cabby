@@ -173,6 +173,7 @@ dependencies = [
  "cabby-core",
  "cabby-server",
  "cabby-testkit",
+ "regex",
  "serde",
  "serde_json",
  "tokio-util",
