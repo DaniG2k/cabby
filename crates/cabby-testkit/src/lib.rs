@@ -21,3 +21,8 @@ pub use backend::{Backend, backend};
 pub fn workspace_root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("workspace root")
 }
+
+// added for pusher/sse
+pub mod pusher_auth;
+pub mod raw_http;
+pub mod text_ws;

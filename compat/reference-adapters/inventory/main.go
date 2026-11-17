@@ -73,6 +73,11 @@ var skipDirs = map[string]bool{"vendor": true, "testdata": true, "mruby-build": 
 func main() {
 	root := flag.String("root", ".", "reference checkout root")
 	flag.Parse()
+	// The checkout may be a symlink (e.g. shared between worktrees); WalkDir does not
+	// follow a symlinked root.
+	if resolved, err := filepath.EvalSymlinks(*root); err == nil {
+		*root = resolved
+	}
 	var files []File
 	for _, arg := range flag.Args() {
 		base := filepath.Join(*root, arg)
