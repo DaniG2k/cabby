@@ -4,6 +4,10 @@
 //! Every behavior is a [`pending!`] marker until its translated tests are promoted.
 
 pub mod common;
+pub mod encoders;
+pub mod logger;
 pub mod pending;
 pub mod protocol;
 pub mod protos;
+pub mod router;
+pub mod utils;

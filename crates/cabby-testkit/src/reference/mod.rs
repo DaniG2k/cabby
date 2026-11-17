@@ -4,5 +4,13 @@
 //! the bridge, converting Go's JSON shapes into Cabby types. Facades only marshal;
 //! they must not contain behavior of their own (SPEC.md §5).
 
+pub mod cli;
+pub mod common;
+pub mod config;
+pub mod encoders;
+pub mod logger;
 pub mod protocol;
+pub mod router;
+pub mod server;
+pub mod utils;
 pub mod ws;
