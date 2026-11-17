@@ -2,7 +2,10 @@
 //!
 //! Stateful Go objects live in the bridge behind integer handles.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use cabby_core::utils::{self as rs, Item, ItemId, MessageVerifier, PushResult, VerifierError};
 use serde::Deserialize;
@@ -303,21 +306,138 @@ impl ByteQueue {
     }
 }
 
-// --- Rust-only interfaces (Go arms not observable) ------------------------------------
+// --- GoPool -----------------------------------------------------------------------
 
-/// The Rust queue for element types the bridge cannot carry (the GC test stores
-/// pointers with finalizers).
-pub fn rust_queue<T: Send>(initial_capacity: usize, reason: &str) -> rs::Queue<T> {
+/// Observations of the upstream `TestWorkerRespawn` schedule: the worker identity
+/// seen by the first and the last task, and how many data tasks had run when the
+/// last task ran (`len(dataChan)`).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct WorkerRespawn {
+    /// Go: goroutine ID; Rust: `GoPool::current_worker_id()`.
+    pub initial: Option<u64>,
+    pub current: Option<u64>,
+    pub data_len: usize,
+}
+
+/// Runs the worker-respawn schedule on a pool of size 1. The Rust arm is `rust`
+/// (the test's schedule on [`rs::GoPool`]); the Go arm runs the same schedule in the
+/// bridge on `NewGoPool("test", 1)` with the upstream `getGID` probe.
+pub fn worker_respawn(rust: impl FnOnce() -> WorkerRespawn) -> WorkerRespawn {
     match backend() {
-        Backend::Rust => rs::Queue::new(initial_capacity),
-        Backend::Go => unimplemented!("not_observable: {reason}"),
+        Backend::Rust => rust(),
+        Backend::Go => bridge::call("utils.GoPool.WorkerRespawn", json!({})),
     }
 }
 
-/// The Rust worker pool (tasks are closures, which cannot cross the bridge).
-pub fn rust_go_pool(name: &str, size: usize, reason: &str) -> rs::GoPool {
+// --- Queue of tracked pointers (TestQueue_vs_GC) ------------------------------------
+
+/// A payload that records when it is released (Go: a finalizer on the map pointer;
+/// Rust: `Drop`).
+pub struct Tracked {
+    _payload: HashMap<String, String>,
+    dropped: Arc<AtomicBool>,
+}
+
+impl Drop for Tracked {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::SeqCst);
+    }
+}
+
+/// `utils.Queue[*map[string]string]` holding tracked payloads.
+#[derive(Clone)]
+pub enum TrackedQueue {
+    Rust { queue: Arc<rs::Queue<Tracked>>, released: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>> },
+    Go(u64),
+}
+
+/// upstream `require.Eventually(..., 2*time.Second, 100*time.Millisecond)` bounds.
+const EVENTUALLY: Duration = Duration::from_secs(2);
+const TICK: Duration = Duration::from_millis(100);
+
+impl TrackedQueue {
+    pub fn new(initial_capacity: usize) -> Self {
+        match backend() {
+            Backend::Rust => {
+                TrackedQueue::Rust { queue: Arc::new(rs::Queue::new(initial_capacity)), released: Arc::default() }
+            }
+            Backend::Go => {
+                TrackedQueue::Go(bridge::call("utils.NewPtrQueue", json!({"InitialCapacity": initial_capacity})))
+            }
+        }
+    }
+
+    /// Adds `Item{Size: 1, Data: &map[string]string{"foo": id}}` with release tracking.
+    pub fn add_tracked(&self, id: &str) -> bool {
+        match self {
+            TrackedQueue::Rust { queue, released } => {
+                let dropped = Arc::new(AtomicBool::new(false));
+                released.lock().unwrap().insert(id.to_owned(), dropped.clone());
+                let payload = [("foo".to_owned(), id.to_owned())].into();
+                queue.add(Item { size: 1, data: Tracked { _payload: payload, dropped } })
+            }
+            TrackedQueue::Go(h) => bridge::call("utils.PtrQueue.AddTracked", json!({"Q": h, "ID": id})),
+        }
+    }
+
+    /// `q.Remove()`, discarding the item.
+    pub fn remove(&self) -> bool {
+        match self {
+            TrackedQueue::Rust { queue, .. } => queue.remove().is_some(),
+            TrackedQueue::Go(h) => bridge::call("utils.PtrQueue.Remove", json!({"Q": h})),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            TrackedQueue::Rust { queue, .. } => queue.len(),
+            TrackedQueue::Go(h) => bridge::call("utils.PtrQueue.Len", json!({"Q": h})),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// `runtime.GC()` (nothing to do in Rust: release happens on drop).
+    pub fn gc(&self) {
+        match self {
+            TrackedQueue::Rust { .. } => {}
+            TrackedQueue::Go(_) => {
+                bridge::call::<_, Value>("utils.RuntimeGC", json!({}));
+            }
+        }
+    }
+
+    /// Whether the payload added as `id` was released; with `eventually`, polls within
+    /// upstream's `require.Eventually` bounds.
+    pub fn released(&self, id: &str, eventually: bool) -> bool {
+        match self {
+            TrackedQueue::Rust { released, .. } => {
+                let flag = released.lock().unwrap().get(id).cloned().expect("tracked id");
+                let deadline = Instant::now() + EVENTUALLY;
+                loop {
+                    if flag.load(Ordering::SeqCst) {
+                        return true;
+                    }
+                    if !eventually || Instant::now() >= deadline {
+                        return false;
+                    }
+                    std::thread::sleep(TICK);
+                }
+            }
+            TrackedQueue::Go(h) => {
+                bridge::call("utils.PtrQueue.Finalized", json!({"Q": h, "ID": id, "Eventually": eventually}))
+            }
+        }
+    }
+}
+
+/// The Rust worker pool, for the Rust arm of [`worker_respawn`] only.
+pub fn rust_go_pool(name: &str, size: usize) -> rs::GoPool {
     match backend() {
         Backend::Rust => rs::GoPool::new(name, size),
-        Backend::Go => unimplemented!("not_observable: {reason}"),
+        Backend::Go => unreachable!("the Go arm of worker_respawn runs in the bridge"),
     }
 }

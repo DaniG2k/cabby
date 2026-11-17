@@ -5,19 +5,21 @@ use std::sync::{Arc, Mutex};
 
 use cabby_core::common::{RemoteCommandMessage, StreamMessage};
 use cabby_server::cli::{
-    BroadcastHandler, Broadcaster, Broker, CliError, LogSink, RunnerOption, Shutdownable, Subscriber,
+    BroadcastHandler, Broadcaster, Broker, CliError, LogSink, Runner, RunnerOption, Shutdownable, Subscriber,
 };
 use cabby_server::config::EnvMap;
-use cabby_testkit::reference::cli::{CustomFlag, new_config_from_cli, rust_runner};
+use cabby_testkit::reference::cli::{
+    CustomFlag, DrainOutcome, new_config_from_cli, runner_drains_broadcasts_before_broker_shutdown,
+};
 use cabby_testkit::reference::config::new_config;
 
 // --- TestRunnerDrainsBroadcastsBeforeBrokerShutdown --------------------------------
 //
 // Upstream uses mockery mocks with `Run` callbacks asserting the shutdown order,
-// and the mocks assert at cleanup that every expected method was called. Here the
-// mocks share one state: violations of the in-callback assertions are recorded
-// (callbacks may run on runner threads) and checked at the end together with the
-// expected calls. Unexpected calls panic, as mockery's do.
+// and the mocks assert at cleanup that every expected method was called. The Rust
+// doubles below share one state: failed in-callback assertions and unexpected calls
+// are recorded as violations (callbacks may run on runner threads, where a panic
+// could be swallowed) and checked at the end together with the expected calls.
 
 #[derive(Default)]
 struct State {
@@ -25,7 +27,7 @@ struct State {
     subscriber_closed: bool,
     service_closed: bool,
     delivered: Vec<String>,
-    violations: Vec<&'static str>,
+    violations: Vec<String>,
     calls: BTreeSet<String>,
 }
 
@@ -35,11 +37,16 @@ fn record(state: &Shared, call: impl Into<String>) {
     state.lock().unwrap().calls.insert(call.into());
 }
 
-fn check(state: &Shared, ok: impl FnOnce(&State) -> bool, message: &'static str) {
+fn check(state: &Shared, ok: impl FnOnce(&State) -> bool, message: &str) {
     let mut s = state.lock().unwrap();
     if !ok(&s) {
-        s.violations.push(message);
+        s.violations.push(message.to_owned());
     }
+}
+
+/// mockery fails on calls without an expectation.
+fn unexpected(state: &Shared, call: String) {
+    state.lock().unwrap().violations.push(format!("mock: unexpected call {call}"));
 }
 
 struct Service(Shared);
@@ -81,15 +88,16 @@ impl Subscriber for MockSubscriber {
     }
 
     fn subscribe(&self, stream: &str) {
-        panic!("mock: unexpected call subscriber.Subscribe({stream:?})")
+        unexpected(&self.0, format!("subscriber.Subscribe({stream:?})"));
     }
 
     fn unsubscribe(&self, stream: &str) {
-        panic!("mock: unexpected call subscriber.Unsubscribe({stream:?})")
+        unexpected(&self.0, format!("subscriber.Unsubscribe({stream:?})"));
     }
 
     fn is_multi_node(&self) -> bool {
-        panic!("mock: unexpected call subscriber.IsMultiNode()")
+        unexpected(&self.0, "subscriber.IsMultiNode()".into());
+        false
     }
 }
 
@@ -130,7 +138,8 @@ impl Broker for AppBroker {
     }
 
     fn handle_command(&self, msg: &RemoteCommandMessage) -> Result<(), CliError> {
-        panic!("mock: unexpected call broker.HandleCommand({msg:?})")
+        unexpected(&self.state, format!("broker.HandleCommand({msg:?})"));
+        Ok(())
     }
 }
 
@@ -156,13 +165,14 @@ impl Broadcaster for MockBroadcaster {
     }
 
     fn is_fanout(&self) -> bool {
-        panic!("mock: unexpected call broadcaster.IsFanout()")
+        unexpected(&self.state, format!("broadcaster{}.IsFanout()", self.index));
+        false
     }
 }
 
-/// upstream: cli/cli_test.go#TestRunnerDrainsBroadcastsBeforeBrokerShutdown
-#[test]
-fn test_runner_drains_broadcasts_before_broker_shutdown() {
+/// The Rust arm of the scenario: `NewRunner`, `runNode`, then every shutdownable's
+/// `Shutdown` in order (upstream asserts NoError on each; the first error is kept).
+fn rust_scenario() -> DrainOutcome {
     let mut c = new_config();
     c.rpc.implementation = "none".into();
     c.disconnector_disabled = true;
@@ -194,20 +204,47 @@ fn test_runner_drains_broadcasts_before_broker_shutdown() {
         }),
     ];
 
-    let mut runner = rust_runner(c, options).expect("require.NoError(NewRunner)");
-    runner.run_node().expect("require.NoError(runner.runNode())");
-
-    for shutdownable in runner.shutdownables() {
-        let res = shutdownable.shutdown();
-        assert!(res.is_ok(), "{res:?}");
+    let mut out = DrainOutcome::default();
+    match Runner::new(c, options) {
+        Err(e) => out.new_runner_error = Some(e.0),
+        Ok(mut runner) => match runner.run_node() {
+            Err(e) => out.run_node_error = Some(e.0),
+            Ok(()) => {
+                for shutdownable in runner.shutdownables() {
+                    if let Err(e) = shutdownable.shutdown() {
+                        out.shutdown_error.get_or_insert(e.0);
+                    }
+                }
+            }
+        },
     }
 
     let s = state.lock().unwrap();
-    assert_eq!(Vec::<&str>::new(), s.violations);
-    assert_eq!(vec!["0", "1"], s.delivered);
-    assert!(s.broker_closed);
-    assert!(s.subscriber_closed);
-    assert!(s.service_closed);
+    out.delivered = s.delivered.clone();
+    out.broker_closed = s.broker_closed;
+    out.subscriber_closed = s.subscriber_closed;
+    out.service_closed = s.service_closed;
+    out.violations = s.violations.clone();
+    out.calls = s.calls.clone();
+    out
+}
+
+/// upstream: cli/cli_test.go#TestRunnerDrainsBroadcastsBeforeBrokerShutdown
+/// note: Go arm runs the upstream body with its mockery doubles in the bridge through the exported NewRunner + Runner.Embed() (calls runNode) + Embedded.Shutdown (walks runner.shutdownables in order); Embedded.Shutdown stops at the first error where upstream asserts NoError per shutdownable, so the outcomes agree on pass.
+/// note: in-callback assertions, unexpected calls and mockery's AssertExpectations failures are collected as violations instead of failing from callback threads.
+#[test]
+fn test_runner_drains_broadcasts_before_broker_shutdown() {
+    let out = runner_drains_broadcasts_before_broker_shutdown(rust_scenario);
+
+    assert_eq!(None, out.new_runner_error, "require.NoError(NewRunner)");
+    assert_eq!(None, out.run_node_error, "require.NoError(runner.runNode())");
+    assert_eq!(None, out.shutdown_error, "assert.NoError(shutdownable.Shutdown(...))");
+
+    assert_eq!(Vec::<String>::new(), out.violations);
+    assert_eq!(vec!["0", "1"], out.delivered);
+    assert!(out.broker_closed);
+    assert!(out.subscriber_closed);
+    assert!(out.service_closed);
 
     // mockery's cleanup: every expected method was called.
     for call in [
@@ -225,7 +262,7 @@ fn test_runner_drains_broadcasts_before_broker_shutdown() {
         "broadcaster1.Start",
         "broadcaster1.Shutdown",
     ] {
-        assert!(s.calls.contains(call), "expected call {call} did not happen");
+        assert!(out.calls.contains(call), "expected call {call} did not happen");
     }
 }
 
