@@ -68,6 +68,8 @@ To translate more tests, see [`docs/translating-tests.md`](docs/translating-test
 
 ## License and attribution
 
+Cabby is released under the [MIT License](LICENSE), the same license as AnyCable.
+
 Translated tests and scenarios derive from AnyCable (MIT, © Vladimir Dementyev), AnyT
-(MIT, © palkan) and go-mruby (MIT, © Mitchell Hashimoto). Notices are in
-[`compat/licenses/`](compat/licenses/). Cabby's own license is not chosen yet.
+(MIT, © palkan) and go-mruby (MIT, © Mitchell Hashimoto). Their notices are in
+[`compat/licenses/`](compat/licenses/).
