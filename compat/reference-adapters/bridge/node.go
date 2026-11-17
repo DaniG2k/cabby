@@ -56,7 +56,8 @@ func nodeGet[T any](id uint64) (T, error) {
 	return o, nil
 }
 
-// handleOf finds the handle of a session object wrapping s.
+// handleOf finds the handle of a session object wrapping s: nil for no
+// session, "unregistered" for a session the bridge does not know.
 func handleOf(s *node.Session) interface{} {
 	if s == nil {
 		return nil
@@ -68,7 +69,7 @@ func handleOf(s *node.Session) interface{} {
 			return id
 		}
 	}
-	return nil
+	return "unregistered"
 }
 
 type nodeObj struct {
@@ -427,11 +428,15 @@ type blockingDisconnector struct {
 	node.NoopDisconnectQueue
 	enqueued chan struct{}
 	release  chan struct{}
-	once     sync.Once
+	// Upstream closes `enqueued` on every call, so a second Enqueue panics;
+	// here calls are counted and the test asserts exactly one.
+	calls atomic.Int32
 }
 
 func (d *blockingDisconnector) Enqueue(*node.Session) error {
-	d.once.Do(func() { close(d.enqueued) })
+	if d.calls.Add(1) == 1 {
+		close(d.enqueued)
+	}
 	<-d.release
 	return nil
 }
@@ -904,18 +909,22 @@ func init() {
 		case "HubSubscribe":
 			// No exported call subscribes a session in the hub directly: run the
 			// node's own command flow with a controller answering
-			// `Streams: [stream]` (no transmissions, no Disconnect interest).
+			// `Streams: [stream]` (no transmissions, no Disconnect interest),
+			// through a legacy broker (its Subscribe returns the stream name), so
+			// the node's broker is not called, as with upstream's hub-only call.
 			subs, err := subscriptionsOf(s.s)
 			if err != nil {
 				return nil, err
 			}
 			prev := o.controller
 			node.WithController(&streamsController{streams: []string{c.Stream}})(n)
+			n.SetBroker(broker.NewLegacyBroker(pubsub.NewLegacySubscriber(n)))
 			if _, ok := subs[c.Identifier]; ok {
 				_, err = n.Perform(s.s, &common.Message{Identifier: c.Identifier, Data: ""})
 			} else {
 				_, err = n.Subscribe(s.s, &common.Message{Identifier: c.Identifier})
 			}
+			n.SetBroker(o.broker)
 			node.WithController(prev)(n)
 			if err != nil {
 				return errReply(err), nil
@@ -990,6 +999,8 @@ func init() {
 		case "Release":
 			close(d.release)
 			return nil, nil
+		case "Enqueues":
+			return d.calls.Load(), nil
 		}
 		return nil, fmt.Errorf("unknown BlockingDisconnector method %q", c.Method)
 	})
