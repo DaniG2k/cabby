@@ -8,16 +8,17 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use cabby_core::common::{EncodedMessage, Message, SentFrame, StreamMessage};
+use cabby_core::common::{CommandResult, ConnectResult, EncodedMessage, Message, SentFrame, SessionEnv, StreamMessage};
 use cabby_server::pusher_sse_deps::{
-    self as deps, CachedEncodedMessage as RsCached, Controller, Encoder as _, HeadersExtractor, NodeOptions,
-    ResponseWriter,
+    self as deps, CachedEncodedMessage as RsCached, CallResult, Controller, Encoder as _, HeadersExtractor,
+    NodeOptions, ResponseWriter,
 };
 use cabby_server::sse as rs;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
+use super::go_types::{command_result_to_go, connect_result_to_go};
 use super::pusher::{ApiResponse, GoApiResponse, GoDecoded, GoFrameResult, GoParsed, encoded_message_json, rust_frame};
 use crate::{Backend, backend, bridge};
 
@@ -36,6 +37,23 @@ struct GoConfig {
     comment_pings: bool,
     ping_interval: i64,
     allowed_origins: String,
+}
+
+/// `sse.NewConfig()`: Go's defaults against Go, the Rust constants against Rust.
+pub fn new_config() -> rs::Config {
+    match backend() {
+        Backend::Rust => rs::Config::new(),
+        Backend::Go => {
+            let g: GoConfig = bridge::call("sse.NewConfig", json!({}));
+            rs::Config {
+                enabled: g.enabled,
+                path: g.path,
+                comment_pings: g.comment_pings,
+                ping_interval: g.ping_interval,
+                allowed_origins: g.allowed_origins,
+            }
+        }
+    }
 }
 
 /// `conf.ToToml()`.
@@ -376,11 +394,23 @@ impl Connection {
         ConnectionContext { conn: self, rust: self.rust.as_ref().map(|(c, _)| c.context()) }
     }
 
-    /// The unexported `c.done` flag.
+    /// The unexported `c.done` flag. Go has no accessor; it is probed on a replayed
+    /// copy of the connection (the probe is not added to this connection's calls):
+    /// a closed connection drops writes instead of buffering them (connection.go
+    /// `if c.done { return nil }`), so `Write` then `Established` leaves the
+    /// recorder body nil exactly when `done` is set. Valid while nothing was buffered
+    /// before the close.
     pub fn is_done(&self) -> bool {
         match &self.rust {
             Some((c, _)) => c.is_done(),
-            None => unimplemented!("not_observable: sse.Connection.done is unexported state"),
+            None => {
+                let mut steps = self.steps.borrow().clone();
+                steps.push(json!({"Op": "write", "Msg": b"probe".to_vec()}));
+                steps.push(json!({"Op": "established"}));
+                steps.push(json!({"Op": "body"}));
+                let mut results: Vec<GoStep> = bridge::call("sse.Connection", json!({"Steps": steps}));
+                results.pop().expect("body result").bytes.is_none()
+            }
         }
     }
 
@@ -421,23 +451,15 @@ pub struct ConnectionContext<'a> {
     rust: Option<CancellationToken>,
 }
 
-/// Probe interval while waiting on a cancellation token (bounded by a deadline).
-const PROBE: Duration = Duration::from_millis(5);
-
 impl ConnectionContext<'_> {
     /// `<-ctx.Done()` bounded by `timeout`: whether the context was cancelled in time.
     pub fn wait_done(&self, timeout: Duration) -> bool {
         match &self.rust {
-            Some(t) => {
-                let deadline = Instant::now() + timeout;
-                while !t.is_cancelled() {
-                    if Instant::now() >= deadline {
-                        return false;
-                    }
-                    std::thread::sleep(PROBE);
-                }
-                true
-            }
+            Some(t) => tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build()
+                .expect("runtime")
+                .block_on(async { tokio::time::timeout(timeout, t.cancelled()).await.is_ok() }),
             None => {
                 let ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
                 self.conn.go(json!({"Op": "context_done", "TimeoutMs": ms})).flag
@@ -448,36 +470,175 @@ impl ConnectionContext<'_> {
 
 // ------------------------------------------------------------------ handler
 
-/// The upstream test's `buildNode()` (node with HubGopoolSize 2, the given
-/// controller, legacy broker) with `TestSSEHandler`'s disconnect queue (rate 1).
+/// `Subscribe` expectation key: (sid, ids, identifier).
+type SubscribeKey = (String, String, String);
+
+/// Upstream `mocks.Controller` as `TestSSEHandler` programs it: `Shutdown` and
+/// `Disconnect(mock.Anything...)` return nil; `Authenticate`/`Subscribe` answer per
+/// expectation (`mock.Anything` for the context and env). Against Go the
+/// expectations go to a real `mocks.Controller` in the bridge.
+///
+/// An unexpected call is forbidden: the Rust double records it and returns an
+/// error (a panic could be swallowed by the handler's thread); Go's testify panic
+/// is recovered and recorded by the bridge. Tests assert the list stays empty.
+pub struct MockController {
+    go: Option<i64>,
+    authenticate: Mutex<Vec<(String, ConnectResult)>>,
+    subscribe: Mutex<Vec<(SubscribeKey, CommandResult)>>,
+    calls: Mutex<Vec<Vec<String>>>,
+    unexpected: Mutex<Vec<String>>,
+}
+
+impl MockController {
+    fn new(go: Option<i64>) -> Self {
+        Self {
+            go,
+            authenticate: Default::default(),
+            subscribe: Default::default(),
+            calls: Default::default(),
+            unexpected: Default::default(),
+        }
+    }
+
+    /// `On("Authenticate", mock.Anything, sid, mock.Anything).Return(res, nil)`.
+    pub fn on_authenticate(&self, sid: &str, res: ConnectResult) {
+        if let Some(h) = self.go {
+            let e = json!({"Method": "Authenticate", "Sid": sid, "ConnectResult": connect_result_to_go(&res)});
+            bridge::call::<_, Value>("sse.Harness.Expect", json!({"Harness": h, "Expectation": e}));
+        }
+        self.authenticate.lock().unwrap().push((sid.to_owned(), res));
+    }
+
+    /// `On("Subscribe", mock.Anything, sid, mock.Anything, ids, identifier).Return(res, nil)`.
+    pub fn on_subscribe(&self, sid: &str, ids: &str, identifier: &str, res: CommandResult) {
+        if let Some(h) = self.go {
+            let e = json!({"Method": "Subscribe", "Sid": sid, "Ids": ids, "Identifier": identifier,
+                           "CommandResult": command_result_to_go(&res)});
+            bridge::call::<_, Value>("sse.Harness.Expect", json!({"Harness": h, "Expectation": e}));
+        }
+        self.subscribe.lock().unwrap().push(((sid.to_owned(), ids.to_owned(), identifier.to_owned()), res));
+    }
+
+    fn go_calls(&self, h: i64) -> GoCalls {
+        bridge::call("sse.Harness.Calls", json!({"Harness": h}))
+    }
+
+    /// `AssertCalled(t, "Subscribe", mock.Anything, sid, mock.Anything, ids, identifier)`.
+    pub fn assert_called_subscribe(&self, sid: &str, ids: &str, identifier: &str) {
+        let calls = match self.go {
+            Some(h) => self.go_calls(h).calls,
+            None => self.calls.lock().unwrap().clone(),
+        };
+        let want = vec!["Subscribe".to_owned(), sid.to_owned(), ids.to_owned(), identifier.to_owned()];
+        assert!(calls.contains(&want), "{want:?} was not called; calls: {calls:?}");
+    }
+
+    /// Calls that matched no expectation (testify would fail the test).
+    pub fn unexpected_calls(&self) -> Vec<String> {
+        match self.go {
+            Some(h) => self.go_calls(h).unexpected,
+            None => self.unexpected.lock().unwrap().clone(),
+        }
+    }
+
+    fn forbidden<T>(&self, call: String) -> CallResult<T> {
+        self.unexpected.lock().unwrap().push(call.clone());
+        CallResult { result: None, error: Some(deps::Error(format!("mocks.Controller: unexpected call {call}"))) }
+    }
+}
+
+#[derive(Deserialize)]
+struct GoCalls {
+    calls: Vec<Vec<String>>,
+    unexpected: Vec<String>,
+}
+
+impl Controller for MockController {
+    fn start(&self) -> Result<(), deps::Error> {
+        self.unexpected.lock().unwrap().push("Start()".into());
+        Err(deps::Error("mocks.Controller: unexpected call Start()".into()))
+    }
+
+    fn shutdown(&self) -> Result<(), deps::Error> {
+        Ok(())
+    }
+
+    fn authenticate(&self, sid: &str, _env: &SessionEnv) -> CallResult<ConnectResult> {
+        self.calls.lock().unwrap().push(vec!["Authenticate".into(), sid.into()]);
+        let found = self.authenticate.lock().unwrap().iter().find(|(s, _)| s == sid).map(|(_, r)| r.clone());
+        match found {
+            Some(res) => CallResult { result: Some(res), error: None },
+            None => self.forbidden(format!("Authenticate(_, {sid:?}, _)")),
+        }
+    }
+
+    fn subscribe(&self, sid: &str, _env: &SessionEnv, ids: &str, channel: &str) -> CallResult<CommandResult> {
+        self.calls.lock().unwrap().push(vec!["Subscribe".into(), sid.into(), ids.into(), channel.into()]);
+        let key = (sid.to_owned(), ids.to_owned(), channel.to_owned());
+        let found = self.subscribe.lock().unwrap().iter().find(|(k, _)| *k == key).map(|(_, r)| r.clone());
+        match found {
+            Some(res) => CallResult { result: Some(res), error: None },
+            None => self.forbidden(format!("Subscribe(_, {sid:?}, _, {ids:?}, {channel:?})")),
+        }
+    }
+
+    fn unsubscribe(&self, sid: &str, _: &SessionEnv, ids: &str, channel: &str) -> CallResult<CommandResult> {
+        self.forbidden(format!("Unsubscribe(_, {sid:?}, _, {ids:?}, {channel:?})"))
+    }
+
+    fn perform(&self, sid: &str, _: &SessionEnv, _: &str, channel: &str, _: &str) -> CallResult<CommandResult> {
+        self.forbidden(format!("Perform(_, {sid:?}, _, _, {channel:?}, _)"))
+    }
+
+    fn disconnect(&self, _: &str, _: &SessionEnv, _: &str, _: &[String]) -> Result<(), deps::Error> {
+        Ok(())
+    }
+}
+
+/// The upstream test's `buildNode()` (node with HubGopoolSize 2, a
+/// `mocks.Controller`, legacy broker) with `TestSSEHandler`'s disconnect queue
+/// (rate 1); against Go the node is started right away (`go appNode.Start()`).
 pub struct Node {
     rust: Option<Arc<deps::Node>>,
+    go: Option<i64>,
 }
 
-pub fn build_node(controller: Arc<dyn Controller>) -> Node {
-    let rust = (backend() == Backend::Rust).then(|| {
-        Arc::new(deps::Node::new(
-            NodeOptions { hub_pool_size: 2, ping_interval: Duration::from_secs(3), disconnect_rate: Some(1) },
-            controller,
-        ))
-    });
-    Node { rust }
+pub fn build_node() -> (Node, Arc<MockController>) {
+    match backend() {
+        Backend::Rust => {
+            let controller = Arc::new(MockController::new(None));
+            let node = deps::Node::new(
+                NodeOptions { hub_pool_size: 2, ping_interval: Duration::from_secs(3), disconnect_rate: Some(1) },
+                controller.clone(),
+            );
+            (Node { rust: Some(Arc::new(node)), go: None }, controller)
+        }
+        Backend::Go => {
+            let h: i64 = bridge::call("sse.Harness.New", json!({}));
+            (Node { rust: None, go: Some(h) }, Arc::new(MockController::new(Some(h))))
+        }
+    }
 }
-
-const NODE_NOT_OBSERVABLE: &str = "not_observable: the upstream case drives sse.SSEHandler through an in-process \
-     node.Node with a mocks.Controller RPC stub and node broadcasts; covered externally by tests/conformance/sse.rs";
 
 impl Node {
-    /// `go appNode.Start()`. Against Go the bridge builds its own node per request.
+    fn go(&self) -> i64 {
+        self.go.expect("Go harness")
+    }
+
+    /// `go appNode.Start()` (the Go harness starts its node when built).
     pub fn start(&self) {
         if let Some(n) = &self.rust {
             n.start().expect("node start");
         }
     }
 
+    /// `appNode.Shutdown(context.Background())`.
     pub fn shutdown(&self) {
-        if let Some(n) = &self.rust {
-            n.shutdown().expect("node shutdown");
+        match &self.rust {
+            Some(n) => n.shutdown().expect("node shutdown"),
+            None => {
+                bridge::call::<_, Value>("sse.Harness.Shutdown", json!({"Harness": self.go()}));
+            }
         }
     }
 
@@ -485,7 +646,12 @@ impl Node {
     pub fn broadcast(&self, msg: &StreamMessage) {
         match &self.rust {
             Some(n) => n.broadcast(msg),
-            None => unimplemented!("{NODE_NOT_OBSERVABLE}"),
+            None => {
+                bridge::call::<_, Value>(
+                    "sse.Harness.Broadcast",
+                    json!({"Harness": self.go(), "Stream": msg.stream, "Data": msg.data}),
+                );
+            }
         }
     }
 
@@ -493,12 +659,13 @@ impl Node {
     pub fn size(&self) -> usize {
         match &self.rust {
             Some(n) => n.size(),
-            None => unimplemented!("{NODE_NOT_OBSERVABLE}"),
+            None => bridge::call("sse.Harness.Size", json!({"Harness": self.go()})),
         }
     }
 
     /// The upstream `assertNoSessions` helper: sessions may be removed
-    /// asynchronously, so wait (bounded) until the node has none.
+    /// asynchronously, so poll (every 100ms, as upstream) until the node has none,
+    /// failing after `timeout`.
     pub fn assert_no_sessions(&self, timeout: Duration) {
         let deadline = Instant::now() + timeout;
         while self.size() != 0 {
@@ -543,18 +710,27 @@ impl TestRequest {
     }
 }
 
-/// `SSEHandler(appNode, nil, shutdownCtx, &server.DefaultHeadersExtractor{}, &conf, logger)`.
+/// `SSEHandler(appNode, nil, shutdownCtx, &server.DefaultHeadersExtractor{}, &conf, logger)`
+/// with its own shutdown context, cancelled by [`Handler::shutdown`] (never, for
+/// upstream's `context.Background()`).
 pub struct Handler {
-    conf: rs::Config,
     rust: Option<Arc<rs::Handler>>,
+    shutdown: CancellationToken,
+    go: Option<i64>,
 }
 
-pub fn sse_handler(node: &Node, shutdown: &CancellationToken, conf: &rs::Config) -> Handler {
-    let rust = node
-        .rust
-        .as_ref()
-        .map(|n| Arc::new(rs::sse_handler(n.clone(), shutdown.clone(), HeadersExtractor::default(), conf)));
-    Handler { conf: conf.clone(), rust }
+pub fn sse_handler(node: &Node, conf: &rs::Config) -> Handler {
+    let shutdown = CancellationToken::new();
+    match &node.rust {
+        Some(n) => {
+            let h = rs::sse_handler(n.clone(), shutdown.clone(), HeadersExtractor::default(), conf);
+            Handler { rust: Some(Arc::new(h)), shutdown, go: None }
+        }
+        None => {
+            let h: i64 = bridge::call("sse.Harness.Handler", json!({"Harness": node.go(), "Config": go_config(conf)}));
+            Handler { rust: None, shutdown, go: Some(h) }
+        }
+    }
 }
 
 /// A completed response (`httptest.ResponseRecorder` after `ServeHTTP` returned).
@@ -571,93 +747,163 @@ impl Recorded {
     }
 }
 
+/// Deadline for the handler to return once the request context is done.
+const RETURN_DEADLINE: Duration = Duration::from_secs(5);
+
 impl Handler {
-    fn serve_rust(h: &rs::Handler, req: &TestRequest, mut w: OwnedRecorder, done: &CancellationToken) {
-        h.serve(req.to_http(), &mut w, done);
-    }
-
-    fn recorded(rec: &Recorder) -> Recorded {
-        let s = rec.0.lock().unwrap();
-        let headers =
-            s.headers.iter().map(|(k, v)| (k.as_str().to_owned(), v.to_str().unwrap_or_default().to_owned())).collect();
-        ApiResponse { status: s.code.unwrap_or(200), headers, body: s.body.clone().unwrap_or_default(), body_read: 0 }
-    }
-
-    /// `handler.ServeHTTP(w, req)` for a request that never reaches the application
-    /// (rejected before authentication).
-    pub fn serve(&self, req: &TestRequest) -> Recorded {
-        match &self.rust {
+    /// Cancels the handler's shutdown context (`shutdownFn()`).
+    pub fn shutdown(&self) {
+        match self.go {
             Some(h) => {
-                let rec = Recorder::new();
-                Self::serve_rust(h, req, OwnedRecorder::new(&rec), &CancellationToken::new());
-                Self::recorded(&rec)
+                bridge::call::<_, Value>("sse.Handler.Shutdown", json!({"Handler": h}));
             }
-            None => {
-                let headers: std::collections::HashMap<&str, &str> =
-                    req.headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-                let r: GoApiResponse = bridge::call(
-                    "sse.SSEHandler.ServeHTTP",
-                    json!({"Config": go_config(&self.conf), "Method": req.method, "Target": req.target,
-                           "Headers": headers,
-                           "Body": req.body.as_ref().map(|b| String::from_utf8_lossy(b).into_owned())}),
-                );
-                r.into_response()
-            }
+            None => self.shutdown.cancel(),
         }
     }
 
-    /// `handler.ServeHTTP(w, req)` for a request handled by the application (the
-    /// node's controller), returning once the handler does. `request_done` is the
-    /// request context.
-    pub fn serve_app(&self, req: &TestRequest, request_done: &CancellationToken) -> Recorded {
-        match &self.rust {
-            Some(h) => {
-                let rec = Recorder::new();
-                Self::serve_rust(h, req, OwnedRecorder::new(&rec), request_done);
-                Self::recorded(&rec)
-            }
-            None => unimplemented!("{NODE_NOT_OBSERVABLE}"),
-        }
+    /// `handler.ServeHTTP(w, req)` with a request context that times out after
+    /// `timeout`; returns the recorded response once the handler returned.
+    pub fn serve(&self, req: &TestRequest, timeout: Duration) -> Recorded {
+        let s = self.serve_streaming(req, timeout);
+        s.wait(timeout + RETURN_DEADLINE).unwrap_or_else(|| panic!("handler did not return within {timeout:?}"))
     }
 
-    /// `go handler.ServeHTTP(sw, req)` with a `streamingWriter`; the request context
-    /// is `request_done`.
-    pub fn serve_streaming(&self, req: &TestRequest, request_done: &CancellationToken) -> Streaming {
-        let Some(h) = &self.rust else { unimplemented!("{NODE_NOT_OBSERVABLE}") };
+    /// `go handler.ServeHTTP(sw, req)` with a `streamingWriter`; the request
+    /// context times out after `timeout` (upstream `context.WithTimeout`).
+    pub fn serve_streaming(&self, req: &TestRequest, timeout: Duration) -> Streaming {
+        if let Some(h) = self.go {
+            let headers: std::collections::HashMap<&str, &str> =
+                req.headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+            let id: i64 = bridge::call(
+                "sse.Handler.Serve",
+                json!({"Handler": h, "Method": req.method, "Target": req.target, "Headers": headers,
+                       "Body": req.body.as_ref().map(|b| String::from_utf8_lossy(b).into_owned()),
+                       "TimeoutMs": u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX)}),
+            );
+            return Streaming { inner: StreamingInner::Go(id) };
+        }
+        let h = self.rust.clone().expect("Rust handler");
         let rec = Recorder::new();
         let (etx, erx) = channel();
         let (stx, srx) = channel();
         let (dtx, drx) = channel();
+        let (stop_tx, stop_rx) = channel::<()>();
         let mut w = OwnedRecorder::new(&rec);
         w.events = Some(etx);
         w.status_seen = Some(stx);
-        let h = h.clone();
+        let request_done = CancellationToken::new();
+        // The request context's timeout: cancel unless the stream was finished first.
+        let timer_token = request_done.clone();
+        std::thread::spawn(move || {
+            if let Err(RecvTimeoutError::Timeout) = stop_rx.recv_timeout(timeout) {
+                timer_token.cancel();
+            }
+        });
         let req = req.clone();
         let done = request_done.clone();
         std::thread::spawn(move || {
-            Self::serve_rust(&h, &req, w, &done);
+            let mut w = w;
+            h.serve(req.to_http(), &mut w, &done);
+            drop(w);
             let _ = dtx.send(());
         });
-        Streaming { recorder: rec, events: erx, status: srx, finished: drx, request_done: request_done.clone() }
+        Streaming {
+            inner: StreamingInner::Rust {
+                recorder: rec,
+                original: Recorder::new(),
+                events: erx,
+                status: srx,
+                finished: Mutex::new(Some(drx)),
+                request_done,
+                _stop_timer: stop_tx,
+            },
+        }
     }
 }
 
-/// A response being streamed by a handler running on its own thread.
-pub struct Streaming {
-    recorder: Recorder,
-    events: Receiver<Vec<u8>>,
-    status: Receiver<u16>,
-    finished: Receiver<()>,
-    request_done: CancellationToken,
+enum StreamingInner {
+    Rust {
+        recorder: Recorder,
+        /// Upstream's `w`, which the streaming writer copied and nothing writes to.
+        original: Recorder,
+        events: Receiver<Vec<u8>>,
+        status: Receiver<u16>,
+        finished: Mutex<Option<Receiver<()>>>,
+        request_done: CancellationToken,
+        _stop_timer: Sender<()>,
+    },
+    Go(i64),
 }
 
+/// A response being streamed by a handler running on its own thread/goroutine.
+pub struct Streaming {
+    inner: StreamingInner,
+}
+
+#[derive(Deserialize)]
+struct GoServeResult {
+    #[serde(default)]
+    event: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GoServeStatus {
+    status: Option<u16>,
+}
+
+#[derive(Deserialize)]
+struct GoServeWait {
+    done: bool,
+    #[serde(default)]
+    status: u16,
+    #[serde(default)]
+    headers: std::collections::HashMap<String, Vec<String>>,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    panic: Option<String>,
+}
+
+fn ms(d: Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// The bridge serves one call at a time for all tests of a binary, so a Go-side
+/// wait is capped at this slice and repeated until the caller's deadline.
+const BRIDGE_SLICE: Duration = Duration::from_millis(20);
+
 impl Streaming {
-    /// `sw.ReadEvent(ctx)` where the context expires after `timeout`.
+    fn go(id: i64, op: &str, timeout: Duration) -> Value {
+        bridge::call("sse.Serve", json!({"Serve": id, "Op": op, "TimeoutMs": ms(timeout)}))
+    }
+
+    /// Repeats `op` in short slices while `pending(result)` and time is left.
+    fn go_poll(id: i64, op: &str, timeout: Duration, pending: impl Fn(&Value) -> bool) -> Value {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let v = Self::go(id, op, left.min(BRIDGE_SLICE));
+            if !pending(&v) || left <= BRIDGE_SLICE {
+                return v;
+            }
+        }
+    }
+
+    /// `sw.ReadEvent(ctx)`, waiting at most `timeout`.
     pub fn read_event(&self, timeout: Duration) -> Result<String, String> {
-        match self.events.recv_timeout(timeout) {
-            Ok(e) => Ok(String::from_utf8_lossy(&e).into_owned()),
-            Err(RecvTimeoutError::Timeout) => Err("context deadline exceeded".into()),
-            Err(RecvTimeoutError::Disconnected) => Err("handler returned".into()),
+        match &self.inner {
+            StreamingInner::Go(id) => {
+                let v = Self::go_poll(*id, "read_event", timeout, |v| v["timeout"].as_bool() == Some(true));
+                let r: GoServeResult = serde_json::from_value(v).expect("serve result");
+                r.event.ok_or_else(|| r.error.unwrap_or_default())
+            }
+            StreamingInner::Rust { events, .. } => match events.recv_timeout(timeout) {
+                Ok(e) => Ok(String::from_utf8_lossy(&e).into_owned()),
+                Err(RecvTimeoutError::Timeout) => Err("context deadline exceeded".into()),
+                Err(RecvTimeoutError::Disconnected) => Err("handler returned".into()),
+            },
         }
     }
 
@@ -665,25 +911,91 @@ impl Streaming {
     /// the upstream `time.Sleep` before broadcasting (the handler subscribes before
     /// writing the status).
     pub fn wait_status(&self, timeout: Duration) -> Option<u16> {
-        self.status.recv_timeout(timeout).ok()
+        match &self.inner {
+            StreamingInner::Go(id) => {
+                let v = Self::go_poll(*id, "wait_status", timeout, |v| v["status"].is_null());
+                let r: GoServeStatus = serde_json::from_value(v).expect("status");
+                r.status
+            }
+            StreamingInner::Rust { status, .. } => status.recv_timeout(timeout).ok(),
+        }
     }
 
-    /// The streaming writer's status code.
+    /// Upstream's `w.Code`: the original recorder, which the streaming writer copied.
+    pub fn original_code(&self) -> u16 {
+        match &self.inner {
+            StreamingInner::Go(id) => serde_json::from_value(Self::go(*id, "original_code", Duration::ZERO)).unwrap(),
+            StreamingInner::Rust { original, .. } => original.code(),
+        }
+    }
+
+    /// Waits up to `timeout` for the handler to return; the recorded response, or
+    /// `None` if it is still running. A panic in the handler fails the test.
+    pub fn wait(&self, timeout: Duration) -> Option<Recorded> {
+        match &self.inner {
+            StreamingInner::Go(id) => {
+                let v = Self::go_poll(*id, "wait", timeout, |v| v["done"].as_bool() == Some(false));
+                let r: GoServeWait = serde_json::from_value(v).expect("wait result");
+                if !r.done {
+                    return None;
+                }
+                if let Some(p) = r.panic {
+                    panic!("handler panicked in Go: {p}");
+                }
+                let resp = GoApiResponse::from_parts(r.status, r.headers, r.body);
+                Some(resp)
+            }
+            StreamingInner::Rust { recorder, finished, .. } => {
+                let mut f = finished.lock().unwrap();
+                if let Some(rx) = f.as_ref() {
+                    match rx.recv_timeout(timeout) {
+                        Ok(()) | Err(RecvTimeoutError::Disconnected) => *f = None,
+                        Err(RecvTimeoutError::Timeout) => return None,
+                    }
+                }
+                let s = recorder.0.lock().unwrap();
+                let headers = s
+                    .headers
+                    .iter()
+                    .map(|(k, v)| (k.as_str().to_owned(), v.to_str().unwrap_or_default().to_owned()))
+                    .collect();
+                Some(ApiResponse {
+                    status: s.code.unwrap_or(200),
+                    headers,
+                    body: s.body.clone().unwrap_or_default(),
+                    body_read: 0,
+                })
+            }
+        }
+    }
+
+    /// The streaming writer's own status code (after the handler returned).
     pub fn code(&self) -> u16 {
-        self.recorder.code()
+        self.wait(RETURN_DEADLINE).expect("handler returned").status
     }
 
     /// `cancel()` the request context and wait (bounded) for the handler to return.
     pub fn finish(&self, timeout: Duration) -> bool {
-        self.request_done.cancel();
-        self.finished.recv_timeout(timeout).is_ok()
+        match &self.inner {
+            StreamingInner::Go(id) => {
+                Self::go(*id, "cancel", Duration::ZERO);
+            }
+            StreamingInner::Rust { request_done, .. } => request_done.cancel(),
+        }
+        self.wait(timeout).is_some()
     }
 }
 
 impl Drop for Streaming {
     fn drop(&mut self) {
         // `defer cancel()`: release the handler even when an assertion failed.
-        self.request_done.cancel();
-        let _ = self.finished.recv_timeout(Duration::from_secs(2));
+        match &self.inner {
+            StreamingInner::Go(id) => {
+                if !std::thread::panicking() {
+                    Self::go(*id, "cancel", Duration::ZERO);
+                }
+            }
+            StreamingInner::Rust { request_done, .. } => request_done.cancel(),
+        }
     }
 }
