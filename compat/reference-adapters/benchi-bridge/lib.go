@@ -25,12 +25,12 @@ func decode[T any](raw json.RawMessage) (T, error) {
 
 // method registers an op taking only a receiver handle.
 func method[T any](name string, f func(T) (interface{}, error)) {
-	register(name, func(raw json.RawMessage) (interface{}, error) {
+	brRegister(name, func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[h](raw)
 		if err != nil {
 			return nil, err
 		}
-		recv, err := get[T](a.H)
+		recv, err := brGet[T](a.H)
 		if err != nil {
 			return nil, err
 		}
@@ -84,34 +84,34 @@ type snapshotResult struct {
 }
 
 func snapshot(s lib.HistogramSnapshot) snapshotResult {
-	return snapshotResult{H: put(s), Count: s.Count, MaxNanos: int64(s.Max)}
+	return snapshotResult{H: brPut(s), Count: s.Count, MaxNanos: int64(s.Max)}
 }
 
 func init() {
 	// Linkage: referencing cli.Embedded and the forked client proves the bridge
 	// links both modules (TestModuleLinks, TestClientPackageCompiles).
-	register("ModuleLinks", func(json.RawMessage) (interface{}, error) {
+	brRegister("ModuleLinks", func(json.RawMessage) (interface{}, error) {
 		var _ *cli.Embedded
 		var _ *anycable.Client
 		return true, nil
 	})
-	register("cable.NewClient", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("cable.NewClient", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct{ URL string }](raw)
 		if err != nil {
 			return nil, err
 		}
 		c := anycable.NewClient(context.Background(), a.URL, slog.New(slog.NewTextHandler(io.Discard, nil)))
-		return put(c), nil
+		return brPut(c), nil
 	})
 
-	register("context.WithCancel", func(json.RawMessage) (interface{}, error) {
+	brRegister("context.WithCancel", func(json.RawMessage) (interface{}, error) {
 		ctx, cancel := context.WithCancel(context.Background())
-		return put(&cancelCtx{ctx, cancel}), nil
+		return brPut(&cancelCtx{ctx, cancel}), nil
 	})
 	method("context.Cancel", func(c *cancelCtx) (interface{}, error) { c.cancel(); return nil, nil })
 
-	register("atomic.NewInt64", func(json.RawMessage) (interface{}, error) { return put(&atomic.Int64{}), nil })
-	register("atomic.Store", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("atomic.NewInt64", func(json.RawMessage) (interface{}, error) { return brPut(&atomic.Int64{}), nil })
+	brRegister("atomic.Store", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			H uint64
 			V int64
@@ -119,7 +119,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		n, err := get[*atomic.Int64](a.H)
+		n, err := brGet[*atomic.Int64](a.H)
 		if err != nil {
 			return nil, err
 		}
@@ -128,8 +128,8 @@ func init() {
 	})
 
 	// --- counter.go ---
-	register("NewAccumulator", func(json.RawMessage) (interface{}, error) { return put(lib.NewAccumulator()), nil })
-	register("Accumulator.Bump", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("NewAccumulator", func(json.RawMessage) (interface{}, error) { return brPut(lib.NewAccumulator()), nil })
+	brRegister("Accumulator.Bump", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			H  uint64
 			ID string
@@ -137,7 +137,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		acc, err := get[*lib.Accumulator](a.H)
+		acc, err := brGet[*lib.Accumulator](a.H)
 		if err != nil {
 			return nil, err
 		}
@@ -145,10 +145,31 @@ func init() {
 		return nil, nil
 	})
 	method("Accumulator.Snapshot", func(a *lib.Accumulator) (interface{}, error) { return a.Snapshot(), nil })
+	// Snapshot kept on the Go side, so that writes to it (map.Set) really land in the
+	// map Snapshot returned and a later Snapshot can show whether storage is shared.
+	method("Accumulator.SnapshotHandle", func(a *lib.Accumulator) (interface{}, error) {
+		return brPut(a.Snapshot()), nil
+	})
+	brRegister("map.Set", func(raw json.RawMessage) (interface{}, error) {
+		a, err := decode[struct {
+			H uint64
+			K string
+			V int
+		}](raw)
+		if err != nil {
+			return nil, err
+		}
+		m, err := brGet[map[string]int](a.H)
+		if err != nil {
+			return nil, err
+		}
+		m[a.K] = a.V
+		return nil, nil
+	})
 	method("Accumulator.TotalReceived", func(a *lib.Accumulator) (interface{}, error) { return a.TotalReceived(), nil })
 
 	// --- throughput.go ---
-	register("NewReceiveSampler", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("NewReceiveSampler", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			IntervalNanos int64
 			Source        uint64
@@ -156,25 +177,25 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		n, err := get[*atomic.Int64](a.Source)
+		n, err := brGet[*atomic.Int64](a.Source)
 		if err != nil {
 			return nil, err
 		}
-		return put(lib.NewReceiveSampler(time.Duration(a.IntervalNanos), n.Load)), nil
+		return brPut(lib.NewReceiveSampler(time.Duration(a.IntervalNanos), n.Load)), nil
 	})
 	method("ReceiveSampler.Start", func(s *lib.ReceiveSampler) (interface{}, error) { s.Start(); return nil, nil })
 	method("ReceiveSampler.Stop", func(s *lib.ReceiveSampler) (interface{}, error) { s.Stop(); return nil, nil })
 	method("ReceiveSampler.Samples", func(s *lib.ReceiveSampler) (interface{}, error) {
 		return fromSamples(s.Samples()), nil
 	})
-	register("Overall", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("Overall", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct{ Samples []sample }](raw)
 		if err != nil {
 			return nil, err
 		}
 		return lib.Overall(toSamples(a.Samples)), nil
 	})
-	register("ComputeWindowStats", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("ComputeWindowStats", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			Samples     []sample
 			WindowNanos int64
@@ -186,8 +207,8 @@ func init() {
 	})
 
 	// --- histogram.go ---
-	register("NewHistogram", func(json.RawMessage) (interface{}, error) { return put(&lib.Histogram{}), nil })
-	register("Histogram.Record", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("NewHistogram", func(json.RawMessage) (interface{}, error) { return brPut(&lib.Histogram{}), nil })
+	brRegister("Histogram.Record", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			H     uint64
 			Nanos int64
@@ -195,7 +216,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		hist, err := get[*lib.Histogram](a.H)
+		hist, err := brGet[*lib.Histogram](a.H)
 		if err != nil {
 			return nil, err
 		}
@@ -204,7 +225,7 @@ func init() {
 	})
 	method("Histogram.Snapshot", func(x *lib.Histogram) (interface{}, error) { return snapshot(x.Snapshot()), nil })
 	method("Histogram.Swap", func(x *lib.Histogram) (interface{}, error) { return snapshot(x.Swap()), nil })
-	register("HistogramSnapshot.Quantile", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("HistogramSnapshot.Quantile", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			H uint64
 			Q float64
@@ -212,7 +233,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		s, err := get[lib.HistogramSnapshot](a.H)
+		s, err := brGet[lib.HistogramSnapshot](a.H)
 		if err != nil {
 			return nil, err
 		}
@@ -220,7 +241,7 @@ func init() {
 	})
 
 	// --- server.go ---
-	register("BuildServer", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("BuildServer", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			BrokerAdapter string
 			RPCHost       string
@@ -241,7 +262,7 @@ func init() {
 			H            uint64
 			WebSocketURL string
 			BroadcastURL string
-		}{put(srv), srv.WebSocketURL(), srv.BroadcastURL()}, nil
+		}{brPut(srv), srv.WebSocketURL(), srv.BroadcastURL()}, nil
 	})
 	method("Server.Shutdown", func(s *lib.Server) (interface{}, error) {
 		return errText(s.Shutdown(context.Background())), nil
@@ -249,7 +270,7 @@ func init() {
 	method("Server.DisconnectQueueSize", func(s *lib.Server) (interface{}, error) { return s.DisconnectQueueSize(), nil })
 
 	// --- client.go ---
-	register("BuildClient", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("BuildClient", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct{ URL string }](raw)
 		if err != nil {
 			return nil, err
@@ -258,9 +279,9 @@ func init() {
 		if err != nil {
 			return struct{ Error *string }{errText(err)}, nil
 		}
-		return struct{ H uint64 }{put(c)}, nil
+		return struct{ H uint64 }{brPut(c)}, nil
 	})
-	register("Client.Connect", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("Client.Connect", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			H            uint64
 			TimeoutNanos int64
@@ -268,7 +289,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		c, err := get[*lib.Client](a.H)
+		c, err := brGet[*lib.Client](a.H)
 		if err != nil {
 			return nil, err
 		}
@@ -280,7 +301,7 @@ func init() {
 		}
 		return errText(c.Connect(ctx)), nil
 	})
-	register("Client.Subscribe", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("Client.Subscribe", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			H       uint64
 			Streams []string
@@ -288,7 +309,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		c, err := get[*lib.Client](a.H)
+		c, err := brGet[*lib.Client](a.H)
 		if err != nil {
 			return nil, err
 		}
@@ -304,7 +325,7 @@ func init() {
 	method("Client.Close", func(c *lib.Client) (interface{}, error) { c.Close(); return nil, nil })
 
 	// --- pool.go ---
-	register("BuildPool", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("BuildPool", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			ServerURL   string
 			C, S, BigS  int
@@ -319,7 +340,7 @@ func init() {
 		cfg := lib.PoolConfig{ServerURL: a.ServerURL, C: a.C, S: a.S, BigS: a.BigS, Tolerance: a.Tolerance,
 			Seed: a.Seed, Streams: a.Streams}
 		if a.Accumulator != nil {
-			if cfg.Accumulator, err = get[*lib.Accumulator](*a.Accumulator); err != nil {
+			if cfg.Accumulator, err = brGet[*lib.Accumulator](*a.Accumulator); err != nil {
 				return nil, err
 			}
 		}
@@ -330,12 +351,12 @@ func init() {
 				IsNil bool
 			}{errText(err), pool == nil}, nil
 		}
-		return struct{ H uint64 }{put(pool)}, nil
+		return struct{ H uint64 }{brPut(pool)}, nil
 	})
 	method("ClientPool.Size", func(p *lib.ClientPool) (interface{}, error) { return p.Size(), nil })
 	method("ClientPool.Streams", func(p *lib.ClientPool) (interface{}, error) { return p.Streams(), nil })
 	method("ClientPool.Close", func(p *lib.ClientPool) (interface{}, error) { p.Close(); return nil, nil })
-	register("BuildStreamSubsets", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("BuildStreamSubsets", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			Seed       uint64
 			C, S, BigS int
@@ -347,7 +368,7 @@ func init() {
 	})
 
 	// --- publisher.go ---
-	register("NewPublisher", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("NewPublisher", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			URL         string
 			MaxInflight int
@@ -364,9 +385,9 @@ func init() {
 		if a.BatchSize != nil {
 			opts = append(opts, lib.WithBatchSize(*a.BatchSize))
 		}
-		return put(lib.NewPublisher(a.URL, a.MaxInflight, opts...)), nil
+		return brPut(lib.NewPublisher(a.URL, a.MaxInflight, opts...)), nil
 	})
-	register("Publisher.Publish", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("Publisher.Publish", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			H            uint64
 			Stream, Data string
@@ -374,7 +395,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		p, err := get[*lib.Publisher](a.H)
+		p, err := brGet[*lib.Publisher](a.H)
 		if err != nil {
 			return nil, err
 		}

@@ -1,14 +1,15 @@
 //! Client for `compat/reference-adapters/benchi-bridge`, the Go reference adapter for
 //! Benchi (`etc/benchi`, a separate Go module the shared bridge cannot import).
 //!
-//! Protocol v1 (JSON lines), see the bridge's `main.go`:
+//! Protocol v1 (JSON lines), see `benchi-bridge/protocol.go`:
 //! * requests carry an `id` and may be answered out of order, so blocking Go calls
 //!   (`Client.Receive`, `ReconnectingClient.Run`) can run while other threads keep
 //!   calling;
 //! * Go objects live in a handle table on the Go side;
 //! * Go func-typed parameters are callbacks: the bridge sends `{"cb","call","args"}`
-//!   and this client answers `{"reply","ok"}` after running the registered closure
-//!   on its own thread (closures may call back into the bridge).
+//!   and this client answers `{"reply","ok"}` (or `{"reply","err"}`) after running
+//!   the registered closure on its own thread (closures may call back into the
+//!   bridge).
 //!
 //! Each test gets its own bridge process ([`Session::current`]): Benchi supports one
 //! embedded server per process, and a test's objects must share a handle table.
@@ -35,7 +36,7 @@ pub const CALL_DEADLINE: Duration = Duration::from_secs(30);
 type Callback = Arc<dyn Fn(Value) -> Value + Send + Sync>;
 type Waiters = Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>>;
 
-/// Directory of the Benchi Go artifacts (bridge and scenario binaries).
+/// Directory of the Benchi Go artifacts (bridge and scenario shims).
 pub fn artifacts_dir() -> PathBuf {
     crate::workspace_root().join("target/reference-adapters/benchi")
 }
@@ -70,23 +71,65 @@ fn bridge_binary() -> Result<PathBuf> {
         .map_err(anyhow::Error::msg)
 }
 
-/// Path to an upstream scenario binary (`stress_publications`, `reconnect_floods`):
-/// `CABBY_GO_BENCHI_SCENARIOS/<name>`, or built once from the Benchi module.
-pub fn scenario_binary(name: &str) -> PathBuf {
+/// Path to the test-only shim of an upstream scenario (`stress_publications`,
+/// `reconnect_floods`): `CABBY_GO_BENCHI_SCENARIOS/<name>.shim`, or built once.
+///
+/// The shim is the scenario's own `go test -c` binary with two extra `_test.go` files
+/// added through `-overlay` (nothing is written into the reference checkout):
+/// `benchi-bridge/protocol.go` and `benchi-bridge/_scenario_shims/<name>_test.go`,
+/// whose `TestMain` serves the adapter protocol when `CABBY_BENCHI_SHIM=1`. That
+/// reaches the unexported `run`, `parseFlags`, `runWithConfig` and `commandStall` of
+/// package main without patching upstream files.
+pub fn shim_binary(name: &str) -> PathBuf {
     static BUILT: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
     if let Ok(dir) = std::env::var("CABBY_GO_BENCHI_SCENARIOS") {
-        return PathBuf::from(dir).join(name);
+        return PathBuf::from(dir).join(format!("{name}.shim"));
     }
     let built = BUILT.get_or_init(Default::default);
     let mut built = built.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(p) = built.get(name) {
         return p.clone();
     }
-    let out = artifacts_dir().join(name);
-    go_build(&out, &format!("github.com/anycable/anycable-go/etc/benchi/scenarios/{name}"))
-        .unwrap_or_else(|e| panic!("{e:#}"));
+    let out = build_shim(name).unwrap_or_else(|e| panic!("{e:#}"));
     built.insert(name.to_owned(), out.clone());
     out
+}
+
+fn build_shim(name: &str) -> Result<PathBuf> {
+    let root = crate::workspace_root();
+    let adapters = root.join("compat/reference-adapters");
+    // Overlay keys must be the paths `go` sees, so resolve a symlinked checkout.
+    let benchi = root.join("compat/reference/etc/benchi").canonicalize().context("compat/reference/etc/benchi")?;
+    let pkg = benchi.join("scenarios").join(name);
+    let mut replace = serde_json::Map::new();
+    replace.insert(
+        pkg.join("zz_cabby_protocol_test.go").to_string_lossy().into_owned(),
+        json!(adapters.join("benchi-bridge/protocol.go")),
+    );
+    replace.insert(
+        pkg.join("zz_cabby_shim_test.go").to_string_lossy().into_owned(),
+        json!(adapters.join(format!("benchi-bridge/_scenario_shims/{name}_test.go"))),
+    );
+    std::fs::create_dir_all(artifacts_dir())?;
+    let overlay_path = artifacts_dir().join(format!("{name}.overlay.json"));
+    std::fs::write(&overlay_path, json!({ "Replace": replace }).to_string())?;
+    let out = artifacts_dir().join(format!("{name}.shim"));
+    // Benchi's own go.mod is stale at the pinned commit; use the tidied copy
+    // (compat/baseline/README.md item 1).
+    let status = Command::new("go")
+        .args(["test", "-c"])
+        .arg(format!("-modfile={}", adapters.join("benchi-modfile/go.mod").display()))
+        .arg(format!("-overlay={}", overlay_path.display()))
+        .arg("-o")
+        .arg(&out)
+        .arg(format!("./scenarios/{name}"))
+        .current_dir(&benchi)
+        .status()
+        .context("running `go test -c` for a Benchi scenario shim (is the Go toolchain on PATH?)")?;
+    if !status.success() {
+        bail!("building the {name} shim failed");
+    }
+    Ok(out)
 }
 
 /// One bridge process.
@@ -115,7 +158,18 @@ impl Session {
     }
 
     fn start() -> Result<Session> {
-        let mut child = Command::new(bridge_binary()?)
+        Session::start_with(Command::new(bridge_binary()?))
+    }
+
+    /// A fresh session served by the scenario shim `name` (see [`shim_binary`]).
+    pub fn shim(name: &str) -> Arc<Session> {
+        let mut cmd = Command::new(shim_binary(name));
+        cmd.env("CABBY_BENCHI_SHIM", "1").env("ANYCABLE_DISABLE_TELEMETRY", "true");
+        Arc::new(Session::start_with(cmd).unwrap_or_else(|e| panic!("starting the {name} shim: {e:#}")))
+    }
+
+    fn start_with(mut cmd: Command) -> Result<Session> {
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -138,6 +192,7 @@ impl Session {
             let waiters = Arc::clone(&waiters);
             let callbacks = Arc::clone(&callbacks);
             let stdin = Arc::clone(&stdin);
+            let stderr = Arc::clone(&stderr);
             std::thread::spawn(move || {
                 for line in BufReader::new(stdout).lines() {
                     let Ok(line) = line else { break };
@@ -148,8 +203,21 @@ impl Session {
                         let f = callbacks.lock().unwrap_or_else(|e| e.into_inner()).get(&cb).cloned();
                         let stdin = Arc::clone(&stdin);
                         std::thread::spawn(move || {
-                            let ok = f.map_or(Value::Null, |f| f(args));
-                            let reply = json!({"v": PROTOCOL_VERSION, "reply": call, "ok": ok});
+                            // Every reply is explicit: a missing callback, a panicking
+                            // closure or a null result is an error the adapter treats as
+                            // fatal, never a silent `false`.
+                            let result = match f {
+                                None => Err(format!("callback {cb} is not registered")),
+                                Some(f) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(args))) {
+                                    Ok(Value::Null) => Err(format!("callback {cb} returned null")),
+                                    Ok(v) => Ok(v),
+                                    Err(p) => Err(format!("callback {cb} panicked: {}", panic_text(p.as_ref()))),
+                                },
+                            };
+                            let reply = match result {
+                                Ok(ok) => json!({"v": PROTOCOL_VERSION, "reply": call, "ok": ok}),
+                                Err(err) => json!({"v": PROTOCOL_VERSION, "reply": call, "err": err}),
+                            };
                             let mut w = stdin.lock().unwrap_or_else(|e| e.into_inner());
                             let _ = writeln!(w, "{reply}");
                             let _ = w.flush();
@@ -165,9 +233,12 @@ impl Session {
                         let _ = tx.send(result);
                     }
                 }
-                // The bridge exited: fail every waiting call.
+                // The adapter exited: fail every waiting call with what it reported. The
+                // stderr reader may still be draining, so give it a bounded moment.
+                std::thread::sleep(Duration::from_millis(100));
+                let text = String::from_utf8_lossy(&stderr.lock().unwrap_or_else(|e| e.into_inner())).into_owned();
                 for (_, tx) in waiters.lock().unwrap_or_else(|e| e.into_inner()).drain() {
-                    let _ = tx.send(Err("bridge exited".into()));
+                    let _ = tx.send(Err(format!("adapter exited; stderr:\n{text}")));
                 }
             });
         }
@@ -222,10 +293,34 @@ impl Session {
         self.callbacks.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
     }
 
+    /// Everything the adapter wrote to stderr before this call, once the pipe has been
+    /// drained up to now: a sentinel is written to stderr through the adapter and
+    /// awaited, so earlier output cannot still be in flight.
+    pub fn stderr_flushed(&self) -> String {
+        let sentinel = format!("\u{1}cabby-stderr-sentinel-{}\u{1}", self.next.fetch_add(1, Ordering::Relaxed));
+        let () = self.call("Stderr.Sentinel", json!({ "Text": sentinel }));
+        let deadline = std::time::Instant::now() + CALL_DEADLINE;
+        loop {
+            let text = self.stderr();
+            if let Some(i) = text.find(&sentinel) {
+                return text[..i].to_owned();
+            }
+            assert!(std::time::Instant::now() < deadline, "stderr sentinel not seen within {CALL_DEADLINE:?}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
     /// Everything the bridge process wrote to stderr so far.
     pub fn stderr(&self) -> String {
         String::from_utf8_lossy(&self.stderr.lock().unwrap_or_else(|e| e.into_inner())).into_owned()
     }
+}
+
+fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<String>()
+        .cloned()
+        .or_else(|| p.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+        .unwrap_or_default()
 }
 
 impl Drop for Session {
