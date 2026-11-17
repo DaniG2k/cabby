@@ -24,11 +24,10 @@
       "pending": 828
     },
     "rust_only": {
-      "cases": 48
+      "cases": 51
     },
     "translation": {
-      "reviewed": 912,
-      "translated": 11
+      "reviewed": 923
     },
     "upstream_result": {
       "pass": 922,
@@ -5775,7 +5774,7 @@
       "rust_cases": [
         "ds::integration_test::test_ds_integration_authenticate"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5801,7 +5800,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5851,11 +5850,13 @@
       "direct_assertions": 12,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] upstream sleeps 50ms after broadcasting; dropped: the memory broker stores a broadcast in the stream history before `HandleBroadcast` returns, so the read that follows sees it."
+      ],
       "rust_cases": [
         "ds::integration_test::test_ds_integration_catchup_read::with_non_empty_stream"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5878,11 +5879,13 @@
       "direct_assertions": 7,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] upstream sleeps 50ms after broadcasting; dropped: the memory broker stores a broadcast in the stream history before `HandleBroadcast` returns, so the read that follows sees it."
+      ],
       "rust_cases": [
         "ds::integration_test::test_ds_integration_catchup_read::with_offset"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5935,7 +5938,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -5958,11 +5961,13 @@
       "direct_assertions": 7,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] upstream sleeps 50ms after broadcasting; dropped: the memory broker stores a broadcast in the stream history before `HandleBroadcast` returns, so the read that follows sees it."
+      ],
       "rust_cases": [
         "ds::integration_test::test_ds_integration_long_poll::should_return_immediately_if_data_already_exists"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6017,7 +6022,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6040,11 +6045,13 @@
       "direct_assertions": 12,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] upstream sleeps 50ms after broadcasting; dropped: the memory broker stores a broadcast in the stream history before `HandleBroadcast` returns, so the read that follows sees it."
+      ],
       "rust_cases": [
         "ds::integration_test::test_ds_integration_sse::should_return_catchup_data_via_sse_with_correct_metadata"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6068,12 +6075,12 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] upstream sleeps 500ms before asserting `n.Size() == 1` and broadcasting (here: waits, bounded, until the session is subscribed) and 100ms before asserting `n.Size() == 0` (here: the size is awaited, bounded, then asserted). The catch-up subtest's stream-scoped expectation is replayed."
+        "[src] upstream sleeps 500ms before asserting `n.Size() == 1` and broadcasting (here: waits, bounded, until the session is subscribed) and 100ms before asserting `n.Size() == 0` (here: the size is awaited, bounded, then asserted). The catch-up subtest's stream-scoped expectation is replayed; on a fresh node `n.Size() == 1` no longer shows that the catch-up session left the hub, which `closed_catchup_sse_session_leaves_the_hub` asserts instead."
       ],
       "rust_cases": [
         "ds::integration_test::test_ds_integration_sse::should_stream_live_data_via_sse"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6097,12 +6104,13 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] replays the earlier subtests' controller expectations that can still match: the catch-up one (scoped to its stream); the live subtest's `Once` expectation was used up upstream, and a used-up testify expectation never matches again, so it is left out."
+        "[src] replays the earlier subtests' controller expectations that can still match: the catch-up one (scoped to its stream); the live subtest's `Once` expectation was used up upstream, and a used-up testify expectation never matches again, so it is left out.",
+        "[src] upstream sleeps 50ms after each round of broadcasts; dropped: the memory broker stores a broadcast in the stream history before `HandleBroadcast` returns, so the read that follows sees it."
       ],
       "rust_cases": [
         "ds::integration_test::test_ds_integration_sse::should_support_reconnection_with_last_known_offset"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -6158,7 +6166,7 @@
       "rust_cases": [
         "ds::integration_test::test_ds_integration_stream_authorization"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -26527,6 +26535,33 @@
       "relation": "regression",
       "links": [
         "26a1a703:ds/handler_test.go#TestDSHandler_GET/catch-up_mode_w/_empty_stream"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "ds::integration_test::test_ds_integration_authenticate_rejects_with_status_401",
+      "relation": "regression",
+      "links": [
+        "26a1a703:ds/integration_test.go#TestDSIntegration_Authenticate"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "ds::integration_test::test_ds_integration_sse::closed_catchup_sse_session_leaves_the_hub",
+      "relation": "regression",
+      "links": [
+        "26a1a703:ds/integration_test.go#TestDSIntegration_SSE/should_stream_live_data_via_SSE"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "ds::integration_test::test_ds_integration_stream_authorization_rejects_with_status_401",
+      "relation": "regression",
+      "links": [
+        "26a1a703:ds/integration_test.go#TestDSIntegration_StreamAuthorization"
       ],
       "reference_status": "pass",
       "rust_status": "pending"
