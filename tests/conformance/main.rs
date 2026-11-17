@@ -7,4 +7,5 @@
 //! Dementyev. MIT License; see compat/licenses/anycable-MIT-LICENSE.
 
 mod api;
+mod health;
 mod origin;

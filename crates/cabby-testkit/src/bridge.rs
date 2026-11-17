@@ -48,7 +48,11 @@ fn bridge_binary() -> Result<PathBuf> {
 }
 
 fn start() -> Result<Bridge> {
-    let mut child = Command::new(bridge_binary()?)
+    spawn(Command::new(bridge_binary()?))
+}
+
+fn spawn(mut cmd: Command) -> Result<Bridge> {
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -96,5 +100,29 @@ pub fn call<A: Serialize, R: DeserializeOwned>(op: &str, args: A) -> R {
     let mut bridge = bridge.lock().unwrap_or_else(|e| e.into_inner());
     let args = serde_json::to_value(args).expect("serializable bridge args");
     let value = bridge.call_raw(op, args).unwrap_or_else(|e| panic!("{e:#}"));
+    serde_json::from_value(value.clone()).unwrap_or_else(|e| panic!("decoding {op} result {value}: {e}"))
+}
+
+/// Calls a bridge op in a fresh bridge process with exactly `env` as its environment
+/// (nothing is inherited) and a new empty working directory. For Go code that reads
+/// the process environment or working directory (presets, CLI flags, log filtering),
+/// so tests never mutate the shared bridge's or the test process's state.
+pub fn call_isolated<A: Serialize, R: DeserializeOwned>(env: &[(&str, &str)], op: &str, args: A) -> R {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let cwd = std::env::temp_dir().join(format!("cabby-bridge-{}-{seq}", std::process::id()));
+    std::fs::create_dir_all(&cwd).unwrap_or_else(|e| panic!("creating {}: {e}", cwd.display()));
+    let result = (|| -> Result<Value> {
+        let mut cmd = Command::new(bridge_binary()?);
+        cmd.env_clear().envs(env.iter().copied()).current_dir(&cwd);
+        let mut bridge = spawn(cmd)?;
+        let args = serde_json::to_value(args).expect("serializable bridge args");
+        let value = bridge.call_raw(op, args);
+        let _ = bridge._child.kill();
+        let _ = bridge._child.wait();
+        value
+    })();
+    let _ = std::fs::remove_dir_all(&cwd);
+    let value = result.unwrap_or_else(|e| panic!("{e:#}"));
     serde_json::from_value(value.clone()).unwrap_or_else(|e| panic!("decoding {op} result {value}: {e}"))
 }

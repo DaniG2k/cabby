@@ -4,3 +4,5 @@ crates/cabby-testkit/src/reference/mod.rs merge=union
 crates/cabby-core/src/lib.rs merge=union
 crates/cabby-server/src/lib.rs merge=union
 crates/cabby-testkit/src/lib.rs merge=union
+tests/conformance/main.rs merge=union
+compat/reference-adapters/bridge/go.sum merge=union
