@@ -9,7 +9,7 @@ mod test_json_encoder {
     #[test]
     fn encode() {
         let msg = Reply {
-            r#type: "test".into(),
+            kind: "test".into(),
             identifier: "test_channel".into(),
             message: Some(json!("hello")),
             ..Reply::default()
@@ -46,6 +46,6 @@ mod test_json_encoder {
         let actual = actual.unwrap();
         assert_eq!(actual.command, "test");
         assert_eq!(actual.identifier, "test_channel");
-        assert_eq!(actual.data, Some(json!("hello")));
+        assert_eq!(actual.data, Some(cabby_core::common::MessageData::Json(json!("hello"))));
     }
 }

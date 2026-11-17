@@ -25,6 +25,11 @@ tokio.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
 tonic.workspace = true
+# added for pusher/sse
+hex = "0.4"
+hmac = "0.13"
+md5 = { package = "md-5", version = "0.11" }
+toml.workspace = true
 
 [lints]
 workspace = true
