@@ -1,7 +1,7 @@
 # Cabby mascot, version 3
 
 Updated with an open smiling mouth and a simple curved cable, preserving the pastel colors and rounded character from version 2.
-Created using the built-in image generation tool on 2026-11-17. The transparent image is saved as `cabby-mascot-v3.png` and displayed in the README at 320 pixels wide.
+Created using the built-in image generation tool on 2026-11-17. The transparent image is saved as `cabby-mascot.png` and displayed in the README at 320 pixels wide.
 
 ## Edit prompt
 
