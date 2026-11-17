@@ -8,9 +8,9 @@ An [AnyCable](https://github.com/anycable/anycable)-compatible real-time server 
 Rust. Cabby is an independent implementation; it is not affiliated with the AnyCable project
 or Evil Martians.
 
-> **Status: test port in progress.** There is no working server yet. We are translating the
-> upstream test corpus to Rust and checking it against the Go implementation first; server code
-> comes after (see [`SPEC.md`](SPEC.md)).
+> **Status: implementation in progress.** The upstream test corpus is fully translated to Rust and
+> verified against the Go implementation (M1). The server is being implemented subsystem by
+> subsystem against those tests; there is no runnable server yet (see [`SPEC.md`](SPEC.md)).
 
 ## Benchmarks: Go vs Rust
 
@@ -35,11 +35,10 @@ From `cargo xtask report` (source of truth: [`compat/test-map.json`](compat/test
 | | Count |
 |---|---:|
 | Upstream cases inventoried (Go unit, Benchi, go-mruby, features, AnyT) | 923 |
-| Translated to Rust | 821 |
-| Independently reviewed | 660 |
-| Translated cases verified against Go | 739 |
-| Translated cases the Go reference cannot expose (`not_observable`, tested against Rust only) | 82 |
-| Passing against Cabby | 1 (an upstream test with an empty body; no server behavior yet) |
+| Translated to Rust and independently reviewed | 923 |
+| Translated cases verified against Go | 914 |
+| Translated cases the Go reference cannot expose (`not_observable`, tested against Rust only) | 9 |
+| Passing against Cabby | 166 (foundations: common, protocol, encoders, utils, logger, identity, configuration) |
 
 Every case is listed individually, including skipped and runtime-specific ones.
 Behavioral differences from Go, if any, are recorded in
