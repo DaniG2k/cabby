@@ -11,6 +11,7 @@ const _: fn() = || {
 };
 
 /// upstream: etc/benchi/lib/lib_test.go#TestModuleLinks
+/// note: adaptation: upstream checks Go module linkage (replace directive + forked client); the external harness's link to the server is its binary, so the invariant is that the harness can execute it (Go: the bridge links cli.Embedded and the client).
 ///
 /// Runtime-specific adaptation: upstream proves the Benchi module links against the
 /// root module through its `replace` directive and against the forked client; the

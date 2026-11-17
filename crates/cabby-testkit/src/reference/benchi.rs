@@ -4,16 +4,15 @@
 //!   test ([`crate::sut::sut_binary`]) as an external process.
 //! * `Backend::Go`: the upstream Go harness through `benchi-bridge` (one bridge
 //!   process per test, see [`crate::benchi_bridge`]); Go objects are handles. Scenario
-//!   entry points run the upstream scenario binaries.
+//!   entry points call the unexported upstream `run`/`parseFlags`/`runWithConfig`/
+//!   `commandStall` through the scenario shims ([`benchi_bridge::shim_binary`]).
 //!
 //! Facades only marshal. Where Go cannot observe what a test asserts, the Go arm is
 //! `unimplemented!("not_observable: ...")`.
 
 use std::collections::HashMap;
-use std::io::Read;
-use std::process::{Command, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cabby_bench as rs;
@@ -26,7 +25,7 @@ pub use rs::rpc_server::{RpcMethod, RpcMethodStats};
 pub use rs::server::ServerTuning;
 pub use rs::throughput::{ReceiveSample, WindowStats};
 
-use crate::benchi_bridge::{self, Session};
+use crate::benchi_bridge::Session;
 use crate::{Backend, backend};
 
 /// A Go object: its session and handle.
@@ -127,14 +126,34 @@ impl Accumulator {
     }
 
     /// A snapshot the caller is going to mutate, to check it does not alias the
-    /// accumulator's storage.
-    pub fn snapshot_to_mutate(&self) -> HashMap<String, i64> {
+    /// accumulator's storage. Go: the map `Snapshot()` returned stays on the Go side
+    /// behind a handle, so writes really land in it.
+    pub fn snapshot_to_mutate(&self) -> MutableSnapshot {
         match self {
-            Accumulator::Rust(a) => a.snapshot(),
-            Accumulator::Go(_) => unimplemented!(
-                "not_observable: map aliasing is in-process only; every bridge result is a JSON copy, \
-                 so mutating it can never reach Go's map"
-            ),
+            Accumulator::Rust(a) => MutableSnapshot::Rust(a.snapshot()),
+            Accumulator::Go(g) => {
+                let h = g.call("Accumulator.SnapshotHandle", json!({}));
+                MutableSnapshot::Go(GoObj::new(Arc::clone(&g.session), h))
+            }
+        }
+    }
+}
+
+/// A snapshot map that stays where it was produced (upstream: the `map[string]int`
+/// returned by `Snapshot`).
+pub enum MutableSnapshot {
+    Rust(HashMap<String, i64>),
+    Go(GoObj),
+}
+
+impl MutableSnapshot {
+    /// `snap[k] = v`.
+    pub fn insert(&mut self, k: &str, v: i64) {
+        match self {
+            MutableSnapshot::Rust(m) => {
+                m.insert(k.to_owned(), v);
+            }
+            MutableSnapshot::Go(g) => g.call("map.Set", json!({"K": k, "V": v})),
         }
     }
 }
@@ -444,9 +463,13 @@ pub fn build_server(cfg: ServerConfig) -> Result<Server, String> {
 }
 
 /// Builds and shuts down a server with `cfg` and returns what the harness wrote to
-/// stderr meanwhile. Go: the bridge process's stderr (upstream redirects
-/// `os.Stderr`). Rust: the server output the harness forwarded to its stderr (the
-/// server is a separate process whose own output is captured, not inherited).
+/// stderr meanwhile.
+///
+/// Go: the bridge process's stderr (upstream redirects `os.Stderr`), read after a
+/// sentinel has come through the pipe, so nothing written before it is missed.
+/// Rust: the server is a separate process whose output is captured, so this checks
+/// a harness default instead: that `ServerLog::Discard` forwards none of it to the
+/// harness's stderr.
 pub fn build_and_shutdown_stderr(cfg: ServerConfig) -> Result<String, String> {
     match backend() {
         Backend::Rust => {
@@ -458,7 +481,7 @@ pub fn build_and_shutdown_stderr(cfg: ServerConfig) -> Result<String, String> {
             let srv = build_server(cfg)?;
             srv.shutdown()?;
             let Server::Go { obj, .. } = &srv else { unreachable!() };
-            Ok(obj.session.stderr())
+            Ok(obj.session.stderr_flushed())
         }
     }
 }
@@ -1090,50 +1113,22 @@ pub struct ScenarioOutput {
 /// Bounds a whole scenario run.
 const SCENARIO_DEADLINE: Duration = Duration::from_secs(120);
 
-/// Runs an upstream scenario binary, optionally sending SIGINT after `interrupt_after`.
-fn run_go_scenario(name: &str, args: &[&str], interrupt_after: Option<Duration>) -> ScenarioOutput {
-    let bin = benchi_bridge::scenario_binary(name);
-    let mut child = Command::new(&bin)
-        .args(args)
-        .env("ANYCABLE_DISABLE_TELEMETRY", "true")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap_or_else(|e| panic!("spawning {}: {e}", bin.display()));
-    let drain = |mut r: Box<dyn Read + Send>| {
-        std::thread::spawn(move || {
-            let mut s = String::new();
-            let _ = r.read_to_string(&mut s);
-            s
-        })
-    };
-    let out = drain(Box::new(child.stdout.take().expect("stdout")));
-    let err = drain(Box::new(child.stderr.take().expect("stderr")));
-    let start = Instant::now();
-    let mut interrupted = false;
-    let status = loop {
-        if let Some(status) = child.try_wait().expect("polling the scenario") {
-            break status;
-        }
-        if let Some(after) = interrupt_after
-            && !interrupted
-            && start.elapsed() >= after
-        {
-            let _ = Command::new("kill").args(["-INT", &child.id().to_string()]).status();
-            interrupted = true;
-        }
-        if start.elapsed() > SCENARIO_DEADLINE {
-            let _ = child.kill();
-            panic!("{name} still running after {SCENARIO_DEADLINE:?}");
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    ScenarioOutput {
-        code: status.code().unwrap_or(-1),
-        stdout: out.join().unwrap_or_default(),
-        stderr: err.join().unwrap_or_default(),
-    }
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct GoScenarioOutput {
+    code: i32,
+    stdout: String,
+    stderr: String,
+}
+
+/// Calls a scenario shim op that returns `{Code, Stdout, Stderr}`.
+fn run_shim(session: &Session, op: &str, args: Value) -> ScenarioOutput {
+    let v = session
+        .call_within(op, args, SCENARIO_DEADLINE)
+        .unwrap_or_else(|e| panic!("{e:#}"))
+        .unwrap_or_else(|| panic!("scenario {op} still running after {SCENARIO_DEADLINE:?}"));
+    let o: GoScenarioOutput = serde_json::from_value(v).expect("scenario output");
+    ScenarioOutput { code: o.code, stdout: o.stdout, stderr: o.stderr }
 }
 
 fn owned(args: &[&str]) -> Vec<String> {
@@ -1154,24 +1149,53 @@ pub mod stress_publications {
     use super::*;
 
     /// A pool client as seen by a setup hook.
-    pub struct HookClient<'a>(&'a rs::client::Client);
+    pub enum HookClient<'a> {
+        Rust(&'a rs::client::Client),
+        Go(GoObj),
+    }
 
     impl HookClient<'_> {
         pub fn close(&self) {
-            self.0.close()
+            match self {
+                HookClient::Rust(c) => c.close(),
+                HookClient::Go(g) => g.call("Client.Close", json!({})),
+            }
         }
     }
 
     /// The pool as seen by a setup hook (upstream `setupHook`'s `*lib.ClientPool`).
-    pub struct HookPool<'a>(&'a rs::pool::ClientPool);
+    pub enum HookPool<'a> {
+        Rust(&'a rs::pool::ClientPool),
+        Go(GoObj),
+    }
 
     impl HookPool<'_> {
+        /// Upstream `pool.Each`, in pool order.
         pub fn each(&self, f: &mut dyn FnMut(&HookClient<'_>)) {
-            self.0.each(&mut |c| f(&HookClient(c)))
+            match self {
+                HookPool::Rust(p) => p.each(&mut |c| f(&HookClient::Rust(c))),
+                HookPool::Go(g) => {
+                    let clients: Vec<u64> = g.call("ClientPool.Clients", json!({}));
+                    for h in clients {
+                        f(&HookClient::Go(GoObj::new(Arc::clone(&g.session), h)));
+                    }
+                }
+            }
         }
     }
 
-    pub type SetupHook = Box<dyn FnOnce(&HookPool<'_>)>;
+    /// `Send`: on Go the hook runs as a bridge callback on another thread.
+    pub type SetupHook = Box<dyn FnOnce(&HookPool<'_>) + Send>;
+
+    const NAME: &str = "stress_publications";
+
+    /// Builds what a run needs ahead of time (Go: the scenario shim), so tests that
+    /// time `run` measure the scenario, not a one-time `go test -c`.
+    pub fn prepare() {
+        if backend() == Backend::Go {
+            crate::benchi_bridge::shim_binary(NAME);
+        }
+    }
 
     /// Upstream `runOpts`.
     #[derive(Default)]
@@ -1186,7 +1210,7 @@ pub mod stress_publications {
         match backend() {
             Backend::Rust => {
                 let hook = opts.setup_hook.map(|h| -> rs::scenarios::stress_publications::SetupHook {
-                    Box::new(move |_server, pool, _publisher| h(&HookPool(pool)))
+                    Box::new(move |_server, pool, _publisher| h(&HookPool::Rust(pool)))
                 });
                 let opts = rs::scenarios::stress_publications::RunOpts {
                     stream_subsets: opts.stream_subsets,
@@ -1197,13 +1221,24 @@ pub mod stress_publications {
                 run_rust_scenario(|out, err| rs::scenarios::stress_publications::run(&owned(args), out, err, opts))
             }
             Backend::Go => {
-                if opts.stream_subsets.is_some() || opts.broadcast_url.is_some() || opts.setup_hook.is_some() {
-                    unimplemented!(
-                        "not_observable: runOpts is a seam of the unexported run() in package main; \
-                         the scenario binary only takes CLI flags"
-                    );
-                }
-                run_go_scenario("stress_publications", args, None)
+                let session = Session::shim(NAME);
+                let hook = opts.setup_hook.map(|h| {
+                    let h = Mutex::new(Some(h));
+                    let weak = Arc::downgrade(&session);
+                    session.register_callback(move |args| {
+                        let session = weak.upgrade().expect("shim session alive during run");
+                        let pool = args["Pool"].as_u64().expect("setup hook pool handle");
+                        let hook = h.lock().unwrap_or_else(|e| e.into_inner()).take().expect("setup hook runs once");
+                        hook(&HookPool::Go(GoObj::new(session, pool)));
+                        json!(true)
+                    })
+                });
+                run_shim(
+                    &session,
+                    "Run",
+                    json!({"Args": args, "StreamSubsets": opts.stream_subsets,
+                           "BroadcastURL": opts.broadcast_url.unwrap_or_default(), "SetupHook": hook}),
+                )
             }
         }
     }
@@ -1214,6 +1249,16 @@ pub mod reconnect_floods {
 
     pub use rs::scenarios::reconnect_floods::Sample;
 
+    const NAME: &str = "reconnect_floods";
+
+    /// Builds what a run needs ahead of time (Go: the scenario shim), so tests that
+    /// time `run` measure the scenario, not a one-time `go test -c`.
+    pub fn prepare() {
+        if backend() == Backend::Go {
+            crate::benchi_bridge::shim_binary(NAME);
+        }
+    }
+
     /// Upstream `run(args, stdout, stderr)`.
     pub fn run(args: &[&str]) -> ScenarioOutput {
         match backend() {
@@ -1222,13 +1267,12 @@ pub mod reconnect_floods {
                 cfg_args.push(format!("--sut={}", crate::sut::sut_binary().display()));
                 run_rust_scenario(|out, err| rs::scenarios::reconnect_floods::run(&cfg_args, out, err))
             }
-            Backend::Go => run_go_scenario("reconnect_floods", args, None),
+            Backend::Go => run_shim(&Session::shim(NAME), "Run", json!({ "Args": args })),
         }
     }
 
     /// Upstream `parseFlags(args)` + `runWithConfig(ctx, ...)` with a context that is
-    /// done after `after`. Go: the binary receives SIGINT after `after`, which `run`
-    /// turns into the same context cancellation.
+    /// done after `after`.
     pub fn run_interrupted_after(args: &[&str], after: Duration) -> ScenarioOutput {
         match backend() {
             Backend::Rust => {
@@ -1240,7 +1284,9 @@ pub mod reconnect_floods {
                     rs::scenarios::reconnect_floods::run_with_config(&interrupt, cfg, out, err)
                 })
             }
-            Backend::Go => run_go_scenario("reconnect_floods", args, Some(after)),
+            Backend::Go => {
+                run_shim(&Session::shim(NAME), "RunWithTimeout", json!({"Args": args, "TimeoutNanos": ns(after)}))
+            }
         }
     }
 
@@ -1263,10 +1309,25 @@ pub mod reconnect_floods {
                     rpc_latency: c.rpc_latency,
                 })
             }
-            Backend::Go => unimplemented!(
-                "not_observable: parseFlags is unexported in package main and the binary has no \
-                 flag-dump mode"
-            ),
+            Backend::Go => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "PascalCase")]
+                struct GoFlags {
+                    #[serde(default)]
+                    waves: Vec<usize>,
+                    #[serde(default)]
+                    s: usize,
+                    #[serde(default, rename = "RPCLatencyNanos")]
+                    rpc_latency_nanos: i64,
+                    #[serde(default)]
+                    error: Option<String>,
+                }
+                let f: GoFlags = Session::shim(NAME).call("ParseFlags", json!({ "Args": args }));
+                match f.error {
+                    Some(e) => Err(e),
+                    None => Ok(ParsedFlags { waves: f.waves, s: f.s, rpc_latency: from_ns(f.rpc_latency_nanos) }),
+                }
+            }
         }
     }
 
@@ -1274,7 +1335,21 @@ pub mod reconnect_floods {
     pub fn command_stall(samples: &[Sample]) -> (Duration, Duration) {
         match backend() {
             Backend::Rust => rs::scenarios::reconnect_floods::command_stall(samples),
-            Backend::Go => unimplemented!("not_observable: commandStall is unexported in package main"),
+            Backend::Go => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "PascalCase")]
+                struct GoStall {
+                    current_nanos: i64,
+                    longest_nanos: i64,
+                }
+                // Only the fields commandStall reads: at, states, rpcDone.
+                let samples: Vec<Value> = samples
+                    .iter()
+                    .map(|s| json!({"AtNanos": ns(s.at), "States": s.states, "RPCDone": s.rpc_done}))
+                    .collect();
+                let r: GoStall = Session::shim(NAME).call("CommandStall", json!({ "Samples": samples }));
+                (from_ns(r.current_nanos), from_ns(r.longest_nanos))
+            }
         }
     }
 }
