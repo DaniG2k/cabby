@@ -50,3 +50,8 @@ pub mod nats;
 pub mod pusher_auth;
 pub mod raw_http;
 pub mod text_ws;
+
+// added for the AnyT / feature scenario ports
+pub mod anyt_app;
+pub mod publish;
+pub mod wsdirector;

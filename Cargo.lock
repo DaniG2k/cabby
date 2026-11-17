@@ -176,6 +176,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio-util",
+ "toml",
+ "tungstenite",
 ]
 
 [[package]]

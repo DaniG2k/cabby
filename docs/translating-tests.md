@@ -87,6 +87,18 @@ When behavior is **externally observable** (HTTP status, WebSocket frames, CLI o
 consider a `tests/conformance/` scenario using `cabby_testkit::sut::Sut`, linked with
 `/// external-for:`.
 
+## Ruby scenarios (AnyT, features)
+
+AnyT scenarios live in `tests/conformance/anyt_*.rs`: bodies in `anyt_core.rs` / `anyt_ext.rs`,
+one file per Makefile `test-conformance*` target instantiating them through `anyt_tests!`
+(`anyt_support.rs` holds the target's flags, env and broadcast adapter). The Ruby RPC
+application they need is `cabby_testkit::anyt_app`; Redis/NATS come from
+`cabby_testkit::services` (one container per test). `features/*.testfile` and `.benchfile`
+ports are in `tests/features/`, with wsdirector's step semantics in `cabby_testkit::wsdirector`.
+Replace sleeps with observations (an ordering barrier subscription, a witness client, a log
+line); keep inherent windows (ping intervals, TTLs, AnyT's 0.5 s "no message" check) with a
+comment.
+
 ## Workflow
 
 ```sh
