@@ -10,6 +10,7 @@ autotests = false
 
 [dependencies]
 cabby-core.workspace = true
+cabby-server.workspace = true
 cabby-testkit.workspace = true
 serde_json.workspace = true
 
@@ -30,3 +31,27 @@ path = "unit/ws/main.rs"
 [[test]]
 name = "conformance"
 path = "conformance/main.rs"
+
+[[test]]
+name = "hub"
+path = "unit/hub/main.rs"
+
+[[test]]
+name = "pubsub"
+path = "unit/pubsub/main.rs"
+
+[[test]]
+name = "redis"
+path = "unit/redis/main.rs"
+
+[[test]]
+name = "broadcast"
+path = "unit/broadcast/main.rs"
+
+[[test]]
+name = "nats"
+path = "unit/nats/main.rs"
+
+[[test]]
+name = "enats"
+path = "unit/enats/main.rs"
