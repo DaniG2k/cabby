@@ -6,6 +6,7 @@ pub mod api;
 pub mod cli;
 pub mod config;
 pub mod metrics;
+pub mod mrb;
 pub mod pusher;
 pub mod pusher_sse_deps;
 pub mod rpc;

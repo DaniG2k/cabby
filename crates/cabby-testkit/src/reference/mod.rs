@@ -15,6 +15,8 @@ mod go_types;
 pub mod identity;
 pub mod logger;
 pub mod metrics;
+pub mod mrb;
+pub mod mruby;
 pub mod protocol;
 pub mod pusher;
 pub mod router;

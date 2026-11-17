@@ -69,6 +69,9 @@ fn run_binary(exe: &str, backend: Backend, sut_bin: &str, filter: Option<&str>) 
     if std::env::var_os("CABBY_GO_BRIDGE").is_none() {
         cmd.env("CABBY_GO_BRIDGE", root().join("target/reference-adapters/bridge"));
     }
+    if std::env::var_os("CABBY_GO_MRUBY_BRIDGE").is_none() {
+        cmd.env("CABBY_GO_MRUBY_BRIDGE", root().join("target/reference-adapters/mruby-bridge"));
+    }
     if let Some(f) = filter {
         cmd.arg(f);
     }
@@ -174,7 +177,9 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
         }
         Backend::Go => {
             let bin = root.join("target/reference-bin/anycable-go");
-            if !bin.exists() || !root.join("target/reference-adapters/bridge").exists() {
+            let mruby_missing = root.join("compat/reference/vendorlib/go-mruby/libmruby.a").exists()
+                && !root.join("target/reference-adapters/mruby-bridge").exists();
+            if !bin.exists() || !root.join("target/reference-adapters/bridge").exists() || mruby_missing {
                 crate::reference::build()?;
             }
             bin
