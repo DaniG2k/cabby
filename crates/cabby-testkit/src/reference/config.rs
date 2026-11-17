@@ -164,7 +164,7 @@ impl From<GoConfigView> for Config {
             disconnector_disabled: g.disconnector_disabled,
             log: g.log.into(),
             server: g.server.into(),
-            app: AppConfig { ping_interval: g.app.ping_interval },
+            app: AppConfig { ping_interval: g.app.ping_interval, ..Default::default() },
             ws: g.ws.into(),
             rpc: RpcConfig { host: g.rpc.host, implementation: g.rpc.implementation },
             broker: BrokerConfig { adapter: g.broker.adapter },

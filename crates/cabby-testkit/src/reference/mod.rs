@@ -22,6 +22,8 @@ pub mod mrb;
 pub mod mruby;
 mod msg_shapes;
 pub mod nats;
+pub mod node;
+mod node_doubles;
 pub mod protocol;
 pub mod pubsub;
 pub mod pusher;
