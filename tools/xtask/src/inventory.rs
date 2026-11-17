@@ -662,6 +662,7 @@ pub fn rust_annotations() -> Result<Vec<Annotation>> {
                     ("/// upstream: ", "upstream"),
                     ("/// regression-for: ", "regression"),
                     ("/// external-for: ", "external"),
+                    ("/// issue: ", "issue"),
                 ] {
                     if let Some(r) = tl.strip_prefix(prefix_s) {
                         pending.push((rel, r.trim().to_owned()));
@@ -688,11 +689,16 @@ pub fn rust_annotations() -> Result<Vec<Annotation>> {
                         let rust_case = path.join("::");
                         if pending.is_empty() {
                             bail!(
-                                "test {rust_case} has no `/// upstream:`, `/// regression-for:` or `/// external-for:` annotation"
+                                "test {rust_case} has no `/// upstream:`, `/// regression-for:`, `/// external-for:` or `/// issue:` annotation"
                             );
                         }
                         for (relation, target) in pending.drain(..) {
-                            out.push(Annotation { rust_case: rust_case.clone(), relation, target, notes: notes.clone() });
+                            out.push(Annotation {
+                                rust_case: rust_case.clone(),
+                                relation,
+                                target,
+                                notes: notes.clone(),
+                            });
                         }
                     }
                     pending.clear();
@@ -745,9 +751,19 @@ pub fn run() -> Result<()> {
     let index: HashMap<String, usize> = cases.iter().enumerate().map(|(i, c)| (c.id.clone(), i)).collect();
     let mut rust_only: Vec<RustOnly> = Vec::new();
     for a in rust_annotations()? {
-        let id = upstream_id(&a.target);
-        let Some(&i) = index.get(&id) else {
-            bail!("{} references unknown upstream case {id}", a.rust_case);
+        // Upstream issues (`anycable/anycable#275`) are links, not inventory cases.
+        let id = if a.relation == "issue" {
+            if !(a.target.starts_with("anycable/") && a.target.contains('#')) {
+                bail!("{}: issue annotation must look like `anycable/anycable#123`", a.rust_case);
+            }
+            a.target.clone()
+        } else {
+            upstream_id(&a.target)
+        };
+        let i = match index.get(&id) {
+            Some(&i) => i,
+            None if a.relation == "issue" => usize::MAX, // never used: issues are rust_only
+            None => bail!("{} references unknown upstream case {id}", a.rust_case),
         };
         if a.relation == "upstream" {
             for n in &a.notes {

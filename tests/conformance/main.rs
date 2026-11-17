@@ -8,6 +8,7 @@
 
 mod api;
 mod health;
+mod issues;
 mod origin;
 mod pusher;
 mod sse;
