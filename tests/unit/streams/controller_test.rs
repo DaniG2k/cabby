@@ -32,6 +32,8 @@ fn reply(kind: &str, identifier: &str) -> String {
 }
 
 /// `common.NewSessionEnv(url, headers)`.
+/// Built locally (not via `reference::common::new_session_env`) so these cases
+/// depend only on this package's implementation, not on `common`'s.
 fn cookie_env() -> SessionEnv {
     SessionEnv {
         url: "ws://demo.anycable.io/cable".into(),
@@ -225,17 +227,23 @@ fn assert_subscribe_rejected(subject: &Subject, channel: &str) {
     assert_eq!(vec![rejection_message(channel)], res.transmissions);
 }
 
-/// Upstream also asserts `Transmissions` and `Streams` equal `[]string{}` (empty,
-/// non-nil); `CommandResult` uses `Vec`, which has no nil/empty distinction.
+/// Upstream asserts `Transmissions` and `Streams` equal `[]string{}` (empty,
+/// non-nil); `CommandResult` uses `Vec`, which has no nil/empty distinction, so
+/// the Rust check is emptiness. Against Go the facade also reports nil-ness,
+/// and the slices must be non-nil there.
 fn assert_unsubscribe(subject: &Subject, channel: &str) {
     let env = cookie_env();
-    let res = subject.unsubscribe("42", Some(&env), "name=jack", channel);
+    let (res, go_nil) = subject.unsubscribe_observing_nil("42", Some(&env), "name=jack", channel);
 
     assert_eq!(None, res.error);
     let res = res.result.expect("result");
     assert_eq!(Status::Success, res.status);
     assert_eq!(Vec::<String>::new(), res.transmissions);
     assert_eq!(Vec::<String>::new(), res.streams);
+    if let Some(nil) = go_nil {
+        assert!(!nil.transmissions, "Transmissions must be []string{{}}, not nil");
+        assert!(!nil.streams, "Streams must be []string{{}}, not nil");
+    }
     assert!(res.stop_all_streams);
 }
 

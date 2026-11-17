@@ -2,8 +2,11 @@
 //!
 //! `TestPublishHandler` itself asserts only that its shared payload marshals;
 //! every subtest rebuilds that payload, so each also maps to the parent case.
-//! `mocks.NewBroker(t)` / `mocks.NewHandler(t)` assert their expectations on
-//! cleanup: that is the `assert_expectations` calls at the end of each test.
+//! `defer api.Shutdown(..) // nolint:errcheck` is [`defer_shutdown`] (runs on
+//! drop, result ignored). `mocks.NewBroker(t)` / `mocks.NewHandler(t)` assert
+//! their expectations on cleanup, after the deferred shutdown: that is
+//! [`Fixture::finish`], whose `assert_expectations` also rejects any unexpected
+//! (forbidden) mock call.
 
 use std::sync::Arc;
 
@@ -26,14 +29,15 @@ impl Fixture {
         Fixture { handler: MockHandler::new(), brk: MockBroker::new() }
     }
 
-    fn start(&self, config: &mut Config) -> Server {
+    /// `NewServer`, `require.NoError(t, api.Start())`, then `defer api.Shutdown(..)`.
+    fn start(&self, config: &mut Config) -> ShutdownOnDrop {
         let api = new_server(config, &self.brk, &self.handler).expect("new server");
         api.start().expect("start");
-        api
+        defer_shutdown(api)
     }
 
-    fn finish(self, api: Server) {
-        api.shutdown().expect("shutdown");
+    fn finish(self, api: ShutdownOnDrop) {
+        drop(api);
         self.brk.assert_expectations();
         self.handler.assert_expectations();
     }

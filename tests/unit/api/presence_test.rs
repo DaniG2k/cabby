@@ -1,11 +1,19 @@
 //! upstream file: api/presence_test.go
 //!
-//! `mocks.NewBroker(t)` / `mocks.NewHandler(t)` assert their expectations on
-//! cleanup: that is the `assert_expectations` calls at the end of each test.
+//! `defer api.Shutdown(..) // nolint:errcheck` is [`defer_shutdown`] (runs on
+//! drop, result ignored). `mocks.NewBroker(t)` / `mocks.NewHandler(t)` assert
+//! their expectations on cleanup, after the deferred shutdown: that is the
+//! `drop(api)` followed by the `assert_expectations` calls, which also reject
+//! any unexpected (forbidden) mock call.
 
 use cabby_core::common::{PresenceEvent, PresenceInfo};
 use cabby_testkit::reference::api::*;
 use serde_json::{Value, json};
+
+/// `brk.On("PresenceInfo", stream, mock.Anything)`: one option, any value.
+fn presence_info_call(stream: &str) -> BrokerCall {
+    BrokerCall::PresenceInfo { stream: stream.into(), options: 1 }
+}
 
 mod test_presence_handler {
     use super::*;
@@ -18,14 +26,14 @@ mod test_presence_handler {
 
         let mut config = new_config();
 
-        let api = new_server(&mut config, &brk, &handler).expect("new server");
+        let api = defer_shutdown(new_server(&mut config, &brk, &handler).expect("new server"));
         api.start().expect("start");
 
         let rr = api.serve(&request("POST", "/api/presence/a/users", &[], b""));
 
         assert_eq!(422, rr.status);
 
-        api.shutdown().expect("shutdown");
+        drop(api);
         brk.assert_expectations();
         handler.assert_expectations();
     }
@@ -38,7 +46,7 @@ mod test_presence_handler {
         brk.on(BrokerCall::SupportsPresence, BrokerReturn::Bool(true));
 
         brk.on(
-            BrokerCall::PresenceInfo { stream: "a".into() },
+            presence_info_call("a"),
             BrokerReturn::PresenceInfo(Ok(PresenceInfo {
                 total: 2,
                 records: vec![
@@ -52,7 +60,7 @@ mod test_presence_handler {
         let mut config = new_config();
         config.secret = "test-secret".into();
 
-        let api = new_server(&mut config, &brk, &handler).expect("new server");
+        let api = defer_shutdown(new_server(&mut config, &brk, &handler).expect("new server"));
         api.start().expect("start");
 
         let rr = api.serve(&request("GET", "/api/presence/a/users", &[("Authorization", "Bearer test-secret")], b""));
@@ -70,7 +78,7 @@ mod test_presence_handler {
         assert_eq!("44", records[1]["id"]);
         assert_eq!("jill", records[1]["info"]["name"]);
 
-        api.shutdown().expect("shutdown");
+        drop(api);
         brk.assert_expectations();
         handler.assert_expectations();
     }
@@ -83,13 +91,10 @@ mod test_presence_handler {
 
         brk.on(BrokerCall::SupportsPresence, BrokerReturn::Bool(true));
 
-        brk.on(
-            BrokerCall::PresenceInfo { stream: "b".into() },
-            BrokerReturn::PresenceInfo(Ok(PresenceInfo::default())),
-        );
+        brk.on(presence_info_call("b"), BrokerReturn::PresenceInfo(Ok(PresenceInfo::default())));
 
         let mut config = new_config();
-        let api = new_server(&mut config, &brk, &handler).expect("new server");
+        let api = defer_shutdown(new_server(&mut config, &brk, &handler).expect("new server"));
         api.start().expect("start");
 
         let rr = api.serve(&request("GET", "/api/presence/b/users", &[], b""));
@@ -102,7 +107,7 @@ mod test_presence_handler {
 
         assert!(!parsed.contains_key("records"));
 
-        api.shutdown().expect("shutdown");
+        drop(api);
         brk.assert_expectations();
         handler.assert_expectations();
     }
@@ -116,14 +121,14 @@ mod test_presence_handler {
         brk.on(BrokerCall::SupportsPresence, BrokerReturn::Bool(false));
 
         let mut config = new_config();
-        let api = new_server(&mut config, &brk, &handler).expect("new server");
+        let api = defer_shutdown(new_server(&mut config, &brk, &handler).expect("new server"));
         api.start().expect("start");
 
         let rr = api.serve(&request("GET", "/api/presence/b/users", &[], b""));
 
         assert_eq!(501, rr.status);
 
-        api.shutdown().expect("shutdown");
+        drop(api);
         brk.assert_expectations();
         handler.assert_expectations();
     }
