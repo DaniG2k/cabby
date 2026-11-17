@@ -3,6 +3,7 @@
 use cabby_testkit::reference::benchi::Accumulator;
 
 /// upstream: etc/benchi/lib/counter_test.go#TestAccumulator_RaceClean
+/// note: adaptation: go test -race is replaced by Sync types (data races are compile errors) plus the exact-total check under 100 concurrent threads.
 ///
 /// Runtime-specific adaptation: upstream relies on `go test -race` to flag data races.
 /// Safe Rust rules them out at compile time (`Accumulator: Sync`); the test keeps the
@@ -32,6 +33,7 @@ fn test_accumulator_race_clean() {
 }
 
 /// upstream: etc/benchi/lib/counter_test.go#TestAccumulator_SnapshotIsCopy
+/// note: Go: the map Snapshot() returns stays behind a bridge handle and the writes go to it (op map.Set), so non-sharing is really observed.
 #[test]
 fn test_accumulator_snapshot_is_copy() {
     let acc = Accumulator::new();
@@ -40,8 +42,8 @@ fn test_accumulator_snapshot_is_copy() {
     acc.bump("b");
 
     let mut snap1 = acc.snapshot_to_mutate();
-    snap1.insert("a".into(), 999);
-    snap1.insert("c".into(), 42);
+    snap1.insert("a", 999);
+    snap1.insert("c", 42);
 
     let snap2 = acc.snapshot();
     assert_eq!(Some(&2), snap2.get("a"), "Snapshot must not share storage with future snapshots");

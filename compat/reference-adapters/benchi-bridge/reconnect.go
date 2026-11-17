@@ -10,7 +10,7 @@ import (
 
 func init() {
 	// --- rpc_server.go ---
-	register("NewRPCServer", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("NewRPCServer", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			LatencyNanos, ConnectLatencyNanos, CommandLatencyNanos, DisconnectLatencyNanos int64
 			Jitter                                                                         float64
@@ -30,9 +30,10 @@ func init() {
 		if a.SessionClosed != nil {
 			fn := *a.SessionClosed
 			cfg.SessionClosed = func(sid string) bool {
+				// A panic here would be swallowed by net/http; fail the adapter instead.
 				var closed bool
-				if err := json.Unmarshal(callback(fn, sid), &closed); err != nil {
-					panic(fmt.Sprintf("SessionClosed callback reply: %v", err))
+				if err := json.Unmarshal(brCallback(fn, sid), &closed); err != nil {
+					brFatal("SessionClosed callback reply: %v", err)
 				}
 				return closed
 			}
@@ -41,10 +42,10 @@ func init() {
 		return struct {
 			H   uint64
 			URL string
-		}{put(rpc), rpc.URL()}, nil
+		}{brPut(rpc), rpc.URL()}, nil
 	})
 	method("RPCServer.Close", func(s *lib.RPCServer) (interface{}, error) { s.Close(); return nil, nil })
-	register("RPCServer.Stats", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("RPCServer.Stats", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			H      uint64
 			Method int
@@ -52,7 +53,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		s, err := get[*lib.RPCServer](a.H)
+		s, err := brGet[*lib.RPCServer](a.H)
 		if err != nil {
 			return nil, err
 		}
@@ -60,9 +61,9 @@ func init() {
 	})
 
 	// --- reconnecting_client.go ---
-	register("NewClientStats", func(json.RawMessage) (interface{}, error) { return put(&lib.ClientStats{}), nil })
+	brRegister("NewClientStats", func(json.RawMessage) (interface{}, error) { return brPut(&lib.ClientStats{}), nil })
 	stat := func(name string, f func(*lib.ClientStats, int) int64) {
-		register(name, func(raw json.RawMessage) (interface{}, error) {
+		brRegister(name, func(raw json.RawMessage) (interface{}, error) {
 			a, err := decode[struct {
 				H   uint64
 				Arg int
@@ -70,7 +71,7 @@ func init() {
 			if err != nil {
 				return nil, err
 			}
-			s, err := get[*lib.ClientStats](a.H)
+			s, err := brGet[*lib.ClientStats](a.H)
 			if err != nil {
 				return nil, err
 			}
@@ -82,7 +83,7 @@ func init() {
 	stat("ClientStats.Attempts", func(s *lib.ClientStats, _ int) int64 { return s.Attempts() })
 	stat("ClientStats.Reconnects", func(s *lib.ClientStats, _ int) int64 { return s.Reconnects() })
 	stat("ClientStats.SubscribeRetries", func(s *lib.ClientStats, _ int) int64 { return s.SubscribeRetries() })
-	register("ClientStats.SessionClosed", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("ClientStats.SessionClosed", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			H   uint64
 			Sid string
@@ -90,13 +91,13 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		s, err := get[*lib.ClientStats](a.H)
+		s, err := brGet[*lib.ClientStats](a.H)
 		if err != nil {
 			return nil, err
 		}
 		return s.SessionClosed(a.Sid), nil
 	})
-	register("ClientStats.Histogram", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("ClientStats.Histogram", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			H    uint64
 			Name string
@@ -104,7 +105,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		s, err := get[*lib.ClientStats](a.H)
+		s, err := brGet[*lib.ClientStats](a.H)
 		if err != nil {
 			return nil, err
 		}
@@ -121,7 +122,7 @@ func init() {
 		return nil, fmt.Errorf("unknown ClientStats histogram %q", a.Name)
 	})
 
-	register("NewReconnectingClient", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("NewReconnectingClient", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			URL                         string
 			Channels                    []string
@@ -138,11 +139,11 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		stats, err := get[*lib.ClientStats](a.Stats)
+		stats, err := brGet[*lib.ClientStats](a.Stats)
 		if err != nil {
 			return nil, err
 		}
-		return put(lib.NewReconnectingClient(lib.ReconnectingClientConfig{
+		return brPut(lib.NewReconnectingClient(lib.ReconnectingClientConfig{
 			URL:                    a.URL,
 			Channels:               a.Channels,
 			SequentialSubscribe:    a.SequentialSubscribe,
@@ -155,7 +156,7 @@ func init() {
 			Seed:                   a.Seed,
 		})), nil
 	})
-	register("ReconnectingClient.Run", func(raw json.RawMessage) (interface{}, error) {
+	brRegister("ReconnectingClient.Run", func(raw json.RawMessage) (interface{}, error) {
 		a, err := decode[struct {
 			H, Ctx       uint64
 			InitialNanos int64
@@ -163,11 +164,11 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		c, err := get[*lib.ReconnectingClient](a.H)
+		c, err := brGet[*lib.ReconnectingClient](a.H)
 		if err != nil {
 			return nil, err
 		}
-		ctx, err := get[*cancelCtx](a.Ctx)
+		ctx, err := brGet[*cancelCtx](a.Ctx)
 		if err != nil {
 			return nil, err
 		}

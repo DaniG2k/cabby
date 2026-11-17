@@ -60,15 +60,7 @@ fn test_publisher_cadence_not_gated_by_http_latency() {
     let p = Publisher::new(&srv.url(), 1024, PublisherOptions::default());
 
     // 100 Hz ticker for 200ms (upstream: time.NewTicker(10ms) until a 200ms deadline).
-    let tick = Duration::from_millis(10);
-    let start = Instant::now();
-    let deadline = start + Duration::from_millis(200);
-    let mut next = start + tick;
-    while next < deadline {
-        std::thread::sleep(next.saturating_duration_since(Instant::now()));
-        p.publish("foo", "x");
-        next += tick;
-    }
+    ticker_until(Duration::from_millis(10), Duration::from_millis(200), || p.publish("foo", "x"));
 
     let issued = p.issued_count();
     assert!(issued >= 15, "expected ~20 ticks in 200ms; got {issued} (cadence may be gated on HTTP)");
@@ -76,6 +68,37 @@ fn test_publisher_cadence_not_gated_by_http_latency() {
     assert_eq!(0, p.dropped_count(), "queue should not have dropped any with maxInflight=1024");
 
     p.close();
+}
+
+/// Calls `f` on every tick of a `tick` ticker until `window` has passed, with
+/// `time.Ticker` semantics: ticks fall on the fixed grid `start + k·tick`, one tick
+/// missed while `f` runs is buffered and fires at once, further missed ticks are
+/// dropped. So a slow `f` lowers the call count, as upstream's ticker loop would.
+fn ticker_until(tick: Duration, window: Duration, mut f: impl FnMut()) {
+    let start = Instant::now();
+    let deadline = start + window;
+    // First grid tick strictly after `t`.
+    let tick_after = |t: Instant| {
+        let k = (t - start).as_nanos() / tick.as_nanos() + 1;
+        start + tick * u32::try_from(k).expect("tick count fits in u32")
+    };
+    let mut next = start + tick;
+    loop {
+        let now = Instant::now();
+        if next > now {
+            if next >= deadline {
+                break;
+            }
+            std::thread::sleep(next - now);
+        }
+        // The tick is read now; ticks until then were the buffered one or dropped.
+        let read_at = Instant::now();
+        if read_at >= deadline {
+            break;
+        }
+        f();
+        next = tick_after(read_at);
+    }
 }
 
 /// upstream: etc/benchi/lib/publisher_test.go#TestPublisher_TargetCountsSnapshot
@@ -197,6 +220,7 @@ fn test_publisher_batching_coalesces_under_backpressure() {
 }
 
 /// upstream: etc/benchi/lib/publisher_test.go#TestPublisher_AgainstBuildServer
+/// note: adaptation: upstream's "no goroutine leak" remark becomes: a second close from another thread returns (workers already joined).
 #[test]
 fn test_publisher_against_build_server() {
     let srv = build_server(ServerConfig::default()).expect("BuildServer");

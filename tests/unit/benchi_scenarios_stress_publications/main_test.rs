@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use cabby_testkit::http_stub::{self, HttpStub, Response};
-use cabby_testkit::reference::benchi::stress_publications::{HookPool, RunOpts, run};
+use cabby_testkit::reference::benchi::stress_publications::{HookPool, RunOpts, prepare, run};
 use cabby_testkit::reference::benchi::{ServerConfig, build_server};
 
 /// Upstream `parseSummary`: the stdout key=value block as a map.
@@ -58,6 +58,7 @@ fn test_stress_publications_small_smoke() {
 }
 
 /// upstream: etc/benchi/scenarios/stress_publications/main_test.go#TestStressPublications_CadenceUnderArtificialLatency
+/// note: Go: run() with runOpts{...} is reached through the test-only scenario shim (go test -c with an overlaid _test.go; upstream files unchanged); the setup hook runs as a bridge callback.
 #[test]
 fn test_stress_publications_cadence_under_artificial_latency() {
     // A real server fronted by a slow proxy; the scenario points its publisher at the
@@ -91,6 +92,7 @@ fn test_stress_publications_cadence_under_artificial_latency() {
 }
 
 /// upstream: etc/benchi/scenarios/stress_publications/main_test.go#TestStressPublications_OneClientShort
+/// note: Go: run() with runOpts{...} is reached through the test-only scenario shim (go test -c with an overlaid _test.go; upstream files unchanged); the setup hook runs as a bridge callback.
 #[test]
 fn test_stress_publications_one_client_short() {
     // The hook closes one client after the pool is built; its count never grows and
@@ -107,6 +109,7 @@ fn test_stress_publications_one_client_short() {
 }
 
 /// upstream: etc/benchi/scenarios/stress_publications/main_test.go#TestStressPublications_SubscribeFailureAborts
+/// note: Go: run() with runOpts{...} is reached through the test-only scenario shim (go test -c with an overlaid _test.go; upstream files unchanged); the setup hook runs as a bridge callback.
 #[test]
 fn test_stress_publications_subscribe_failure_aborts() {
     // One client gets the empty stream name, which the server rejects; at
@@ -122,10 +125,12 @@ fn test_stress_publications_subscribe_failure_aborts() {
 }
 
 /// upstream: etc/benchi/scenarios/stress_publications/main_test.go#TestStressPublications_DrainTimeoutHonored
+/// note: Go: run() with runOpts{...} is reached through the test-only scenario shim (go test -c with an overlaid _test.go; upstream files unchanged); the setup hook runs as a bridge callback.
 #[test]
 fn test_stress_publications_drain_timeout_honored() {
     // With a client closed, "all clients drained" is unreachable; the drain must give
     // up at its timeout: 500ms publish + 1s drain ≈ 1.5s, with 2s slack.
+    prepare();
     let start = Instant::now();
     let out = run(
         &["-c", "5", "-r", "10", "-d", "500ms", "-S", "1", "-s", "1", "--drain-timeout", "1s"],
