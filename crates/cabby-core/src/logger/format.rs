@@ -3,7 +3,7 @@
 //! Timestamps are UTC with millisecond precision (slog uses the local zone; servers
 //! usually run in UTC). In JSON, lists and maps are rendered from their resolved values;
 //! slog marshals the unresolved Go value, which shows wrappers such as `CompactValues`
-//! as `{}` (see `compat/deviations.md`, D-006).
+//! as `{}` (see `compat/deviations.md`, D-008).
 
 use std::fmt::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};

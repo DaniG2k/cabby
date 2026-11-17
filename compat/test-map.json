@@ -20,8 +20,8 @@
       "pass": 914
     },
     "rust": {
-      "pass": 1,
-      "pending": 922
+      "pass": 43,
+      "pending": 880
     },
     "rust_only": {
       "cases": 48
@@ -10800,7 +10800,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -10827,7 +10827,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -10854,7 +10854,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -10881,7 +10881,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -10908,7 +10908,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -10935,7 +10935,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -10962,7 +10962,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -10989,7 +10989,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11015,7 +11015,7 @@
       "rust_cases": [],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11043,7 +11043,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11071,7 +11071,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11099,7 +11099,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11127,7 +11127,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11155,7 +11155,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11183,7 +11183,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11211,7 +11211,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11239,7 +11239,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11267,7 +11267,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11295,7 +11295,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11323,7 +11323,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11351,7 +11351,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11378,7 +11378,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11405,7 +11405,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -11432,7 +11432,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22565,7 +22565,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22592,7 +22592,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22619,7 +22619,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22646,7 +22646,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22673,7 +22673,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22700,7 +22700,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22727,7 +22727,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22754,7 +22754,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22783,7 +22783,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "not_observable",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22810,7 +22810,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22836,7 +22836,7 @@
       "rust_cases": [],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22863,7 +22863,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22890,7 +22890,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22917,7 +22917,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22944,7 +22944,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22971,7 +22971,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -22998,7 +22998,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -23028,7 +23028,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
