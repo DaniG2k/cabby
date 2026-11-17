@@ -6,8 +6,16 @@
 
 pub mod api;
 pub mod broker;
+pub mod cli;
+pub mod common;
+pub mod config;
+pub mod encoders;
 mod go_types;
 pub mod identity;
+pub mod logger;
 pub mod protocol;
+pub mod router;
+pub mod server;
 pub mod streams;
+pub mod utils;
 pub mod ws;

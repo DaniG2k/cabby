@@ -159,6 +159,7 @@ name = "cabby-compat"
 version = "0.0.0"
 dependencies = [
  "cabby-core",
+ "cabby-server",
  "cabby-testkit",
  "serde_json",
 ]
