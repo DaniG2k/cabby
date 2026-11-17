@@ -15,8 +15,10 @@ cabby-core = { path = "crates/cabby-core" }
 cabby-server = { path = "crates/cabby-server" }
 cabby-testkit = { path = "crates/cabby-testkit" }
 anyhow = "1.0.104"
+base64 = "0.22.1"
 bytes = "1.12.1"
 clap = { version = "4.6.7", features = ["derive"] }
+hmac = "0.13.0"
 http = "1.5.0"
 http-body-util = "0.1.5"
 hyper = { version = "1.12.0", features = ["server", "http1"] }
