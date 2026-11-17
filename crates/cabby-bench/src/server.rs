@@ -143,7 +143,9 @@ impl Server {
 
     /// Sessions waiting in the disconnect queue: the `disconnect_queue_size` gauge.
     /// Upstream reads the queue directly (never stale); an external server only
-    /// exposes the gauge, so tunings that wait on it set a 1s stats refresh.
+    /// exposes the gauge, refreshed every stats interval, so a 0 read can be stale.
+    /// Callers that wait for the queue to drain must use
+    /// [`crate::scenarios::reconnect_floods::wave_drained`], not this value alone.
     pub fn disconnect_queue_size(&self) -> u64 {
         pending!("benchi::server_disconnect_queue_size")
     }

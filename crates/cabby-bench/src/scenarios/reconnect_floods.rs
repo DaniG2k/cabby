@@ -143,6 +143,32 @@ pub fn run_with_config(
     pending!("benchi::reconnect_floods::run_with_config")
 }
 
+/// What [`wave_drained`] looks at, captured at one poll after a wave.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DrainObservation {
+    /// Time of the wave, on the harness clock.
+    pub fired_at: Duration,
+    /// When the server last refreshed its gauges (from the metrics endpoint), on the
+    /// harness clock.
+    pub gauge_refreshed_at: Duration,
+    /// The `disconnect_queue_size` gauge.
+    pub queue_size: u64,
+    /// Disconnect calls the fake RPC completed since the wave.
+    pub disconnects_since_wave: i64,
+    /// `disconnect_queue_discarded_total` growth since the wave.
+    pub discarded_since_wave: u64,
+    /// Connections the wave closed.
+    pub dropped: usize,
+}
+
+/// Whether the disconnect queue drained after a wave. Upstream reads the embedded
+/// queue's size directly; with an external server the gauge can be stale, so a 0
+/// only counts when it was refreshed after the wave *and* every dropped session has
+/// been accounted for by a completed Disconnect call or a discard.
+pub fn wave_drained(_o: &DrainObservation) -> bool {
+    pending!("benchi::reconnect_floods::wave_drained")
+}
+
 /// Current and longest run of consecutive samples in which clients waited for
 /// confirmations but no Command call completed (upstream `commandStall`).
 pub fn command_stall(_samples: &[Sample]) -> (Duration, Duration) {

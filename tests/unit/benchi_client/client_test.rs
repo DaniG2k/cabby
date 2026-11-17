@@ -3,6 +3,7 @@
 use cabby_testkit::reference::benchi::new_cable_client;
 
 /// upstream: etc/benchi/client/client_test.go#TestClientPackageCompiles
+/// note: adaptation: upstream is compile-only; the type references are kept and the runtime counterpart (constructing an unconnected client) is exercised, with no state asserted.
 ///
 /// Upstream is compile-only: `var _ *Client = nil` etc. prove the forked package builds
 /// and its exported symbols resolve. Runtime-specific adaptation: the type references
