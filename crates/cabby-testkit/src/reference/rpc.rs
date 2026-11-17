@@ -19,7 +19,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use super::metrics::Metrics;
-use crate::rpc_doubles::{AlwaysReady, ForwardingService, TonicRpcClient};
+use crate::rpc_doubles::{AlwaysReady, CancelOnCall, ForwardingService, TonicRpcClient};
 use crate::runtime::{block_on_within, spawn};
 use crate::{Backend, backend, bridge};
 
@@ -215,8 +215,9 @@ fn config_to_go(c: &Config) -> GoConfig {
     }
 }
 
-/// Go's nil and empty slices both become an empty `Vec` (the rpc suite never
-/// distinguishes them).
+/// Go's nil and empty slices both become an empty `Vec`. No rpc case asserts
+/// nil vs empty on config lists, and both encode the same way in TOML (the
+/// round-trip cases compare decoded configs, where Go yields non-nil lists).
 fn config_from_go(g: GoConfig) -> Config {
     Config {
         host: g.host,
@@ -336,30 +337,24 @@ impl Ctx {
         Self::make(false, None, pairs)
     }
 
-    /// Cancels a context whose call is waiting for an RPC slot (or not started).
+    fn handle(&self) -> CtxHandle {
+        CtxHandle { rust: self.rust.cancel.clone(), go: self.go }
+    }
+
+    /// Cancels the context (Go: its `cancel` func).
     pub fn cancel(&self) {
         self.rust.cancel.cancel();
         if backend() == Backend::Go {
             let _: bool = bridge::call("rpcm.CancelContext", json!({"Ctx": self.go}));
         }
     }
+}
 
-    /// Cancels a context while its RPC is in flight at the RPC service.
-    ///
-    /// Against the real Go gRPC client this was observed to make `Authenticate`
-    /// return `(nil, status Canceled "context canceled")` rather than upstream's
-    /// mock-based `(nil, nil)`, so the Go arm does not claim the upstream result.
-    pub fn cancel_in_flight(&self) {
-        match backend() {
-            Backend::Rust => self.rust.cancel.cancel(),
-            Backend::Go => unimplemented!(
-                "not_observable: upstream's mock pb.RPCClient returns a bare context.Canceled; every real Go \
-                 transport (gRPC, in-process grpchan, HTTP) turns a mid-call cancellation into a gRPC status \
-                 error, so Controller's errors.Is(err, context.Canceled) branch is unreachable through the \
-                 exported API"
-            ),
-        }
-    }
+/// What a [`Dial::CancelOnCall`] client cancels.
+#[derive(Debug, Clone)]
+pub struct CtxHandle {
+    rust: tokio_util::sync::CancellationToken,
+    go: i64,
 }
 
 // --- Background calls ----------------------------------------------------------------
@@ -415,12 +410,24 @@ pub enum Dial {
     /// `NewInprocessServiceDialer(service, MockState{ready: true})` with a service
     /// that forwards every call (and its incoming metadata) to `target`.
     Inprocess(String),
+    /// Upstream's mock client in `TestAuthenticate/Canceled_during_RPC`: each
+    /// call is passed to `target` (where the fake records it), then `session` is
+    /// cancelled and the bare context error (Go `ctx.Err()`, Rust
+    /// `ClientError::Canceled`) is returned. Always-ready helper.
+    CancelOnCall { target: String, session: CtxHandle },
+}
+
+impl Dial {
+    pub fn cancel_on_call(target: String, session: &Ctx) -> Self {
+        Dial::CancelOnCall { target, session: session.handle() }
+    }
 }
 
 #[derive(Clone)]
 pub enum Controller {
     Rust(Arc<rs::Controller>),
-    Go(i64),
+    /// (controller handle, metrics handle)
+    Go(i64, i64),
 }
 
 impl Controller {
@@ -438,23 +445,28 @@ impl Controller {
                             Arc::new(AlwaysReady),
                         )))
                     }
+                    Dial::CancelOnCall { target, session } => {
+                        config.dial_fun = Some(rs::DialFun(CancelOnCall::dialer(&target, session.rust)))
+                    }
                 }
                 let instrumenter: Arc<dyn cabby_server::metrics::Instrumenter> = metrics.rust();
                 rs::Controller::new(instrumenter, config).map(|c| Controller::Rust(Arc::new(c)))
             }
             Backend::Go => {
-                let (kind, target) = match dial {
-                    Dial::Config => ("", String::new()),
-                    Dial::TestClient(t) => ("client", t),
-                    Dial::Inprocess(t) => ("inprocess", t),
+                let (kind, target, session) = match dial {
+                    Dial::Config => ("", String::new(), 0),
+                    Dial::TestClient(t) => ("client", t, 0),
+                    Dial::Inprocess(t) => ("inprocess", t, 0),
+                    Dial::CancelOnCall { target, session } => ("cancel_on_call", target, session.go),
                 };
                 let r: GoHandle = bridge::call(
                     "rpc.NewController",
-                    json!({"Metrics": metrics.go_handle(), "Config": config_to_go(config), "Dial": kind, "Target": target}),
+                    json!({"Metrics": metrics.go_handle(), "Config": config_to_go(config), "Dial": kind, "Target": target,
+                           "Session": session}),
                 );
                 match r.error {
                     Some(e) => Err(go_error(e)),
-                    None => Ok(Controller::Go(r.handle)),
+                    None => Ok(Controller::Go(r.handle, metrics.go_handle())),
                 }
             }
         }
@@ -463,14 +475,14 @@ impl Controller {
     pub fn start(&self) -> Result<(), RpcError> {
         match self {
             Controller::Rust(c) => c.start(),
-            Controller::Go(h) => decode_unit(bridge::call("rpc.Controller.Start", json!({"Handle": h}))),
+            Controller::Go(h, _) => decode_unit(bridge::call("rpc.Controller.Start", json!({"Handle": h}))),
         }
     }
 
     pub fn shutdown(&self) -> Result<(), RpcError> {
         match self {
             Controller::Rust(c) => block_on_within(AWAIT, c.shutdown()),
-            Controller::Go(h) => {
+            Controller::Go(h, _) => {
                 let call: i64 = bridge::call("rpc.Controller.Shutdown", json!({"Handle": h}));
                 InFlight::Go(call, decode_unit).wait()
             }
@@ -491,7 +503,7 @@ impl Controller {
                 let (c, ctx, sid, env) = (Arc::clone(c), ctx.rust.clone(), sid.to_owned(), env.clone());
                 InFlight::Rust(spawn(async move { c.authenticate(&ctx, &sid, &env).await }))
             }
-            Controller::Go(h) => InFlight::Go(
+            Controller::Go(h, _) => InFlight::Go(
                 Self::go_call(*h, ctx, "Authenticate", json!({"Sid": sid, "Env": env_json(env)})),
                 decode_connect,
             ),
@@ -526,7 +538,7 @@ impl Controller {
                     }
                 }))
             }
-            Controller::Go(h) => InFlight::Go(
+            Controller::Go(h, _) => InFlight::Go(
                 Self::go_call(
                     *h,
                     ctx,
@@ -610,7 +622,7 @@ impl Controller {
                     (Arc::clone(c), ctx.rust.clone(), sid.to_owned(), env.clone(), id.to_owned());
                 InFlight::Rust(spawn(async move { c.disconnect(&ctx, &sid, &env, &id, &subs).await }))
             }
-            Controller::Go(h) => InFlight::Go(
+            Controller::Go(h, _) => InFlight::Go(
                 Self::go_call(
                     *h,
                     ctx,
@@ -633,25 +645,19 @@ impl Controller {
         self.spawn_disconnect(ctx, sid, env, id, subscriptions).wait()
     }
 
-    /// Upstream unexported `controller.waitTimeout`.
-    pub fn wait_timeout(&self) -> Duration {
-        match self {
-            Controller::Rust(c) => c.wait_timeout(),
-            Controller::Go(_) => unimplemented!(
-                "not_observable: Controller.waitTimeout is unexported and only observable as the wall-clock \
-                 time a call waits for a slot"
-            ),
-        }
-    }
-
-    /// Upstream `controller.clientState.ActiveConns()` (unexported field).
+    /// Upstream `controller.clientState.ActiveConns()`.
+    ///
+    /// Go: `clientState` is unexported; its exported view is the
+    /// `grpc_active_conn_num` gauge, which the controller sets from
+    /// `clientState.ActiveConns()` 10s after `Start` and every 10s after that
+    /// (0 before the first refresh). Callers wait for a value, so they must
+    /// allow for that refresh period.
     pub fn active_conns(&self) -> usize {
         match self {
             Controller::Rust(c) => c.active_conns(),
-            Controller::Go(_) => unimplemented!(
-                "not_observable: Controller.clientState is unexported; the grpc_active_conn_num gauge is only \
-                 refreshed every 10s"
-            ),
+            Controller::Go(_, m) => Metrics::Go(*m)
+                .gauge(metric_names::GRPC_ACTIVE_CONNS)
+                .map_or(0, |g| usize::try_from(g.value()).expect("gauge fits usize")),
         }
     }
 }
@@ -664,8 +670,11 @@ pub enum HttpService {
     Go(i64),
 }
 
-fn status_err(s: RpcStatus) -> RpcError {
-    RpcError::Status(s)
+fn status_err(e: rs::ClientError) -> RpcError {
+    match e {
+        rs::ClientError::Status(s) => RpcError::Status(s),
+        other => RpcError::Other(other.to_string()),
+    }
 }
 
 fn decode_response<T: DeserializeOwned>(v: Value) -> Result<T, RpcError> {
