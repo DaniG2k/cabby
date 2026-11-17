@@ -80,3 +80,85 @@ pub struct CommandResult {
     pub disconnect_interest: i32,
     pub status: Status,
 }
+
+// --- added for identity, streams, broker, api ---
+//
+// Mirrors of upstream `common` definitions these packages use, plus the
+// `node.Controller` interface (placed here because identity and streams both
+// implement or wrap it; move it to the `node` module when that lands).
+
+/// Channel state key carrying the whisper stream (upstream `WHISPER_STREAM_STATE`).
+pub const WHISPER_STREAM_STATE: &str = "$w";
+/// Channel state key carrying the presence stream (upstream `PRESENCE_STREAM_STATE`).
+pub const PRESENCE_STREAM_STATE: &str = "$p";
+
+/// Presence event types (upstream `PresenceJoinType` etc.).
+pub const PRESENCE_JOIN_TYPE: &str = "join";
+pub const PRESENCE_LEAVE_TYPE: &str = "leave";
+pub const PRESENCE_INFO_TYPE: &str = "info";
+
+/// Presence information for a stream (upstream `common.PresenceInfo`).
+/// `records` is omitted from JSON when empty (Go `omitempty`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PresenceInfo {
+    /// `"info"` when built by upstream `NewPresenceInfo`; omitted from JSON when empty.
+    pub kind: String,
+    pub total: usize,
+    pub records: Vec<PresenceEvent>,
+}
+
+/// A command for other nodes (upstream `common.RemoteCommandMessage`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RemoteCommandMessage {
+    pub command: String,
+    /// Raw JSON payload (Go `json.RawMessage`), kept as written.
+    pub payload: String,
+}
+
+/// An error returned by a controller or identifier (Go `error`), compared by message.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
+pub struct ControllerError {
+    pub message: String,
+}
+
+impl ControllerError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self { message: message.into() }
+    }
+}
+
+/// A Go `(*T, error)` pair: upstream controllers may return a result *and* an
+/// error (e.g. a rejection transmission alongside the failure), or neither.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Outcome<T> {
+    pub result: Option<T>,
+    pub error: Option<ControllerError>,
+}
+
+/// Executes connection and channel commands (upstream `node.Controller`).
+///
+/// Upstream methods also take a `context.Context`; cancellation is not part of
+/// these signatures yet. `env` is a Go pointer that callers may pass as nil.
+pub trait Controller: Send + Sync {
+    fn start(&self) -> Result<(), ControllerError>;
+    fn shutdown(&self) -> Result<(), ControllerError>;
+    fn authenticate(&self, sid: &str, env: Option<&SessionEnv>) -> Outcome<ConnectResult>;
+    fn subscribe(&self, sid: &str, env: Option<&SessionEnv>, ids: &str, channel: &str) -> Outcome<CommandResult>;
+    fn unsubscribe(&self, sid: &str, env: Option<&SessionEnv>, ids: &str, channel: &str) -> Outcome<CommandResult>;
+    fn perform(
+        &self,
+        sid: &str,
+        env: Option<&SessionEnv>,
+        ids: &str,
+        channel: &str,
+        data: &str,
+    ) -> Outcome<CommandResult>;
+    fn disconnect(
+        &self,
+        sid: &str,
+        env: Option<&SessionEnv>,
+        ids: &str,
+        subscriptions: &[String],
+    ) -> Result<(), ControllerError>;
+}
