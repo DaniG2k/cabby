@@ -18,6 +18,8 @@ regex = "1.13.1"
 serde.workspace = true
 serde_json.workspace = true
 tokio-util.workspace = true
+toml.workspace = true
+tungstenite.workspace = true
 
 [lints]
 workspace = true
@@ -156,3 +158,7 @@ path = "unit/enats/main.rs"
 [[test]]
 name = "node"
 path = "unit/node/main.rs"
+
+[[test]]
+name = "features"
+path = "features/main.rs"
