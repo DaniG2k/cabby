@@ -97,6 +97,39 @@ func (s *forwardingService) Disconnect(ctx context.Context, r *pb.DisconnectRequ
 	return s.client.Disconnect(forward(ctx), r)
 }
 
+// cancelOnCallClient is the upstream test's mock client for
+// TestAuthenticate/Canceled_during_RPC:
+//
+//	Return(nil, func(ctx, req, opts...) error { cancel(); return canceledCtx.Err() })
+//
+// Each call is first passed to the Rust fake (which records it, standing in for
+// the mock's call log; its reply is discarded), then the session context is
+// cancelled and the call context's bare error is returned.
+type cancelOnCallClient struct {
+	inner  pb.RPCClient
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnCallClient) fail(ctx context.Context) error {
+	c.cancel()
+	return ctx.Err()
+}
+
+func (c *cancelOnCallClient) Connect(ctx context.Context, r *pb.ConnectionRequest, opts ...grpc.CallOption) (*pb.ConnectionResponse, error) {
+	_, _ = c.inner.Connect(ctx, r, opts...)
+	return nil, c.fail(ctx)
+}
+
+func (c *cancelOnCallClient) Command(ctx context.Context, r *pb.CommandMessage, opts ...grpc.CallOption) (*pb.CommandResponse, error) {
+	_, _ = c.inner.Command(ctx, r, opts...)
+	return nil, c.fail(ctx)
+}
+
+func (c *cancelOnCallClient) Disconnect(ctx context.Context, r *pb.DisconnectRequest, opts ...grpc.CallOption) (*pb.DisconnectResponse, error) {
+	_, _ = c.inner.Disconnect(ctx, r, opts...)
+	return nil, c.fail(ctx)
+}
+
 func dialTarget(target string) (*grpc.ClientConn, pb.RPCClient, error) {
 	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -162,9 +195,12 @@ func init() {
 			// "": config as given; "client": a plain gRPC client to Target with an
 			// always-ready helper (upstream NewTestController's injected client and
 			// MockState); "inprocess": NewInprocessServiceDialer over a service
-			// forwarding to Target (upstream TestCustomDialFun).
-			Dial   string
-			Target string
+			// forwarding to Target (upstream TestCustomDialFun); "cancel_on_call":
+			// the upstream mock of TestAuthenticate/Canceled_during_RPC (see
+			// cancelOnCallClient), cancelling the context handle Session.
+			Dial    string
+			Target  string
+			Session int
 		}
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, err
@@ -190,6 +226,19 @@ func init() {
 				return handleOrErr{Error: describeErr(err)}, nil
 			}
 			c.DialFun = rpc.NewInprocessServiceDialer(&forwardingService{client: client}, readyHelper{conn})
+		case "cancel_on_call":
+			session, err := rpcmGet[*ctxEntry](a.Session)
+			if err != nil {
+				return nil, err
+			}
+			conn, client, err := dialTarget(a.Target)
+			if err != nil {
+				return handleOrErr{Error: describeErr(err)}, nil
+			}
+			cc := &cancelOnCallClient{inner: client, cancel: session.cancel}
+			c.DialFun = func(*rpc.Config, *slog.Logger) (pb.RPCClient, rpc.ClientHelper, error) {
+				return cc, readyHelper{conn}, nil
+			}
 		default:
 			return nil, fmt.Errorf("unknown dial kind %q", a.Dial)
 		}

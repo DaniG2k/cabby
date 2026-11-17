@@ -10,7 +10,7 @@ use cabby_testkit::fake_rpc::{FakeRpc, FakeRpcOptions, Method, Reply};
 use cabby_testkit::reference::metrics::Metrics;
 use cabby_testkit::reference::rpc::*;
 
-use super::helpers::{DEADLINE, map, strings};
+use super::helpers::{map, strings};
 
 fn run_grpc_server() -> FakeRpc {
     FakeRpc::start_with(FakeRpcOptions { grpc_max_concurrent_streams: Some(1) })
@@ -56,9 +56,18 @@ mod test_grpc_integration {
     #[test]
     fn success() {
         let slow = cabby_testkit::sync::Gate::new();
-        // In this subtest the slow Disconnect only delays the reply.
-        slow.open();
         let service = service(&slow);
+        // Upstream's Disconnect replies after 1s (`.After(1 * time.Second)`): a
+        // slow Disconnect still succeeds under the default timeouts (no request
+        // timeout, 3s command timeout). The reply is released after that delay;
+        // the elapsed time is the behavior here, not a synchronization point.
+        let releaser = {
+            let slow = slow.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                slow.open();
+            })
+        };
         let metrics = Metrics::new(0);
 
         let mut config = new_config();
@@ -79,6 +88,7 @@ mod test_grpc_integration {
 
         assert_eq!(rpc_calls + 2, counter(&metrics, metric_names::RPC_CALLS));
         let _ = controller.shutdown();
+        releaser.join().expect("releaser thread");
     }
 
     fn timeout_case() -> (Metrics, [u64; 3], Result<(), RpcError>) {
@@ -161,6 +171,9 @@ mod test_grpc_integration {
 fn multi_host() -> (FakeRpc, FakeRpc, Controller) {
     let service = run_grpc_server();
     let service2 = run_grpc_server();
+    // Upstream also delays each reply by 10µs (`.After(10 * time.Microsecond)`)
+    // and counts calls in `.Run` callbacks; the delay asserts nothing and is
+    // dropped, and the fakes' call logs replace the counters.
     for s in [&service, &service2] {
         s.on(Method::Connect)
             .reply(protos::ConnectionResponse { status: protos::Status::Success as i32, ..Default::default() });
@@ -179,19 +192,17 @@ fn multi_host() -> (FakeRpc, FakeRpc, Controller) {
 
 /// upstream: rpc/grpc_test.go#TestGRPCMultiHost
 ///
-/// Upstream waits (`require.Eventually`, 2s) for `controller.clientState.ActiveConns()
-/// == 2`, an unexported field. The observable equivalent used here: both services
-/// accepted a connection from the client. The controller-side count is asserted
-/// by `active_conns_reach_two`.
+/// Upstream requires `controller.clientState.ActiveConns() == 2` within 2s before
+/// counting calls. Go exposes that count only through the `grpc_active_conn_num`
+/// gauge, which the controller refreshes 10s after `Start` (and every 10s after
+/// that), so the wait allows 15s.
 #[test]
 fn test_grpc_multi_host() {
     let (service, service2, controller) = multi_host();
 
-    assert!(
-        service.await_grpc_connections(1, std::time::Duration::from_secs(2))
-            && service2.await_grpc_connections(1, std::time::Duration::from_secs(2)),
-        "both gRPC subchannels did not become ready"
-    );
+    super::helpers::eventually("both gRPC subchannels did not become ready", ACTIVE_CONNS_DEADLINE, || {
+        controller.active_conns() == 2
+    });
 
     let service1_before = service.call_count(Method::Connect);
     let service2_before = service2.call_count(Method::Connect);
@@ -209,13 +220,5 @@ fn test_grpc_multi_host() {
     let _ = controller.shutdown();
 }
 
-/// regression-for: rpc/grpc_test.go#TestGRPCMultiHost
-/// The upstream readiness condition itself: the client helper reports both
-/// subchannel connections.
-#[test]
-fn active_conns_reach_two() {
-    let (_service, _service2, controller) = multi_host();
-
-    super::helpers::eventually("both gRPC subchannels active", DEADLINE, || controller.active_conns() == 2);
-    let _ = controller.shutdown();
-}
+/// Upstream: 2s. Go's exported view refreshes 10s after start (see above).
+const ACTIVE_CONNS_DEADLINE: std::time::Duration = std::time::Duration::from_secs(15);
