@@ -36,7 +36,7 @@ fn test_session_send() {
 }
 
 /// upstream: node/session_test.go#TestSessionDisconnect
-/// note: session.connected.Store(true) is node.Authenticated(s, s.GetIdentifiers()) on Go (also registers the session in the hub); sendFrame(TextFrame) is SendJSONTransmission; the send and Disconnect run before the reads (upstream: in a goroutine) because Go reads go through the serialized bridge.
+/// note: session.connected.Store(true) is node.Authenticated(s, s.GetIdentifiers()) on Go (also registers the session in the hub; the Rust arm only sets the flag); sendFrame(TextFrame) is SendJSONTransmission; the send and Disconnect run before the reads (upstream: in a goroutine) because Go reads go through the serialized bridge.
 #[test]
 fn test_session_disconnect() {
     let node = new_mock_node();
