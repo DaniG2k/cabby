@@ -1,8 +1,11 @@
 //! Direct stream subscriptions without channels (upstream package `streams`):
 //! signed/public pub/sub streams, Turbo Streams and CableReady.
 
-use crate::common::{CommandResult, ConnectResult, Controller, ControllerError, Outcome, SessionEnv};
-use crate::pending;
+use crate::common::{
+    self, CommandResult, ConnectResult, Controller, ControllerError, Outcome, SessionEnv, Status, StringMap,
+};
+use crate::gojson;
+use crate::utils::MessageVerifier;
 
 /// Invalid TOML or a type mismatch while decoding a config.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -109,7 +112,7 @@ pub struct SubscribeRequest {
 
 impl SubscribeRequest {
     pub fn is_present(&self) -> bool {
-        pending!("streams::subscribe_request_is_present")
+        !self.stream_name.is_empty() || !self.signed_stream_name.is_empty()
     }
 }
 
@@ -118,57 +121,160 @@ pub type StreamResolver = Box<dyn Fn(&str) -> Result<SubscribeRequest, Controlle
 
 /// Controller for stream subscriptions (upstream `streams.Controller`).
 pub struct StreamsController {
-    _key: String,
-    _resolver: StreamResolver,
+    /// `None`: no key, signed streams are rejected (the verifier never runs with
+    /// an empty key).
+    verifier: Option<MessageVerifier>,
+    resolver: StreamResolver,
+}
+
+/// Go `json.Unmarshal(identifier, &T)` for a struct of string fields.
+fn decode<const N: usize>(
+    identifier: &str,
+    type_name: &'static str,
+    fields: &'static [&'static str; N],
+) -> Result<[String; N], ControllerError> {
+    gojson::decode_string_fields(identifier, type_name, fields).map_err(ControllerError::new)
 }
 
 impl StreamsController {
     /// Upstream `NewController(key, resolver)`: no key means signed streams are
     /// rejected.
     pub fn new(key: &str, resolver: StreamResolver) -> Self {
-        Self { _key: key.to_owned(), _resolver: resolver }
+        let verifier = (!key.is_empty()).then(|| MessageVerifier::new(key));
+        Self { verifier, resolver }
     }
 
-    /// Upstream `NewStreamsController(conf)`.
-    pub fn for_config(_conf: &Config) -> Self {
-        pending!("streams::new_streams_controller")
+    /// Upstream `NewStreamsController(conf)`: `{"stream_name": ...}` (public, if
+    /// allowed) or `{"signed_stream_name": ...}` identifiers.
+    pub fn for_config(conf: &Config) -> Self {
+        let allow_public = conf.public;
+        let whispers = conf.whisper;
+        let presence = conf.presence;
+
+        let resolver = move |identifier: &str| {
+            let [stream_name, signed_stream_name] =
+                decode(identifier, "streams.SubscribeRequest", &["stream_name", "signed_stream_name"])?;
+            let public_stream = !stream_name.is_empty() && signed_stream_name.is_empty();
+
+            if !allow_public && public_stream {
+                return Err(ControllerError::new("public streams are not allowed"));
+            }
+
+            Ok(SubscribeRequest {
+                stream_name,
+                signed_stream_name,
+                whisper: whispers || public_stream,
+                presence: presence || public_stream,
+            })
+        };
+
+        Self::new(&conf.secret, Box::new(resolver))
     }
 
-    /// Upstream `NewTurboController(key)`.
-    pub fn turbo(_key: &str) -> Self {
-        pending!("streams::new_turbo_controller")
+    /// Upstream `NewTurboController(key)`: `{"signed_stream_name": ...}` identifiers.
+    pub fn turbo(key: &str) -> Self {
+        let resolver = |identifier: &str| {
+            let [signed_stream_name] = decode(identifier, "streams.TurboMessage", &["signed_stream_name"])?;
+            Ok(SubscribeRequest { signed_stream_name, ..Default::default() })
+        };
+        Self::new(key, Box::new(resolver))
     }
 
-    /// Upstream `NewCableReadyController(key)`.
-    pub fn cable_ready(_key: &str) -> Self {
-        pending!("streams::new_cable_ready_controller")
+    /// Upstream `NewCableReadyController(key)`: `{"identifier": ...}` identifiers.
+    pub fn cable_ready(key: &str) -> Self {
+        let resolver = |identifier: &str| {
+            let [signed_stream_name] = decode(identifier, "streams.CableReadyMesssage", &["identifier"])?;
+            Ok(SubscribeRequest { signed_stream_name, ..Default::default() })
+        };
+        Self::new(key, Box::new(resolver))
     }
 
     /// Resolves and verifies the stream named by `identifier`.
-    pub fn verified_stream(&self, _identifier: &str) -> Result<(SubscribeRequest, String), ControllerError> {
-        pending!("streams::controller_verified_stream")
+    pub fn verified_stream(&self, identifier: &str) -> Result<(SubscribeRequest, String), ControllerError> {
+        let request = (self.resolver)(identifier)
+            .map_err(|e| ControllerError::new(format!("invalid identifier, cause: {}", e.message)))?;
+
+        if !request.is_present() {
+            return Err(ControllerError::new("malformed identifier: no stream name or signed stream"));
+        }
+
+        if request.signed_stream_name.is_empty() {
+            let stream = request.stream_name.clone();
+            return Ok((request, stream));
+        }
+
+        let Some(verifier) = &self.verifier else {
+            return Err(ControllerError::new("verification failed: no secret configured"));
+        };
+
+        match verifier.verified(&request.signed_stream_name) {
+            Ok(serde_json::Value::String(stream)) => Ok((request, stream)),
+            Ok(_) => Err(ControllerError::new("verification failed: stream name is not a string")),
+            Err(_) => Err(ControllerError::new("verification failed")),
+        }
     }
 }
 
 impl Controller for StreamsController {
     fn start(&self) -> Result<(), ControllerError> {
-        pending!("streams::controller_start")
+        Ok(())
     }
 
     fn shutdown(&self) -> Result<(), ControllerError> {
-        pending!("streams::controller_shutdown")
+        Ok(())
     }
 
     fn authenticate(&self, _sid: &str, _env: Option<&SessionEnv>) -> Outcome<ConnectResult> {
-        pending!("streams::controller_authenticate")
+        Outcome { result: None, error: None }
     }
 
-    fn subscribe(&self, _sid: &str, _env: Option<&SessionEnv>, _ids: &str, _channel: &str) -> Outcome<CommandResult> {
-        pending!("streams::controller_subscribe")
+    fn subscribe(&self, _sid: &str, _env: Option<&SessionEnv>, _ids: &str, identifier: &str) -> Outcome<CommandResult> {
+        let (request, stream) = match self.verified_stream(identifier) {
+            Ok(verified) => verified,
+            Err(err) => {
+                return Outcome {
+                    result: Some(CommandResult {
+                        status: Status::Failure,
+                        transmissions: vec![common::rejection_message(identifier)],
+                        ..Default::default()
+                    }),
+                    error: Some(err),
+                };
+            }
+        };
+
+        let mut state: Option<StringMap> = None;
+        if request.whisper {
+            state.get_or_insert_with(StringMap::new).insert(common::WHISPER_STREAM_STATE.to_owned(), stream.clone());
+        }
+        if request.presence {
+            state.get_or_insert_with(StringMap::new).insert(common::PRESENCE_STREAM_STATE.to_owned(), stream.clone());
+        }
+
+        Outcome {
+            result: Some(CommandResult {
+                status: Status::Success,
+                transmissions: vec![common::confirmation_message(identifier)],
+                streams: vec![stream],
+                disconnect_interest: -1,
+                istate: state,
+                ..Default::default()
+            }),
+            error: None,
+        }
     }
 
     fn unsubscribe(&self, _sid: &str, _env: Option<&SessionEnv>, _ids: &str, _channel: &str) -> Outcome<CommandResult> {
-        pending!("streams::controller_unsubscribe")
+        Outcome {
+            result: Some(CommandResult {
+                status: Status::Success,
+                transmissions: Vec::new(),
+                streams: Vec::new(),
+                stop_all_streams: true,
+                ..Default::default()
+            }),
+            error: None,
+        }
     }
 
     fn perform(
@@ -179,7 +285,7 @@ impl Controller for StreamsController {
         _channel: &str,
         _data: &str,
     ) -> Outcome<CommandResult> {
-        pending!("streams::controller_perform")
+        Outcome { result: None, error: None }
     }
 
     fn disconnect(
@@ -189,6 +295,6 @@ impl Controller for StreamsController {
         _ids: &str,
         _subscriptions: &[String],
     ) -> Result<(), ControllerError> {
-        pending!("streams::controller_disconnect")
+        Ok(())
     }
 }
