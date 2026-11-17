@@ -5,6 +5,13 @@
 //! expectations become scripted replies matched on the exact request, and
 //! `AssertCalled` / `AssertNotCalled` become checks on the fake's call log.
 //! Subtests that shared one controller and mock upstream get their own here.
+//!
+//! Nil vs empty: upstream asserts `assert.Nil(t, res.Transmissions)` (and
+//! `Streams`, `StoppedStreams`) on results parsed from the response. Here those
+//! are `is_empty()`. The Rust result types use `Vec`, and the distinction cannot
+//! be observed anyway: the responses arrive over the wire (protobuf, or JSON with
+//! `omitempty`), where an absent and an empty repeated field encode identically,
+//! so the Go result is nil exactly when the list is empty.
 
 use std::time::Duration;
 
@@ -24,11 +31,16 @@ struct TestController {
 }
 
 fn new_test_controller() -> TestController {
+    new_test_controller_with(|fake| Dial::TestClient(fake.grpc_target()))
+}
+
+/// [`new_test_controller`] with another injected client.
+fn new_test_controller_with(dial: impl FnOnce(&FakeRpc) -> Dial) -> TestController {
     let mut config = new_config();
     config.concurrency = 5;
     let fake = FakeRpc::start();
     let metrics = Metrics::new(0);
-    let controller = Controller::new(&metrics, &config, Dial::TestClient(fake.grpc_target())).expect("controller");
+    let controller = Controller::new(&metrics, &config, dial(&fake)).expect("controller");
     controller.start().expect("start");
     TestController { fake, controller }
 }
@@ -166,24 +178,21 @@ mod test_authenticate {
     /// upstream: rpc/rpc_test.go#TestAuthenticate/Canceled_during_RPC
     #[test]
     fn canceled_during_rpc() {
-        let t = new_test_controller();
         let url = "/cancel-cables-2";
         let expected = connect_request(url, &[]);
         let canceled = Ctx::background();
 
-        // Upstream's mock cancels the context while handling the call and returns
-        // ctx.Err(); here the call is held until the test cancels it.
-        let gate = t.fake.gate();
+        // Upstream's mock client cancels the context during the call and returns
+        // the bare `canceledCtx.Err()`. `Dial::CancelOnCall` is that client: it
+        // passes the call to the fake (which records it; the scripted reply is
+        // discarded), cancels `canceled` and returns the bare context error.
+        let t = new_test_controller_with(|fake| Dial::cancel_on_call(fake.grpc_target(), &canceled));
         t.fake
             .on(Method::Connect)
             .with_request(expected.clone())
-            .held_by(&gate)
-            .reply(Reply::status(Code::Cancelled, "context canceled"));
+            .reply(protos::ConnectionResponse { status: protos::Status::Success as i32, ..Default::default() });
 
-        let call = t.controller.spawn_authenticate(&canceled, "42", &session(url, &[]));
-        gate.await_held(1, DEADLINE);
-        canceled.cancel_in_flight();
-        let out = call.wait();
+        let out = t.controller.authenticate(&canceled, "42", &session(url, &[]));
         assert!(out.error.is_none(), "{:?}", out.error);
         assert!(out.result.is_none());
 
@@ -735,6 +744,11 @@ mod test_wait_timeout {
     fn new_busy_controller(wait_timeout_ms: i64, holder: Method) -> Busy {
         let mut config = new_config();
         config.wait_timeout = wait_timeout_ms;
+        new_busy_controller_with(config, holder)
+    }
+
+    /// [`new_busy_controller`] with an explicit config (concurrency is forced to 1).
+    fn new_busy_controller_with(mut config: Config, holder: Method) -> Busy {
         config.concurrency = 1;
         let fake = FakeRpc::start();
         let metrics = Metrics::new(0);
@@ -762,19 +776,52 @@ mod test_wait_timeout {
         Busy { fake, gate, controller, metrics, holder }
     }
 
+    /// How long a Subscribe waits for the only (taken) slot before failing with
+    /// ErrWaitTimeout, under `config`.
+    ///
+    /// Every held call is itself bounded by the command timeout, so the first
+    /// holder frees the slot about when the waiter's wait timeout (the same
+    /// 1234ms by default) expires. A second holder, a Disconnect (which waits for
+    /// a slot without a wait timeout), is queued first and takes the slot over,
+    /// so the slot stays taken for the whole measurement.
+    fn time_to_wait_timeout(config: Config) -> Duration {
+        let busy = new_busy_controller_with(config, Method::Disconnect);
+        busy.fake.on(Method::Disconnect).held_by(&busy.gate).reply(protos::DisconnectResponse::default());
+        let next_holder =
+            busy.controller.spawn_disconnect(&Ctx::background(), "next-holder", &session("", &[]), "", &[]);
+        busy.await_waiting();
+
+        let started = std::time::Instant::now();
+        let out = busy.controller.subscribe(&Ctx::background(), "42", &session("", &[]), "ids", "test_channel");
+        let waited = started.elapsed();
+        assert_eq!(Some(RpcError::WaitTimeout), out.error);
+        assert_eq!(0, busy.fake.call_count(Method::Command));
+        busy.release();
+        drop(next_holder.wait());
+        waited
+    }
+
     /// upstream: rpc/rpc_test.go#TestWaitTimeout/Defaults_to_the_command_timeout
+    ///
+    /// Upstream reads the unexported `controller.waitTimeout`. Here the effective
+    /// wait timeout is observed through the exported API as the time a call
+    /// waits for a taken slot before ErrWaitTimeout: never before the timeout,
+    /// and (for 500ms) clearly before the 1234ms command timeout. Bounded at
+    /// about 2s in total.
     #[test]
     fn defaults_to_the_command_timeout() {
         let mut config = new_config();
         config.command_timeout = 1234;
-        let controller = Controller::new(&Metrics::new(0), &config, Dial::Config).expect("controller");
 
-        assert_eq!(Duration::from_millis(1234), controller.wait_timeout());
+        let waited = time_to_wait_timeout(config.clone());
+        assert!(waited >= Duration::from_millis(1234), "waited {waited:?}");
+        assert!(waited < Duration::from_millis(1234 + 2000), "waited {waited:?}");
 
         config.wait_timeout = 500;
-        let controller = Controller::new(&Metrics::new(0), &config, Dial::Config).expect("controller");
 
-        assert_eq!(Duration::from_millis(500), controller.wait_timeout());
+        let waited = time_to_wait_timeout(config);
+        assert!(waited >= Duration::from_millis(500), "waited {waited:?}");
+        assert!(waited < Duration::from_millis(1234), "waited {waited:?}");
     }
 
     /// upstream: rpc/rpc_test.go#TestWaitTimeout
