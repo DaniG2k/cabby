@@ -39,7 +39,19 @@ enum Cmd {
     /// Verify vendored upstream inputs (rpc.proto) against upstream.lock.
     CheckInputs,
     /// Print translation / reference / implementation coverage.
-    Report,
+    Report {
+        /// Also break coverage down per upstream file directory.
+        #[arg(long)]
+        by_package: bool,
+    },
+    /// Mark translated cases as reviewed after an independent fidelity review.
+    /// Patterns are case IDs, or prefixes ending in `/` or `#` (e.g.
+    /// `26a1a703:identity/`); `--except` takes precedence.
+    MarkReviewed {
+        patterns: Vec<String>,
+        #[arg(long)]
+        except: Vec<String>,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum, PartialEq, Eq, Debug)]
@@ -68,6 +80,7 @@ fn main() -> Result<()> {
         Cmd::Inventory => inventory::run(),
         Cmd::Test { backend, record, filter } => runner::run(backend, record, filter.as_deref()),
         Cmd::CheckInputs => reference::check_inputs(),
-        Cmd::Report => manifest::report(),
+        Cmd::Report { by_package } => manifest::report_with(by_package),
+        Cmd::MarkReviewed { patterns, except } => manifest::mark_reviewed(&patterns, &except),
     }
 }

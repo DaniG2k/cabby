@@ -126,6 +126,75 @@ fn summarize(m: &Manifest) -> BTreeMap<String, BTreeMap<String, usize>> {
 }
 
 pub fn report() -> Result<()> {
+    report_with(false)
+}
+
+/// Upstream package of a case: the Go file's directory, or the suite for Ruby.
+fn package_of(c: &Case) -> String {
+    if c.language == "go" {
+        c.file.rsplit_once('/').map_or(".".to_owned(), |(d, _)| d.to_owned())
+    } else {
+        c.suite.clone()
+    }
+}
+
+pub fn report_with(by_package: bool) -> Result<()> {
+    report_summary()?;
+    if by_package {
+        let m = load()?;
+        let mut rows: BTreeMap<String, [usize; 6]> = BTreeMap::new();
+        for c in &m.cases {
+            let r = rows.entry(package_of(c)).or_default();
+            r[0] += 1;
+            r[1] += usize::from(c.translation_status != "unreviewed");
+            r[2] += usize::from(c.translation_status == "reviewed");
+            r[3] += usize::from(c.reference_status == "pass");
+            r[4] += usize::from(c.reference_status == "not_observable");
+            r[5] += usize::from(c.rust_status == "pass");
+        }
+        println!(
+            "\n  {:44} {:>6} {:>10} {:>8} {:>6} {:>7} {:>9}",
+            "package", "cases", "translated", "reviewed", "go", "not_obs", "rust_pass"
+        );
+        for (k, r) in rows {
+            println!("  {k:44} {:>6} {:>10} {:>8} {:>6} {:>7} {:>9}", r[0], r[1], r[2], r[3], r[4], r[5]);
+        }
+    }
+    Ok(())
+}
+
+fn matches_pattern(id: &str, pattern: &str) -> bool {
+    if pattern.ends_with('/') || pattern.ends_with('#') { id.starts_with(pattern) } else { id == pattern }
+}
+
+pub fn mark_reviewed(patterns: &[String], except: &[String]) -> Result<()> {
+    let mut m = load()?;
+    let mut marked = 0;
+    for p in patterns.iter().chain(except) {
+        if !m.cases.iter().any(|c| matches_pattern(&c.id, p)) {
+            anyhow::bail!("pattern {p:?} matches no case");
+        }
+    }
+    for c in &mut m.cases {
+        let hit = patterns.iter().any(|p| matches_pattern(&c.id, p));
+        let excluded = except.iter().any(|p| matches_pattern(&c.id, p));
+        if hit && !excluded {
+            if c.translation_status == "unreviewed" {
+                anyhow::bail!("{} is not translated; cannot mark it reviewed", c.id);
+            }
+            if c.translation_status != "reviewed" {
+                c.translation_status = "reviewed".into();
+                marked += 1;
+            }
+        }
+    }
+    crate::inventory::derive_aggregates(&mut m.cases);
+    save(&mut m)?;
+    println!("marked {marked} cases reviewed");
+    Ok(())
+}
+
+fn report_summary() -> Result<()> {
     let m = load()?;
     let total = m.cases.len();
     println!("upstream {} — {} cases ({} Rust-only)", m.upstream.commit, total, m.rust_only.len());

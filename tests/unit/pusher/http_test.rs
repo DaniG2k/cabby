@@ -231,6 +231,7 @@ mod test_get_users_integration {
     use super::*;
 
     /// upstream: pusher/http_test.go#TestGetUsersIntegration/Get_users_from_presence_channel_with_users
+    /// upstream: pusher/http_test.go#TestGetUsersIntegration
     #[test]
     fn get_users_from_presence_channel_with_users() {
         let f = UsersFixture::new();
@@ -249,6 +250,7 @@ mod test_get_users_integration {
     }
 
     /// upstream: pusher/http_test.go#TestGetUsersIntegration/Get_users_from_empty_channel
+    /// upstream: pusher/http_test.go#TestGetUsersIntegration
     #[test]
     fn get_users_from_empty_channel() {
         let f = UsersFixture::new();
@@ -260,6 +262,7 @@ mod test_get_users_integration {
     }
 
     /// upstream: pusher/http_test.go#TestGetUsersIntegration/Get_users_from_unknown_channel
+    /// upstream: pusher/http_test.go#TestGetUsersIntegration
     #[test]
     fn get_users_from_unknown_channel() {
         let f = UsersFixture::new();
@@ -271,6 +274,7 @@ mod test_get_users_integration {
     }
 
     /// upstream: pusher/http_test.go#TestGetUsersIntegration/Get_users_from_non-presence_channel_returns_400
+    /// upstream: pusher/http_test.go#TestGetUsersIntegration
     #[test]
     fn get_users_from_non_presence_channel_returns_400() {
         let f = UsersFixture::new();

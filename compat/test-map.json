@@ -17,8 +17,8 @@
     },
     "reference": {
       "not_observable": 36,
-      "pass": 476,
-      "unverified": 411
+      "pass": 477,
+      "unverified": 410
     },
     "rust": {
       "pass": 1,
@@ -28,8 +28,8 @@
       "cases": 36
     },
     "translation": {
-      "translated": 516,
-      "unreviewed": 407
+      "translated": 517,
+      "unreviewed": 406
     },
     "upstream_result": {
       "pass": 922,
@@ -16156,9 +16156,14 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "pusher::http_test::test_get_users_integration::get_users_from_empty_channel",
+        "pusher::http_test::test_get_users_integration::get_users_from_non_presence_channel_returns_400",
+        "pusher::http_test::test_get_users_integration::get_users_from_presence_channel_with_users",
+        "pusher::http_test::test_get_users_integration::get_users_from_unknown_channel"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
