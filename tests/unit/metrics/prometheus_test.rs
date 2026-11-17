@@ -1,6 +1,7 @@
 //! upstream file: metrics/prometheus_test.go
 
 use cabby_testkit::reference::metrics::*;
+use regex::Regex;
 
 /// upstream: metrics/prometheus_test.go#TestPrometheus
 #[test]
@@ -64,16 +65,13 @@ fn test_prometheus_with_tags() {
 
     let actual = m.prometheus();
 
-    // regexp `anycable_go_test_total{(.+)}\s+(\d+)`
-    let matches = actual.lines().find_map(|line| {
-        let rest = line.strip_prefix("anycable_go_test_total{")?;
-        let (tags, value) = rest.rsplit_once('}')?;
-        let value = value.trim_start();
-        (!tags.is_empty() && !value.is_empty() && value.chars().all(|c| c.is_ascii_digit()))
-            .then(|| (tags.to_owned(), value.to_owned()))
-    });
+    let r = Regex::new(r"anycable_go_test_total\{(.+)\}\s+(\d+)").expect("regex");
+    let matches = r.captures(&actual);
 
-    let (tags_str, val_str) = matches.expect("a tagged anycable_go_test_total line");
+    let matches = matches.expect("a tagged anycable_go_test_total line");
+
+    let tags_str = &matches[1];
+    let val_str = &matches[2];
 
     let tags: Vec<&str> = tags_str.split(", ").collect();
 
