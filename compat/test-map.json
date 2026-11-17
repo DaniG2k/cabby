@@ -16,9 +16,9 @@
       "go_vendored": 57
     },
     "reference": {
-      "not_observable": 101,
-      "pass": 658,
-      "unverified": 164
+      "not_observable": 85,
+      "pass": 736,
+      "unverified": 102
     },
     "rust": {
       "pass": 1,
@@ -28,9 +28,9 @@
       "cases": 45
     },
     "translation": {
-      "reviewed": 623,
-      "translated": 139,
-      "unreviewed": 161
+      "reviewed": 655,
+      "translated": 166,
+      "unreviewed": 102
     },
     "upstream_result": {
       "pass": 922,
@@ -6756,10 +6756,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] inherent window: AnyT's 0.5 s no-message check",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::broadcast_to_others",
+        "conformance::anyt_broker_nats::broadcast_to_others",
+        "conformance::anyt_broker_redis::broadcast_to_others",
+        "conformance::anyt_http::broadcast_to_others",
+        "conformance::anyt_nats::broadcast_to_others",
+        "conformance::anyt_nats_embedded::broadcast_to_others"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -6785,10 +6796,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] inherent window: AnyT's 0.5 s no-message check",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::whisper_to_others",
+        "conformance::anyt_broker_nats::whisper_to_others",
+        "conformance::anyt_broker_redis::whisper_to_others",
+        "conformance::anyt_http::whisper_to_others",
+        "conformance::anyt_nats::whisper_to_others",
+        "conformance::anyt_nats_embedded::whisper_to_others"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -6813,10 +6835,18 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] `sleep 2` after the before-block broadcasts is replaced by a witness subscriber that receives both",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::history_by_offset",
+        "conformance::anyt_broker_nats::history_by_offset",
+        "conformance::anyt_broker_redis::history_by_offset"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -6838,10 +6868,18 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] `sleep 2` after the before-block broadcasts is replaced by a witness subscriber that receives both",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::history_by_timestamp",
+        "conformance::anyt_broker_nats::history_by_timestamp",
+        "conformance::anyt_broker_redis::history_by_timestamp"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -6863,10 +6901,18 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] `sleep 2` after the before-block broadcasts is replaced by a witness subscriber that receives both",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::history_on_subscribe",
+        "conformance::anyt_broker_nats::history_on_subscribe",
+        "conformance::anyt_broker_redis::history_on_subscribe"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -6888,10 +6934,18 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] keeps the Ruby semantics: the before-block client stays open and the scenario's `client.close` closes a new let(:client)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::restore_session_by_sid",
+        "conformance::anyt_broker_nats::restore_session_by_sid",
+        "conformance::anyt_broker_redis::restore_session_by_sid"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-redis.log (pass)"
@@ -6912,10 +6966,16 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::presence_join_leave_on_perform",
+        "conformance::anyt_broker_redis::presence_join_leave_on_perform"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -6937,10 +6997,17 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] inherent window: the leave follows the disconnect after the presence TTL (2 s), within the 5 s receive timeout",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::presence_implicit_join_leave_on_disconnect",
+        "conformance::anyt_broker_redis::presence_implicit_join_leave_on_disconnect"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -6962,10 +7029,17 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] inherent windows: AnyT's 0.5 s no-event check; the leave after the presence TTL (2 s)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::presence_explicit_duplicate_sessions",
+        "conformance::anyt_broker_redis::presence_explicit_duplicate_sessions"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -8773,10 +8847,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] correctness check only, same workload parameters; throughput belongs to the external Benchi harness (crates/cabby-bench); inherent window: --wait-broadcasts 30 s"
+      ],
+      "rust_cases": [
+        "features::bench::broadcasts"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/benchmarks/broadcasts.log"
@@ -8797,10 +8875,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] sleeps replaced by cluster-port readiness and retrying every 2 s within 40 s; JetStream readiness via KV__anycable_epoch_ store files as upstream"
+      ],
+      "rust_cases": [
+        "features::enats::enats_broker"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/enats_broker.log"
@@ -8821,10 +8903,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] sleeps replaced by launching after cluster ports listen and retrying every 2 s within 40 s; the publisher performs after the subscribers subscribed (upstream race absorbed by its retry)"
+      ],
+      "rust_cases": [
+        "features::enats::enats_clusters"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/enats_clusters.log"
@@ -8845,10 +8931,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] only stdout is parsed (upstream's pipe merges stderr); commands run in a fresh working directory with ANYCABLE_* removed"
+      ],
+      "rust_cases": [
+        "features::file_config::file_config"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/file_config.log"
@@ -8869,10 +8959,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] replacement invariant for the Go-specific gops goroutine checks: server fds return to idle (+10) after load and grow at most 10% (min 2) between runs; OS threads reported only"
+      ],
+      "rust_cases": [
+        "features::bench::goroutines"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/benchmarks/goroutines.log"
@@ -8894,9 +8988,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "features::rpc_less::jwt"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/jwt.log"
@@ -8917,10 +9013,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] `sleep 2` replaced by waiting for the metrics line (rotation 3 s); inherent window: pings at --ping_interval=1"
+      ],
+      "rust_cases": [
+        "features::with_rpc::metrics"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/metrics.log"
@@ -8941,10 +9041,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] clients stay connected until the printer reports 2 connections (the clients_num gauge is refreshed periodically); inherent window: pings at --ping_interval=3"
+      ],
+      "rust_cases": [
+        "features::with_rpc::mruby_printers"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/mruby_printers.log"
@@ -8965,10 +9069,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] inherent window: with pi=1 a ping must arrive within wsdirector's 5 s although --ping_interval=10"
+      ],
+      "rust_cases": [
+        "features::with_rpc::ping"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/ping.log"
@@ -8989,10 +9097,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] inherent windows: a pong 0.5 s after each ping keeps the connection, 1 s of silence ends it with no_pong (--pong_timeout=1)"
+      ],
+      "rust_cases": [
+        "features::with_rpc::ping_pong"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/ping_pong.log"
@@ -9013,10 +9125,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] wait_all barriers become sequential steps; channel users polled once per second, at most 6 times (inherent polling)"
+      ],
+      "rust_cases": [
+        "features::pusher::pusher_presence"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/pusher-presence.log"
@@ -9037,10 +9153,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] wait_all barriers become sequential steps"
+      ],
+      "rust_cases": [
+        "features::pusher::pusher_private"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/pusher-private.log"
@@ -9061,10 +9181,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] `sleep 3` replaced by waiting for pusher_internal:subscription_succeeded before the REST trigger"
+      ],
+      "rust_cases": [
+        "features::pusher::pusher"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/pusher.log"
@@ -9085,10 +9209,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] `sleep 1` replaced by awaiting the three welcomes; Disconnect calls are counted on the AnyT app instead of its debug log"
+      ],
+      "rust_cases": [
+        "features::with_rpc::shutdown"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/shutdown.log"
@@ -9109,10 +9237,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] inherent window: Net::HTTP read_timeout (2 s) per event"
+      ],
+      "rust_cases": [
+        "features::sse::sse"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/sse.log"
@@ -9134,9 +9266,11 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "rust_cases": [
+        "features::rpc_less::standalone"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/standalone.log"
@@ -9157,10 +9291,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] the `sleep 2` before stopping waits for the next metrics line (rotation 1 s); upstream's log check is weak: it only fails when all three counters are non-zero single digits"
+      ],
+      "rust_cases": [
+        "features::rpc_less::streams"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/streams.log"
@@ -9181,10 +9319,14 @@
       "discovered": "static",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] the `sleep 2` before stopping waits for the next metrics line (rotation 1 s); upstream's log check is weak: it only fails when all three counters are non-zero single digits"
+      ],
+      "rust_cases": [
+        "features::rpc_less::turbo_rpc_less"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/features/turbo_rpc_less.log"
@@ -15574,7 +15716,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -15705,11 +15847,13 @@
       "direct_assertions": 6,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] `assert.Equal([]string{}, ...)` also requires non-nil slices; checked through the facade's Go nil flags (Rust slices are never nil)."
+      ],
       "rust_cases": [
         "pusher::controller_test::test_pusher_controller::unsubscribe"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -15735,7 +15879,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -15789,7 +15933,7 @@
       "rust_cases": [
         "pusher::encoder_test::test_pusher_decode::custom_event"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -16461,8 +16605,8 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
-      "reference_status": "unverified",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -16488,8 +16632,8 @@
       "rust_cases": [
         "pusher::executor_test::test_handle_command::subscribe_presence"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -16515,8 +16659,8 @@
       "rust_cases": [
         "pusher::executor_test::test_handle_command::subscribe_private"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -16542,8 +16686,8 @@
       "rust_cases": [
         "pusher::executor_test::test_handle_command::subscribe_private_failure_bad_signature"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -16569,8 +16713,8 @@
       "rust_cases": [
         "pusher::executor_test::test_handle_command::subscribe_public"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -16599,7 +16743,7 @@
         "pusher::http_test::test_get_users_integration::get_users_from_presence_channel_with_users",
         "pusher::http_test::test_get_users_integration::get_users_from_unknown_channel"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -16626,7 +16770,7 @@
       "rust_cases": [
         "pusher::http_test::test_get_users_integration::get_users_from_empty_channel"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -16653,7 +16797,7 @@
       "rust_cases": [
         "pusher::http_test::test_get_users_integration::get_users_from_non_presence_channel_returns_400"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -16680,7 +16824,7 @@
       "rust_cases": [
         "pusher::http_test::test_get_users_integration::get_users_from_presence_channel_with_users"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -16707,7 +16851,7 @@
       "rust_cases": [
         "pusher::http_test::test_get_users_integration::get_users_from_unknown_channel"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -16733,7 +16877,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -16787,7 +16931,7 @@
       "rust_cases": [
         "pusher::http_test::test_http_handler::rejects_large_body_with_invalid_signature_without_reading_it"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -16814,7 +16958,7 @@
       "rust_cases": [
         "pusher::http_test::test_http_handler::rejects_unsupported_methods"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -20168,8 +20312,8 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
-      "reference_status": "unverified",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -20191,12 +20335,14 @@
       "direct_assertions": 1,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] Go has no accessor for the unexported `c.done`; on Go it is probed indirectly (a closed connection drops a later Write, so Established leaves the body nil). The second Close runs on Go too."
+      ],
       "rust_cases": [
         "sse::connection_test::test_connection_close::close_cancels_the_context"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -20357,7 +20503,7 @@
       "rust_cases": [
         "sse::encoder_test::test_encoder_decode"
       ],
-      "translation_status": "translated",
+      "translation_status": "reviewed",
       "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
@@ -20921,8 +21067,8 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "translated",
-      "reference_status": "unverified",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -20944,12 +21090,14 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] upstream's 1s sleep before broadcasting is replaced by waiting for the status line, which the handler writes after subscribing."
+      ],
       "rust_cases": [
         "sse::handler_test::test_sse_handler::get_request_with_raw_t"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -20975,8 +21123,8 @@
       "rust_cases": [
         "sse::handler_test::test_sse_handler::get_request_with_raw_t_sends_comment_pings"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -21002,8 +21150,8 @@
       "rust_cases": [
         "sse::handler_test::test_sse_handler::get_request_with_channel_rejected"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -21029,8 +21177,8 @@
       "rust_cases": [
         "sse::handler_test::test_sse_handler::get_request_with_comment_pings"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -21056,8 +21204,8 @@
       "rust_cases": [
         "sse::handler_test::test_sse_handler::get_request_with_identifier"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -21083,8 +21231,8 @@
       "rust_cases": [
         "sse::handler_test::test_sse_handler::get_request_with_signed_stream"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -21110,8 +21258,8 @@
       "rust_cases": [
         "sse::handler_test::test_sse_handler::get_request_with_stream"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -21137,8 +21285,8 @@
       "rust_cases": [
         "sse::handler_test::test_sse_handler::get_request_with_turbo_signed_stream_name"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -21218,8 +21366,8 @@
       "rust_cases": [
         "sse::handler_test::test_sse_handler::post_request_with_multiple_subscriptions"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -21245,8 +21393,8 @@
       "rust_cases": [
         "sse::handler_test::test_sse_handler::post_request_without_commands_server_shutdown"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -21353,8 +21501,8 @@
       "rust_cases": [
         "sse::handler_test::test_sse_handler::when_authentication_fails"
       ],
-      "translation_status": "translated",
-      "reference_status": "not_observable",
+      "translation_status": "reviewed",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
@@ -24128,10 +24276,22 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] inherent window: the server's default ping_interval (3 s); two pings take about 6 s, each within AnyT's 5 s receive timeout",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::ping",
+        "conformance::anyt_broker_nats::ping",
+        "conformance::anyt_broker_redis::ping",
+        "conformance::anyt_default::ping",
+        "conformance::anyt_http::ping",
+        "conformance::anyt_nats::ping",
+        "conformance::anyt_nats_embedded::ping"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24159,10 +24319,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::welcome",
+        "conformance::anyt_broker_nats::welcome",
+        "conformance::anyt_broker_redis::welcome",
+        "conformance::anyt_default::welcome",
+        "conformance::anyt_http::welcome",
+        "conformance::anyt_nats::welcome",
+        "conformance::anyt_nats_embedded::welcome"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -24189,10 +24360,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::channel_state_available_in_unsubscribe",
+        "conformance::anyt_broker_nats::channel_state_available_in_unsubscribe",
+        "conformance::anyt_broker_redis::channel_state_available_in_unsubscribe",
+        "conformance::anyt_default::channel_state_available_in_unsubscribe",
+        "conformance::anyt_http::channel_state_available_in_unsubscribe",
+        "conformance::anyt_nats::channel_state_available_in_unsubscribe",
+        "conformance::anyt_nats_embedded::channel_state_available_in_unsubscribe"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24221,10 +24403,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::channel_state_kept_between_commands",
+        "conformance::anyt_broker_nats::channel_state_kept_between_commands",
+        "conformance::anyt_broker_redis::channel_state_kept_between_commands",
+        "conformance::anyt_default::channel_state_kept_between_commands",
+        "conformance::anyt_http::channel_state_kept_between_commands",
+        "conformance::anyt_nats::channel_state_kept_between_commands",
+        "conformance::anyt_nats_embedded::channel_state_kept_between_commands"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24253,10 +24446,22 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] AnyT's Action Cable-only `sleep 1` is dropped: the welcome arrives after the session is registered",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::remote_disconnect_by_id",
+        "conformance::anyt_broker_nats::remote_disconnect_by_id",
+        "conformance::anyt_broker_redis::remote_disconnect_by_id",
+        "conformance::anyt_default::remote_disconnect_by_id",
+        "conformance::anyt_http::remote_disconnect_by_id",
+        "conformance::anyt_nats::remote_disconnect_by_id",
+        "conformance::anyt_nats_embedded::remote_disconnect_by_id"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24285,10 +24490,22 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] restart_server! is ported as stopping the server (SIGTERM); the disconnect is sent while stopping, the restart is not performed",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::server_restart_disconnect_message",
+        "conformance::anyt_broker_nats::server_restart_disconnect_message",
+        "conformance::anyt_broker_redis::server_restart_disconnect_message",
+        "conformance::anyt_default::server_restart_disconnect_message",
+        "conformance::anyt_http::server_restart_disconnect_message",
+        "conformance::anyt_nats::server_restart_disconnect_message",
+        "conformance::anyt_nats_embedded::server_restart_disconnect_message"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24317,10 +24534,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::request_channel_has_access_to_request",
+        "conformance::anyt_broker_nats::request_channel_has_access_to_request",
+        "conformance::anyt_broker_redis::request_channel_has_access_to_request",
+        "conformance::anyt_default::request_channel_has_access_to_request",
+        "conformance::anyt_http::request_channel_has_access_to_request",
+        "conformance::anyt_nats::request_channel_has_access_to_request",
+        "conformance::anyt_nats_embedded::request_channel_has_access_to_request"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24348,10 +24576,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::request_accept_with_cookies",
+        "conformance::anyt_broker_nats::request_accept_with_cookies",
+        "conformance::anyt_broker_redis::request_accept_with_cookies",
+        "conformance::anyt_default::request_accept_with_cookies",
+        "conformance::anyt_http::request_accept_with_cookies",
+        "conformance::anyt_nats::request_accept_with_cookies",
+        "conformance::anyt_nats_embedded::request_accept_with_cookies"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24378,10 +24617,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::request_accept_with_header",
+        "conformance::anyt_broker_nats::request_accept_with_header",
+        "conformance::anyt_broker_redis::request_accept_with_header",
+        "conformance::anyt_default::request_accept_with_header",
+        "conformance::anyt_http::request_accept_with_header",
+        "conformance::anyt_nats::request_accept_with_header",
+        "conformance::anyt_nats_embedded::request_accept_with_header"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24410,10 +24660,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::request_reject_without_cookies",
+        "conformance::anyt_broker_nats::request_reject_without_cookies",
+        "conformance::anyt_broker_redis::request_reject_without_cookies",
+        "conformance::anyt_default::request_reject_without_cookies",
+        "conformance::anyt_http::request_reject_without_cookies",
+        "conformance::anyt_nats::request_reject_without_cookies",
+        "conformance::anyt_nats_embedded::request_reject_without_cookies"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24442,10 +24703,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::request_reject_without_header",
+        "conformance::anyt_broker_nats::request_reject_without_header",
+        "conformance::anyt_broker_redis::request_reject_without_header",
+        "conformance::anyt_default::request_reject_without_header",
+        "conformance::anyt_http::request_reject_without_header",
+        "conformance::anyt_nats::request_reject_without_header",
+        "conformance::anyt_nats_embedded::request_reject_without_header"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24474,10 +24746,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::request_url_is_set",
+        "conformance::anyt_broker_nats::request_url_is_set",
+        "conformance::anyt_broker_redis::request_url_is_set",
+        "conformance::anyt_default::request_url_is_set",
+        "conformance::anyt_http::request_url_is_set",
+        "conformance::anyt_nats::request_url_is_set",
+        "conformance::anyt_nats_embedded::request_url_is_set"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -24504,10 +24787,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::request_disconnect_message_when_rejected",
+        "conformance::anyt_broker_nats::request_disconnect_message_when_rejected",
+        "conformance::anyt_broker_redis::request_disconnect_message_when_rejected",
+        "conformance::anyt_default::request_disconnect_message_when_rejected",
+        "conformance::anyt_http::request_disconnect_message_when_rejected",
+        "conformance::anyt_nats::request_disconnect_message_when_rejected",
+        "conformance::anyt_nats_embedded::request_disconnect_message_when_rejected"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24536,10 +24830,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::request_disconnect_unsubscribes_different_channels",
+        "conformance::anyt_broker_nats::request_disconnect_unsubscribes_different_channels",
+        "conformance::anyt_broker_redis::request_disconnect_unsubscribes_different_channels",
+        "conformance::anyt_default::request_disconnect_unsubscribes_different_channels",
+        "conformance::anyt_http::request_disconnect_unsubscribes_different_channels",
+        "conformance::anyt_nats::request_disconnect_unsubscribes_different_channels",
+        "conformance::anyt_nats_embedded::request_disconnect_unsubscribes_different_channels"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24568,10 +24873,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::request_disconnect_unsubscribes_same_channel_subscriptions",
+        "conformance::anyt_broker_nats::request_disconnect_unsubscribes_same_channel_subscriptions",
+        "conformance::anyt_broker_redis::request_disconnect_unsubscribes_same_channel_subscriptions",
+        "conformance::anyt_default::request_disconnect_unsubscribes_same_channel_subscriptions",
+        "conformance::anyt_http::request_disconnect_unsubscribes_same_channel_subscriptions",
+        "conformance::anyt_nats::request_disconnect_unsubscribes_same_channel_subscriptions",
+        "conformance::anyt_nats_embedded::request_disconnect_unsubscribes_same_channel_subscriptions"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24600,10 +24916,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::broadcast_json_string",
+        "conformance::anyt_broker_nats::broadcast_json_string",
+        "conformance::anyt_broker_redis::broadcast_json_string",
+        "conformance::anyt_default::broadcast_json_string",
+        "conformance::anyt_http::broadcast_json_string",
+        "conformance::anyt_nats::broadcast_json_string",
+        "conformance::anyt_nats_embedded::broadcast_json_string"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24632,10 +24959,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::broadcast_custom_string",
+        "conformance::anyt_broker_nats::broadcast_custom_string",
+        "conformance::anyt_broker_redis::broadcast_custom_string",
+        "conformance::anyt_default::broadcast_custom_string",
+        "conformance::anyt_http::broadcast_custom_string",
+        "conformance::anyt_nats::broadcast_custom_string",
+        "conformance::anyt_nats_embedded::broadcast_custom_string"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -24663,10 +25001,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::broadcast_object",
+        "conformance::anyt_broker_nats::broadcast_object",
+        "conformance::anyt_broker_redis::broadcast_object",
+        "conformance::anyt_default::broadcast_object",
+        "conformance::anyt_http::broadcast_object",
+        "conformance::anyt_nats::broadcast_object",
+        "conformance::anyt_nats_embedded::broadcast_object"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24695,10 +25044,22 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] AnyT's `sleep 1` after unsubscribe is replaced by a barrier subscription (Cabby::BarrierChannel) on the same session; inherent window: AnyT's 0.5 s no-message check",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::many_clients_one_unsubscribes",
+        "conformance::anyt_broker_nats::many_clients_one_unsubscribes",
+        "conformance::anyt_broker_redis::many_clients_one_unsubscribes",
+        "conformance::anyt_default::many_clients_one_unsubscribes",
+        "conformance::anyt_http::many_clients_one_unsubscribes",
+        "conformance::anyt_nats::many_clients_one_unsubscribes",
+        "conformance::anyt_nats_embedded::many_clients_one_unsubscribes"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24725,10 +25086,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::many_clients_receive",
+        "conformance::anyt_broker_nats::many_clients_receive",
+        "conformance::anyt_broker_redis::many_clients_receive",
+        "conformance::anyt_default::many_clients_receive",
+        "conformance::anyt_http::many_clients_receive",
+        "conformance::anyt_nats::many_clients_receive",
+        "conformance::anyt_nats_embedded::many_clients_receive"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24757,10 +25129,22 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] AnyT's `sleep 1` after unsubscribe is replaced by a barrier subscription (Cabby::BarrierChannel) on the same session; inherent window: AnyT's 0.5 s no-message check",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::multiple_streams_none_after_unsubscribe",
+        "conformance::anyt_broker_nats::multiple_streams_none_after_unsubscribe",
+        "conformance::anyt_broker_redis::multiple_streams_none_after_unsubscribe",
+        "conformance::anyt_default::multiple_streams_none_after_unsubscribe",
+        "conformance::anyt_http::multiple_streams_none_after_unsubscribe",
+        "conformance::anyt_nats::multiple_streams_none_after_unsubscribe",
+        "conformance::anyt_nats_embedded::multiple_streams_none_after_unsubscribe"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24786,10 +25170,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::multiple_streams_receive_both",
+        "conformance::anyt_broker_nats::multiple_streams_receive_both",
+        "conformance::anyt_broker_redis::multiple_streams_receive_both",
+        "conformance::anyt_default::multiple_streams_receive_both",
+        "conformance::anyt_http::multiple_streams_receive_both",
+        "conformance::anyt_nats::multiple_streams_receive_both",
+        "conformance::anyt_nats_embedded::multiple_streams_receive_both"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24818,10 +25213,22 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] AnyT's `sleep 1` after unsubscribe is replaced by a barrier subscription (Cabby::BarrierChannel) on the same session; inherent window: AnyT's 0.5 s no-message check",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::single_stream_none_after_unsubscribe",
+        "conformance::anyt_broker_nats::single_stream_none_after_unsubscribe",
+        "conformance::anyt_broker_redis::single_stream_none_after_unsubscribe",
+        "conformance::anyt_default::single_stream_none_after_unsubscribe",
+        "conformance::anyt_http::single_stream_none_after_unsubscribe",
+        "conformance::anyt_nats::single_stream_none_after_unsubscribe",
+        "conformance::anyt_nats_embedded::single_stream_none_after_unsubscribe"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24847,10 +25254,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::single_stream_receives",
+        "conformance::anyt_broker_nats::single_stream_receives",
+        "conformance::anyt_broker_redis::single_stream_receives",
+        "conformance::anyt_default::single_stream_receives",
+        "conformance::anyt_http::single_stream_receives",
+        "conformance::anyt_nats::single_stream_receives",
+        "conformance::anyt_nats_embedded::single_stream_receives"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24879,10 +25297,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::single_stream_same_channel_different_params",
+        "conformance::anyt_broker_nats::single_stream_same_channel_different_params",
+        "conformance::anyt_broker_redis::single_stream_same_channel_different_params",
+        "conformance::anyt_default::single_stream_same_channel_different_params",
+        "conformance::anyt_http::single_stream_same_channel_different_params",
+        "conformance::anyt_nats::single_stream_same_channel_different_params",
+        "conformance::anyt_nats_embedded::single_stream_same_channel_different_params"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24911,10 +25340,22 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] the two `sleep 0.2` are replaced by a session barrier after `unfollow` and a witness client that receives Y before Z is broadcast",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::stop_streams_unsubscribes_from_stream",
+        "conformance::anyt_broker_nats::stop_streams_unsubscribes_from_stream",
+        "conformance::anyt_broker_redis::stop_streams_unsubscribes_from_stream",
+        "conformance::anyt_default::stop_streams_unsubscribes_from_stream",
+        "conformance::anyt_http::stop_streams_unsubscribes_from_stream",
+        "conformance::anyt_nats::stop_streams_unsubscribes_from_stream",
+        "conformance::anyt_nats_embedded::stop_streams_unsubscribes_from_stream"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24943,10 +25384,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::ack_confirmation",
+        "conformance::anyt_broker_nats::ack_confirmation",
+        "conformance::anyt_broker_redis::ack_confirmation",
+        "conformance::anyt_default::ack_confirmation",
+        "conformance::anyt_http::ack_confirmation",
+        "conformance::anyt_nats::ack_confirmation",
+        "conformance::anyt_nats_embedded::ack_confirmation"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -24973,10 +25425,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::ack_rejection",
+        "conformance::anyt_broker_nats::ack_rejection",
+        "conformance::anyt_broker_redis::ack_rejection",
+        "conformance::anyt_default::ack_rejection",
+        "conformance::anyt_http::ack_rejection",
+        "conformance::anyt_nats::ack_rejection",
+        "conformance::anyt_nats_embedded::ack_rejection"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -25004,10 +25467,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::params_same_channel_different_params",
+        "conformance::anyt_broker_nats::params_same_channel_different_params",
+        "conformance::anyt_broker_redis::params_same_channel_different_params",
+        "conformance::anyt_default::params_same_channel_different_params",
+        "conformance::anyt_http::params_same_channel_different_params",
+        "conformance::anyt_nats::params_same_channel_different_params",
+        "conformance::anyt_nats_embedded::params_same_channel_different_params"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25034,10 +25508,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::perform_with_arguments",
+        "conformance::anyt_broker_nats::perform_with_arguments",
+        "conformance::anyt_broker_redis::perform_with_arguments",
+        "conformance::anyt_default::perform_with_arguments",
+        "conformance::anyt_http::perform_with_arguments",
+        "conformance::anyt_nats::perform_with_arguments",
+        "conformance::anyt_nats_embedded::perform_with_arguments"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -25065,10 +25550,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::perform_without_arguments",
+        "conformance::anyt_broker_nats::perform_without_arguments",
+        "conformance::anyt_broker_redis::perform_without_arguments",
+        "conformance::anyt_default::perform_without_arguments",
+        "conformance::anyt_http::perform_without_arguments",
+        "conformance::anyt_nats::perform_without_arguments",
+        "conformance::anyt_nats_embedded::perform_without_arguments"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -25095,10 +25591,21 @@
       "discovered": "static+runtime",
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
-      "reference_status": "unverified",
+      "notes": [
+        "[src] run once per Makefile test-conformance* target (anyt_<target>.rs); test-conformance-ssl and test-conformance-embedded are not instantiated (no TLS in the fake RPC; embedding is a Go API)",
+        "[src] on the shared Redis/NATS services the broadcast channel/stream/subject is per test and the application prefixes stream names (opaque to clients)"
+      ],
+      "rust_cases": [
+        "conformance::anyt_broker_http::transmissions_from_subscribed",
+        "conformance::anyt_broker_nats::transmissions_from_subscribed",
+        "conformance::anyt_broker_redis::transmissions_from_subscribed",
+        "conformance::anyt_default::transmissions_from_subscribed",
+        "conformance::anyt_http::transmissions_from_subscribed",
+        "conformance::anyt_nats::transmissions_from_subscribed",
+        "conformance::anyt_nats_embedded::transmissions_from_subscribed"
+      ],
+      "translation_status": "translated",
+      "reference_status": "pass",
       "rust_status": "pending",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
@@ -25536,17 +26043,9 @@
       "rust_case": "sse::handler_test::test_sse_handler::streaming_response_status_is_ok",
       "relation": "regression",
       "links": [
-        "26a1a703:sse/handler_test.go#TestSSEHandler/GET_request_with_?raw=t",
-        "26a1a703:sse/handler_test.go#TestSSEHandler/GET_request_with_?raw=t_sends_comment_pings",
-        "26a1a703:sse/handler_test.go#TestSSEHandler/GET_request_with_comment_pings",
-        "26a1a703:sse/handler_test.go#TestSSEHandler/GET_request_with_identifier",
-        "26a1a703:sse/handler_test.go#TestSSEHandler/GET_request_with_signed_stream",
-        "26a1a703:sse/handler_test.go#TestSSEHandler/GET_request_with_stream",
-        "26a1a703:sse/handler_test.go#TestSSEHandler/GET_request_with_turbo_signed_stream_name",
-        "26a1a703:sse/handler_test.go#TestSSEHandler/POST_request_with_multiple_subscriptions",
-        "26a1a703:sse/handler_test.go#TestSSEHandler/POST_request_without_commands_+_server_shutdown"
+        "26a1a703:sse/handler_test.go#TestSSEHandler/GET_request_with_identifier"
       ],
-      "reference_status": "not_observable",
+      "reference_status": "pass",
       "rust_status": "pending"
     }
   ],
