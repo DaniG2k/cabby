@@ -12,10 +12,19 @@ name = "cabby-bench"
 path = "src/main.rs"
 
 [dependencies]
-cabby-core.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client", "server", "http1"] }
+hyper-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "signal"] }
+tokio-tungstenite = { workspace = true, features = ["handshake"] }
+tokio-util.workspace = true
+tungstenite.workspace = true
 
 [lints]
 workspace = true
