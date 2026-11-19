@@ -1,0 +1,30 @@
+[package]
+name = "cabby-mruby-sys"
+description = "Vendored mruby 1.2.0 (built with cc) and the FFI boundary of Cabby's mruby binding"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+publish.workspace = true
+license.workspace = true
+links = "mruby"
+build = "build.rs"
+
+[features]
+default = ["vendored"]
+# Compile and link the vendored mruby. The build script does so only on Linux
+# and macOS, as upstream's `mrb` build tag. Without it no C is built and
+# `available()` is false.
+vendored = []
+
+[build-dependencies]
+cc.workspace = true
+
+# This is the only crate that may use `unsafe` (the workspace forbids it), so it
+# does not inherit the workspace lint table. These lints keep every unsafe
+# block small and justified.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

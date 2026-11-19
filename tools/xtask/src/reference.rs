@@ -95,6 +95,20 @@ pub fn check_inputs() -> Result<()> {
         bail!("crates/cabby-core/proto/rpc.proto sha256 {proto} != upstream {}", l.rpc_proto_sha256);
     }
     println!("rpc.proto matches upstream");
+
+    // The vendored mruby (compat/scripts/vendor-mruby.sh) must match its SHA256SUMS.
+    let sys = root().join("crates/cabby-mruby-sys");
+    let sums = std::fs::read_to_string(sys.join("SHA256SUMS")).context("crates/cabby-mruby-sys/SHA256SUMS")?;
+    let mut count = 0;
+    for line in sums.lines().filter(|l| !l.trim().is_empty()) {
+        let (want, rel) = line.split_once("  ").with_context(|| format!("bad SHA256SUMS line: {line}"))?;
+        let have = sha256_file(&sys.join(rel))?;
+        if have != want {
+            bail!("crates/cabby-mruby-sys/{rel} sha256 {have} != SHA256SUMS {want}");
+        }
+        count += 1;
+    }
+    println!("vendored mruby matches SHA256SUMS ({count} files)");
     Ok(())
 }
 

@@ -6,3 +6,8 @@ crates/cabby-server/src/lib.rs merge=union
 crates/cabby-testkit/src/lib.rs merge=union
 tests/conformance/main.rs merge=union
 compat/reference-adapters/bridge/go.sum merge=union
+
+# Vendored mruby 1.2.0 and its generated build outputs (compat/scripts/vendor-mruby.sh).
+crates/cabby-mruby-sys/mruby/** linguist-vendored
+crates/cabby-mruby-sys/mruby-env/** linguist-vendored
+crates/cabby-mruby-sys/generated/** linguist-generated
