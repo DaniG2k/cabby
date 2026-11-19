@@ -1,45 +1,48 @@
 //! Unsigned gauge (upstream `metrics/gauge.go`; decrementing below zero wraps, as upstream).
 
-use cabby_core::pending;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Debug)]
 pub struct Gauge {
-    _name: String,
-    _desc: String,
+    name: String,
+    desc: String,
+    value: AtomicU64,
 }
 
 impl Gauge {
     pub fn new(name: &str, desc: &str) -> Self {
-        Self { _name: name.to_owned(), _desc: desc.to_owned() }
+        Self { name: name.to_owned(), desc: desc.to_owned(), value: AtomicU64::new(0) }
     }
 
     pub fn name(&self) -> &str {
-        pending!("metrics::gauge_name")
+        &self.name
     }
 
     pub fn desc(&self) -> &str {
-        pending!("metrics::gauge_desc")
+        &self.desc
     }
 
-    /// Upstream `Set(int)`.
-    pub fn set(&self, _value: i64) {
-        pending!("metrics::gauge_set")
+    /// Upstream `Set(int)` (negative values wrap, as Go's `uint64(value)`).
+    pub fn set(&self, value: i64) {
+        self.value.store(value as u64, Ordering::Relaxed);
     }
 
     /// Upstream `Set64(uint64)`.
-    pub fn set64(&self, _value: u64) {
-        pending!("metrics::gauge_set64")
+    pub fn set64(&self, value: u64) {
+        self.value.store(value, Ordering::Relaxed);
     }
 
+    #[inline]
     pub fn inc(&self) -> u64 {
-        pending!("metrics::gauge_inc")
+        self.value.fetch_add(1, Ordering::Relaxed).wrapping_add(1)
     }
 
+    #[inline]
     pub fn dec(&self) -> u64 {
-        pending!("metrics::gauge_dec")
+        self.value.fetch_sub(1, Ordering::Relaxed).wrapping_sub(1)
     }
 
     pub fn value(&self) -> u64 {
-        pending!("metrics::gauge_value")
+        self.value.load(Ordering::Relaxed)
     }
 }

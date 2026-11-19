@@ -1,6 +1,6 @@
 //! Concurrency limit for RPC calls (upstream `rpc/barrier.go`).
 
-use cabby_core::pending;
+use tokio::sync::Semaphore;
 
 use super::{BoxFuture, Context, RpcError};
 
@@ -19,45 +19,96 @@ pub trait Barrier: Send + Sync {
     fn stop(&self);
 }
 
-/// Fixed number of slots (upstream `FixedSizeBarrier`).
+/// Fixed number of slots (upstream `FixedSizeBarrier`): a fair (FIFO) semaphore.
+/// Taking a free slot is a single atomic operation; waiters queue in order.
 #[derive(Debug)]
 pub struct FixedSizeBarrier {
-    _capacity: i64,
+    capacity: usize,
+    capacity_info: String,
+    sem: Semaphore,
 }
 
 impl FixedSizeBarrier {
     /// Fails unless `capacity > 0`.
-    pub fn new(_capacity: i64) -> Result<Self, RpcError> {
-        pending!("rpc::new_fixed_size_barrier")
+    pub fn new(capacity: i64) -> Result<Self, RpcError> {
+        let capacity = usize::try_from(capacity)
+            .ok()
+            .filter(|c| *c > 0 && *c <= Semaphore::MAX_PERMITS)
+            .ok_or_else(|| RpcError::Other("RPC concurrency must be > 0".into()))?;
+        Ok(Self { capacity, capacity_info: capacity.to_string(), sem: Semaphore::new(capacity) })
     }
+
+    /// Takes a slot, waiting until one is free or `ctx` is done.
+    pub async fn wait(&self, ctx: &Context) -> Result<(), RpcError> {
+        if let Ok(permit) = self.sem.try_acquire() {
+            permit.forget();
+            return Ok(());
+        }
+        tokio::select! {
+            permit = self.sem.acquire() => {
+                // The semaphore is never closed.
+                if let Ok(p) = permit { p.forget() }
+                Ok(())
+            }
+            e = ctx.done() => Err(RpcError::Other(e.to_string())),
+        }
+    }
+
+    /// Frees a slot taken with [`FixedSizeBarrier::wait`].
+    pub fn release(&self) {
+        self.sem.add_permits(1);
+    }
+
+    /// In-flight calls: the capacity minus the free slots.
+    pub fn busy_count(&self) -> usize {
+        self.capacity.saturating_sub(self.sem.available_permits())
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    pub fn capacity_info(&self) -> String {
+        self.capacity_info.clone()
+    }
+
+    pub fn exhausted(&self) {}
+
+    pub fn has_dynamic_capacity(&self) -> bool {
+        false
+    }
+
+    pub fn start(&self) {}
+
+    pub fn stop(&self) {}
 }
 
 impl Barrier for FixedSizeBarrier {
-    fn acquire<'a>(&'a self, _ctx: &'a Context) -> BoxFuture<'a, Result<(), RpcError>> {
-        pending!("rpc::barrier_acquire")
+    fn acquire<'a>(&'a self, ctx: &'a Context) -> BoxFuture<'a, Result<(), RpcError>> {
+        Box::pin(self.wait(ctx))
     }
     fn release(&self) {
-        pending!("rpc::barrier_release")
+        FixedSizeBarrier::release(self);
     }
     fn busy_count(&self) -> usize {
-        pending!("rpc::barrier_busy_count")
+        FixedSizeBarrier::busy_count(self)
     }
     fn capacity(&self) -> usize {
-        pending!("rpc::barrier_capacity")
+        FixedSizeBarrier::capacity(self)
     }
     fn capacity_info(&self) -> String {
-        pending!("rpc::barrier_capacity_info")
+        FixedSizeBarrier::capacity_info(self)
     }
     fn exhausted(&self) {
-        pending!("rpc::barrier_exhausted")
+        FixedSizeBarrier::exhausted(self);
     }
     fn has_dynamic_capacity(&self) -> bool {
-        pending!("rpc::barrier_has_dynamic_capacity")
+        FixedSizeBarrier::has_dynamic_capacity(self)
     }
     fn start(&self) {
-        pending!("rpc::barrier_start")
+        FixedSizeBarrier::start(self);
     }
     fn stop(&self) {
-        pending!("rpc::barrier_stop")
+        FixedSizeBarrier::stop(self);
     }
 }
