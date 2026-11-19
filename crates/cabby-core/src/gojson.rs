@@ -66,6 +66,23 @@ impl Formatter for GoFormatter {
     }
 }
 
+/// Go's `omitempty` test for the shapes generated from the RPC proto: the zero
+/// value of strings, numbers, bools, slices and maps, and a nil (`None`) message.
+/// Used as `#[serde(skip_serializing_if = "...")]`.
+pub fn is_zero<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
+}
+
+/// Serializes a string map with sorted keys, as Go's `encoding/json` writes maps.
+/// Used as `#[serde(serialize_with = "...")]`.
+pub fn sorted_string_map<S: serde::Serializer>(
+    map: &std::collections::HashMap<String, String>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let sorted: std::collections::BTreeMap<&str, &str> = map.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    serializer.collect_map(sorted)
+}
+
 /// Serializes `value` exactly as Go's `json.Marshal` would.
 pub fn to_vec<T: Serialize + ?Sized>(value: &T) -> Vec<u8> {
     let mut out = Vec::with_capacity(128);

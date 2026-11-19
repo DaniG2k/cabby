@@ -15,6 +15,7 @@ cabby-core = { path = "crates/cabby-core" }
 cabby-server = { path = "crates/cabby-server" }
 cabby-testkit = { path = "crates/cabby-testkit" }
 anyhow = "1.0.104"
+arc-swap = "1.9.3"
 base64 = "0.22.1"
 bytes = "1.12.1"
 clap = { version = "4.6.7", features = ["derive"] }
@@ -25,16 +26,20 @@ http-body-util = "0.1.5"
 hyper = { version = "1.12.0", features = ["server", "http1"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
 prost = "0.14.6"
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8.5"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["arbitrary_precision", "raw_value"] }
 sha2 = "0.11.1"
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
-tokio-stream = { version = "0.1.19", features = ["net"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+tokio-stream ={ version = "0.1.19", features = ["net"] }
 tokio-util = "0.7.20"
 toml = "1.2.1"
 tonic = "0.14.9"
 tonic-prost = "0.14.9"
+tower = { version = "0.5.3", features = ["util"] }
 tonic-prost-build = "0.14.9"
 tungstenite = "0.30.0"
 
