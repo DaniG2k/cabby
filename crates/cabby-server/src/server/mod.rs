@@ -1,11 +1,33 @@
-//! HTTP server helpers (upstream package `server`).
+//! HTTP server (upstream package `server`): the hyper-based server shared by the
+//! WebSocket, health, broadcast, API and metrics endpoints ([`HttpServer`],
+//! [`for_port`]), request inspection ([`RequestInfo`], [`fetch_uid`], the headers
+//! extractor), origin matching and CORS headers.
 
-use std::collections::HashMap;
-
-use cabby_core::pending;
 use cabby_core::toml_config::go_quote;
 
+mod http_server;
+mod mounts;
+mod request;
+#[cfg(test)]
+pub(crate) mod tests;
+
+pub use mounts::{api_handler, metrics_handler};
+
 pub use cabby_core::logger::TomlError;
+pub use http_server::{
+    Body, BodyError, BoxError, ConnInfo, Handler, HttpServer, Request, Response, ResponseFuture, ServerDefaults,
+    ServerError, conn_info, current_defaults, empty, error_response, for_port, full, not_found, read_body,
+    runtime_handle, set_defaults, status_response,
+};
+pub use request::{
+    DefaultHeadersExtractor, HEALTH_MESSAGE, HeadersExtractor, HttpRequest, HttpResponse, REMOTE_ADDR_HEADER,
+    RequestError, RequestInfo, fetch_uid, health_handler, write_cors_headers,
+};
+
+/// The health endpoint as a server handler (upstream `http.HandlerFunc(HealthHandler)`).
+pub fn health_endpoint() -> impl Handler {
+    |_req: Request| async { ::http::Response::new(full(HEALTH_MESSAGE)) }
+}
 
 /// Whether an `Origin` header value matches one of the allowed host patterns
 /// (exact host, `*` for any, `*.example.com` or `*example.com` wildcards).
@@ -175,91 +197,4 @@ impl Config {
         cabby_core::toml_config::decode(self, toml).map_err(|e| TomlError(e.0))?;
         Ok(())
     }
-}
-
-// --- Requests -----------------------------------------------------------------
-
-/// The parts of an incoming HTTP request the server inspects.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct HttpRequest {
-    pub method: String,
-    /// The request target as received: a path (`/cable?x=1`) or an absolute URL.
-    pub target: String,
-    /// The `Host` the request was addressed to.
-    pub host: String,
-    /// Header fields in arrival order; names are case-insensitive.
-    pub headers: Vec<(String, String)>,
-    /// Peer address, `ip:port`.
-    pub remote_addr: String,
-    /// Whether the request arrived over TLS.
-    pub tls: bool,
-}
-
-/// A response produced by a plain HTTP handler.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct HttpResponse {
-    pub status: u16,
-    pub body: Vec<u8>,
-}
-
-/// Upstream `HealthHandler`.
-pub fn health_handler(_req: &HttpRequest) -> HttpResponse {
-    pending!("server::health_handler")
-}
-
-/// Extracts the headers forwarded to the RPC application (upstream `HeadersExtractor`;
-/// `extract_headers` is upstream `FromRequest`).
-pub trait HeadersExtractor {
-    fn extract_headers(&self, req: &HttpRequest) -> HashMap<String, String>;
-}
-
-/// Upstream `DefaultHeadersExtractor`.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct DefaultHeadersExtractor {
-    pub auth_header: String,
-    pub headers: Vec<String>,
-    pub cookies: Vec<String>,
-}
-
-impl HeadersExtractor for DefaultHeadersExtractor {
-    fn extract_headers(&self, _req: &HttpRequest) -> HashMap<String, String> {
-        pending!("server::headers_extractor_from_request")
-    }
-}
-
-/// A request-handling failure.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{0}")]
-pub struct RequestError(pub String);
-
-/// Connection request data (upstream `server.RequestInfo`).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct RequestInfo {
-    pub uid: String,
-    pub url: String,
-    pub headers: Option<HashMap<String, String>>,
-    _anycable_headers: Option<HashMap<String, String>>,
-    _params: Option<HashMap<String, String>>,
-}
-
-impl RequestInfo {
-    /// Upstream `NewRequestInfo` (`extractor: None` collects no headers).
-    pub fn new(_req: &HttpRequest, _extractor: Option<&dyn HeadersExtractor>) -> Result<RequestInfo, RequestError> {
-        pending!("server::new_request_info")
-    }
-
-    /// The last value of a URL query parameter (`""` when missing).
-    pub fn param(&self, _key: &str) -> String {
-        pending!("server::request_info_param")
-    }
-
-    /// The value of an `X-AnyCable-*` header, case-insensitively (`""` when missing).
-    pub fn anycable_header(&self, _key: &str) -> String {
-        pending!("server::request_info_anycable_header")
-    }
-}
-
-/// The connection UID: a valid `X-Request-ID`, or a generated one (upstream `FetchUID`).
-pub fn fetch_uid(_req: &HttpRequest) -> Result<String, RequestError> {
-    pending!("server::fetch_uid")
 }
