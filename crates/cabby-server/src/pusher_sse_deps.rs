@@ -1,16 +1,12 @@
-//! Interfaces from upstream packages that `pusher` and `sse` depend on but that are
-//! ported elsewhere (`node`, `broker`, `broadcast`, `encoders`, `server`, and Go's
-//! `net/http`). These are placeholders sized to what the pusher/sse tests need;
-//! unify them with the real ports when those land. `MemoryBroker` already delegates
-//! to `cabby_core::broker::Memory`; the rest is `pending!`.
+//! Interfaces from upstream packages that `sse` and `ds` depend on but that are
+//! ported elsewhere (`node`, `encoders`, `server`, and Go's `net/http`). These are
+//! placeholders sized to what the sse/ds tests need; unify them with the real ports.
+//! (`pusher` uses the canonical types.)
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use cabby_core::common::{
-    CommandResult, ConnectResult, EncodedMessage, Message, PresenceEvent, PresenceInfo, SentFrame, SessionEnv,
-    StreamMessage,
-};
+use cabby_core::common::{CommandResult, ConnectResult, EncodedMessage, Message, SentFrame, SessionEnv, StreamMessage};
 use cabby_core::pending;
 
 /// An error value (Go `error`); the text is what Go's `err.Error()` would print.
@@ -45,82 +41,6 @@ pub trait Controller: Send + Sync {
     fn disconnect(&self, sid: &str, env: &SessionEnv, ids: &str, subscriptions: &[String]) -> Result<(), Error>;
 }
 
-/// The presence subset of upstream `broker.Broker` used by pusher.
-pub trait Broker: Send + Sync {
-    fn supports_presence(&self) -> bool;
-    fn presence_add(
-        &self,
-        stream: &str,
-        sid: &str,
-        pid: &str,
-        info: serde_json::Value,
-    ) -> Result<Option<PresenceEvent>, Error>;
-    fn presence_info(&self, stream: &str) -> Result<PresenceInfo, Error>;
-}
-
-/// Upstream `broker.Memory` (in-memory broker with presence support): the
-/// canonical [`cabby_core::broker::Memory`] behind pusher's presence subset.
-pub struct MemoryBroker {
-    inner: cabby_core::broker::Memory,
-}
-
-fn broker_error(e: cabby_core::broker::BrokerError) -> Error {
-    Error(e.message)
-}
-
-impl MemoryBroker {
-    #[allow(clippy::new_without_default)]
-    /// `broker.NewMemoryBroker(nil, nil, &broker.NewConfig())`.
-    pub fn new() -> Self {
-        Self {
-            inner: cabby_core::broker::Memory::new(
-                None,
-                None,
-                &cabby_core::broker::Config::new(),
-                Arc::new(cabby_core::broker::SystemClock),
-            ),
-        }
-    }
-
-    /// The canonical broker, for callers that need the full `broker.Broker` API.
-    pub fn inner(&self) -> &cabby_core::broker::Memory {
-        &self.inner
-    }
-
-    pub fn start(&self) -> Result<(), Error> {
-        cabby_core::broker::Broker::start(&self.inner).map_err(broker_error)
-    }
-
-    pub fn shutdown(&self) -> Result<(), Error> {
-        cabby_core::broker::Broker::shutdown(&self.inner).map_err(broker_error)
-    }
-}
-
-impl Broker for MemoryBroker {
-    fn supports_presence(&self) -> bool {
-        cabby_core::broker::Broker::supports_presence(&self.inner)
-    }
-
-    fn presence_add(
-        &self,
-        stream: &str,
-        sid: &str,
-        pid: &str,
-        info: serde_json::Value,
-    ) -> Result<Option<PresenceEvent>, Error> {
-        cabby_core::broker::Broker::presence_add(&self.inner, stream, sid, pid, info).map_err(broker_error)
-    }
-
-    fn presence_info(&self, stream: &str) -> Result<PresenceInfo, Error> {
-        cabby_core::broker::Broker::presence_info(&self.inner, stream, None).map_err(broker_error)
-    }
-}
-
-/// Upstream `broadcast.Handler`: receives raw broadcast payloads.
-pub trait BroadcastHandler: Send + Sync {
-    fn handle_broadcast(&self, payload: &[u8]) -> Result<(), Error>;
-}
-
 /// Upstream `encoders.Encoder`.
 pub trait Encoder: Send + Sync {
     fn id(&self) -> String;
@@ -148,23 +68,6 @@ impl CachedEncodedMessage {
     ) -> Result<Option<SentFrame>, Error> {
         pending!("encoders::cached_encoded_message_fetch")
     }
-}
-
-/// The session operations an executor uses (subset of upstream `node.Session`).
-pub trait ExecutorSession {
-    fn id(&self) -> String;
-    fn identifiers(&self) -> String;
-    fn env(&self) -> SessionEnv;
-    /// `s.GetEnv().MergeChannelState(identifier, &state)`.
-    fn merge_channel_state(&mut self, identifier: &str, state: &cabby_core::common::StringMap);
-    /// Encodes a raw transmission with the session's encoder and writes it.
-    fn send_json_transmission(&mut self, msg: &str);
-}
-
-/// Upstream `node.Executor`: handles decoded client commands for a session.
-pub trait Executor: Send + Sync {
-    fn handle_command(&self, session: &mut dyn ExecutorSession, msg: &Message) -> Result<(), Error>;
-    fn disconnect(&self, session: &mut dyn ExecutorSession) -> Result<(), Error>;
 }
 
 /// Go `http.ResponseWriter` plus `http.Flusher`.

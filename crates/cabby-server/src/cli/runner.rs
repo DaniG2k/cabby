@@ -25,8 +25,8 @@ use cabby_core::utils::all_pools;
 use tokio::runtime::Handle;
 
 use super::adapters::{
-    CoreBroadcaster, CoreBroker, CoreSubscriber, Events, NodeBroker, NodeHandler, RpcController, ShutdownContext,
-    ShutdownFn, SubscriberBroadcaster, block_on, remaining,
+    CoreBroadcaster, CoreBroker, CoreSubscriber, DeferredController, Events, NodeBroker, NodeHandler, RpcController,
+    ShutdownContext, ShutdownFn, SubscriberBroadcaster, block_on, remaining,
 };
 use super::session_options::default_websocket_handler;
 use super::{
@@ -99,6 +99,8 @@ pub struct Runner {
     runtime: Handle,
     node: Option<Arc<Node>>,
     node_broker: Option<Arc<dyn core_broker::Broker>>,
+    /// The router route for the Pusher channel, attached once the broker exists.
+    pusher_controller: Option<Arc<DeferredController>>,
 }
 
 impl std::fmt::Debug for Runner {
@@ -139,6 +141,7 @@ impl Runner {
             runtime: server::runtime_handle(),
             node: None,
             node_broker: None,
+            pusher_controller: None,
         };
         r.check_and_set_defaults(options)?;
         Ok(r)
@@ -342,7 +345,7 @@ impl Runner {
         }
 
         if c.pusher.enabled() {
-            cabby_core::pending!("cli::pusher_handlers");
+            self.mount_pusher(&node, &ws_server)?;
         }
 
         ws_server.setup_handler(&c.server.health_path, server::health_endpoint());
@@ -598,9 +601,19 @@ impl Runner {
             let _ = router.route("CableReady::Stream", Arc::new(StreamsController::cable_ready(&cr_secret)));
             routes.push("CableReady::Stream".to_owned());
         }
+        // Upstream routes the Pusher channel after the node and broker exist; the
+        // route is registered now and its controller attached in `run`. It is not
+        // part of the "Using channels router" line, as upstream logs that earlier.
+        if c.pusher.enabled() {
+            let deferred = Arc::new(DeferredController::default());
+            let _ = router.route(crate::pusher::CHANNEL_NAME, deferred.clone());
+            self.pusher_controller = Some(deferred);
+        }
         if !router.empty() {
             router.set_default(controller);
-            log_info(&format!("Using channels router: {}", routes.join(", ")));
+            if !routes.is_empty() {
+                log_info(&format!("Using channels router: {}", routes.join(", ")));
+            }
             controller = Arc::new(router);
         }
 
@@ -685,6 +698,48 @@ impl Runner {
             out.push(Arc::new(CoreBroadcaster { inner, events: self.events.clone() }));
         }
         Ok(out)
+    }
+
+    /// Upstream: the Pusher WebSocket endpoint, the `$pusher` channel controller
+    /// and the Pusher REST API (on the main port, or its own when `api_port` is set).
+    fn mount_pusher(&mut self, node: &Arc<Node>, ws_server: &server::HttpServer) -> Result<(), CliError> {
+        let c = self.config.clone();
+        let broker = self.node_broker.clone().ok_or_else(|| assertion_failed("broker is not initialized"))?;
+
+        let ws_path = c.pusher.websocket_path();
+        let extractor: Option<crate::ws::SharedHeadersExtractor> =
+            Some(Arc::new(super::session_options::headers_extractor(&c)));
+        ws_server.setup_handler(
+            &ws_path,
+            crate::pusher::websocket_handler(node.clone(), &c.pusher, &c.ws, extractor, c.broker.presence_ttl),
+        );
+        if let Some(deferred) = &self.pusher_controller {
+            deferred.attach(Arc::new(crate::pusher::Controller::new(Some(broker.clone()), c.pusher.clone())));
+        }
+        log_info(&format!("Handle Pusher WebSocket connections at {}{ws_path}", ws_server.address()));
+
+        let handler: Arc<dyn cabby_core::broadcast::Handler> =
+            Arc::new(crate::pusher::NodeBroadcastHandler(node.clone()));
+        if c.pusher.api_port == 0 {
+            let api_path = c.pusher.api_path();
+            let rest = Arc::new(crate::pusher::RestApi::new(handler, broker, c.pusher.clone()));
+            ws_server.setup_handler(&api_path, rest.into_handler());
+            log_info(&format!("Handle Pusher API requests at {}{api_path}", ws_server.address()));
+        } else {
+            let api = Arc::new(crate::pusher::Server::new(handler, broker, c.pusher.clone()));
+            api.start().map_err(|e| {
+                decorate(
+                    CliError(e.to_string()),
+                    &format!("failed to initialize Pusher API server at port {}", c.pusher.api_port),
+                )
+            })?;
+            api.run().map_err(|e| CliError(e.to_string()))?;
+            let (srv, runtime, ctx) = (api.clone(), self.runtime.clone(), self.shutdown_ctx.clone());
+            self.shutdownables.push(Arc::new(ShutdownFn(move || {
+                block_on(&runtime, srv.shutdown(remaining(&ctx.get()))).map_err(|e| CliError(e.to_string()))
+            })));
+        }
+        Ok(())
     }
 
     /// Upstream `startAPIServer`.
