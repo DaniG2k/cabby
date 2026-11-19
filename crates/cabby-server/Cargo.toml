@@ -16,6 +16,7 @@ cabby-core.workspace = true
 async-nats.workspace = true
 getrandom.workspace = true
 hmac.workspace = true
+md5.workspace = true
 sha2.workspace = true
 http.workspace = true
 arc-swap.workspace = true
