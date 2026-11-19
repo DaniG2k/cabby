@@ -20,8 +20,8 @@
       "pass": 914
     },
     "rust": {
-      "pass": 799,
-      "pending": 124
+      "pass": 858,
+      "pending": 65
     },
     "rust_only": {
       "cases": 56
@@ -9297,7 +9297,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/features/mruby_printers.log"
       ]
@@ -12011,7 +12011,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -23063,7 +23063,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23090,7 +23090,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23117,7 +23117,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23144,7 +23144,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23171,7 +23171,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23198,7 +23198,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23225,7 +23225,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23252,7 +23252,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23281,7 +23281,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23310,7 +23310,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23339,7 +23339,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23368,7 +23368,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23397,7 +23397,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23424,7 +23424,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23453,7 +23453,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23480,7 +23480,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23507,7 +23507,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23534,7 +23534,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23561,7 +23561,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23588,7 +23588,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23615,7 +23615,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23642,7 +23642,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23671,7 +23671,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23698,7 +23698,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23725,7 +23725,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23752,7 +23752,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23779,7 +23779,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23808,7 +23808,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23835,7 +23835,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23862,7 +23862,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23889,7 +23889,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23916,7 +23916,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23943,7 +23943,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23970,7 +23970,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -23997,7 +23997,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24024,7 +24024,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24053,7 +24053,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24082,7 +24082,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24109,7 +24109,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24136,7 +24136,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24165,7 +24165,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24192,7 +24192,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24219,7 +24219,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24246,7 +24246,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24273,7 +24273,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24302,7 +24302,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24329,7 +24329,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24356,7 +24356,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24383,7 +24383,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24410,7 +24410,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24437,7 +24437,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24464,7 +24464,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24493,7 +24493,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24522,7 +24522,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24549,7 +24549,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24578,7 +24578,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
@@ -24605,7 +24605,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-mruby-vendored.jsonl"
       ]
