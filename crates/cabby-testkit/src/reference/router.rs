@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use cabby_core::common::{CommandResult, ConnectResult, SessionEnv};
+use cabby_core::common::{CommandResult, ConnectResult, Outcome as CoreOutcome, SessionEnv};
 use cabby_core::router::{Controller, ControllerError, RouterController};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -167,14 +167,17 @@ impl MockController {
 }
 
 fn unit(r: Return) -> Result<(), ControllerError> {
-    r.error.map_or(Ok(()), |e| Err(ControllerError(e)))
+    r.error.map_or(Ok(()), |e| Err(ControllerError::new(e)))
 }
 
-fn command(r: Return) -> Result<Option<CommandResult>, ControllerError> {
-    match r.error {
-        Some(e) => Err(ControllerError(e)),
-        None => Ok(r.command_result),
-    }
+/// testify `Return(result, err)`: both values are returned, as in Go.
+fn command(r: Return) -> CoreOutcome<CommandResult> {
+    CoreOutcome { result: r.command_result, error: r.error.map(ControllerError::new) }
+}
+
+/// The router passes the caller's env through; the mocks expect one.
+fn env_or_default(env: Option<&SessionEnv>) -> SessionEnv {
+    env.cloned().unwrap_or_default()
 }
 
 impl Controller for MockController {
@@ -186,54 +189,39 @@ impl Controller for MockController {
         unit(self.answer(Call::shutdown(), &SessionEnv::default()))
     }
 
-    fn authenticate(&self, sid: &str, env: &SessionEnv) -> Result<Option<ConnectResult>, ControllerError> {
-        let r = self.answer(Call::authenticate(sid), env);
-        match r.error {
-            Some(e) => Err(ControllerError(e)),
-            None => Ok(r.connect_result),
-        }
+    fn authenticate(&self, sid: &str, env: Option<&SessionEnv>) -> CoreOutcome<ConnectResult> {
+        let r = self.answer(Call::authenticate(sid), &env_or_default(env));
+        CoreOutcome { result: r.connect_result, error: r.error.map(ControllerError::new) }
     }
 
-    fn subscribe(
-        &self,
-        sid: &str,
-        env: &SessionEnv,
-        id: &str,
-        channel: &str,
-    ) -> Result<Option<CommandResult>, ControllerError> {
-        command(self.answer(Call::subscribe(sid, id, channel), env))
+    fn subscribe(&self, sid: &str, env: Option<&SessionEnv>, id: &str, channel: &str) -> CoreOutcome<CommandResult> {
+        command(self.answer(Call::subscribe(sid, id, channel), &env_or_default(env)))
     }
 
-    fn unsubscribe(
-        &self,
-        sid: &str,
-        env: &SessionEnv,
-        id: &str,
-        channel: &str,
-    ) -> Result<Option<CommandResult>, ControllerError> {
-        command(self.answer(Call::unsubscribe(sid, id, channel), env))
+    fn unsubscribe(&self, sid: &str, env: Option<&SessionEnv>, id: &str, channel: &str) -> CoreOutcome<CommandResult> {
+        command(self.answer(Call::unsubscribe(sid, id, channel), &env_or_default(env)))
     }
 
     fn perform(
         &self,
         sid: &str,
-        env: &SessionEnv,
+        env: Option<&SessionEnv>,
         id: &str,
         channel: &str,
         data: &str,
-    ) -> Result<Option<CommandResult>, ControllerError> {
-        command(self.answer(Call::perform(sid, id, channel, data), env))
+    ) -> CoreOutcome<CommandResult> {
+        command(self.answer(Call::perform(sid, id, channel, data), &env_or_default(env)))
     }
 
     fn disconnect(
         &self,
         sid: &str,
-        env: &SessionEnv,
+        env: Option<&SessionEnv>,
         id: &str,
         subscriptions: &[String],
     ) -> Result<(), ControllerError> {
         let subs: Vec<&str> = subscriptions.iter().map(String::as_str).collect();
-        unit(self.answer(Call::disconnect(sid, id, &subs), env))
+        unit(self.answer(Call::disconnect(sid, id, &subs), &env_or_default(env)))
     }
 }
 
@@ -247,10 +235,10 @@ fn run_rust(s: &Scenario) -> Outcome {
     let mut out = Outcome::default();
     for name in &s.routes {
         let m = mock(name);
-        out.route_errors.push(subject.route(name, m.clone()).err().map(|e| e.0));
+        out.route_errors.push(subject.route(name, m.clone()).err().map(|e| e.message));
         mocks.push((name.clone(), m));
     }
-    let env = &s.env;
+    let env = Some(&s.env);
     let Some(c) = &s.call else {
         out.calls = mocks.into_iter().map(|(n, m)| (n, m.calls())).collect();
         return out;
@@ -258,31 +246,24 @@ fn run_rust(s: &Scenario) -> Outcome {
     let err = match c.method.as_str() {
         "Start" => subject.start().err(),
         "Shutdown" => subject.shutdown().err(),
-        "Authenticate" => match subject.authenticate(&c.sid, env) {
-            Ok(r) => {
-                out.connect_result = r;
-                None
-            }
-            Err(e) => Some(e),
-        },
+        "Authenticate" => {
+            let res = subject.authenticate(&c.sid, env);
+            out.connect_result = res.result;
+            res.error
+        }
         "Subscribe" | "Unsubscribe" | "Perform" => {
             let res = match c.method.as_str() {
                 "Subscribe" => subject.subscribe(&c.sid, env, &c.id, &c.channel),
                 "Unsubscribe" => subject.unsubscribe(&c.sid, env, &c.id, &c.channel),
                 _ => subject.perform(&c.sid, env, &c.id, &c.channel, &c.data),
             };
-            match res {
-                Ok(r) => {
-                    out.command_result = r;
-                    None
-                }
-                Err(e) => Some(e),
-            }
+            out.command_result = res.result;
+            res.error
         }
         "Disconnect" => subject.disconnect(&c.sid, env, &c.id, &c.subscriptions).err(),
         other => panic!("unknown method {other}"),
     };
-    out.error = err.map(|e| e.0);
+    out.error = err.map(|e| e.message);
     out.calls = mocks.into_iter().map(|(n, m)| (n, m.calls())).collect();
     out
 }

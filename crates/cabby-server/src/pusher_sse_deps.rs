@@ -1,7 +1,8 @@
 //! Interfaces from upstream packages that `pusher` and `sse` depend on but that are
 //! ported elsewhere (`node`, `broker`, `broadcast`, `encoders`, `server`, and Go's
 //! `net/http`). These are placeholders sized to what the pusher/sse tests need;
-//! unify them with the real ports when those land. All behavior is `pending!`.
+//! unify them with the real ports when those land. `MemoryBroker` already delegates
+//! to `cabby_core::broker::Memory`; the rest is `pending!`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -57,38 +58,61 @@ pub trait Broker: Send + Sync {
     fn presence_info(&self, stream: &str) -> Result<PresenceInfo, Error>;
 }
 
-/// Upstream `broker.Memory` (in-memory broker with presence support).
+/// Upstream `broker.Memory` (in-memory broker with presence support): the
+/// canonical [`cabby_core::broker::Memory`] behind pusher's presence subset.
 pub struct MemoryBroker {
-    _private: (),
+    inner: cabby_core::broker::Memory,
+}
+
+fn broker_error(e: cabby_core::broker::BrokerError) -> Error {
+    Error(e.message)
 }
 
 impl MemoryBroker {
     #[allow(clippy::new_without_default)]
     /// `broker.NewMemoryBroker(nil, nil, &broker.NewConfig())`.
     pub fn new() -> Self {
-        pending!("broker::new_memory_broker")
+        Self {
+            inner: cabby_core::broker::Memory::new(
+                None,
+                None,
+                &cabby_core::broker::Config::new(),
+                Arc::new(cabby_core::broker::SystemClock),
+            ),
+        }
+    }
+
+    /// The canonical broker, for callers that need the full `broker.Broker` API.
+    pub fn inner(&self) -> &cabby_core::broker::Memory {
+        &self.inner
     }
 
     pub fn start(&self) -> Result<(), Error> {
-        pending!("broker::memory_start")
+        cabby_core::broker::Broker::start(&self.inner).map_err(broker_error)
     }
 
     pub fn shutdown(&self) -> Result<(), Error> {
-        pending!("broker::memory_shutdown")
+        cabby_core::broker::Broker::shutdown(&self.inner).map_err(broker_error)
     }
 }
 
 impl Broker for MemoryBroker {
     fn supports_presence(&self) -> bool {
-        pending!("broker::memory_supports_presence")
+        cabby_core::broker::Broker::supports_presence(&self.inner)
     }
 
-    fn presence_add(&self, _: &str, _: &str, _: &str, _: serde_json::Value) -> Result<Option<PresenceEvent>, Error> {
-        pending!("broker::memory_presence_add")
+    fn presence_add(
+        &self,
+        stream: &str,
+        sid: &str,
+        pid: &str,
+        info: serde_json::Value,
+    ) -> Result<Option<PresenceEvent>, Error> {
+        cabby_core::broker::Broker::presence_add(&self.inner, stream, sid, pid, info).map_err(broker_error)
     }
 
-    fn presence_info(&self, _: &str) -> Result<PresenceInfo, Error> {
-        pending!("broker::memory_presence_info")
+    fn presence_info(&self, stream: &str) -> Result<PresenceInfo, Error> {
+        cabby_core::broker::Broker::presence_info(&self.inner, stream, None).map_err(broker_error)
     }
 }
 

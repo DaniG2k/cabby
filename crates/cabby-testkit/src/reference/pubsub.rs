@@ -51,12 +51,12 @@ struct RustHandler {
 }
 
 impl rs::Handler for RustHandler {
-    fn broadcast(&self, msg: StreamMessage) {
-        self.messages.push(msg);
+    fn broadcast(&self, msg: &StreamMessage) {
+        self.messages.push(msg.clone());
     }
 
-    fn execute_remote_command(&self, cmd: RemoteCommandMessage) {
-        self.commands.push(cmd);
+    fn execute_remote_command(&self, cmd: &RemoteCommandMessage) {
+        self.commands.push(cmd.clone());
     }
 }
 
