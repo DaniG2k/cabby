@@ -266,6 +266,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cabby-mruby-sys"
+version = "0.0.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "cabby-server"
 version = "0.0.0"
 dependencies = [
@@ -274,6 +281,7 @@ dependencies = [
  "base64",
  "bytes",
  "cabby-core",
+ "cabby-mruby-sys",
  "futures-util",
  "getrandom 0.4.3",
  "hmac",
