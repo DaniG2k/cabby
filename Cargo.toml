@@ -24,6 +24,8 @@ bytes = "1.12.1"
 cc = "1.11.2"
 clap = { version = "4.6.7", features = ["derive"] }
 getrandom = "0.4.3"
+# System time zone for log timestamps (reads TZ / /etc/localtime; no bundled database).
+jiff = { version = "1.0.1", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 hmac = "0.13.0"
 md5 = { package = "md-5", version = "0.11.0" }
 http = "1.5.0"

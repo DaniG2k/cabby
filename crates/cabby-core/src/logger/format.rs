@@ -1,15 +1,14 @@
 //! Record rendering as Go's `slog.NewTextHandler` and `slog.NewJSONHandler` do it.
 //!
-//! Timestamps are UTC with millisecond precision (slog uses the local zone; servers
-//! usually run in UTC). In JSON, lists and maps are rendered from their resolved values;
+//! Timestamps are in the local time zone with millisecond precision, as slog prints
+//! them (`2006-01-02T15:04:05.000+07:00`, `Z` in UTC). In JSON, lists and maps are rendered from their resolved values;
 //! slog marshals the unresolved Go value, which shows wrappers such as `CompactValues`
 //! as `{}` (see `compat/deviations.md`, D-008).
 
-use std::fmt::Write as _;
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use super::gofmt::{is_print, quote};
 use super::{Attr, Level, LogValue};
+use crate::utils::LocalTime;
+use std::fmt::Write as _;
 
 /// Renders a record the way upstream's text handler does (`slog.NewTextHandler`).
 pub fn format_text(level: Level, msg: &str, attrs: &[Attr]) -> String {
@@ -175,29 +174,24 @@ fn json_string(out: &mut String, s: &str, html: bool) {
     out.push('"');
 }
 
-/// The current time as `2006-01-02T15:04:05.000Z`.
+/// The current local time as slog prints it: `2006-01-02T15:04:05.000Z07:00`.
 fn write_time(out: &mut String) {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    let secs = now.as_secs();
-    let millis = now.subsec_millis();
-    let days = (secs / 86_400) as i64;
-    let rem = secs % 86_400;
-    let (y, m, d) = civil_from_days(days);
-    let _ = write!(out, "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{millis:03}Z", rem / 3600, (rem % 3600) / 60, rem % 60);
+    write_rfc3339_millis(out, &LocalTime::now());
 }
 
-/// Days since 1970-01-01 to a proleptic Gregorian date (H. Hinnant's algorithm).
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let y = yoe + era * 400 + i64::from(m <= 2);
-    (y, m, d)
+fn write_rfc3339_millis(out: &mut String, t: &LocalTime) {
+    let _ = write!(
+        out,
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}{}",
+        t.year,
+        t.month,
+        t.day,
+        t.hour,
+        t.minute,
+        t.second,
+        t.millis,
+        t.rfc3339_offset()
+    );
 }
 
 #[cfg(test)]
@@ -246,9 +240,12 @@ mod tests {
     }
 
     #[test]
-    fn converts_days_to_dates() {
-        assert_eq!((1970, 1, 1), civil_from_days(0));
-        assert_eq!((2000, 2, 29), civil_from_days(11_016));
-        assert_eq!((2026, 11, 17), civil_from_days(20_774));
+    fn formats_times_like_slog() {
+        let mut out = String::new();
+        write_rfc3339_millis(&mut out, &LocalTime::at(1_795_000_000, 5, 0));
+        assert_eq!(out, "2026-11-18T11:06:40.005Z");
+        out.clear();
+        write_rfc3339_millis(&mut out, &LocalTime::at(1_795_000_000, 5, 7 * 3600));
+        assert_eq!(out, "2026-11-18T18:06:40.005+07:00");
     }
 }

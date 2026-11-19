@@ -3,9 +3,9 @@
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::sync::{OnceLock, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use cabby_core::logger::{Attr, Level, LogValue, format_json, format_text};
+use cabby_core::utils::LocalTime;
 
 use super::{IntervalWriter, Metrics, MetricsError};
 
@@ -139,20 +139,17 @@ fn write_stdout(line: &str) {
 }
 
 /// tint's text format without colors: `<time> <LVL> <msg> <key=value>...`, the
-/// time as `2006-01-02 15:04:05.000` (UTC, where Go uses the local time zone).
+/// time as `2006-01-02 15:04:05.000` in the local time zone.
 pub fn format_tint(level: Level, msg: &str, attrs: &[Attr]) -> String {
+    format_tint_at(&LocalTime::now(), level, msg, attrs)
+}
+
+fn format_tint_at(t: &LocalTime, level: Level, msg: &str, attrs: &[Attr]) -> String {
     let mut out = String::with_capacity(96);
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    let secs = now.as_secs();
-    let (y, m, d) = civil_from_days(i64::try_from(secs / 86_400).unwrap_or(0));
-    let rem = secs % 86_400;
     let _ = write!(
         out,
-        "{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}.{:03} ",
-        rem / 3600,
-        rem % 3600 / 60,
-        rem % 60,
-        now.subsec_millis()
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03} ",
+        t.year, t.month, t.day, t.hour, t.minute, t.second, t.millis
     );
     out.push_str(match level {
         Level::Debug => "DBG",
@@ -201,19 +198,6 @@ fn tint_string(out: &mut String, s: &str) {
     }
 }
 
-/// Days since 1970-01-01 to a proleptic Gregorian date (H. Hinnant's algorithm).
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = u32::try_from(doy - (153 * mp + 2) / 5 + 1).unwrap_or(1);
-    let m = u32::try_from(if mp < 10 { mp + 3 } else { mp - 9 }).unwrap_or(1);
-    (yoe + era * 400 + i64::from(m <= 2), m, d)
-}
-
 impl IntervalWriter for BasePrinter {
     fn run(&self, interval: u64) -> Result<(), MetricsError> {
         let mut attrs = vec![Attr::new("context", LogValue::String("metrics".into()))];
@@ -241,9 +225,9 @@ impl IntervalWriter for BasePrinter {
 mod logger_tests {
     use super::*;
 
-    /// Pins D-028: tint's text format without colors, timestamps in UTC.
+    /// Pins D-028: tint's text format without colors.
     #[test]
-    fn deviation_d023_text_logs_use_utc_and_no_colors() {
+    fn deviation_d028_text_logs_have_no_colors() {
         let line = format_tint(
             Level::Info,
             "Starting AnyCable",
@@ -257,6 +241,15 @@ mod logger_tests {
         assert_eq!(b' ', time.as_bytes()[10]);
         assert_eq!(" INF Starting AnyCable nodeid=abc x=\"a b\" n=2\n", rest);
         assert_eq!(" WRN k=v\n", &format_tint(Level::Warn, "", &[Attr::new("k", LogValue::String("v".into()))])[23..]);
+    }
+
+    /// tint prints the time in the local zone (Go's `time.Local`).
+    #[test]
+    fn text_log_times_are_local() {
+        // 2026-11-18T11:06:40Z in Bangkok.
+        let t = LocalTime::at(1_795_000_000, 42, 7 * 3600);
+        let line = format_tint_at(&t, Level::Info, "m", &[]);
+        assert_eq!(line, "2026-11-18 18:06:40.042 INF m\n");
     }
 
     #[test]
