@@ -1,10 +1,18 @@
 //! Embedded NATS server (upstream package `enats`).
 //!
-//! Status: interfaces only; every behavior is `pending!`. The embedded-NATS
-//! strategy is a separate milestone (SPEC.md §3); translated tests that need a
-//! NATS server use an external `nats-server` for now.
+//! Upstream links the NATS server (a Go library) into the binary. There is no
+//! maintained NATS server in Rust, so Cabby runs the official `nats-server`
+//! binary as a supervised child process configured from [`Config`] (see
+//! `docs/enats.md` for the strategy and its limits). The binary is found in
+//! `CABBY_NATS_SERVER`, next to the Cabby executable, or on `PATH`.
 
-use cabby_core::pending;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
+
 use cabby_core::toml_config::string_list;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,25 +146,446 @@ impl Config {
     }
 }
 
-/// Embedded NATS service (upstream `enats.Service`).
+/// Upstream `serverStartTimeout`: how long `start` waits for the server to
+/// accept connections.
+const SERVER_START_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long `shutdown` waits for a graceful exit before killing the server.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+const PROBE_INTERVAL: Duration = Duration::from_millis(20);
+
+/// `host` and `port` of a `scheme://[user@]host:port` address (upstream
+/// `url.Parse` + `Hostname()`/`Port()`). A missing port is reported as `None`.
+fn parse_host_port(addr: &str) -> Result<(String, Option<u16>), EnatsError> {
+    let rest = addr.split_once("://").map_or(addr, |(_, r)| r);
+    let rest = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let hostport = rest.rsplit_once('@').map_or(rest, |(_, h)| h);
+    let (host, port) = if let Some(v6) = hostport.strip_prefix('[') {
+        let (host, tail) = v6.split_once(']').ok_or_else(|| EnatsError(format!("invalid address: {addr}")))?;
+        (host, tail.strip_prefix(':'))
+    } else {
+        match hostport.rsplit_once(':') {
+            Some((h, p)) => (h, Some(p)),
+            None => (hostport, None),
+        }
+    };
+    let port = match port.filter(|p| !p.is_empty()) {
+        Some(p) => Some(p.parse::<u16>().map_err(|e| EnatsError(format!("port is not valid: {p}: {e}")))?),
+        None => None,
+    };
+    Ok((host.to_owned(), port))
+}
+
+fn address_with_port(addr: &str, what: &str) -> Result<(String, u16), EnatsError> {
+    match parse_host_port(addr) {
+        Ok((host, Some(port))) => Ok((host, port)),
+        Ok((_, None)) => Err(EnatsError(format!("failed to parse {what}, cause: port cannot be empty"))),
+        Err(e) => Err(EnatsError(format!("failed to parse {what}, cause: {e}"))),
+    }
+}
+
+/// A quoted string in the nats-server configuration format (JSON-compatible).
+fn quote(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_else(|_| "\"\"".into())
+}
+
+fn quote_list<'a>(items: impl IntoIterator<Item = &'a str>) -> String {
+    format!("[{}]", items.into_iter().map(quote).collect::<Vec<_>>().join(", "))
+}
+
+fn random_suffix(size: usize) -> String {
+    const ALPHABET: &[u8; 64] = b"_-0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let mut bytes = vec![0u8; size];
+    let _ = getrandom::fill(&mut bytes);
+    bytes.iter().map(|b| ALPHABET[usize::from(b & 63)] as char).collect()
+}
+
+/// The `nats-server` executable: `CABBY_NATS_SERVER`, a `nats-server` next to
+/// the running executable, or `nats-server` on `PATH`.
+pub fn server_binary() -> PathBuf {
+    if let Some(p) = std::env::var_os("CABBY_NATS_SERVER").filter(|p| !p.is_empty()) {
+        return PathBuf::from(p);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let bundled = exe.with_file_name(format!("nats-server{}", std::env::consts::EXE_SUFFIX));
+        if bundled.is_file() {
+            return bundled;
+        }
+    }
+    PathBuf::from("nats-server")
+}
+
+struct Running {
+    child: Child,
+    output: Arc<Mutex<Vec<u8>>>,
+    conf_path: PathBuf,
+    host: String,
+    port: u16,
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Embedded NATS service (upstream `enats.Service`), backed by a supervised
+/// `nats-server` child process.
 pub struct Service {
-    _private: (),
+    config: Config,
+    name: Mutex<String>,
+    running: Mutex<Option<Running>>,
 }
 
 impl Service {
-    pub fn new(_config: &Config) -> Self {
-        pending!("enats::new_service")
+    /// Upstream `NewService(config)`.
+    pub fn new(config: &Config) -> Self {
+        Self { config: config.clone(), name: Mutex::new(String::new()), running: Mutex::new(None) }
     }
 
+    /// The server name: the configured one, or the service address with `:`
+    /// and `/` replaced plus a random suffix (upstream `serverName`).
+    pub fn server_name(&self) -> String {
+        let mut name = lock(&self.name);
+        if name.is_empty() {
+            *name = if self.config.name.is_empty() {
+                format!("{}-{}", self.config.service_addr.replace(':', "-").replace('/', ""), random_suffix(3))
+            } else {
+                self.config.name.clone()
+            };
+        }
+        name.clone()
+    }
+
+    /// The nats-server configuration equivalent to upstream's `server.Options`.
+    pub fn server_config(&self) -> Result<String, EnatsError> {
+        let c = &self.config;
+        let (host, port) = match parse_host_port(&c.service_addr) {
+            Ok((host, Some(port))) => (host, port),
+            Ok((_, None)) => {
+                return Err(EnatsError("failed to parse NATS server URL, can not fetch port".into()));
+            }
+            Err(e) => return Err(EnatsError(format!("error parsing NATS service addr, cause: {e}"))),
+        };
+        let name = self.server_name();
+        let mut out = String::new();
+        out.push_str(&format!("server_name: {}\n", quote(&name)));
+        out.push_str(&format!("host: {}\nport: {port}\n", quote(&host)));
+        out.push_str(&format!("debug: {}\ntrace: {}\n", c.debug, c.trace));
+        if c.max_payload > 0 {
+            out.push_str(&format!("max_payload: {}\n", c.max_payload));
+        }
+        if c.jetstream {
+            let store = if c.store_dir.is_empty() {
+                std::env::temp_dir().join("nats-data").join(&name).display().to_string()
+            } else {
+                c.store_dir.clone()
+            };
+            out.push_str(&format!("jetstream: {{\n  store_dir: {}\n}}\n", quote(&store)));
+        }
+        let cluster = if !c.cluster_addr.is_empty() && !c.cluster_name.is_empty() {
+            Some(
+                address_with_port(&c.cluster_addr, "cluster URL")
+                    .map_err(|e| EnatsError(format!("failed to configure NATS cluster, cause: {}", e.0)))?,
+            )
+        } else {
+            None
+        };
+        if cluster.is_some() || !c.routes.is_empty() {
+            out.push_str("cluster: {\n");
+            if let Some((h, p)) = &cluster {
+                out.push_str(&format!("  name: {}\n  host: {}\n  port: {p}\n", quote(&c.cluster_name), quote(h)));
+            }
+            if !c.routes.is_empty() {
+                out.push_str(&format!("  routes: {}\n", quote_list(c.routes.iter().map(String::as_str))));
+            }
+            out.push_str("}\n");
+        }
+        if !c.gateway_addr.is_empty() && !c.cluster_name.is_empty() {
+            let (h, p) = address_with_port(&c.gateway_addr, "gateway URL")
+                .map_err(|e| EnatsError(format!("failed to configure NATS gateway, cause: {}", e.0)))?;
+            out.push_str(&format!(
+                "gateway: {{\n  name: {}\n  host: {}\n  port: {p}\n",
+                quote(&c.cluster_name),
+                quote(&h)
+            ));
+            if !c.gateway_advertise.is_empty() {
+                out.push_str(&format!("  advertise: {}\n", quote(&c.gateway_advertise)));
+            }
+            if !c.gateways.is_empty() {
+                out.push_str("  gateways: [\n");
+                for g in &c.gateways {
+                    let (gname, urls) = g.split_once(':').ok_or_else(|| {
+                        EnatsError(format!("failed to configure NATS gateway, cause: gateway has unknown format: {g}"))
+                    })?;
+                    out.push_str(&format!(
+                        "    {{ name: {}, urls: {} }}\n",
+                        quote(gname),
+                        quote_list(urls.split(',').map(str::trim))
+                    ));
+                }
+                out.push_str("  ]\n");
+            }
+            out.push_str("}\n");
+        }
+        Ok(out)
+    }
+
+    /// Starts the server and waits until it accepts connections (upstream
+    /// `Start` + `WaitReady`). JetStream readiness is not awaited, as upstream
+    /// (see [`Service::wait_jetstream_ready`]).
     pub fn start(&self) -> Result<(), EnatsError> {
-        pending!("enats::start")
+        self.start_with(&server_binary())
     }
 
+    /// [`Service::start`] with an explicit `nats-server` executable.
+    pub fn start_with(&self, bin: &Path) -> Result<(), EnatsError> {
+        let conf = self.server_config()?;
+        let (host, port) = match parse_host_port(&self.config.service_addr)? {
+            (h, Some(p)) => (h, p),
+            (_, None) => return Err(EnatsError("failed to parse NATS server URL, can not fetch port".into())),
+        };
+        let conf_path = std::env::temp_dir().join(format!("cabby-enats-{}-{}.conf", std::process::id(), port));
+        std::fs::write(&conf_path, conf)
+            .map_err(|e| EnatsError(format!("failed to start NATS server, cause: writing {conf_path:?}: {e}")))?;
+
+        let mut child = Command::new(bin)
+            .arg("-c")
+            .arg(&conf_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| EnatsError(format!("failed to start NATS server, cause: running {bin:?}: {e}")))?;
+
+        // Drain the output continuously; it is echoed to stderr in debug mode
+        // (upstream routes server logs to its logger only when debugging).
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let echo = self.config.debug || self.config.trace;
+        let streams: [Box<dyn Read + Send>; 2] = [
+            Box::new(child.stdout.take().expect("piped stdout")),
+            Box::new(child.stderr.take().expect("piped stderr")),
+        ];
+        for stream in streams {
+            let sink = Arc::clone(&output);
+            std::thread::spawn(move || {
+                for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                    if echo {
+                        let _ = writeln!(std::io::stderr(), "{line}");
+                    }
+                    let mut buf = lock(&sink);
+                    buf.extend_from_slice(line.as_bytes());
+                    buf.push(b'\n');
+                }
+            });
+        }
+
+        *lock(&self.running) = Some(Running { child, output, conf_path, host, port });
+        self.wait_ready()
+    }
+
+    /// Waits until the server accepts connections (upstream `WaitReady`).
     pub fn wait_ready(&self) -> Result<(), EnatsError> {
-        pending!("enats::wait_ready")
+        let deadline = Instant::now() + SERVER_START_TIMEOUT;
+        loop {
+            {
+                let mut running = lock(&self.running);
+                let Some(r) = running.as_mut() else {
+                    return Err(EnatsError("NATS server is not started".into()));
+                };
+                if let Ok(Some(status)) = r.child.try_wait() {
+                    let out = String::from_utf8_lossy(&lock(&r.output)).into_owned();
+                    return Err(EnatsError(format!("failed to start NATS server: exited with {status}\n{out}")));
+                }
+                let addr = (r.host.as_str(), r.port).to_socket_addrs().ok().and_then(|mut a| a.next());
+                if let Some(addr) = addr
+                    && TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
+                {
+                    return Ok(());
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err(EnatsError(format!(
+                    "failed to start NATS server within {} seconds",
+                    SERVER_START_TIMEOUT.as_secs()
+                )));
+            }
+            std::thread::sleep(PROBE_INTERVAL);
+        }
     }
 
+    /// Waits up to `max_seconds` for JetStream to answer API requests
+    /// (upstream `WaitJetStreamReady`); a no-op without JetStream.
+    pub fn wait_jetstream_ready(&self, max_seconds: i64) -> Result<(), EnatsError> {
+        if !self.config.jetstream {
+            return Ok(());
+        }
+        let url = {
+            let running = lock(&self.running);
+            let r = running.as_ref().ok_or_else(|| EnatsError("NATS server is not started".into()))?;
+            format!("nats://{}:{}", r.host, r.port)
+        };
+        let max = Duration::from_secs(u64::try_from(max_seconds).unwrap_or(0));
+        cabby_core::nats::client::block_on(async move {
+            let start = Instant::now();
+            loop {
+                if start.elapsed() > max {
+                    return Err(EnatsError(format!("JetStream is not ready after {} seconds", max.as_secs())));
+                }
+                if let Ok(client) = async_connect(&url).await {
+                    let js = async_nats::jetstream::new(client);
+                    if js.query_account().await.is_ok() {
+                        return Ok(());
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        })
+    }
+
+    /// A one-line summary for logs (upstream `Description`).
+    pub fn description(&self) -> String {
+        let c = &self.config;
+        let mut out = format!("server_name: {}", self.server_name());
+        if !c.cluster_addr.is_empty() {
+            out.push_str(&format!(", cluster: {}, cluster_name: {}", c.cluster_addr, c.cluster_name));
+        }
+        if !c.routes.is_empty() {
+            out.push_str(&format!(", routes: {}", c.routes.join(",")));
+        }
+        if !c.gateway_addr.is_empty() {
+            out.push_str(&format!(", gateway: {}, gateways: [{}]", c.gateway_addr, c.gateways.join(" ")));
+            if !c.gateway_advertise.is_empty() {
+                out.push_str(&format!(", gateway_advertise: {}", c.gateway_advertise));
+            }
+        }
+        out
+    }
+
+    /// Stops the server gracefully (SIGINT: JetStream is flushed, lame-duck
+    /// clients are told), killing it if it does not exit in time.
     pub fn shutdown(&self) -> Result<(), EnatsError> {
-        pending!("enats::shutdown")
+        let Some(mut r) = lock(&self.running).take() else {
+            return Ok(());
+        };
+        stop_child(&mut r.child);
+        let _ = std::fs::remove_file(&r.conf_path);
+        Ok(())
+    }
+}
+
+async fn async_connect(url: &str) -> Result<async_nats::Client, async_nats::ConnectError> {
+    async_nats::ConnectOptions::new().connection_timeout(Duration::from_secs(1)).connect(url).await
+}
+
+fn stop_child(child: &mut Child) {
+    if matches!(child.try_wait(), Ok(Some(_))) {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill")
+            .arg("-INT")
+            .arg(child.id().to_string())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
+        while Instant::now() < deadline {
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            std::thread::sleep(PROBE_INTERVAL);
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+impl Drop for Service {
+    fn drop(&mut self) {
+        let _ = self.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_addresses() {
+        assert_eq!(("127.0.0.1".to_owned(), Some(4222)), parse_host_port("nats://127.0.0.1:4222").unwrap());
+        assert_eq!(("localhost".to_owned(), Some(6222)), parse_host_port("localhost:6222").unwrap());
+        assert_eq!(("::1".to_owned(), Some(4222)), parse_host_port("nats://[::1]:4222").unwrap());
+        assert_eq!(("h".to_owned(), None), parse_host_port("nats://user:pw@h").unwrap());
+        assert!(parse_host_port("nats://h:port").is_err());
+    }
+
+    #[test]
+    fn server_config_mirrors_upstream_options() {
+        let config = Config {
+            name: "n1".into(),
+            service_addr: "nats://127.0.0.1:4242".into(),
+            cluster_addr: "nats://127.0.0.1:4342".into(),
+            cluster_name: "c1".into(),
+            gateway_addr: "nats://127.0.0.1:4442".into(),
+            gateways: vec!["c2:nats://127.0.0.1:4443,nats://127.0.0.1:4444".into()],
+            routes: vec!["nats://127.0.0.1:4343".into()],
+            jetstream: true,
+            store_dir: "/tmp/store".into(),
+            max_payload: 2048,
+            ..Config::new()
+        };
+        let conf = Service::new(&config).server_config().unwrap();
+        for line in [
+            "server_name: \"n1\"",
+            "host: \"127.0.0.1\"\nport: 4242",
+            "max_payload: 2048",
+            "store_dir: \"/tmp/store\"",
+            "  name: \"c1\"\n  host: \"127.0.0.1\"\n  port: 4342",
+            "  routes: [\"nats://127.0.0.1:4343\"]",
+            "gateway: {\n  name: \"c1\"\n  host: \"127.0.0.1\"\n  port: 4442",
+            "{ name: \"c2\", urls: [\"nats://127.0.0.1:4443\", \"nats://127.0.0.1:4444\"] }",
+        ] {
+            assert!(conf.contains(line), "{line:?} not in:\n{conf}");
+        }
+
+        let mut no_port = Config::new();
+        no_port.service_addr = "nats://127.0.0.1".into();
+        assert_eq!(
+            "failed to parse NATS server URL, can not fetch port",
+            Service::new(&no_port).server_config().unwrap_err().0
+        );
+    }
+
+    #[test]
+    fn generated_server_name() {
+        let service = Service::new(&Config::new());
+        let name = service.server_name();
+        assert!(name.starts_with("nats-127.0.0.1-4222-"), "{name}");
+        assert_eq!(name, service.server_name());
+    }
+
+    /// Runs the real server when the test services binary is available
+    /// (`target/test-services/nats-server`, built by the test kit) or
+    /// `CABBY_NATS_SERVER` is set.
+    #[test]
+    fn starts_and_stops_nats_server() {
+        let built = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-services/nats-server");
+        if std::env::var_os("CABBY_NATS_SERVER").is_none() && !built.is_file() {
+            return;
+        }
+        let bin = std::env::var_os("CABBY_NATS_SERVER").map_or(built, PathBuf::from);
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let store = std::env::temp_dir().join(format!("cabby-enats-test-{port}"));
+        let config = Config {
+            service_addr: format!("nats://127.0.0.1:{port}"),
+            jetstream: true,
+            store_dir: store.display().to_string(),
+            ..Config::new()
+        };
+        let service = Service::new(&config);
+        service.start_with(&bin).expect("start");
+        service.wait_jetstream_ready(10).expect("JetStream ready");
+        service.shutdown().expect("shutdown");
+        assert!(TcpStream::connect(("127.0.0.1", port)).is_err());
+        let _ = std::fs::remove_dir_all(store);
     }
 }
