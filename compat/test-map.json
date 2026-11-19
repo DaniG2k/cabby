@@ -20,11 +20,11 @@
       "pass": 914
     },
     "rust": {
-      "pass": 543,
-      "pending": 380
+      "pass": 597,
+      "pending": 326
     },
     "rust_only": {
-      "cases": 54
+      "cases": 56
     },
     "translation": {
       "reviewed": 923
@@ -2356,7 +2356,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]
@@ -7012,7 +7012,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-redis.log (pass)",
@@ -7054,7 +7054,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-redis.log (pass)",
@@ -7090,7 +7090,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-redis.log (pass)"
@@ -7123,7 +7123,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-redis.log (pass)"
@@ -7156,7 +7156,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-redis.log (pass)"
@@ -7190,7 +7190,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-redis.log (pass)"
       ]
@@ -7220,7 +7220,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-redis.log (pass)"
@@ -7253,7 +7253,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-redis.log (pass)"
@@ -7286,7 +7286,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-redis.log (pass)"
@@ -9102,7 +9102,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/benchmarks/broadcasts.log"
       ]
@@ -9130,7 +9130,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/features/enats_broker.log"
       ]
@@ -9158,7 +9158,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/features/enats_clusters.log"
       ]
@@ -9215,7 +9215,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/benchmarks/goroutines.log"
       ]
@@ -9241,7 +9241,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/features/jwt.log"
       ]
@@ -9269,7 +9269,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/features/metrics.log"
       ]
@@ -9325,7 +9325,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/features/ping.log"
       ]
@@ -9353,7 +9353,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/features/ping_pong.log"
       ]
@@ -9465,7 +9465,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/features/shutdown.log"
       ]
@@ -9519,7 +9519,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/features/standalone.log"
       ]
@@ -9547,7 +9547,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/features/streams.log"
       ]
@@ -9575,7 +9575,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/features/turbo_rpc_less.log"
       ]
@@ -24780,7 +24780,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -24826,7 +24826,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-nats.log (pass)",
@@ -24872,7 +24872,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -24919,7 +24919,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -24968,7 +24968,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25016,7 +25016,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25063,7 +25063,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25109,7 +25109,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25154,7 +25154,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25201,7 +25201,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25248,7 +25248,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25295,7 +25295,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-nats.log (pass)",
@@ -25340,7 +25340,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25388,7 +25388,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25436,7 +25436,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25483,7 +25483,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25530,7 +25530,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-nats.log (pass)",
@@ -25576,7 +25576,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25624,7 +25624,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25669,7 +25669,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25717,7 +25717,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-redis.log (pass)",
@@ -25761,7 +25761,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25809,7 +25809,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25853,7 +25853,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25900,7 +25900,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25948,7 +25948,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -25995,7 +25995,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -26040,7 +26040,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -26086,7 +26086,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-nats.log (pass)",
@@ -26131,7 +26131,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -26177,7 +26177,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-nats.log (pass)",
@@ -26222,7 +26222,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "pass",
-      "rust_status": "pending",
+      "rust_status": "pass",
       "evidence": [
         "compat/baseline/conformance/test-conformance.log (pass)",
         "compat/baseline/conformance/test-conformance-broker-http.log (pass)",
@@ -26262,7 +26262,7 @@
         "26a1a703:api/publish_test.go#TestPublishHandler/Accepts_when_authorization_header_is_valid"
       ],
       "reference_status": "pass",
-      "rust_status": "pending"
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::api::publish_rejects_bad_credentials",
@@ -26273,7 +26273,7 @@
         "26a1a703:api/auth_test.go#TestAuthenticator/Authenticate_rejects_non-Bearer_auth"
       ],
       "reference_status": "pass",
-      "rust_status": "pending"
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::api::publish_rejects_non_post_requests",
@@ -26282,7 +26282,7 @@
         "26a1a703:api/publish_test.go#TestPublishHandler/Rejects_non-POST_requests"
       ],
       "reference_status": "pass",
-      "rust_status": "pending"
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::health::health_endpoint_answers_ok",
@@ -26291,7 +26291,7 @@
         "26a1a703:server/health_handler_test.go#TestHealthHandler"
       ],
       "reference_status": "pass",
-      "rust_status": "pending"
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::issues::delivery_recovers_after_redis_drops_the_stream_subscription",
@@ -26300,7 +26300,7 @@
         "anycable/anycable/issues/275"
       ],
       "reference_status": "upstream_failure",
-      "rust_status": "pending"
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::issues::delivery_recovers_after_the_subscriber_connection_goes_half_open",
@@ -26309,7 +26309,7 @@
         "anycable/anycable/issues/275"
       ],
       "reference_status": "upstream_failure",
-      "rust_status": "pending"
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::issues::redis_pubsub_channels_are_released_when_streams_have_no_subscribers",
@@ -26318,7 +26318,7 @@
         "anycable/anycable/issues/263"
       ],
       "reference_status": "pass",
-      "rust_status": "pending"
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::origin::absent_origin_header",
@@ -26327,7 +26327,7 @@
         "26a1a703:ws/handler_test.go#TestCheckOriginWithoutHeader"
       ],
       "reference_status": "pass",
-      "rust_status": "pending"
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::origin::case_insensitive_hosts_and_lists",
@@ -26336,7 +26336,7 @@
         "26a1a703:ws/handler_test.go#TestCheckOrigin"
       ],
       "reference_status": "pass",
-      "rust_status": "pending"
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::origin::empty_entries_are_ignored",
@@ -26345,7 +26345,7 @@
         "26a1a703:ws/handler_test.go#TestCheckOriginEmptyEntries"
       ],
       "reference_status": "pass",
-      "rust_status": "pending"
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::origin::wildcard_domain_boundaries",
@@ -26354,7 +26354,7 @@
         "26a1a703:ws/handler_test.go#TestCheckOriginWildcards"
       ],
       "reference_status": "pass",
-      "rust_status": "pending"
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::pusher::presence_subscription",
@@ -26519,6 +26519,24 @@
       ],
       "reference_status": "pass",
       "rust_status": "pending"
+    },
+    {
+      "rust_case": "conformance::threads::broadcast_fan_out_does_not_add_threads",
+      "relation": "issue",
+      "links": [
+        "anycable/anycable/issues/265"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::threads::idle_connections_do_not_add_threads",
+      "relation": "issue",
+      "links": [
+        "anycable/anycable/issues/265"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pass"
     },
     {
       "rust_case": "ds::ds_test::test_stream_generate_cursor::cursors_progress_numerically",

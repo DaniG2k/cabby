@@ -2,15 +2,22 @@
 
 use std::sync::{Arc, Mutex};
 
-use cabby_core::common::{RemoteCommandMessage, StreamMessage};
-use cabby_core::pending;
+use cabby_core::common::{Controller, RemoteCommandMessage, StreamMessage};
 
 use crate::config::Config;
 
+mod adapters;
 mod flags;
 mod options;
+mod runner;
+mod session_options;
+mod signals;
 
 pub use options::{new_config_from_cli, new_config_from_cli_to, parse_tags};
+pub use runner::{Embedded, Runner};
+pub use session_options::{
+    ACTION_CABLE_V1_EXT_JSON, ACTION_CABLE_V1_JSON, action_cable_protocols, is_extended_action_cable_protocol,
+};
 
 /// A CLI or runner failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -39,15 +46,50 @@ pub enum CliOption {
 
 /// Runs a server node with the configuration from [`new_config_from_cli`]
 /// (upstream `main`: `NewRunner` with the default components, then `Run`).
-pub fn run(_config: Config) -> Result<(), CliError> {
-    pending!("cli::run")
+///
+/// Builds the Tokio runtime the server's I/O runs on (one worker per CPU, like
+/// Go's `GOMAXPROCS`), then blocks until the server stops.
+pub fn run(config: Config) -> Result<(), CliError> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .thread_name("cabby-io")
+        .enable_all()
+        .build()
+        .map_err(|e| CliError(format!("failed to start the runtime: {e}")))?;
+    let result = {
+        let _guard = runtime.enter();
+        set_command_pool_size(&config);
+        Runner::new(
+            config,
+            vec![
+                RunnerOption::Name("AnyCable".into()),
+                RunnerOption::DefaultRpcController,
+                RunnerOption::DefaultBroker,
+                RunnerOption::DefaultSubscriber,
+                RunnerOption::DefaultBroadcaster,
+                RunnerOption::Telemetry(Vec::new()),
+            ],
+        )
+        .and_then(|mut runner| runner.run())
+    };
+    // Connections still open are dropped with the runtime; do not wait for them.
+    runtime.shutdown_timeout(std::time::Duration::from_millis(100));
+    result
+}
+
+/// Sizes the node's command pool: twice the RPC concurrency, so commands
+/// waiting for an RPC slot leave room for those that need none, and at least
+/// the default.
+fn set_command_pool_size(config: &Config) {
+    let rpc = usize::try_from(config.rpc.concurrency).unwrap_or(0);
+    crate::node::set_command_concurrency((rpc * 2).max(crate::node::DEFAULT_COMMAND_CONCURRENCY));
 }
 
 // --- Runner -------------------------------------------------------------------
 //
-// Minimal views of the upstream interfaces the runner composes (broadcast.Broadcaster,
-// broadcast.Handler, pubsub.Subscriber, pubsub.Handler, broker.Broker).
-// TODO(merge): replace with the traits of the broadcast/pubsub/broker modules.
+// The runner's views of the upstream interfaces it composes (broadcast.Broadcaster,
+// broadcast.Handler, pubsub.Subscriber, pubsub.Handler, broker.Broker): what
+// custom components given as options implement. The default components
+// implement the full interfaces of their modules and are adapted to these.
 
 /// Upstream `cli.Shutdownable`.
 pub trait Shutdownable: Send + Sync {
@@ -95,42 +137,44 @@ pub type SubscriberFactory =
     Box<dyn FnOnce(Arc<dyn SubscriberHandler>, &Config) -> Result<Arc<dyn Subscriber>, CliError> + Send>;
 /// Receives the subscriber the broker publishes through.
 pub type BrokerFactory = Box<dyn FnOnce(Arc<dyn Subscriber>, &Config) -> Result<Arc<dyn Broker>, CliError> + Send>;
+/// Builds the node's controller (upstream `controllerFactory`).
+pub type ControllerFactory =
+    Box<dyn FnOnce(Arc<crate::metrics::Metrics>, &Config) -> Result<Arc<dyn Controller>, CliError> + Send>;
 
 /// Where runner logs go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogSink {
+    /// The process logger as it is (upstream `WithLogger(slog.Default())`).
     Default,
+    /// Nothing is logged.
     Discard,
 }
 
 /// Runner options (upstream `cli.Option` constructors `With*`).
 pub enum RunnerOption {
+    /// `WithName`.
     Name(String),
+    /// `WithLogger`: without it, the runner initializes the process logger from
+    /// the configuration.
     Logger(LogSink),
+    /// `WithDefaultRPCController`.
     DefaultRpcController,
+    /// `WithController`.
+    Controller(ControllerFactory),
+    /// `WithShutdownable`.
     Shutdownable(Arc<dyn Shutdownable>),
+    /// `WithSubscriber`.
     Subscriber(SubscriberFactory),
+    /// `WithDefaultSubscriber`: legacy, Redis or NATS pub/sub from the configuration.
+    DefaultSubscriber,
+    /// `WithBroker`.
     Broker(BrokerFactory),
+    /// `WithDefaultBroker`: legacy, memory or NATS broker from the configuration.
+    DefaultBroker,
+    /// `WithBroadcasters`.
     Broadcasters(BroadcastersFactory),
-}
-
-/// Assembles and runs a server node (upstream `cli.Runner`).
-pub struct Runner {
-    _config: Config,
-}
-
-impl Runner {
-    pub fn new(_config: Config, _options: Vec<RunnerOption>) -> Result<Runner, CliError> {
-        pending!("cli::new_runner")
-    }
-
-    /// Builds and starts the node and its components (upstream unexported `runNode`).
-    pub fn run_node(&mut self) -> Result<(), CliError> {
-        pending!("cli::run_node")
-    }
-
-    /// Components to shut down, in shutdown order (upstream unexported `shutdownables`).
-    pub fn shutdownables(&self) -> Vec<Arc<dyn Shutdownable>> {
-        pending!("cli::shutdownables")
-    }
+    /// `WithDefaultBroadcaster`: the configured broadcast adapters.
+    DefaultBroadcaster,
+    /// `WithTelemetry(props...)`: custom properties as key/value pairs.
+    Telemetry(Vec<String>),
 }

@@ -12,15 +12,27 @@
 //! frames and a single inbound slot, a condition variable for the synchronous
 //! callers, and a [`Notify`] waking the io loop.
 //!
+//! * **Push-model reads.** A server does not block a thread on [`Connection::read`]:
+//!   it registers an [`InboundHandler`] ([`WsConnection::set_inbound_handler`]),
+//!   and the io loop hands each message to it together with a [`ReadPermit`]. The
+//!   io loop reads the next message only once the permit is dropped (the message
+//!   has been executed), so messages are processed one at a time, in order, and
+//!   the client is pushed back through TCP while its commands run. The end of the
+//!   connection is reported once, after the last message.
+//!
 //! * **Back-pressure both ways.** A writer blocks (until its deadline) while the
 //!   outgoing queue is full, so slow clients push back on the session's own
-//!   pending-size accounting as with Go's synchronous writes. The io loop stops
+//!   pending-size accounting as with Go's synchronous writes. Sessions use the
+//!   non-blocking variant ([`Connection::try_write_frame`]): a full queue refuses
+//!   the frame, and the connection calls the session's writable handler once the
+//!   io loop has taken the queued frames. Ping control frames are queued even
+//!   when the queue is full (one per ping interval), so they never wait. The io loop stops
 //!   reading from the socket while the inbound slot is full, so a slow reader
 //!   pushes back on the client through TCP, as with Go's `ReadMessage`.
 //! * **Batching.** The io loop takes every queued frame at once, feeds them to the
 //!   WebSocket and flushes once: a fan-out burst becomes one socket write.
-//! * **Zero-copy frames.** [`WsConnection::write_frame`] takes the hub's shared
-//!   `Arc<SentFrame>` and queues it as is; the payload is referenced (not cloned)
+//! * **Zero-copy frames.** [`Connection::write_frame`] and `try_write_frame` take
+//!   the hub's shared `Arc<SentFrame>` and queue it as is; the payload is referenced (not cloned)
 //!   until it is copied into the socket write buffer. The `&[u8]` methods of the
 //!   node interface must copy once into a `Bytes`.
 //! * **Deadlines.** Each frame carries its deadline: the io loop fails the
@@ -35,7 +47,7 @@
 //! `ws.IsCloseError`.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -112,6 +124,29 @@ fn close_error_text(code: u16, reason: &str) -> String {
     }
 }
 
+/// Receives a connection's messages in push mode (see the module docs).
+pub trait InboundHandler: Send + Sync {
+    /// A text or binary message. The io loop reads the next one after `permit`
+    /// is dropped. Called on the io loop: hand the work over, do not block.
+    fn on_message(&self, msg: Bytes, permit: ReadPermit);
+    /// The connection ended (the read error, e.g. a close); called once, after
+    /// the last message.
+    fn on_end(&self, err: ConnectionError);
+}
+
+/// Permission for the io loop to read the next message (push mode): dropping
+/// it resumes reading.
+pub struct ReadPermit(Weak<Shared>);
+
+impl Drop for ReadPermit {
+    fn drop(&mut self) {
+        if let Some(shared) = self.0.upgrade() {
+            shared.lock().inflight = false;
+            shared.wake.notify_one();
+        }
+    }
+}
+
 /// A frame payload: copied bytes, or the hub's shared frame.
 enum Payload {
     Bytes(Bytes),
@@ -176,6 +211,16 @@ struct State {
     /// Released when the connection ends: it usually holds the session, which
     /// holds this connection.
     pong_handler: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Push mode: receives messages instead of the inbound slot. Released (after
+    /// `on_end`) when the connection ends, like the pong handler.
+    inbound_handler: Option<Arc<dyn InboundHandler>>,
+    /// Push mode: a message is being processed (its permit is alive).
+    inflight: bool,
+    /// Called when a refused non-blocking write may succeed (or the connection
+    /// ended). Released when the connection ends.
+    writable_handler: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// A non-blocking write was refused since the last call of the handler.
+    want_writable: bool,
 }
 
 struct Shared {
@@ -201,13 +246,38 @@ impl Shared {
         drop(pong_handler);
 
         let mut state = self.lock();
-        state.done.get_or_insert(reason);
+        let reason = state.done.get_or_insert(reason).clone();
         state.closing = true;
         state.out.clear();
         let late = state.pong_handler.take();
+        let inbound = state.inbound_handler.take();
+        let writable = state.writable_handler.take();
+        let refused = std::mem::take(&mut state.want_writable);
         drop(state);
         self.cond.notify_all();
         drop(late);
+        // A writer waiting for space finds out that the connection failed.
+        if let Some(handler) = writable.filter(|_| refused) {
+            handler();
+        }
+        if let Some(handler) = inbound {
+            handler.on_end(ConnectionError(reason));
+        }
+    }
+
+    /// Calls the writable handler if a write was refused: the io loop has just
+    /// taken the queued frames.
+    fn signal_writable(&self) {
+        let handler = {
+            let mut state = self.lock();
+            if !std::mem::take(&mut state.want_writable) {
+                return;
+            }
+            state.writable_handler.clone()
+        };
+        if let Some(handler) = handler {
+            handler();
+        }
     }
 }
 
@@ -267,6 +337,33 @@ impl WsConnection {
         }
     }
 
+    /// Switches the connection to push mode: messages (including one already
+    /// received) go to `handler` instead of [`Connection::read`]. If the
+    /// connection has already ended, `handler` gets the pending message, if any,
+    /// and the end right away.
+    pub fn set_inbound_handler(&self, handler: Arc<dyn InboundHandler>) {
+        let shared = self.shared();
+        let mut state = shared.lock();
+        if let Some(reason) = state.done.clone() {
+            let pending = state.inbound.take();
+            drop(state);
+            if let Some(msg) = pending {
+                handler.on_message(msg, ReadPermit(Weak::new()));
+            }
+            handler.on_end(ConnectionError(reason));
+            return;
+        }
+        state.inbound_handler = Some(Arc::clone(&handler));
+        let pending = state.inbound.take();
+        if pending.is_some() {
+            state.inflight = true;
+        }
+        drop(state);
+        if let Some(msg) = pending {
+            handler.on_message(msg, ReadPermit(Arc::downgrade(&self.owner.0)));
+        }
+    }
+
     /// Whether the connection has ended (closed by either side or failed).
     pub fn is_closed(&self) -> bool {
         self.shared().lock().done.is_some()
@@ -299,22 +396,6 @@ impl WsConnection {
         Ok(())
     }
 
-    /// Writes the hub's shared frame without copying its payload: text, binary,
-    /// or close (with its code and reason).
-    pub fn write_frame(&self, frame: &Arc<SentFrame>, deadline: Instant) -> Result<(), ConnectionError> {
-        match frame.frame_type {
-            FrameType::Close => {
-                self.close(frame.close_code, &frame.close_reason);
-                Ok(())
-            }
-            FrameType::Text | FrameType::Binary => self.push(Outbound::Data {
-                text: frame.frame_type == FrameType::Text,
-                payload: Payload::Shared(Arc::clone(frame)),
-                deadline,
-            }),
-        }
-    }
-
     /// Requests the close frame and returns without waiting for it to be written.
     fn request_close(&self, code: i32, reason: &str) -> bool {
         let shared = self.shared();
@@ -341,9 +422,61 @@ impl Connection for WsConnection {
         self.push(Outbound::Data { text: false, payload: Payload::Bytes(Bytes::copy_from_slice(msg)), deadline })
     }
 
-    /// Queues a ping control frame (upstream `WritePing`).
+    /// Queues a ping control frame (upstream `WritePing`), even when the queue is
+    /// full: pings are periodic, and writers must not wait for them.
     fn write_ping(&self, deadline: Instant) -> Result<(), ConnectionError> {
-        self.push(Outbound::Ping { deadline })
+        let shared = self.shared();
+        let mut state = shared.lock();
+        if let Some(err) = &state.done {
+            return Err(ConnectionError(err.clone()));
+        }
+        if state.closing {
+            return Err(ConnectionError(ERR_CLOSE_SENT.to_owned()));
+        }
+        state.out.push_back(Outbound::Ping { deadline });
+        drop(state);
+        shared.wake.notify_one();
+        Ok(())
+    }
+
+    fn nonblocking(&self) -> bool {
+        true
+    }
+
+    /// Queues a shared text or binary frame (`Ok(false)` when the queue is full;
+    /// see the module docs), or requests the close frame without waiting.
+    fn try_write_frame(&self, frame: &Arc<SentFrame>, deadline: Instant) -> Result<bool, ConnectionError> {
+        if frame.frame_type == FrameType::Close {
+            self.request_close(frame.close_code, &frame.close_reason);
+            return Ok(true);
+        }
+        let shared = self.shared();
+        let mut state = shared.lock();
+        if let Some(err) = &state.done {
+            return Err(ConnectionError(err.clone()));
+        }
+        if state.closing {
+            return Err(ConnectionError(ERR_CLOSE_SENT.to_owned()));
+        }
+        if state.out.len() >= MAX_QUEUED {
+            state.want_writable = true;
+            return Ok(false);
+        }
+        state.out.push_back(Outbound::Data {
+            text: frame.frame_type == FrameType::Text,
+            payload: Payload::Shared(Arc::clone(frame)),
+            deadline,
+        });
+        drop(state);
+        shared.wake.notify_one();
+        Ok(true)
+    }
+
+    fn set_writable_handler(&self, handler: Box<dyn Fn() + Send + Sync>) {
+        let mut state = self.shared().lock();
+        if state.done.is_none() {
+            state.writable_handler = Some(Arc::from(handler));
+        }
     }
 
     /// The next text or binary message (upstream `Read`); blocks until one arrives
@@ -361,6 +494,22 @@ impl Connection for WsConnection {
                 return Err(ConnectionError(err.clone()));
             }
             state = shared.cond.wait(state).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
+    /// Writes the hub's shared frame without copying its payload: text, binary,
+    /// or close (with its code and reason).
+    fn write_frame(&self, frame: &Arc<SentFrame>, deadline: Instant) -> Result<(), ConnectionError> {
+        match frame.frame_type {
+            FrameType::Close => {
+                self.close(frame.close_code, &frame.close_reason);
+                Ok(())
+            }
+            FrameType::Text | FrameType::Binary => self.push(Outbound::Data {
+                text: frame.frame_type == FrameType::Text,
+                payload: Payload::Shared(Arc::clone(frame)),
+                deadline,
+            }),
         }
     }
 
@@ -424,7 +573,11 @@ where
         let work = {
             let mut state = shared.lock();
             std::mem::swap(&mut state.out, &mut batch);
-            Work { close: state.close.take(), abandoned: state.abandoned, can_read: state.inbound.is_none() }
+            Work {
+                close: state.close.take(),
+                abandoned: state.abandoned,
+                can_read: state.inbound.is_none() && !state.inflight,
+            }
         };
         if work.abandoned {
             break "connection abandoned".to_owned();
@@ -432,6 +585,7 @@ where
         let wrote = !batch.is_empty();
         if wrote {
             shared.cond.notify_all();
+            shared.signal_writable();
             if let Err(err) = write_batch(&mut ws, &mut batch).await {
                 break err;
             }
@@ -484,7 +638,7 @@ where
 
 /// Handles one read result; `Some(error)` ends the connection.
 async fn handle_inbound<S>(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     ws: &mut WebSocketStream<S>,
     msg: Option<Result<Message, WsError>>,
 ) -> Option<String>
@@ -492,7 +646,15 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let deliver = |payload: Bytes| {
-        shared.lock().inbound = Some(payload);
+        let mut state = shared.lock();
+        if let Some(handler) = state.inbound_handler.clone() {
+            state.inflight = true;
+            drop(state);
+            handler.on_message(payload, ReadPermit(Arc::downgrade(shared)));
+            return;
+        }
+        state.inbound = Some(payload);
+        drop(state);
         shared.cond.notify_all();
     };
     match msg {
