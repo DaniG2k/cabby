@@ -42,6 +42,8 @@ tonic-prost = "0.14.9"
 tower = { version = "0.5.3", features = ["util"] }
 tonic-prost-build = "0.14.9"
 tungstenite = "0.30.0"
+tokio-tungstenite = { version = "0.30.0", default-features = false }
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
