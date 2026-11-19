@@ -6,7 +6,9 @@
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
-use cabby_core::common::{RemoteCommandMessage, StreamMessage};
+use cabby_core::common::{PubSubMessage, RemoteCommandMessage, StreamMessage, pub_sub_message_from_json};
+use cabby_core::gojson;
+use cabby_core::nats::client::{Connection, Incoming};
 use cabby_core::pending;
 use cabby_core::pubsub::{Handler, PubSubError, Subscriber};
 use cabby_core::toml_config::{self, TomlSection};
@@ -120,43 +122,104 @@ impl Subscriber for RedisSubscriber {
     }
 }
 
-/// NATS subscriber (upstream `pubsub.NATSSubscriber`).
+/// NATS subscriber (upstream `pubsub.NATSSubscriber`): streams are NATS
+/// subjects, remote commands go to the internal channel subject.
+///
+/// Calls before `start` (and after `shutdown`) are ignored; upstream requires
+/// `Start` first.
 pub struct NatsSubscriber {
-    _private: (),
+    node: Arc<dyn Handler>,
+    config: NatsConfig,
+    conn: std::sync::Mutex<Option<Arc<Connection>>>,
 }
 
 impl NatsSubscriber {
-    pub fn new(_node: Arc<dyn Handler>, _config: &NatsConfig) -> Result<Self, PubSubError> {
-        pending!("pubsub::new_nats_subscriber")
+    /// Upstream `NewNATSSubscriber(node, config)`.
+    pub fn new(node: Arc<dyn Handler>, config: &NatsConfig) -> Result<Self, PubSubError> {
+        Ok(Self { node, config: config.clone(), conn: std::sync::Mutex::new(None) })
+    }
+
+    fn conn(&self) -> Option<Arc<Connection>> {
+        self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+
+    fn publish(&self, subject: &str, payload: Vec<u8>) {
+        if let Some(c) = self.conn() {
+            c.publish(subject, payload);
+        }
+    }
+}
+
+/// Upstream `handleMessage`: stream messages and remote commands go to the
+/// node; anything else (including batches) is ignored.
+fn handle_nats_message(node: &dyn Handler, msg: &Incoming) {
+    match pub_sub_message_from_json(&msg.payload) {
+        Ok(PubSubMessage::Stream(m)) => node.broadcast(&m),
+        Ok(PubSubMessage::RemoteCommand(c)) => node.execute_remote_command(&c),
+        Ok(PubSubMessage::Batch(_)) | Err(_) => {}
     }
 }
 
 impl Subscriber for NatsSubscriber {
     fn start(&self, _done: Sender<PubSubError>) -> Result<(), PubSubError> {
-        pending!("pubsub::nats_start")
+        let nats = self.config.nats.clone().ok_or_else(|| PubSubError("NATS configuration is missing".into()))?;
+        let node = self.node.clone();
+        let conn = Connection::open(&nats, "cabby-nats-pubsub", move |msg| handle_nats_message(node.as_ref(), &msg))
+            .map_err(|e| PubSubError(e.0))?;
+        conn.subscribe(&self.config.channel);
+        *self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(conn));
+        Ok(())
     }
 
     fn shutdown(&self) -> Result<(), PubSubError> {
-        pending!("pubsub::nats_shutdown")
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        if let Some(c) = conn {
+            c.close();
+        }
+        Ok(())
     }
 
-    fn broadcast(&self, _msg: &StreamMessage) {
-        pending!("pubsub::nats_broadcast")
+    fn broadcast(&self, msg: &StreamMessage) {
+        self.publish(&msg.stream, gojson::to_vec(msg));
     }
 
-    fn broadcast_command(&self, _cmd: &RemoteCommandMessage) {
-        pending!("pubsub::nats_broadcast_command")
+    fn broadcast_command(&self, cmd: &RemoteCommandMessage) {
+        self.publish(&self.config.channel, gojson::to_vec(cmd));
     }
 
-    fn subscribe(&self, _stream: &str) {
-        pending!("pubsub::nats_subscribe")
+    fn subscribe(&self, stream: &str) {
+        if let Some(c) = self.conn() {
+            c.subscribe(stream);
+        }
     }
 
-    fn unsubscribe(&self, _stream: &str) {
-        pending!("pubsub::nats_unsubscribe")
+    fn unsubscribe(&self, stream: &str) {
+        if let Some(c) = self.conn() {
+            c.unsubscribe(stream);
+        }
     }
 
     fn is_multi_node(&self) -> bool {
-        pending!("pubsub::nats_is_multi_node")
+        true
+    }
+}
+
+/// Brokers publish through the subscriber (upstream passes the subscriber
+/// where a `broker.Broadcaster` is expected).
+impl cabby_core::broker::Broadcaster for NatsSubscriber {
+    fn broadcast(&self, msg: &StreamMessage) {
+        Subscriber::broadcast(self, msg);
+    }
+
+    fn broadcast_command(&self, msg: &RemoteCommandMessage) {
+        Subscriber::broadcast_command(self, msg);
+    }
+
+    fn subscribe(&self, stream: &str) {
+        Subscriber::subscribe(self, stream);
+    }
+
+    fn unsubscribe(&self, stream: &str) {
+        Subscriber::unsubscribe(self, stream);
     }
 }
