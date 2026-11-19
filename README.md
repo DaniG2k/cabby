@@ -8,9 +8,10 @@ An [AnyCable](https://github.com/anycable/anycable)-compatible real-time server 
 Rust. Cabby is an independent implementation; it is not affiliated with the AnyCable project
 or Evil Martians.
 
-> **Status: implementation in progress.** The upstream test corpus is fully translated to Rust and
-> verified against the Go implementation (M1). The server is being implemented subsystem by
-> subsystem against those tests; there is no runnable server yet (see [`SPEC.md`](SPEC.md)).
+> **Status: runnable, not yet feature-complete.** `cabby` runs as an AnyCable-compatible server and
+> passes the full AnyT conformance suite end to end. SSE, Pusher, durable streams and some
+> operational features are still being implemented, and performance has not been benchmarked yet
+> (see [`SPEC.md`](SPEC.md)).
 
 ## Benchmarks: Go vs Rust
 
@@ -38,7 +39,7 @@ From `cargo xtask report` (source of truth: [`compat/test-map.json`](compat/test
 | Translated to Rust and independently reviewed | 923 |
 | Translated cases verified against Go | 914 |
 | Translated cases the Go reference cannot expose (`not_observable`, tested against Rust only) | 9 |
-| Passing against Cabby | 516 (foundations, hub, node, brokers incl. NATS JetStream, RPC, metrics, Redis/NATS pub/sub, HTTP server, WebSocket, CLI config) |
+| Passing against Cabby | 583, including every AnyT conformance scenario (32 core + 9 extensions) run end to end against the `cabby` binary |
 
 Every case is listed individually, including skipped and runtime-specific ones.
 Behavioral differences from Go, if any, are recorded in
