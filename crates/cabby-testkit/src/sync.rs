@@ -54,6 +54,33 @@ impl<T> Watched<T> {
         }
     }
 
+    /// Blocks until `pred` holds, then applies `f` under the same lock, so no
+    /// other thread sees the state in between (a check-and-take); `None` on
+    /// deadline. Wakes every waiter after `f` ran.
+    pub fn wait_and_update<R>(
+        &self,
+        deadline: Duration,
+        mut pred: impl FnMut(&T) -> bool,
+        f: impl FnOnce(&mut T) -> R,
+    ) -> Option<R> {
+        let end = Instant::now() + deadline;
+        let mut guard = self.lock();
+        loop {
+            if pred(&guard) {
+                let r = f(&mut guard);
+                drop(guard);
+                self.cv.notify_all();
+                self.version.send_modify(|v| *v += 1);
+                return Some(r);
+            }
+            let now = Instant::now();
+            if now >= end {
+                return None;
+            }
+            guard = self.cv.wait_timeout(guard, end - now).unwrap_or_else(|e| e.into_inner()).0;
+        }
+    }
+
     /// Async variant of [`Watched::wait_until`] without a deadline of its own;
     /// callers race it against their own cancellation.
     pub async fn changed_until(&self, mut pred: impl FnMut(&T) -> bool) {
