@@ -221,10 +221,19 @@ dependencies = [
 name = "cabby-bench"
 version = "0.0.0"
 dependencies = [
- "cabby-core",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tungstenite",
 ]
 
 [[package]]
