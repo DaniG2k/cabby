@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 cabby-core.workspace = true
+async-nats.workspace = true
 getrandom.workspace = true
 hmac.workspace = true
 sha2.workspace = true
