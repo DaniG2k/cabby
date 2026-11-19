@@ -14,7 +14,6 @@ use crate::common::{
     PRESENCE_INFO_TYPE, PRESENCE_JOIN_TYPE, PRESENCE_LEAVE_TYPE, PresenceEvent, PresenceInfo, RemoteCommandMessage,
     StreamMessage,
 };
-use crate::pending;
 use crate::utils::{ItemId, PriorityQueue};
 
 /// A broker operation failed (Go `error`), compared by message.
@@ -892,104 +891,9 @@ impl Broker for Memory {
 /// NATS connection settings (upstream `nats.NATSConfig`, used by the NATS broker).
 pub use crate::nats::NatsConfig;
 
-/// Broker backed by NATS JetStream (upstream `broker.NATS`). History and
-/// session TTLs are enforced by the NATS server, on its own clock.
-pub struct Nats {
-    _private: (),
-}
+mod nats;
 
-impl Nats {
-    /// Upstream `NewNATSBroker(broadcaster, config, natsConfig)`.
-    pub fn new(_broadcaster: Option<Arc<dyn Broadcaster>>, _config: &Config, _nats: &NatsConfig) -> Self {
-        pending!("broker::new_nats_broker")
-    }
-
-    /// Waits until JetStream is initialized.
-    pub fn ready(&self, _timeout: Duration) -> Result<(), BrokerError> {
-        pending!("broker::nats_ready")
-    }
-
-    /// Deletes all streams and buckets the broker owns.
-    pub fn reset(&self) -> Result<(), BrokerError> {
-        pending!("broker::nats_reset")
-    }
-
-    pub fn epoch(&self) -> String {
-        pending!("broker::nats_epoch")
-    }
-
-    pub fn set_epoch(&self, _epoch: &str) -> Result<(), BrokerError> {
-        pending!("broker::nats_set_epoch")
-    }
-
-    /// Epoch of the node-local broker (upstream reads `n.local.GetEpoch()`).
-    pub fn local_epoch(&self) -> String {
-        pending!("broker::nats_local_epoch")
-    }
-}
-
-impl Broker for Nats {
-    fn start(&self) -> Result<(), BrokerError> {
-        pending!("broker::nats_start")
-    }
-    fn shutdown(&self) -> Result<(), BrokerError> {
-        pending!("broker::nats_shutdown")
-    }
-    fn announce(&self) -> String {
-        pending!("broker::nats_announce")
-    }
-    fn handle_broadcast(&self, _msg: &StreamMessage) -> Result<(), BrokerError> {
-        pending!("broker::nats_handle_broadcast")
-    }
-    fn handle_command(&self, _msg: &RemoteCommandMessage) -> Result<(), BrokerError> {
-        pending!("broker::nats_handle_command")
-    }
-    fn subscribe(&self, _stream: &str) -> String {
-        pending!("broker::nats_subscribe")
-    }
-    fn unsubscribe(&self, _stream: &str) -> String {
-        pending!("broker::nats_unsubscribe")
-    }
-    fn history_from(&self, _stream: &str, _epoch: &str, _offset: u64) -> Result<Vec<StreamMessage>, BrokerError> {
-        pending!("broker::nats_history_from")
-    }
-    fn history_since(&self, _stream: &str, _ts: i64) -> Result<Option<Vec<StreamMessage>>, BrokerError> {
-        pending!("broker::nats_history_since")
-    }
-    fn commit_session(&self, _sid: &str, _session: &dyn Cacheable) -> Result<(), BrokerError> {
-        pending!("broker::nats_commit_session")
-    }
-    fn restore_session(&self, _sid: &str) -> Result<Option<Vec<u8>>, BrokerError> {
-        pending!("broker::nats_restore_session")
-    }
-    fn touch_session(&self, _sid: &str) -> Result<(), BrokerError> {
-        pending!("broker::nats_touch_session")
-    }
-    fn supports_presence(&self) -> bool {
-        pending!("broker::nats_supports_presence")
-    }
-    fn presence_add(
-        &self,
-        _stream: &str,
-        _sid: &str,
-        _pid: &str,
-        _info: Value,
-    ) -> Result<Option<PresenceEvent>, BrokerError> {
-        pending!("broker::nats_presence_add")
-    }
-    fn presence_remove(&self, _stream: &str, _sid: &str) -> Result<Option<PresenceEvent>, BrokerError> {
-        pending!("broker::nats_presence_remove")
-    }
-    fn presence_info(&self, _stream: &str, _opts: Option<&PresenceInfoOptions>) -> Result<PresenceInfo, BrokerError> {
-        pending!("broker::nats_presence_info")
-    }
-    fn touch_presence(&self, _sid: &str) -> Result<(), BrokerError> {
-        pending!("broker::nats_touch_presence")
-    }
-    fn peak(&self, _stream: &str) -> Result<Option<StreamMessage>, BrokerError> {
-        pending!("broker::nats_peak")
-    }
-}
+pub use nats::{JETSTREAM_READY_TIMEOUT, Nats};
 
 /// Broker without history, presence or session cache: every call goes straight
 /// to the broadcaster (upstream `broker.NewLegacyBroker(broadcaster)`, used by

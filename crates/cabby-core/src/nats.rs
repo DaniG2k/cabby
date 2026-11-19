@@ -6,6 +6,8 @@
 
 use crate::logger::{LogValue, LogValuer};
 
+pub mod client;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NatsError(pub String);
 
