@@ -14,6 +14,13 @@
 //! ordering comes from the session itself (see [`Session`]): the registration
 //! lock serializes hub registration against disconnects, and commands of one
 //! session are executed in order by its reader.
+//!
+//! # Threads
+//!
+//! No thread is tied to a connection. Transports push client messages to a
+//! [`SessionReader`], which executes them in order on the bounded command pool
+//! ([`execute`]); session writes drain on a shared task pool; timers share one
+//! timer thread.
 
 mod app;
 mod clock;
@@ -33,8 +40,9 @@ pub use config::{
 };
 pub use deps::{Hub, LegacySubscriber};
 pub use disconnect_queue::{DisconnectQueue, Disconnector, InlineDisconnector, NoopDisconnectQueue};
-pub use session::{Connection, ConnectionError, Executor, Session, SessionOption};
+pub use session::{Connection, ConnectionError, Executor, ReadPermit, Session, SessionOption, SessionReader};
 pub use subscription_state::SubscriptionState;
+pub use tasks::{DEFAULT_COMMAND_CONCURRENCY, command_concurrency, execute, set_command_concurrency};
 
 pub use app::{AuthOption, Clock, Node, NodeOption, NullController, SystemClock, Ticker, Timer};
 

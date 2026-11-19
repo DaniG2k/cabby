@@ -44,10 +44,11 @@ mod tests;
 
 pub use cabby_core::encoders::{FrameType, SentFrame};
 pub use cabby_core::logger::TomlError;
+pub(crate) use connection::close_without_waiting;
 pub use connection::{
     CLOSE_ABNORMAL_CLOSURE, CLOSE_GOING_AWAY, CLOSE_INTERNAL_SERVER_ERR, CLOSE_INVALID_FRAME_PAYLOAD_DATA,
     CLOSE_MESSAGE_TOO_BIG, CLOSE_NO_STATUS_RECEIVED, CLOSE_NORMAL_CLOSURE, CLOSE_PROTOCOL_ERROR, CLOSE_TRY_AGAIN_LATER,
-    MAX_QUEUED, WsConnection, is_close_error,
+    InboundHandler, MAX_QUEUED, ReadPermit, WsConnection, is_close_error,
 };
 pub use handler::{SessionCallback, SessionHandler, SharedHeadersExtractor, WebsocketHandler, websocket_handler};
 
