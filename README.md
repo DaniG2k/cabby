@@ -169,3 +169,10 @@ Cabby is released under the [MIT License](LICENSE), the same license as AnyCable
 Translated tests and scenarios derive from AnyCable (MIT, © Vladimir Dementyev), AnyT
 (MIT, © palkan) and go-mruby (MIT, © Mitchell Hashimoto). Their notices are in
 [`compat/licenses/`](compat/licenses/).
+
+Cabby statically links a C dependency: mruby 1.2.0 (MIT, © mruby developers) with the
+mruby-env gem (MIT, © Internet Initiative Japan Inc.), vendored in
+[`crates/cabby-mruby-sys`](crates/cabby-mruby-sys) for the optional mruby scripting
+feature (cargo feature `mruby`, on by default on Linux and macOS). Their notices are
+`compat/licenses/mruby-MITL` and `compat/licenses/mruby-env-LICENSE`; the binding's API
+is modeled on go-mruby (see [`docs/mruby.md`](docs/mruby.md)).
