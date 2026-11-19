@@ -212,15 +212,25 @@ struct ManualTicker {
 impl Ticker for ManualTicker {
     fn recv(&self) {
         self.inner.state.update(|s| s.tickers[self.index].waiting += 1);
-        let ticked = self.inner.state.wait_until(RECV_DEADLINE, |s| s.tickers[self.index].buffered);
-        self.inner.state.update(|s| {
-            let t = &mut s.tickers[self.index];
-            t.waiting -= 1;
-            if ticked {
-                t.buffered = false;
-                t.received += 1;
-            }
-        });
+        // The tick is taken under the same lock that observed it, so one tick
+        // wakes exactly one receiver (as a Go ticker channel delivers it once).
+        let ticked = self
+            .inner
+            .state
+            .wait_and_update(
+                RECV_DEADLINE,
+                |s| s.tickers[self.index].buffered,
+                |s| {
+                    let t = &mut s.tickers[self.index];
+                    t.waiting -= 1;
+                    t.buffered = false;
+                    t.received += 1;
+                },
+            )
+            .is_some();
+        if !ticked {
+            self.inner.state.update(|s| s.tickers[self.index].waiting -= 1);
+        }
         assert!(ticked, "manual ticker: no tick within {RECV_DEADLINE:?}; the test never advanced time");
     }
 
