@@ -5,13 +5,84 @@
 # Cabby
 
 An [AnyCable](https://github.com/anycable/anycable)-compatible real-time server written in
-Rust. Cabby is an independent implementation; it is not affiliated with the AnyCable project
-or Evil Martians.
+Rust. It is a drop-in replacement for the AnyCable server: the same Action Cable protocol, the
+same RPC contract with your Rails app, the same CLI flags, environment variables and
+configuration file. Cabby is an independent implementation; it is not affiliated with the
+AnyCable project or Evil Martians.
 
-> **Status: runnable, nearly feature-complete.** `cabby` runs as an AnyCable-compatible server and
-> passes the full AnyT conformance suite end to end, with SSE, Pusher, durable streams, Redis and
-> NATS. mruby support is still being implemented, and performance has not been benchmarked yet
-> (see [`SPEC.md`](SPEC.md)).
+> **Status: runnable, nearly feature-complete.** `cabby` passes the full AnyT conformance suite
+> end to end, with SSE, Pusher, durable streams, Redis and NATS. mruby support and the load
+> harness are still being implemented, and performance has not been benchmarked yet (see
+> [`SPEC.md`](SPEC.md)).
+
+## Action Cable, AnyCable and Cabby
+
+All three serve the same client: a browser using the `@rails/actioncable` (or AnyCable) JavaScript
+client, talking to channels you write in Rails. They differ in **where the WebSocket connections
+live** and what runs them.
+
+### Action Cable: everything in the Rails process
+
+```mermaid
+flowchart LR
+    B1[Browsers] -- WebSocket --> R1["Rails app (Puma)<br/>connections + channels"]
+    R1 <-- pub/sub --> P1[(Redis / PostgreSQL)]
+    J1[Jobs / models] -- broadcast --> P1
+```
+
+Rails' built-in framework. Every WebSocket is held by a Ruby process alongside your web
+requests, so connection count, memory and broadcast fan-out compete with the app itself.
+
+### AnyCable: a dedicated WebSocket server, channels stay in Rails
+
+```mermaid
+flowchart LR
+    B2[Browsers] -- WebSocket / SSE --> G2["AnyCable server (Go)<br/>connections, streams, pings"]
+    G2 -- "RPC (gRPC/HTTP)<br/>connect, subscribe, perform" --> R2["Rails app<br/>channel code"]
+    R2 -- "broadcast (HTTP/Redis/NATS)" --> G2
+```
+
+The connections move to a standalone server. Your Rails channels are unchanged and are called
+over RPC only when something happens (connect, subscribe, perform); idle connections cost the
+Rails app nothing. AnyCable adds reliable streams (history and recovery), presence, JWT
+identification, signed streams, SSE, Pusher compatibility and durable streams.
+
+### Cabby: the same architecture, a Rust server
+
+```mermaid
+flowchart LR
+    B3[Browsers] -- WebSocket / SSE / Pusher --> C3["Cabby (Rust)<br/>connections, streams, pings"]
+    C3 -- "same RPC contract" --> R3["Rails app<br/>channel code, unchanged"]
+    R3 -- "same broadcast adapters" --> C3
+```
+
+Cabby replaces the AnyCable server binary and nothing else: the Rails side (`anycable-rails`,
+your channels, your broadcasts) and the JavaScript client stay as they are.
+
+### Feature comparison
+
+| | Action Cable | AnyCable (Go) | Cabby (Rust) |
+|---|:---:|:---:|:---:|
+| Where WebSockets are handled | Rails process | Go server | Rust server |
+| Channel code | Ruby | Ruby (over RPC) | Ruby (over RPC, unchanged) |
+| Action Cable protocol (`actioncable-v1-json`, extended protocol) | ✅ | ✅ | ✅ |
+| RPC over gRPC and HTTP | n/a | ✅ | ✅ |
+| Broadcasts via HTTP, Redis (pub/sub, streams), NATS | Redis/PostgreSQL | ✅ | ✅ |
+| Multi-node pub/sub (Redis, NATS) | via adapter | ✅ | ✅ |
+| Reliable streams: history and session recovery | – | ✅ | ✅ |
+| Presence | – | ✅ | ✅ |
+| JWT identification, signed and Turbo streams | – | ✅ | ✅ |
+| Server-Sent Events | – | ✅ | ✅ |
+| Pusher protocol compatibility | – | ✅ | ✅ |
+| Durable Streams (HTTP catch-up, long-poll, SSE) | – | ✅ | ✅ |
+| Embedded NATS | – | ✅ (in-process) | ✅ (bundled `nats-server` child process) |
+| mruby metrics printers | – | ✅ | 🚧 in progress |
+| Recovers when Redis silently drops a subscription ([AnyCable issue 275](https://github.com/anycable/anycable/issues/275)) | – | ❌ stays broken until restart | ✅ resubscribes (~1 s) / heartbeat (~10 s) |
+| Concurrency model | Ruby threads | goroutines | Tokio tasks; no OS thread per connection |
+
+AnyCable features above are those of the pinned open-source server
+(`anycable/anycable@26a1a703`); AnyCable Pro features are out of scope. Intended differences from
+the Go server are recorded in [`compat/deviations.md`](compat/deviations.md), most with a pinning test.
 
 ## Benchmarks: Go vs Rust
 
@@ -24,56 +95,72 @@ or Evil Martians.
 | Slow or unavailable RPC with queue saturation | pending | pending |
 | Cluster broadcast and reconnect recovery | pending | pending |
 
-No numbers yet. Results will only be published once Cabby passes the compatibility suite.
-Both servers will run on the same hardware and settings, with the load generator outside the
-measured process and repeated runs. A faster server that behaves differently isn't a valid
-comparison. Methodology: [`SPEC.md` §10](SPEC.md#10-performance-evaluation).
+No numbers yet: results (with charts) will be published once Cabby passes the full
+compatibility suite, using the external load harness in [`crates/cabby-bench`](crates/cabby-bench)
+against both binaries on the same hardware and settings, with the load generator outside the
+measured process and repeated runs. Workloads where Rust is not faster will be reported too.
+Methodology: [`SPEC.md` §10](SPEC.md#10-performance-evaluation).
+
+One early, non-benchmark observation from the conformance suite (`tests/conformance/threads.rs`):
+
+| Server OS threads | AnyCable (Go) | Cabby (Rust) |
+|---|---:|---:|
+| Change after opening 300 more idle connections | +4 | +0 |
+| Change during 20 broadcasts to 301 subscribers | +0 | +0 |
 
 ## Compatibility progress
 
-From `cargo xtask report` (source of truth: [`compat/test-map.json`](compat/test-map.json)):
+Cabby is built tests-first: AnyCable's entire test corpus was translated to Rust and verified
+against the Go server before any Cabby code was written; a feature counts as done when its
+translated tests pass against Cabby.
+
+```mermaid
+pie showData
+    title Upstream test cases (923) against Cabby
+    "Passing" : 799
+    "Pending (mruby, load harness)" : 124
+```
 
 | | Count |
 |---|---:|
-| Upstream cases inventoried (Go unit, Benchi, go-mruby, features, AnyT) | 923 |
+| Upstream cases (Go unit tests, Benchi, go-mruby, features, AnyT conformance) | 923 |
 | Translated to Rust and independently reviewed | 923 |
-| Translated cases verified against Go | 914 |
-| Translated cases the Go reference cannot expose (`not_observable`, tested against Rust only) | 9 |
-| Passing against Cabby | 786: every AnyT conformance scenario, SSE, Pusher, durable streams, Redis and NATS (remaining: mruby bindings and the load-harness library) |
+| Verified against the Go server | 914 |
+| Go cannot expose the behavior (`not_observable`, tested against Rust only) | 9 |
+| **Passing against Cabby** | **799** |
 
-Every case is listed individually, including skipped and runtime-specific ones.
-Behavioral differences from Go, if any, are recorded in
-[`compat/deviations.md`](compat/deviations.md), including fixes Cabby proposes for open AnyCable
-issues: [AnyCable issue 275](https://github.com/anycable/anycable/issues/275) (silent loss of Redis pub/sub
-broadcasts, reproduced deterministically against Go), [AnyCable issue 263](https://github.com/anycable/anycable/issues/263)
-and [AnyCable issue 265](https://github.com/anycable/anycable/issues/265).
+Source of truth: [`compat/test-map.json`](compat/test-map.json), summarized by `cargo xtask report`.
 
 ## Layout
 
 ```text
-crates/cabby-core      protocol types, generated RPC bindings, state, routing
-crates/cabby-server    transports, RPC clients, adapters, config, `cabby` binary
-crates/cabby-testkit   backend selection, Go reference bridge, process supervision
-tests/                 translated upstream tests (unit/<go package>, conformance)
+crates/cabby-core      protocol, JSON, hub, brokers, pub/sub, identity, configuration
+crates/cabby-server    node, RPC, WebSocket/SSE/Pusher/durable streams, adapters, CLI, `cabby` binary
+crates/cabby-bench     external load harness (Go vs Rust comparisons)
+crates/cabby-testkit   backend selection, Go reference bridge, fake RPC, process supervision
+tests/                 translated upstream tests (unit/<go package>, conformance, features)
 tools/xtask            inventory, compatibility runner, reports
-compat/                pinned reference, baseline evidence, manifest, adapters
+compat/                pinned reference, baseline evidence, manifest, deviations, adapters
 docs/                  contributor guides
 ```
 
 ## Development
 
-Toolchains are pinned in `mise.toml` (Rust 1.100.0, Go 1.27.3 for the reference, protoc).
+Toolchains are pinned in `mise.toml` (Rust 1.100.0, plus Go 1.27.3 and protoc for the reference
+server during the port).
 
 ```sh
 mise install
 cargo xtask reference-checkout          # pinned upstream into compat/reference
 cargo xtask reference-build             # Go reference binary + test bridge
+eval "$(compat/scripts/services.sh start)"   # Redis + NATS for integration tests
 cargo xtask test --backend go           # translated tests against Go: must pass
 cargo xtask test --backend rust         # against Cabby: pass or explicitly pending
-cargo xtask report
+cargo xtask report --by-package
 ```
 
-To translate more tests, see [`docs/translating-tests.md`](docs/translating-tests.md).
+See [`docs/implementing.md`](docs/implementing.md) and
+[`docs/translating-tests.md`](docs/translating-tests.md).
 
 ## License and attribution
 
