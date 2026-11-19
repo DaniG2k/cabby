@@ -352,11 +352,36 @@ impl Runner {
         log_info(&format!("Handle health requests at {}{}", ws_server.address(), c.server.health_path));
 
         if c.sse.enabled {
-            cabby_core::pending!("cli::sse_handler");
+            log_info(&format!("Handle SSE requests at {}{}", ws_server.address(), c.sse.path));
+            let extractor: Option<crate::sse::SharedHeadersExtractor> =
+                Some(Arc::new(super::session_options::headers_extractor(&c)));
+            let metrics: Option<Arc<dyn Instrumenter>> = Some(self.metrics.clone() as Arc<dyn Instrumenter>);
+            ws_server.setup_handler(
+                &c.sse.path,
+                crate::sse::handler(node.clone(), metrics, ws_server.shutdown_token(), extractor, &c.sse),
+            );
         }
 
         if c.ds.enabled {
-            cabby_core::pending!("cli::ds_handler");
+            let ds_path = format!("{}/*", c.ds.path);
+            log_info(&format!("Handle Durable Streams requests at {}{ds_path}", ws_server.address()));
+            let extractor: Option<crate::ds::SharedHeadersExtractor> =
+                Some(Arc::new(super::session_options::headers_extractor(&c)));
+            let metrics: Option<Arc<dyn Instrumenter>> = Some(self.metrics.clone() as Arc<dyn Instrumenter>);
+            let broker = self.node_broker.clone().ok_or_else(|| assertion_failed("broker is not initialized"))?;
+            // Upstream reuses the runner's streams controller, or builds one from config.
+            let streams = Some(Arc::new(StreamsController::for_config(&c.streams)));
+            let handler = crate::ds::handler(
+                node.clone(),
+                broker,
+                streams,
+                metrics,
+                ws_server.shutdown_token(),
+                extractor,
+                &c.ds,
+            )
+            .map_err(|e| decorate(CliError(e.to_string()), "failed to initialize Durable Streams handler"))?;
+            ws_server.setup_handler(&ds_path, handler);
         }
 
         self.start_api_server(&node)?;

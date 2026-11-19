@@ -17,7 +17,6 @@ use cabby_core::common::{
 use cabby_server::node::{Executor as NodeExecutor, NodeError, Session, SessionOption};
 use cabby_server::pusher::{self as rs, PusherClientEvent, PusherSubscriptionData};
 // Shared with the sse/ds facades (`rust_frame`).
-use cabby_server::pusher_sse_deps::Error;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -226,10 +225,6 @@ impl GoFrameResult {
             ..Default::default()
         }))
     }
-}
-
-pub(crate) fn rust_frame(r: Result<Option<SentFrame>, Error>) -> Result<Option<SentFrame>, String> {
-    r.map_err(|e| e.0)
 }
 
 #[derive(Deserialize)]

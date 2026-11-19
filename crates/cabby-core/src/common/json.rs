@@ -389,6 +389,55 @@ pub(super) fn decode_message(raw: &[u8]) -> Result<Message, DecodeError> {
     Ok(msg)
 }
 
+// --- Decoding: replies (transmissions) ----------------------------------------------------
+
+impl GoStruct for Reply {
+    const FIELDS: &'static [&'static str] = &[
+        "type",
+        "identifier",
+        "message",
+        "presence",
+        "reason",
+        "reconnect",
+        "stream_id",
+        "epoch",
+        "offset",
+        "sid",
+        "restored",
+        "restored_ids",
+    ];
+
+    fn field<'de, A: MapAccess<'de>>(&mut self, idx: usize, map: &mut A) -> Result<(), A::Error> {
+        match idx {
+            0 => scalar(map, &mut self.kind),
+            1 => scalar(map, &mut self.identifier),
+            2 => {
+                self.message = interface(map)?;
+                Ok(())
+            }
+            3 => map.next_value_seed(IntoPtr(&mut self.presence)),
+            4 => scalar(map, &mut self.reason),
+            5 => scalar(map, &mut self.reconnect),
+            6 => scalar(map, &mut self.stream_id),
+            7 => scalar(map, &mut self.epoch),
+            8 => scalar(map, &mut self.offset),
+            9 => scalar(map, &mut self.sid),
+            10 => scalar(map, &mut self.restored),
+            _ => {
+                // A Go slice: `null` makes it nil, an array replaces it.
+                self.restored_ids = map.next_value::<Option<Vec<String>>>()?.unwrap_or_default();
+                Ok(())
+            }
+        }
+    }
+}
+
+pub(super) fn decode_reply(raw: &[u8]) -> Result<Reply, DecodeError> {
+    let mut reply = Reply::default();
+    decode_with(raw, InPlace(&mut reply))?;
+    Ok(reply)
+}
+
 // --- Decoding: pub/sub messages -------------------------------------------------------
 
 impl GoStruct for StreamMessage {
