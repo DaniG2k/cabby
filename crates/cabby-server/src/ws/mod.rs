@@ -1,26 +1,76 @@
 //! WebSocket transport (upstream package `ws`).
+//!
+//! * [`websocket_handler`]: the endpoint mounted on the HTTP server. It validates
+//!   the handshake in gorilla/websocket's order and with its status codes (400,
+//!   405, 403 for a rejected origin), negotiates a subprotocol (server preference
+//!   order, as gorilla), answers 101 with `X-AnyCable-Version`, and hands the
+//!   upgraded socket to a session handler.
+//! * [`WsConnection`]: the node's [`Connection`](crate::node::Connection) over a
+//!   WebSocket, one Tokio task per connection (see `connection.rs`).
+//!
+//! # WebSocket library
+//!
+//! The handshake is ours (it runs inside the hyper service, so the HTTP side
+//! stays one server); framing uses **tungstenite** (`tokio-tungstenite` for the
+//! async stream). Reasons:
+//!
+//! * **Compliance.** tungstenite passes the Autobahn test suite and is the most
+//!   widely used Rust WebSocket implementation; it handles fragmentation, control
+//!   frames interleaved with fragments, close handshakes, UTF-8 validation and
+//!   message/frame size limits. tungstenite 0.30 was already in the workspace (the
+//!   testkit's clients).
+//! * **Memory per connection.** Its buffers are configurable: `ws.read_buffer_size`
+//!   and `ws.write_buffer_size` (1 KiB by default, as upstream) bound what an idle
+//!   connection holds, and there is no per-connection task besides ours.
+//! * **No copies of shared frames.** Payloads are `Bytes`: the hub's
+//!   `Arc<SentFrame>` is wrapped (`Bytes::from_owner`) and sent as a raw frame, so
+//!   the payload is neither cloned nor re-validated per session; the only copy is
+//!   into the socket write buffer, which batches the frames of one flush into a
+//!   single write.
+//!
+//! `fastwebsockets` was the alternative: faster raw framing and vectored writes,
+//! but its reads are not cancel-safe (our io loop multiplexes reads and writes on
+//! one task with `select!`, which tungstenite's incremental parser supports), it
+//! leaves fragment reassembly and UTF-8 checks to helpers, and it is far less
+//! widely deployed. Neither crate implements permessage-deflate, so
+//! `ws.enable_compression` is accepted but not negotiated (proposed deviation).
 
-use cabby_core::pending;
 use cabby_core::toml_config::string_list;
+
+mod connection;
+mod handler;
+#[cfg(test)]
+mod tests;
 
 pub use cabby_core::encoders::{FrameType, SentFrame};
 pub use cabby_core::logger::TomlError;
+pub use connection::{
+    CLOSE_ABNORMAL_CLOSURE, CLOSE_GOING_AWAY, CLOSE_INTERNAL_SERVER_ERR, CLOSE_INVALID_FRAME_PAYLOAD_DATA,
+    CLOSE_MESSAGE_TOO_BIG, CLOSE_NO_STATUS_RECEIVED, CLOSE_NORMAL_CLOSURE, CLOSE_PROTOCOL_ERROR, CLOSE_TRY_AGAIN_LATER,
+    MAX_QUEUED, WsConnection, is_close_error,
+};
+pub use handler::{SessionCallback, SessionHandler, SharedHeadersExtractor, WebsocketHandler, websocket_handler};
 
 /// Origin policy built from the comma-separated `allowed_origins` setting.
 #[derive(Debug, Clone)]
 pub struct OriginCheck {
-    _origins: String,
+    /// `None`: any origin (an empty setting).
+    hosts: Option<Vec<String>>,
 }
 
 /// Builds the origin policy (upstream `ws.CheckOrigin`).
 pub fn check_origin(origins: &str) -> OriginCheck {
-    OriginCheck { _origins: origins.to_owned() }
+    OriginCheck { hosts: (!origins.is_empty()).then(|| origins.split(',').map(str::to_owned).collect()) }
 }
 
 impl OriginCheck {
     /// Decides a handshake given its `Origin` header (`None` when absent).
-    pub fn allows(&self, _origin: Option<&str>) -> bool {
-        pending!("ws::check_origin")
+    pub fn allows(&self, origin: Option<&str>) -> bool {
+        let Some(hosts) = &self.hosts else {
+            return true;
+        };
+        let hosts: Vec<&str> = hosts.iter().map(String::as_str).collect();
+        crate::server::origin_allowed(origin.unwrap_or(""), &hosts)
     }
 }
 
