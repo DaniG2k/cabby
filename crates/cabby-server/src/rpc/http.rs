@@ -403,7 +403,8 @@ mod tests {
             }),
         };
         assert_eq!(
-            r#"{"command":"subscribe","identifier":"chat","connection_identifiers":"user=1","env":{"url":"ws://example.com/cable","headers":{"accept":"&","cookie":"a=b","x-b":"<b>"},"cstate":{"_s_":"x"}}}"#,
+            r#"{"command":"subscribe","identifier":"chat","connection_identifiers":"user=1","env":{"url":"ws://example.com/cable","headers":{"accept":"{U}0026","cookie":"a=b","x-b":"{U}003cb{U}003e"},"cstate":{"_s_":"x"}}}"#
+                .replace("{U}", &format!("{}u", '\\')),
             gojson::to_string(&msg)
         );
         assert_eq!("{}", gojson::to_string(&protos::ConnectionRequest::default()));
