@@ -8,6 +8,7 @@ use cabby_core::toml_config::go_quote;
 mod http_server;
 mod mounts;
 mod request;
+mod response_writer;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -21,7 +22,11 @@ pub use http_server::{
 };
 pub use request::{
     DefaultHeadersExtractor, HEALTH_MESSAGE, HeadersExtractor, HttpRequest, HttpResponse, REMOTE_ADDR_HEADER,
-    RequestError, RequestInfo, fetch_uid, health_handler, write_cors_headers,
+    RequestError, RequestInfo, fetch_uid, health_handler, query_param, write_cors_headers,
+};
+pub use response_writer::{
+    ChannelResponseWriter, MAX_BUFFERED, ResponseWriter, SharedResponseWriter, WRITE_TIMEOUT, channel_response,
+    lock_writer, shared_writer,
 };
 
 /// The health endpoint as a server handler (upstream `http.HandlerFunc(HealthHandler)`).

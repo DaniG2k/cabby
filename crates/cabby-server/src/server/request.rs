@@ -244,6 +244,27 @@ fn parse_query(target: &str) -> HashMap<String, String> {
     params
 }
 
+/// The first value of a query parameter of a request target, `""` when missing
+/// (Go `r.URL.Query().Get(key)`; decoding as in [`RequestInfo::param`]).
+pub fn query_param(target: &str, key: &str) -> String {
+    let without_fragment = target.split('#').next().unwrap_or("");
+    let Some((_, query)) = without_fragment.split_once('?') else {
+        return String::new();
+    };
+    for pair in query.split('&') {
+        if pair.is_empty() || pair.contains(';') {
+            continue;
+        }
+        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+        if let (Some(k), Some(v)) = (query_unescape(k), query_unescape(v))
+            && k == key
+        {
+            return v;
+        }
+    }
+    String::new()
+}
+
 /// Go `url.QueryUnescape` (`None` on an invalid escape).
 fn query_unescape(s: &str) -> Option<String> {
     if !s.contains(['%', '+']) {
@@ -346,6 +367,14 @@ mod tests {
         assert_eq!(Some("A"), q.get("c").map(String::as_str));
         assert!(!q.contains_key("bad"));
         assert!(!q.contains_key("semi"));
+    }
+
+    #[test]
+    fn query_param_takes_the_first_value() {
+        assert_eq!("1", query_param("/x?a=1&a=2", "a"));
+        assert_eq!("x y", query_param("/x?b=x+y#a=3", "b"));
+        assert_eq!("", query_param("/x?bad=%zz", "bad"));
+        assert_eq!("", query_param("/x", "a"));
     }
 
     #[test]
