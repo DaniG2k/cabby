@@ -17,9 +17,10 @@ fn main() {
         ),
         "reconnect_floods" => cabby_bench::scenarios::reconnect_floods::run(&rest, &mut stdout, &mut stderr),
         _ => {
-            eprintln!("usage: cabby-bench <stress_publications|reconnect_floods> [flags]");
+            eprintln!("usage: cabby-bench <stress_publications|reconnect_floods> [flags]  (-h: scenario flags)");
             2
         }
     };
+    let _ = std::io::Write::flush(&mut stdout);
     std::process::exit(code);
 }
