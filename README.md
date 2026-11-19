@@ -10,10 +10,9 @@ same RPC contract with your Rails app, the same CLI flags, environment variables
 configuration file. Cabby is an independent implementation; it is not affiliated with the
 AnyCable project or Evil Martians.
 
-> **Status: runnable, nearly feature-complete.** `cabby` passes the full AnyT conformance suite
-> end to end, with SSE, Pusher, durable streams, Redis and NATS. mruby support and the load
-> harness are still being implemented, and performance has not been benchmarked yet (see
-> [`SPEC.md`](SPEC.md)).
+> **Status: feature-complete, not yet benchmarked.** `cabby` passes the full AnyT conformance
+> suite end to end, with SSE, Pusher, durable streams, Redis, NATS and mruby. The load harness
+> used for the Go vs Rust benchmarks is still being implemented (see [`SPEC.md`](SPEC.md)).
 
 ## Action Cable, AnyCable and Cabby
 
@@ -76,7 +75,7 @@ your channels, your broadcasts) and the JavaScript client stay as they are.
 | Pusher protocol compatibility | – | ✅ | ✅ |
 | Durable Streams (HTTP catch-up, long-poll, SSE) | – | ✅ | ✅ |
 | Embedded NATS | – | ✅ (in-process) | ✅ (bundled `nats-server` child process) |
-| mruby metrics printers | – | ✅ | 🚧 in progress |
+| mruby metrics printers | – | ✅ | ✅ |
 | Recovers when Redis silently drops a subscription ([AnyCable issue 275](https://github.com/anycable/anycable/issues/275)) | – | ❌ stays broken until restart | ✅ resubscribes (~1 s) / heartbeat (~10 s) |
 | Concurrency model | Ruby threads | goroutines | Tokio tasks; no OS thread per connection |
 
@@ -117,8 +116,8 @@ translated tests pass against Cabby.
 ```mermaid
 pie showData
     title Upstream test cases (923) against Cabby
-    "Passing" : 799
-    "Pending (mruby, load harness)" : 124
+    "Passing" : 845
+    "Pending (load harness)" : 64
 ```
 
 | | Count |
@@ -127,7 +126,7 @@ pie showData
 | Translated to Rust and independently reviewed | 923 |
 | Verified against the Go server | 914 |
 | Go cannot expose the behavior (`not_observable`, tested against Rust only) | 9 |
-| **Passing against Cabby** | **799** |
+| **Passing against Cabby** | **845** |
 
 Source of truth: [`compat/test-map.json`](compat/test-map.json), summarized by `cargo xtask report`.
 
