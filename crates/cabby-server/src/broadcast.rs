@@ -172,28 +172,71 @@ impl RedisConfig {
     }
 }
 
-/// Redis Streams broadcaster (upstream `broadcast.RedisBroadcaster`).
+/// Redis Streams broadcaster (upstream `broadcast.RedisBroadcaster`): every
+/// node reads the stream in one consumer group, so each broadcast is handled
+/// by one node.
 pub struct RedisBroadcaster {
-    _private: (),
+    stream: String,
+    redis: RedisClientConfig,
+    streamer: crate::redis::Streamer,
 }
 
 impl RedisBroadcaster {
-    pub fn new(_node: Arc<dyn Handler>, _config: &RedisConfig) -> Self {
-        pending!("broadcast::new_redis_broadcaster")
+    pub fn new(node: Arc<dyn Handler>, config: &RedisConfig) -> Self {
+        let name = crate::redis::connect::nanoid6();
+        let redis = crate::redis::or_defaults(config.redis.as_ref());
+        let handler: crate::redis::StreamHandler = Arc::new(move |message| match message.get("payload") {
+            Some(payload) => {
+                crate::redis::log(cabby_core::logger::Level::Debug, "broadcast", "received broadcast", &[]);
+                node.handle_broadcast(payload.as_bytes()).map_err(|e| crate::redis::RedisError(e.0))
+            }
+            None => Err(crate::redis::RedisError("missing payload field".to_owned())),
+        });
+        let streamer = crate::redis::Streamer::new(
+            &config.stream,
+            &config.group,
+            &redis,
+            crate::redis::StreamerOptions {
+                block_ms: Some(config.stream_read_block_milliseconds),
+                consumer_name: Some(name),
+                handler: Some(handler),
+            },
+        );
+        Self { stream: config.stream.clone(), redis, streamer }
     }
 }
 
 impl Broadcaster for RedisBroadcaster {
     fn start(&self, _done: Sender<BroadcastError>) -> Result<(), BroadcastError> {
-        pending!("broadcast::redis_start")
+        self.streamer
+            .start()
+            .map_err(|e| BroadcastError(format!("failed to initialize Redis stream, cause: {}", e.0)))?;
+
+        let mut redis = self.redis.clone();
+        let _ = redis.to_client_options();
+        let hosts = format!("[{}]", redis.hostnames().join(" "));
+        let msg = if redis.is_sentinel() {
+            format!("Starting Redis broadcaster at {hosts} (sentinels)")
+        } else if redis.is_cluster() {
+            format!("Starting Redis broadcaster at {hosts} (cluster)")
+        } else {
+            format!("Starting Redis broadcaster at {}", redis.hostname())
+        };
+        crate::redis::log(
+            cabby_core::logger::Level::Info,
+            "broadcast",
+            &msg,
+            &[("provider", "redisx".to_owned()), ("stream", self.stream.clone())],
+        );
+        Ok(())
     }
 
     fn shutdown(&self) -> Result<(), BroadcastError> {
-        pending!("broadcast::redis_shutdown")
+        self.streamer.shutdown().map_err(|e| BroadcastError(e.0))
     }
 
     fn is_fanout(&self) -> bool {
-        pending!("broadcast::redis_is_fanout")
+        false
     }
 }
 
@@ -224,28 +267,81 @@ impl LegacyRedisConfig {
     }
 }
 
-/// Legacy Redis pub/sub broadcaster (upstream `broadcast.LegacyRedisBroadcaster`).
+/// Legacy Redis pub/sub broadcaster (upstream `broadcast.LegacyRedisBroadcaster`):
+/// every node subscribes to the channel. The subscription is kept alive like
+/// the pub/sub subscriber's (deviation D-003).
 pub struct LegacyRedisBroadcaster {
-    _private: (),
+    node: Arc<dyn Handler>,
+    redis: RedisClientConfig,
+    subscriptions: Arc<crate::redis::subscription::Subscriptions>,
+    started: std::sync::atomic::AtomicBool,
+}
+
+/// Hands pub/sub payloads to the node (upstream `OnMessage` hook).
+struct PubSubSink {
+    node: Arc<dyn Handler>,
+}
+
+impl crate::redis::subscription::Sink for PubSubSink {
+    fn message(&self, _channel: &str, payload: &[u8]) {
+        crate::redis::log(cabby_core::logger::Level::Debug, "broadcast", "received pubsub message", &[]);
+        self.node.handle_pubsub(payload);
+    }
 }
 
 impl LegacyRedisBroadcaster {
-    pub fn new(_node: Arc<dyn Handler>, _config: &LegacyRedisConfig) -> Self {
-        pending!("broadcast::new_legacy_redis_broadcaster")
+    pub fn new(node: Arc<dyn Handler>, config: &LegacyRedisConfig) -> Self {
+        let redis = crate::redis::or_defaults(config.redis.as_ref());
+        let subscriptions = crate::redis::subscription::Subscriptions::new(crate::redis::subscription::Settings {
+            context: "broadcast",
+            primary: config.channel.clone(),
+            max_reconnect_attempts: redis.max_reconnect_attempts,
+            connected_msg: "subscribed to Redis channel",
+            reconnected_msg: "reconnected to Redis channel",
+            exhausted_error: "Redis reconnect attempts exceeded",
+        });
+        subscriptions.subscribe(&config.channel);
+        Self { node, redis, subscriptions, started: std::sync::atomic::AtomicBool::new(false) }
     }
 }
 
 impl Broadcaster for LegacyRedisBroadcaster {
-    fn start(&self, _done: Sender<BroadcastError>) -> Result<(), BroadcastError> {
-        pending!("broadcast::legacy_redis_start")
+    fn start(&self, done: Sender<BroadcastError>) -> Result<(), BroadcastError> {
+        let mut redis = self.redis.clone();
+        redis.to_client_options().map_err(|e| BroadcastError(e.0))?;
+        let spec = redis.connect_spec().map_err(|e| BroadcastError(e.0))?;
+
+        let msg = crate::redis::pubsub_start_message("Starting Redis pub/sub", &redis);
+        // Upstream logs the single-instance line at debug level.
+        let level = if redis.is_sentinel() || redis.is_cluster() {
+            cabby_core::logger::Level::Info
+        } else {
+            cabby_core::logger::Level::Debug
+        };
+        crate::redis::log(level, "broadcast", &msg, &[("provider", "redis".to_owned())]);
+
+        self.started.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.subscriptions.start(
+            spec,
+            Arc::new(PubSubSink { node: Arc::clone(&self.node) }),
+            Box::new(move |err| {
+                let _ = done.send(BroadcastError(err));
+            }),
+        );
+        Ok(())
     }
 
     fn shutdown(&self) -> Result<(), BroadcastError> {
-        pending!("broadcast::legacy_redis_shutdown")
+        if !self.started.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            return Ok(());
+        }
+        crate::redis::log(cabby_core::logger::Level::Debug, "broadcast", "shutting down Redis pub/sub", &[]);
+        self.subscriptions.shutdown(std::time::Duration::from_secs(2));
+        Ok(())
     }
 
     fn is_fanout(&self) -> bool {
-        pending!("broadcast::legacy_redis_is_fanout")
+        true
     }
 }
 
