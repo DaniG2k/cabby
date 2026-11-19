@@ -66,7 +66,7 @@ run fanout-50k  stress_publications -c 1000 -S 100 -s 5 -r 1000 -d 20s
 run fanout-100k stress_publications -c 1000 -S 100 -s 5 -r 2000 -d 20s
 run fanout-150k stress_publications -c 1000 -S 100 -s 5 -r 3000 -d 20s
 # Large room: 5000 clients on one stream.
-run room-5k stress_publications -c 5000 -S 1 -s 1 -r 20 -d 20s
+CABBY_BENCH_THREADS=8 run room-5k stress_publications -c 5000 -S 1 -s 1 -r 20 -d 20s
 # Churn: reconnect floods against a 5 ms RPC (connect + subscribe + disconnect over RPC).
 run churn reconnect_floods -c 2000 -s 2 --waves 500,1000 --wave-interval 10s --rpc-latency 5ms
 echo "results in ${OUT}" >&2

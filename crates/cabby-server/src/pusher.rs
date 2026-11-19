@@ -859,6 +859,10 @@ impl Executor {
 }
 
 impl NodeExecutor for Executor {
+    fn is_inline(&self, msg: &Message) -> bool {
+        msg.command != "subscribe" && msg.data.is_none() && self.app.is_inline(msg)
+    }
+
     fn handle_command(&self, session: &Arc<Session>, msg: &Message) -> Result<(), NodeError> {
         if msg.command == "subscribe" {
             let mut subscribe =
