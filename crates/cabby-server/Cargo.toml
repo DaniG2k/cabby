@@ -27,7 +27,7 @@ rustls.workspace = true
 rustls-native-certs.workspace = true
 tokio-rustls.workspace = true
 tower.workspace = true
-tokio = { workspace = true, features = ["io-util"] }
+tokio = { workspace = true, features = ["io-util", "signal"] }
 tokio-tungstenite.workspace = true
 tungstenite.workspace = true
 futures-util.workspace = true

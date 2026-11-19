@@ -16,11 +16,17 @@
 //!   cleared and the session is disconnected with `too_slow` (upstream
 //!   semantics).
 //! * **Writer.** Upstream runs a writer goroutine per session. Here the writer
-//!   is a drain task: when a frame is queued and no drain is running, one is
-//!   started on the node's task pool and writes until the queue is empty. At
-//!   most one drain runs per session (an atomic writer state), so frames keep
-//!   their order, and threads are only busy while there is something to write:
-//!   idle sessions cost no thread. Pings share a write lock with the drain.
+//!   is a drain: when a frame is queued and no drain is running, one starts and
+//!   writes until the queue is empty. At most one drain runs per session (an
+//!   atomic writer state), so frames keep their order, and idle sessions cost no
+//!   thread. Over a non-blocking transport (the WebSocket connection, which
+//!   queues frames for its I/O task) the drain runs right on the producer's
+//!   thread: a broadcast fan-out hands each session's frame to its connection
+//!   without a thread switch, and when a connection's queue is full the frame
+//!   waits in the session until the connection signals space. Close frames,
+//!   failed writes, and blocking transports use a drain on the node's task pool.
+//!   Pings over a non-blocking transport are queued like other frames; over a
+//!   blocking one they share a write lock with the drain.
 //! * **Lifecycle.** `closed` (with the close token) and the Disconnect interest
 //!   live under one small mutex; `connected` is an atomic that only changes
 //!   under the registration lock, which serializes hub registration against
@@ -33,11 +39,12 @@
 //! * **Env and subscriptions** have their own locks; controller calls get a
 //!   snapshot of the env, never a guard.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use bytes::Bytes;
 use cabby_core::broker::{Broker, BrokerError, Cacheable};
 use cabby_core::common::{
     DisconnectMessage, Message, NO_PONG_REASON, PONG_TYPE, PingMessage, REMOTE_DISCONNECT_REASON, Reply,
@@ -85,6 +92,39 @@ pub trait Connection: Send + Sync {
     fn write_ping(&self, deadline: Instant) -> Result<(), ConnectionError>;
     fn read(&self) -> Result<Vec<u8>, ConnectionError>;
     fn close(&self, code: i32, reason: &str);
+
+    /// Writes a shared frame: text, binary, or close (with its code and reason).
+    /// Transports that can reference the payload instead of copying it (the hub
+    /// encodes a broadcast once for every session) override this.
+    fn write_frame(&self, frame: &Arc<SentFrame>, deadline: Instant) -> Result<(), ConnectionError> {
+        match frame.frame_type {
+            FrameType::Text => self.write(&frame.payload, deadline),
+            FrameType::Binary => self.write_binary(&frame.payload, deadline),
+            FrameType::Close => {
+                self.close(frame.close_code, &frame.close_reason);
+                Ok(())
+            }
+        }
+    }
+
+    /// Whether the transport queues writes without blocking: it implements
+    /// [`Connection::try_write_frame`] and calls the writable handler. Sessions
+    /// over such transports write from the producer's thread instead of a pool
+    /// thread (see the module docs).
+    fn nonblocking(&self) -> bool {
+        false
+    }
+
+    /// Queues a text or binary frame without blocking: `Ok(false)` when the
+    /// transport cannot take it now, in which case it calls the writable handler
+    /// once it can (or once it has failed).
+    fn try_write_frame(&self, frame: &Arc<SentFrame>, deadline: Instant) -> Result<bool, ConnectionError> {
+        self.write_frame(frame, deadline).map(|()| true)
+    }
+
+    /// Sets the handler [`Connection::try_write_frame`] promises to call after
+    /// refusing a frame.
+    fn set_writable_handler(&self, _handler: Box<dyn Fn() + Send + Sync>) {}
 }
 
 /// Handles decoded client commands for sessions (upstream `node.Executor`).
@@ -251,6 +291,12 @@ pub struct Session {
     writer: AtomicU8,
     max_pending_size: AtomicU64,
     timers: Mutex<Timers>,
+    /// The transport queues writes without blocking ([`Connection::nonblocking`]).
+    nonblocking: bool,
+    /// A frame the non-blocking transport refused: written first once it is writable.
+    refused: Mutex<Option<Arc<SentFrame>>>,
+    /// The transport signalled that it is writable again (see `drain_nonblocking`).
+    writable: AtomicBool,
 }
 
 impl std::fmt::Debug for Session {
@@ -340,8 +386,12 @@ impl Session {
     /// subscriptions, a 16-frame write queue, 2s write timeout (upstream
     /// `BuildSession`). Neither the writer nor the timers are started.
     pub fn build(conn: Arc<dyn Connection>, env: SessionEnv) -> Arc<Session> {
-        Arc::new_cyclic(|me| Session {
+        let nonblocking = conn.nonblocking();
+        let session = Arc::new_cyclic(|me| Session {
             me: me.clone(),
+            nonblocking,
+            refused: Mutex::new(None),
+            writable: AtomicBool::new(false),
             conn,
             settings: RwLock::new(Settings {
                 uid: String::new(),
@@ -371,7 +421,17 @@ impl Session {
             writer: AtomicU8::new(WRITER_DETACHED),
             max_pending_size: AtomicU64::new(0),
             timers: Mutex::new(Timers::default()),
-        })
+        });
+        if nonblocking {
+            let me = Arc::downgrade(&session);
+            session.conn.set_writable_handler(Box::new(move || {
+                if let Some(session) = me.upgrade() {
+                    session.writable.store(true, Ordering::SeqCst);
+                    session.kick_writer();
+                }
+            }));
+        }
+        session
     }
 
     /// Upstream `NewSession`: a session bound to `node` (its metrics, broker and
@@ -494,8 +554,82 @@ impl Session {
     /// Starts a drain unless one is running (or no writer is attached).
     fn kick_writer(&self) {
         if self.writer.compare_exchange(WRITER_IDLE, WRITER_BUSY, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
-            let session = self.me();
-            super::tasks::spawn(Box::new(move || session.drain()));
+            if self.nonblocking {
+                self.drain_nonblocking();
+            } else {
+                self.spawn_drain();
+            }
+        }
+    }
+
+    /// Runs the (blocking) drain on the node's task pool; the writer is busy.
+    fn spawn_drain(&self) {
+        let session = self.me();
+        super::tasks::spawn(Box::new(move || session.drain()));
+    }
+
+    /// The next frame to write: a refused one first, then the queue's head.
+    fn next_frame(&self) -> Option<Arc<SentFrame>> {
+        if let Some(frame) = lock(&self.refused).take() {
+            return Some(frame);
+        }
+        self.write_queue.remove().map(|item| item.data)
+    }
+
+    /// Hands frames to a non-blocking transport on the producer's thread while
+    /// it takes them; the writer is busy. When the transport is full, the frame
+    /// is kept and the drain stops: the transport's writable handler resumes it.
+    /// Close frames and failures go to the pool drain, so disconnecting never
+    /// runs on a producer's thread (a hub gate, a command).
+    fn drain_nonblocking(&self) {
+        loop {
+            let Some(frame) = self.next_frame() else {
+                self.writer.store(WRITER_IDLE, Ordering::SeqCst);
+                if self.write_queue.is_empty()
+                    || self
+                        .writer
+                        .compare_exchange(WRITER_IDLE, WRITER_BUSY, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_err()
+                {
+                    return;
+                }
+                continue;
+            };
+            if frame.frame_type == FrameType::Close {
+                *lock(&self.refused) = Some(frame);
+                self.spawn_drain();
+                return;
+            }
+
+            self.writable.store(false, Ordering::SeqCst);
+            let deadline = Instant::now() + self.settings().write_timeout;
+            match self.conn.try_write_frame(&frame, deadline) {
+                Ok(true) => {
+                    let metrics = self.metrics();
+                    metrics.counter_add(METRICS_DATA_SENT, frame.payload.len() as u64);
+                    metrics.counter_increment(METRICS_SENT_MSG);
+                }
+                Ok(false) => {
+                    *lock(&self.refused) = Some(frame);
+                    self.writer.store(WRITER_IDLE, Ordering::SeqCst);
+                    // The transport may have become writable since it refused the
+                    // frame, while the drain was still busy: go on then.
+                    if !self.writable.swap(false, Ordering::SeqCst)
+                        || self
+                            .writer
+                            .compare_exchange(WRITER_IDLE, WRITER_BUSY, Ordering::SeqCst, Ordering::SeqCst)
+                            .is_err()
+                    {
+                        return;
+                    }
+                }
+                Err(_) => {
+                    // The pool drain writes it again and handles the failure.
+                    *lock(&self.refused) = Some(frame);
+                    self.spawn_drain();
+                    return;
+                }
+            }
         }
     }
 
@@ -504,7 +638,7 @@ impl Session {
     fn drain(self: Arc<Self>) {
         let metrics = self.metrics();
         loop {
-            let Some(item) = self.write_queue.remove() else {
+            let Some(frame) = self.next_frame() else {
                 self.writer.store(WRITER_IDLE, Ordering::SeqCst);
                 // A frame queued after the queue looked empty may have seen the
                 // drain as busy: take it over unless another drain started.
@@ -518,7 +652,6 @@ impl Session {
                 }
                 continue;
             };
-            let frame = item.data;
 
             let res = self.write_frame(&frame);
 
@@ -690,7 +823,13 @@ impl Session {
 
         let deadline = Instant::now() + interval / 2;
         let mut res = match self.encoder().encode(&new_ping_message(&precision)) {
-            Ok(frame) => self.write_frame_with_deadline(&frame, deadline),
+            // Behind the frames already queued: a non-blocking transport is never
+            // waited for (a dead connection fails the queued writes instead).
+            Ok(frame) if self.nonblocking => {
+                self.push_frame(Arc::new(frame));
+                Ok(())
+            }
+            Ok(frame) => self.write_frame_with_deadline(&Arc::new(frame), deadline),
             Err(e) => Err(ConnectionError(e.0)),
         };
 
@@ -909,6 +1048,26 @@ impl Session {
         Ok(())
     }
 
+    /// The push-model counterpart of [`Session::serve`]: instead of a reader
+    /// thread blocking on [`Connection::read`], the transport hands every client
+    /// message (and the end of the connection) to the returned reader, which
+    /// executes them in order on the node's command pool. `callback` runs when
+    /// reading ends, as with `serve`.
+    pub fn reader(self: &Arc<Self>, callback: Box<dyn FnOnce() + Send>) -> SessionReader {
+        SessionReader {
+            inner: Arc::new(ReaderInner {
+                session: self.clone(),
+                state: Mutex::new(ReaderState {
+                    events: VecDeque::new(),
+                    running: false,
+                    finished: false,
+                    callback: Some(callback),
+                    parked: None,
+                }),
+            }),
+        }
+    }
+
     /// Decodes and executes one client message (upstream `ReadMessage`).
     pub fn read_message(self: &Arc<Self>, message: &[u8]) -> Result<(), NodeError> {
         let metrics = self.metrics();
@@ -1008,12 +1167,12 @@ impl Session {
         self.close();
 
         self.disconnect_from_node();
-        let _ = self.write_frame(&SentFrame {
+        let _ = self.write_frame(&Arc::new(SentFrame {
             frame_type: FrameType::Close,
             close_reason: reason.to_owned(),
             close_code: code,
             ..Default::default()
-        });
+        }));
 
         self.write_queue.close();
     }
@@ -1062,21 +1221,17 @@ impl Session {
         });
     }
 
-    fn write_frame(&self, frame: &SentFrame) -> Result<(), ConnectionError> {
+    fn write_frame(&self, frame: &Arc<SentFrame>) -> Result<(), ConnectionError> {
         let timeout = self.settings().write_timeout;
         self.write_frame_with_deadline(frame, Instant::now() + timeout)
     }
 
-    fn write_frame_with_deadline(&self, frame: &SentFrame, deadline: Instant) -> Result<(), ConnectionError> {
+    fn write_frame_with_deadline(&self, frame: &Arc<SentFrame>, deadline: Instant) -> Result<(), ConnectionError> {
         match frame.frame_type {
             FrameType::Text | FrameType::Binary => {
                 let res = {
                     let _w = lock(&self.write_lock);
-                    if frame.frame_type == FrameType::Text {
-                        self.conn.write(&frame.payload, deadline)
-                    } else {
-                        self.conn.write_binary(&frame.payload, deadline)
-                    }
+                    self.conn.write_frame(frame, deadline)
                 };
                 if res.is_ok() {
                     self.metrics().counter_add(METRICS_DATA_SENT, frame.payload.len() as u64);
@@ -1132,6 +1287,137 @@ impl Session {
 
     pub fn read_internal_state(&self, key: &str) -> Option<Value> {
         lock(&self.lifecycle).internal_state.as_ref().and_then(|m| m.get(key).cloned())
+    }
+}
+
+/// Holds the transport's permission to read the next message: dropping it lets
+/// the transport read on (see [`SessionReader::message`]).
+pub type ReadPermit = Box<dyn Send>;
+
+enum ReadEvent {
+    Message(Bytes, ReadPermit),
+    End(ConnectionError),
+}
+
+struct ReaderState {
+    events: VecDeque<ReadEvent>,
+    /// A drain is scheduled or running on the command pool.
+    running: bool,
+    /// Reading ended (upstream's reader goroutine returned): later events are dropped.
+    finished: bool,
+    callback: Option<Box<dyn FnOnce() + Send>>,
+    /// The permit of the message that ended reading: kept, so the transport
+    /// reads no further (as nothing reads after upstream's reader returned).
+    parked: Option<ReadPermit>,
+}
+
+struct ReaderInner {
+    session: Arc<Session>,
+    state: Mutex<ReaderState>,
+}
+
+/// Executes a session's client messages pushed by its transport (see
+/// [`Session::reader`]): upstream's reader loop (`Serve`) without a thread.
+///
+/// Messages of one session run one at a time, in arrival order, on the node's
+/// command pool; a session with nothing to execute holds no thread. Each
+/// message comes with a permit the transport hands over: it is released once
+/// the message has been executed, and the transport reads the next message only
+/// then, so a client that sends faster than its commands execute is slowed down
+/// through TCP, as with upstream's blocking reads.
+#[derive(Clone)]
+pub struct SessionReader {
+    inner: Arc<ReaderInner>,
+}
+
+impl std::fmt::Debug for SessionReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionReader").field("session", &self.inner.session).finish_non_exhaustive()
+    }
+}
+
+impl SessionReader {
+    /// A client message; `permit` is dropped once it has been executed.
+    pub fn message(&self, msg: Bytes, permit: ReadPermit) {
+        self.push(ReadEvent::Message(msg, permit));
+    }
+
+    /// The connection ended with `err` (a read failure or a close): the session
+    /// is disconnected after the messages received before (upstream `Serve` on a
+    /// failed `Read`).
+    pub fn end(&self, err: ConnectionError) {
+        self.push(ReadEvent::End(err));
+    }
+
+    fn push(&self, event: ReadEvent) {
+        let mut state = lock(&self.inner.state);
+        if state.finished {
+            return;
+        }
+        state.events.push_back(event);
+        if state.running {
+            return;
+        }
+        state.running = true;
+        drop(state);
+        let inner = self.inner.clone();
+        super::tasks::execute(Box::new(move || inner.drain()));
+    }
+}
+
+impl ReaderInner {
+    fn drain(&self) {
+        loop {
+            let event = {
+                let mut state = lock(&self.state);
+                match state.events.pop_front() {
+                    Some(event) if !state.finished => event,
+                    _ => {
+                        state.events.clear();
+                        state.running = false;
+                        return;
+                    }
+                }
+            };
+            let session = &self.session;
+            match event {
+                ReadEvent::Message(msg, permit) => {
+                    // Upstream checks before every read whether the session closed.
+                    if session.is_closed() {
+                        self.finish(Some(permit));
+                        continue;
+                    }
+                    if session.read_message(&msg).is_err() {
+                        self.finish(Some(permit));
+                        continue;
+                    }
+                    drop(permit);
+                }
+                ReadEvent::End(err) => {
+                    if err.is_close() {
+                        session.disconnect_now("Read closed", CLOSE_NORMAL_CLOSURE);
+                    } else {
+                        session.disconnect_now("Read failed", CLOSE_ABNORMAL_CLOSURE);
+                    }
+                    self.finish(None);
+                }
+            }
+        }
+    }
+
+    /// Reading ended: later events are dropped and the callback runs (once).
+    fn finish(&self, permit: Option<ReadPermit>) {
+        let callback = {
+            let mut state = lock(&self.state);
+            state.finished = true;
+            if permit.is_some() {
+                state.parked = permit;
+            }
+            state.callback.take()
+        };
+        if let Some(callback) = callback {
+            callback();
+        }
     }
 }
 
@@ -1438,6 +1724,161 @@ mod tests {
         assert_eq!(Some(Vec::<String>::new()), s.subscriptions().streams_for("c"));
         assert!(s.is_disconnectable());
         assert!(s.restore_from_cache(b"[1]").is_err());
+    }
+
+    /// Records the commands it executes.
+    struct Commands(Mutex<Sender<String>>);
+
+    impl Executor for Commands {
+        fn handle_command(&self, _session: &Arc<Session>, msg: &Message) -> Result<(), NodeError> {
+            let _ = lock(&self.0).send(msg.identifier.clone());
+            Ok(())
+        }
+        fn disconnect(&self, _session: &Arc<Session>) -> Result<(), NodeError> {
+            Ok(())
+        }
+    }
+
+    /// Counts released read permits.
+    struct Permit(Arc<AtomicU64>);
+
+    impl Drop for Permit {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn reader_executes_messages_in_order_then_disconnects() {
+        let clock = TestClock::new();
+        let (s, frames) = session(&clock, vec![]);
+        let (tx, commands) = channel();
+        s.set_executor(Arc::new(Commands(Mutex::new(tx))));
+        s.set_connected(true);
+        let (done_tx, done) = channel();
+        let reader = s.reader(Box::new(move || done_tx.send(()).unwrap()));
+        let released = Arc::new(AtomicU64::new(0));
+
+        for i in 0..50 {
+            let msg = format!(r#"{{"command":"message","identifier":"{i}","data":"{{}}"}}"#);
+            reader.message(Bytes::from(msg), Box::new(Permit(released.clone())));
+        }
+        reader.end(ConnectionError("websocket: close 1000 (normal)".into()));
+
+        let got: Vec<String> = (0..50).map(|_| next(&commands)).collect();
+        assert_eq!((0..50).map(|i| i.to_string()).collect::<Vec<_>>(), got);
+        done.recv_timeout(Duration::from_secs(5)).expect("the callback runs when reading ends");
+        assert_eq!(50, released.load(Ordering::SeqCst), "every permit is released after its message");
+        assert!(s.is_closed());
+        assert_eq!(format!("close:{CLOSE_NORMAL_CLOSURE}"), next(&frames));
+
+        // Nothing is executed after the end.
+        reader.message(Bytes::from_static(br#"{"command":"message","identifier":"late"}"#), Box::new(()));
+        assert!(commands.recv_timeout(Duration::from_millis(100)).is_err());
+    }
+
+    #[test]
+    fn reader_stops_at_an_undecodable_message_and_keeps_its_permit() {
+        let clock = TestClock::new();
+        let (s, _frames) = session(&clock, vec![]);
+        let (tx, commands) = channel();
+        s.set_executor(Arc::new(Commands(Mutex::new(tx))));
+        let (done_tx, done) = channel();
+        let reader = s.reader(Box::new(move || done_tx.send(()).unwrap()));
+        let released = Arc::new(AtomicU64::new(0));
+
+        reader.message(Bytes::from_static(b"not json"), Box::new(Permit(released.clone())));
+        reader.message(Bytes::from_static(br#"{"command":"message","identifier":"1"}"#), Box::new(()));
+
+        done.recv_timeout(Duration::from_secs(5)).expect("reading ends (upstream's reader returns)");
+        assert!(commands.recv_timeout(Duration::from_millis(100)).is_err());
+        assert_eq!(0, released.load(Ordering::SeqCst), "the transport reads no further");
+    }
+
+    /// A non-blocking transport that takes `capacity` frames, then refuses until
+    /// released.
+    #[derive(Default)]
+    struct Valve {
+        frames: Mutex<Vec<String>>,
+        capacity: Mutex<usize>,
+        refused: AtomicBool,
+        handler: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+    }
+
+    impl Valve {
+        fn frames(&self) -> Vec<String> {
+            lock(&self.frames).clone()
+        }
+
+        fn release(&self, n: usize) {
+            *lock(&self.capacity) += n;
+            if self.refused.swap(false, Ordering::SeqCst)
+                && let Some(handler) = lock(&self.handler).as_ref()
+            {
+                handler();
+            }
+        }
+    }
+
+    impl Connection for Valve {
+        fn write(&self, msg: &[u8], _deadline: Instant) -> Result<(), ConnectionError> {
+            lock(&self.frames).push(String::from_utf8_lossy(msg).into_owned());
+            Ok(())
+        }
+        fn write_binary(&self, msg: &[u8], deadline: Instant) -> Result<(), ConnectionError> {
+            self.write(msg, deadline)
+        }
+        fn write_ping(&self, _deadline: Instant) -> Result<(), ConnectionError> {
+            Ok(())
+        }
+        fn read(&self) -> Result<Vec<u8>, ConnectionError> {
+            Err(ConnectionError("websocket: close 1000 (normal)".into()))
+        }
+        fn close(&self, code: i32, _reason: &str) {
+            lock(&self.frames).push(format!("close:{code}"));
+        }
+        fn nonblocking(&self) -> bool {
+            true
+        }
+        fn try_write_frame(&self, frame: &Arc<SentFrame>, _deadline: Instant) -> Result<bool, ConnectionError> {
+            let mut capacity = lock(&self.capacity);
+            if *capacity == 0 {
+                self.refused.store(true, Ordering::SeqCst);
+                return Ok(false);
+            }
+            *capacity -= 1;
+            lock(&self.frames).push(String::from_utf8_lossy(&frame.payload).into_owned());
+            Ok(true)
+        }
+        fn set_writable_handler(&self, handler: Box<dyn Fn() + Send + Sync>) {
+            *lock(&self.handler) = Some(handler);
+        }
+    }
+
+    #[test]
+    fn nonblocking_transports_are_written_by_the_producer_and_resumed_when_writable() {
+        let valve = Arc::new(Valve { capacity: Mutex::new(2), ..Default::default() });
+        let s = Session::build(valve.clone(), SessionEnv::new("/cable", None));
+        s.send_messages();
+        s.set_connected(true);
+
+        for i in 0..5 {
+            s.send_json_transmission(&format!("{{\"n\":{i}}}"));
+        }
+        // Written synchronously while the transport takes frames; the rest waits.
+        assert_eq!(vec![r#"{"n":0}"#, r#"{"n":1}"#], valve.frames());
+
+        valve.release(10);
+        assert_eq!(vec![r#"{"n":0}"#, r#"{"n":1}"#, r#"{"n":2}"#, r#"{"n":3}"#, r#"{"n":4}"#], valve.frames());
+
+        // Close frames go through the pool drain.
+        s.disconnect("bye", CLOSE_NORMAL_CLOSURE);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !valve.frames().last().is_some_and(|f| f.starts_with("close:")) {
+            assert!(Instant::now() < deadline, "no close: {:?}", valve.frames());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(Some(&format!("close:{CLOSE_NORMAL_CLOSURE}")), valve.frames().last());
     }
 
     #[test]

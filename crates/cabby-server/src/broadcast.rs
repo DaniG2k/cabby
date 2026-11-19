@@ -206,7 +206,7 @@ impl HttpBroadcaster {
 
     /// The endpoint as a server handler (reads the body only after the method
     /// and authorization checks, at most `max_body_size` bytes, as upstream).
-    pub fn http_handler(&self) -> impl http_server::Handler {
+    pub fn http_handler(&self) -> impl http_server::Handler + use<> {
         let inner = Arc::clone(&self.inner);
         move |req: http_server::Request| {
             let inner = Arc::clone(&inner);
