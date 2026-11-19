@@ -406,3 +406,84 @@ impl Controller for RpcController {
             .map_err(controller_error)
     }
 }
+
+/// A router route whose controller is attached later: upstream registers the
+/// Pusher channel controller after the node and broker exist, while Cabby builds
+/// the router up front. Calls before attachment fail with an application error.
+#[derive(Default)]
+pub(super) struct DeferredController(std::sync::OnceLock<std::sync::Arc<dyn cabby_core::common::Controller>>);
+
+impl DeferredController {
+    pub(super) fn attach(&self, c: std::sync::Arc<dyn cabby_core::common::Controller>) {
+        let _ = self.0.set(c);
+    }
+
+    fn get(&self) -> Result<&std::sync::Arc<dyn cabby_core::common::Controller>, cabby_core::common::ControllerError> {
+        self.0.get().ok_or_else(|| cabby_core::common::ControllerError::new("controller is not ready"))
+    }
+}
+
+impl cabby_core::common::Controller for DeferredController {
+    fn start(&self) -> Result<(), cabby_core::common::ControllerError> {
+        self.0.get().map_or(Ok(()), |c| c.start())
+    }
+    fn shutdown(&self) -> Result<(), cabby_core::common::ControllerError> {
+        self.0.get().map_or(Ok(()), |c| c.shutdown())
+    }
+    fn authenticate(
+        &self,
+        sid: &str,
+        env: Option<&cabby_core::common::SessionEnv>,
+    ) -> cabby_core::common::Outcome<cabby_core::common::ConnectResult> {
+        match self.get() {
+            Ok(c) => c.authenticate(sid, env),
+            Err(e) => cabby_core::common::Outcome { result: None, error: Some(e) },
+        }
+    }
+    fn subscribe(
+        &self,
+        sid: &str,
+        env: Option<&cabby_core::common::SessionEnv>,
+        ids: &str,
+        channel: &str,
+    ) -> cabby_core::common::Outcome<cabby_core::common::CommandResult> {
+        match self.get() {
+            Ok(c) => c.subscribe(sid, env, ids, channel),
+            Err(e) => cabby_core::common::Outcome { result: None, error: Some(e) },
+        }
+    }
+    fn unsubscribe(
+        &self,
+        sid: &str,
+        env: Option<&cabby_core::common::SessionEnv>,
+        ids: &str,
+        channel: &str,
+    ) -> cabby_core::common::Outcome<cabby_core::common::CommandResult> {
+        match self.get() {
+            Ok(c) => c.unsubscribe(sid, env, ids, channel),
+            Err(e) => cabby_core::common::Outcome { result: None, error: Some(e) },
+        }
+    }
+    fn perform(
+        &self,
+        sid: &str,
+        env: Option<&cabby_core::common::SessionEnv>,
+        ids: &str,
+        channel: &str,
+        data: &str,
+    ) -> cabby_core::common::Outcome<cabby_core::common::CommandResult> {
+        match self.get() {
+            Ok(c) => c.perform(sid, env, ids, channel, data),
+            Err(e) => cabby_core::common::Outcome { result: None, error: Some(e) },
+        }
+    }
+    fn disconnect(
+        &self,
+        sid: &str,
+        env: Option<&cabby_core::common::SessionEnv>,
+        ids: &str,
+        subscriptions: &[String],
+    ) -> Result<(), cabby_core::common::ControllerError> {
+        self.get()?.disconnect(sid, env, ids, subscriptions)
+    }
+}
