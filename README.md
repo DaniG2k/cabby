@@ -38,7 +38,7 @@ From `cargo xtask report` (source of truth: [`compat/test-map.json`](compat/test
 | Translated to Rust and independently reviewed | 923 |
 | Translated cases verified against Go | 914 |
 | Translated cases the Go reference cannot expose (`not_observable`, tested against Rust only) | 9 |
-| Passing against Cabby | 166 (foundations: common, protocol, encoders, utils, logger, identity, configuration) |
+| Passing against Cabby | 516 (foundations, hub, node, brokers incl. NATS JetStream, RPC, metrics, Redis/NATS pub/sub, HTTP server, WebSocket, CLI config) |
 
 Every case is listed individually, including skipped and runtime-specific ones.
 Behavioral differences from Go, if any, are recorded in
