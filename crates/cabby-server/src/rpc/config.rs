@@ -138,6 +138,19 @@ impl Config {
         self.enable_tls || !self.tls_root_ca.is_empty()
     }
 
+    /// The TLS client configuration when TLS is enabled (upstream `TLSConfig`).
+    pub(crate) fn tls_config(&self, alpn: &[&[u8]]) -> Result<Option<Arc<rustls::ClientConfig>>, RpcError> {
+        if !self.tls_enabled() {
+            return Ok(None);
+        }
+        let options = crate::client_tls::TlsOptions {
+            root_ca: self.tls_root_ca.clone(),
+            verify: self.tls_verify,
+            alpn: alpn.iter().map(|p| p.to_vec()).collect(),
+        };
+        crate::client_tls::client_config(&options).map(Some).map_err(RpcError::Other)
+    }
+
     /// HTTP request timeout with the legacy fallbacks (ms).
     pub fn effective_http_request_timeout(&self) -> i64 {
         if self.http_request_timeout > 0 {

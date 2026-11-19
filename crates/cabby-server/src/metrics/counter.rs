@@ -1,47 +1,66 @@
 //! Monotonic counter with an interval delta (upstream `metrics/counter.go`).
 
-use cabby_core::pending;
+use std::sync::atomic::{AtomicU64, Ordering};
 
+/// A counter. Increments are single relaxed atomic adds; the interval fields
+/// are only written by rotation.
 #[derive(Debug)]
 pub struct Counter {
-    _name: String,
-    _desc: String,
+    name: String,
+    desc: String,
+    value: AtomicU64,
+    last_interval_value: AtomicU64,
+    last_interval_delta: AtomicU64,
 }
 
 impl Counter {
     pub fn new(name: &str, desc: &str) -> Self {
-        Self { _name: name.to_owned(), _desc: desc.to_owned() }
+        Self {
+            name: name.to_owned(),
+            desc: desc.to_owned(),
+            value: AtomicU64::new(0),
+            last_interval_value: AtomicU64::new(0),
+            last_interval_delta: AtomicU64::new(0),
+        }
     }
 
     pub fn name(&self) -> &str {
-        pending!("metrics::counter_name")
+        &self.name
     }
 
     pub fn desc(&self) -> &str {
-        pending!("metrics::counter_desc")
+        &self.desc
     }
 
     pub fn value(&self) -> u64 {
-        pending!("metrics::counter_value")
+        self.value.load(Ordering::Relaxed)
     }
 
     /// The delta of the last completed interval (the raw value before the first rotation).
     pub fn interval_value(&self) -> u64 {
-        pending!("metrics::counter_interval_value")
+        if self.last_interval_value.load(Ordering::Relaxed) == 0 {
+            return self.value();
+        }
+        self.last_interval_delta.load(Ordering::Relaxed)
     }
 
     /// Adds one; returns the new value.
+    #[inline]
     pub fn inc(&self) -> u64 {
-        pending!("metrics::counter_inc")
+        self.add(1)
     }
 
     /// Adds `n`; returns the new value.
-    pub fn add(&self, _n: u64) -> u64 {
-        pending!("metrics::counter_add")
+    #[inline]
+    pub fn add(&self, n: u64) -> u64 {
+        self.value.fetch_add(n, Ordering::Relaxed).wrapping_add(n)
     }
 
     /// Closes the current interval.
     pub fn update_delta(&self) {
-        pending!("metrics::counter_update_delta")
+        let now = self.value.load(Ordering::Relaxed);
+        let last = self.last_interval_value.load(Ordering::Relaxed);
+        self.last_interval_delta.store(now.wrapping_sub(last), Ordering::Relaxed);
+        self.last_interval_value.store(now, Ordering::Relaxed);
     }
 }
