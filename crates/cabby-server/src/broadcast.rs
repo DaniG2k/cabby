@@ -276,27 +276,46 @@ impl LegacyNatsConfig {
     }
 }
 
-/// Legacy NATS broadcaster (upstream `broadcast.LegacyNATSBroadcaster`).
+/// Legacy NATS broadcaster (upstream `broadcast.LegacyNATSBroadcaster`):
+/// every message on the channel subject is a fan-out broadcast.
 pub struct LegacyNatsBroadcaster {
-    _private: (),
+    node: Arc<dyn Handler>,
+    config: LegacyNatsConfig,
+    conn: std::sync::Mutex<Option<cabby_core::nats::client::Connection>>,
 }
 
 impl LegacyNatsBroadcaster {
-    pub fn new(_node: Arc<dyn Handler>, _config: &LegacyNatsConfig) -> Self {
-        pending!("broadcast::new_legacy_nats_broadcaster")
+    /// Upstream `NewLegacyNATSBroadcaster(node, config)`.
+    pub fn new(node: Arc<dyn Handler>, config: &LegacyNatsConfig) -> Self {
+        Self { node, config: config.clone(), conn: std::sync::Mutex::new(None) }
     }
 }
 
 impl Broadcaster for LegacyNatsBroadcaster {
     fn start(&self, _done: Sender<BroadcastError>) -> Result<(), BroadcastError> {
-        pending!("broadcast::legacy_nats_start")
+        let nats = self.config.nats.clone().ok_or_else(|| BroadcastError("NATS configuration is missing".into()))?;
+        let node = self.node.clone();
+        let conn = cabby_core::nats::client::Connection::open(&nats, "cabby-nats-broadcast", move |msg| {
+            node.handle_pubsub(&msg.payload)
+        })
+        .map_err(|e| BroadcastError(e.0))?;
+        if let Err(e) = conn.subscribe_sync(&self.config.channel) {
+            conn.close();
+            return Err(BroadcastError(e.0));
+        }
+        *self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(conn);
+        Ok(())
     }
 
     fn shutdown(&self) -> Result<(), BroadcastError> {
-        pending!("broadcast::legacy_nats_shutdown")
+        let conn = self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        if let Some(c) = conn {
+            c.close();
+        }
+        Ok(())
     }
 
     fn is_fanout(&self) -> bool {
-        pending!("broadcast::legacy_nats_is_fanout")
+        true
     }
 }
