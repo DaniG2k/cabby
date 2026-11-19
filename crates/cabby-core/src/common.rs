@@ -523,6 +523,31 @@ pub const PRESENCE_TYPE: &str = "presence";
 
 /// Disconnect reason sent on shutdown (upstream `common.SERVER_RESTART_REASON`).
 pub const SERVER_RESTART_REASON: &str = "server_restart";
+/// Disconnect reason for sessions that sent no handshake in time (upstream `IDLE_TIMEOUT_REASON`).
+pub const IDLE_TIMEOUT_REASON: &str = "idle_timeout";
+/// Disconnect reason for clients that stopped answering pings (upstream `NO_PONG_REASON`).
+pub const NO_PONG_REASON: &str = "no_pong";
+/// Disconnect reason for clients that cannot keep up with the send queue (upstream `SLOW_CLIENT_REASON`).
+pub const SLOW_CLIENT_REASON: &str = "too_slow";
+/// Disconnect reason for rejected connections (upstream `UNAUTHORIZED_REASON`).
+pub const UNAUTHORIZED_REASON: &str = "unauthorized";
+
+/// More outgoing message types (upstream `common.ErrorType` etc.).
+pub const ERROR_TYPE: &str = "error";
+pub const HISTORY_CONFIRMED_TYPE: &str = "confirm_history";
+pub const HISTORY_REJECTED_TYPE: &str = "reject_history";
+
+impl DisconnectMessage {
+    /// Upstream `NewDisconnectMessage(reason, reconnect)`.
+    pub fn new(reason: &str, reconnect: bool) -> Self {
+        DisconnectMessage { kind: DISCONNECT_TYPE.to_owned(), reason: reason.to_owned(), reconnect }
+    }
+}
+
+/// Upstream `DisconnectionMessage(reason, reconnect)`: the JSON transmission.
+pub fn disconnection_message(reason: &str, reconnect: bool) -> String {
+    crate::gojson::to_string(&DisconnectMessage::new(reason, reconnect))
+}
 
 /// Server ping (upstream `common.PingMessage`).
 #[derive(Debug, Clone, PartialEq, Default)]
