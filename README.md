@@ -10,9 +10,9 @@ same RPC contract with your Rails app, the same CLI flags, environment variables
 configuration file. Cabby is an independent implementation; it is not affiliated with the
 AnyCable project or Evil Martians.
 
-> **Status: feature-complete, not yet benchmarked.** `cabby` passes the full AnyT conformance
-> suite end to end, with SSE, Pusher, durable streams, Redis, NATS and mruby. The load harness
-> used for the Go vs Rust benchmarks is still being implemented (see [`SPEC.md`](SPEC.md)).
+> **Status: feature-complete.** `cabby` passes all 923 translated upstream test cases, including
+> the full AnyT conformance suite end to end, with SSE, Pusher, durable streams, Redis, NATS and
+> mruby (see [`SPEC.md`](SPEC.md)).
 
 ## Action Cable, AnyCable and Cabby
 
@@ -116,8 +116,7 @@ translated tests pass against Cabby.
 ```mermaid
 pie showData
     title Upstream test cases (923) against Cabby
-    "Passing" : 845
-    "Pending (load harness)" : 64
+    "Passing" : 923
 ```
 
 | | Count |
@@ -126,7 +125,7 @@ pie showData
 | Translated to Rust and independently reviewed | 923 |
 | Verified against the Go server | 914 |
 | Go cannot expose the behavior (`not_observable`, tested against Rust only) | 9 |
-| **Passing against Cabby** | **845** |
+| **Passing against Cabby** | **923** |
 
 Source of truth: [`compat/test-map.json`](compat/test-map.json), summarized by `cargo xtask report`.
 
