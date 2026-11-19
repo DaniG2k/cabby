@@ -4,6 +4,7 @@
 //! encoders stay in `cabby-core`; `cabby_server::ws` re-exports them.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::common::{self, DisconnectMessage, Message, PingMessage, Reply};
 use crate::gojson;
@@ -178,5 +179,124 @@ impl EncodingCache {
                 None => "encoding failed".to_owned(),
             })),
         }
+    }
+}
+
+/// Outcome of encoding a [`CachedEncodedMessage`] for one encoder: a frame shared by
+/// every session using that encoder, or the (decorated) error.
+pub type SharedFrame = Result<Arc<SentFrame>, EncodeError>;
+
+/// A message whose encoding is computed once per encoder ID and then shared
+/// (upstream `encoders.CachedEncodedMessage`).
+///
+/// The hub builds one per channel identifier and broadcast and passes it to every
+/// subscribed session; each session fetches the frame for its encoder. A broadcast
+/// to N sessions using one encoder is therefore encoded once, and the frame is
+/// shared through an `Arc` instead of being copied per session.
+///
+/// Unlike upstream's unsynchronized cache this type is `Sync`. The first encoder ID
+/// is cached in a lock-free slot, so the common single-encoder case costs one
+/// atomic load per fetch; further encoders go to a small mutex-guarded list.
+pub struct CachedEncodedMessage {
+    target: common::EncodedMessage,
+    first: OnceLock<(Box<str>, SharedFrame)>,
+    rest: Mutex<Vec<(Box<str>, SharedFrame)>>,
+}
+
+fn encode_once(
+    target: &common::EncodedMessage,
+    callback: impl FnOnce(&common::EncodedMessage) -> Result<Option<SentFrame>, EncodeError>,
+) -> SharedFrame {
+    match callback(target) {
+        Ok(Some(frame)) => Ok(Arc::new(frame)),
+        // Upstream: `errorx.Decorate(err, "encoding failed")` (a nil error when the
+        // callback returned a nil frame).
+        Ok(None) => Err(EncodeError("encoding failed".to_owned())),
+        Err(err) => Err(EncodeError(format!("encoding failed, cause: {err}"))),
+    }
+}
+
+impl CachedEncodedMessage {
+    /// Upstream `NewCachedEncodedMessage(msg)`.
+    pub fn new(target: common::EncodedMessage) -> Self {
+        Self { target, first: OnceLock::new(), rest: Mutex::new(Vec::new()) }
+    }
+
+    /// The wrapped message.
+    pub fn target(&self) -> &common::EncodedMessage {
+        &self.target
+    }
+
+    /// Returns the frame cached for `encoder`, calling `callback` only on the first
+    /// fetch for that encoder (upstream `Fetch`). A callback error, or `Ok(None)`
+    /// (a nil frame upstream), is cached as a failure with upstream's texts.
+    pub fn fetch(
+        &self,
+        encoder: &str,
+        callback: impl FnOnce(&common::EncodedMessage) -> Result<Option<SentFrame>, EncodeError>,
+    ) -> SharedFrame {
+        let mut callback = Some(callback);
+        let (id, frame) = self.first.get_or_init(|| {
+            let cb = callback.take().expect("callback runs at most once");
+            (encoder.into(), encode_once(&self.target, cb))
+        });
+        if **id == *encoder {
+            return frame.clone();
+        }
+
+        let mut rest = self.rest.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, frame)) = rest.iter().find(|(id, _)| **id == *encoder) {
+            return frame.clone();
+        }
+        // The first slot belongs to another encoder, so the callback is still unused.
+        let frame = encode_once(&self.target, callback.take().expect("callback runs at most once"));
+        rest.push((encoder.into(), frame.clone()));
+        frame
+    }
+
+    /// [`fetch`](Self::fetch) with `encoder.encode` as the callback.
+    pub fn fetch_with(&self, encoder: &dyn Encoder) -> SharedFrame {
+        self.fetch(&encoder.id(), |msg| encoder.encode(msg).map(Some))
+    }
+
+    /// The [`Json`] encoder's (shared) frame for this message.
+    pub fn json_frame(&self) -> SharedFrame {
+        self.fetch(JSON_ENCODER_ID, |msg| Json.encode(msg).map(Some))
+    }
+
+    /// The `encoders.JSON` payload (upstream `MarshalJSON`), encoded once.
+    pub fn to_json(&self) -> Vec<u8> {
+        match self.json_frame() {
+            Ok(frame) => frame.payload.clone(),
+            Err(_) => self.target.to_json(),
+        }
+    }
+}
+
+impl std::fmt::Debug for CachedEncodedMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CachedEncodedMessage").field("target", &self.target).finish_non_exhaustive()
+    }
+}
+
+impl From<common::EncodedMessage> for CachedEncodedMessage {
+    fn from(msg: common::EncodedMessage) -> Self {
+        Self::new(msg)
+    }
+}
+
+impl EncodedMessage for CachedEncodedMessage {
+    fn get_type(&self) -> String {
+        self.target.get_type()
+    }
+}
+
+impl EncodedMessageJson for CachedEncodedMessage {
+    fn to_json_value(&self) -> serde_json::Value {
+        self.target.to_json_value()
+    }
+
+    fn write_json(&self, out: &mut Vec<u8>) {
+        self.target.write_json(out);
     }
 }

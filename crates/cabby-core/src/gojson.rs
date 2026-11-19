@@ -215,10 +215,109 @@ impl<'de> Visitor<'de> for FieldKey {
     }
 }
 
+/// Decodes `input` the way Go's `json.Unmarshal` fills a struct whose fields are
+/// all `string`s, named (ASCII lowercase) by `fields`: keys match exactly or
+/// case-insensitively, in document order (a later key overwrites), unknown keys
+/// and `null` values are ignored, and `null` input leaves every field empty.
+/// A non-string value for a field is an error after the whole object was decoded
+/// (Go's `UnmarshalTypeError`); so is input that is not an object or not JSON.
+/// `type_name` is the Go struct name used in error texts.
+pub fn decode_string_fields<const N: usize>(
+    input: &str,
+    type_name: &'static str,
+    fields: &'static [&'static str; N],
+) -> Result<[String; N], String> {
+    use serde::Deserializer as _;
+    use serde::de::{IgnoredAny, MapAccess};
+
+    struct StringFields<const N: usize> {
+        type_name: &'static str,
+        fields: &'static [&'static str; N],
+    }
+
+    fn kind(v: &Value) -> &'static str {
+        match v {
+            Value::Null => "null",
+            Value::Bool(_) => "bool",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+        }
+    }
+
+    impl<'de, const N: usize> Visitor<'de> for StringFields<N> {
+        type Value = Result<[String; N], String>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "a JSON object for Go type {}", self.type_name)
+        }
+
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(Ok(std::array::from_fn(|_| String::new())))
+        }
+
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut out: [String; N] = std::array::from_fn(|_| String::new());
+            let mut type_error: Option<String> = None;
+            while let Some(key) = map.next_key_seed(FieldKey(self.fields))? {
+                let Some(i) = key else {
+                    map.next_value::<IgnoredAny>()?;
+                    continue;
+                };
+                match map.next_value::<Value>()? {
+                    Value::String(s) => out[i] = s,
+                    Value::Null => {}
+                    other => {
+                        type_error.get_or_insert_with(|| {
+                            format!(
+                                "json: cannot unmarshal {} into Go struct field {}.{} of type string",
+                                kind(&other),
+                                self.type_name,
+                                self.fields[i]
+                            )
+                        });
+                    }
+                }
+            }
+            Ok(type_error.map_or(Ok(out), Err))
+        }
+    }
+
+    // Objects (and `null`) are visited straight from the text, so keys are seen in
+    // document order. Anything else is only classified for the error: with
+    // `arbitrary_precision` a number would otherwise reach `visit_map`.
+    let starts_object = matches!(input.trim_start().as_bytes().first(), Some(b'{' | b'n'));
+    let mut de = serde_json::Deserializer::from_str(input);
+    if !starts_object {
+        let value: Value = serde::Deserialize::deserialize(&mut de).map_err(|e| e.to_string())?;
+        de.end().map_err(|e| e.to_string())?;
+        return Err(format!("json: cannot unmarshal {} into Go value of type {type_name}", kind(&value)));
+    }
+    let decoded = de.deserialize_any(StringFields { type_name, fields }).map_err(|e| e.to_string())?;
+    de.end().map_err(|e| e.to_string())?;
+    decoded
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn decodes_string_fields_like_go() {
+        const F: &[&str; 2] = &["stream_name", "signed_stream_name"];
+        let d = |s: &str| decode_string_fields(s, "T", F);
+        assert_eq!(Ok(["a".to_owned(), String::new()]), d(r#"{"stream_name":"a","x":[1]}"#));
+        assert_eq!(Ok(["b".to_owned(), String::new()]), d(r#"{"stream_name":"a","STREAM_NAME":"b"}"#));
+        assert_eq!(Ok([String::new(), String::new()]), d("null"));
+        assert_eq!(Ok(["a".to_owned(), String::new()]), d(r#"{"stream_name":"a","signed_stream_name":null}"#));
+        assert!(d(r#"{"stream_name":1}"#).is_err());
+        assert!(d(r#"["a"]"#).is_err());
+        assert!(d(r#""a""#).is_err());
+        assert!(d("{").is_err());
+        assert!(d(r#"{} x"#).is_err());
+    }
 
     #[test]
     fn escapes_html_like_go() {

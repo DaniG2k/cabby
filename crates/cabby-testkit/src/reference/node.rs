@@ -1179,7 +1179,7 @@ impl TestNode {
     /// `node.Broadcast(msg)`, which is exactly that (plus a metrics counter).
     pub fn hub_broadcast_message(&self, msg: &StreamMessage) {
         match &self.imp {
-            NodeImp::Rust(r) => r.node.hub().broadcast_message(msg),
+            NodeImp::Rust(r) => r.node.hub().broadcast_message(msg.clone()),
             NodeImp::Go { .. } => {
                 self.go_node("Broadcast", json!({"msg": stream_message_to_go(msg)}));
             }

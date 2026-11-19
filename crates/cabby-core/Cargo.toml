@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 base64.workspace = true
+getrandom.workspace = true
 hmac.workspace = true
 prost.workspace = true
 serde.workspace = true
