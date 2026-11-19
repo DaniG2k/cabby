@@ -26,6 +26,8 @@ http-body-util = "0.1.5"
 hyper = { version = "1.12.0", features = ["server", "http1"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
 prost = "0.14.6"
+# Redis client (pub/sub over RESP3 pushes, streams, sentinel, cluster, rustls TLS).
+redis = { version = "=1.8.1", default-features = false, features = ["aio", "tokio-comp", "tokio-rustls-comp", "tls-rustls-insecure", "streams", "sentinel", "cluster-async"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8.5"
 serde = { version = "1.0.229", features = ["derive"] }
