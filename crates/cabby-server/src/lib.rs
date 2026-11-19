@@ -16,7 +16,6 @@ pub mod nats;
 pub mod node;
 pub mod pubsub;
 pub mod pusher;
-pub mod pusher_sse_deps;
 pub mod redis;
 pub mod rpc;
 pub mod server;
