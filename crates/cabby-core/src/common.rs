@@ -304,6 +304,14 @@ pub struct Reply {
     pub restored_ids: Vec<String>,
 }
 
+impl Reply {
+    /// Decodes a transmission into a reply (upstream `json.Unmarshal(raw, &reply)`):
+    /// Go's rules as for [`Message::from_json`]; `message` numbers become `float64`.
+    pub fn from_json(raw: &[u8]) -> Result<Reply, DecodeError> {
+        json::decode_reply(raw)
+    }
+}
+
 impl StreamMessage {
     /// Builds the client reply for a subscription identifier. The data is decoded as
     /// JSON when valid (keeping integer precision), otherwise sent as a string.

@@ -24,19 +24,19 @@ use cabby_core::common::{
     CommandResult, ConnectResult, Controller, ControllerError, EncodedMessage, Outcome, PresenceEvent, PresenceInfo,
     RemoteCommandMessage, SentFrame, SessionEnv, StreamMessage,
 };
+use cabby_core::encoders::Encoder as _;
 use cabby_core::streams::{StreamsController, SubscribeRequest};
 use cabby_server::ds as rs;
 use cabby_server::metrics::{Instrumenter, Metrics};
 use cabby_server::node::{self as node_rs, Connection as _, Node, NodeOption};
-use cabby_server::pusher_sse_deps::{Encoder as _, ResponseWriter};
-use cabby_server::server::{DefaultHeadersExtractor, HttpRequest};
+use cabby_server::server::{DefaultHeadersExtractor, HttpRequest, ResponseWriter};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::go_types::{command_result_to_go, connect_result_to_go, stream_message_to_go};
-use super::pusher::{ApiResponse, GoApiResponse, GoFrameResult, GoParsed, encoded_message_json, rust_frame};
-use super::sse::{OwnedRecorder, Recorder};
+use super::pusher::{ApiResponse, GoApiResponse, GoFrameResult, GoParsed, encoded_message_json};
+use super::sse::{OwnedRecorder, Recorder, rust_frame};
 use crate::{Backend, backend, bridge};
 
 /// The bridge serves one call at a time for all tests of a binary: Go-side waits
@@ -169,7 +169,7 @@ pub fn poll_encoder_id() -> String {
 /// `PollEncoder{}.Encode(msg)`.
 pub fn poll_encoder_encode(msg: &EncodedMessage) -> Result<Option<SentFrame>, String> {
     match backend() {
-        Backend::Rust => rust_frame(rs::PollEncoder.encode(msg)),
+        Backend::Rust => rust_frame(rs::PollEncoder.encode_optional(msg)),
         Backend::Go => {
             bridge::call::<_, GoFrameResult>("ds.PollEncoder.Encode", json!({"Msg": encoded_message_json(msg)}))
                 .into_result()
@@ -184,7 +184,7 @@ fn go_sse_encoder(e: &rs::SseEncoder) -> Value {
 /// `(&SSEEncoder{...}).Encode(msg)`.
 pub fn sse_encoder_encode(enc: &rs::SseEncoder, msg: &EncodedMessage) -> Result<Option<SentFrame>, String> {
     match backend() {
-        Backend::Rust => rust_frame(enc.encode(msg)),
+        Backend::Rust => rust_frame(enc.encode_optional(msg)),
         Backend::Go => bridge::call::<_, GoFrameResult>(
             "ds.SSEEncoder.Encode",
             json!({"Encoder": go_sse_encoder(enc), "Msg": encoded_message_json(msg)}),
@@ -209,7 +209,7 @@ struct GoRawFrame {
 /// `(&SSEEncoder{...}).EncodeTransmission(raw)`.
 pub fn sse_encoder_encode_transmission(enc: &rs::SseEncoder, raw: &str) -> FrameAndError {
     match backend() {
-        Backend::Rust => match enc.encode_transmission(raw) {
+        Backend::Rust => match enc.encode_transmission_optional(raw) {
             Ok(frame) => FrameAndError { frame, error: None },
             Err(e) => FrameAndError { frame: None, error: Some(e.0) },
         },
@@ -1201,7 +1201,7 @@ impl Harness {
             ctrl.map(Arc::new),
             None,
             shutdown.clone(),
-            DefaultHeadersExtractor::default(),
+            Some(Arc::new(DefaultHeadersExtractor::default())),
             conf,
         )
         .map_err(|e| e.0)?;
@@ -1271,13 +1271,13 @@ impl Handler {
         }
         let h = self.rust.clone().expect("Rust handler");
         let rec = Recorder::new();
-        let mut w = OwnedRecorder::new(&rec);
+        let w = OwnedRecorder::new(&rec);
         let (tx, rx) = channel();
         let r = req.to_rust();
         std::thread::spawn(move || {
             let done = CancellationToken::new();
-            h.serve(&r, &mut w, &done);
-            drop(w);
+            // The handler finishes the writer before it returns.
+            h.serve(&r, Box::new(w), &done);
             let _ = tx.send(());
         });
         match rx.recv_timeout(SERVE_DEADLINE) {
@@ -1456,8 +1456,8 @@ fn serve_connection(handler: Arc<rs::Handler>, conn: TcpStream, prefix: &str) {
         }
         watch.cancel();
     });
-    handler.serve(&req, &mut w, &done);
-    w.finish();
+    // The handler finishes the response before it returns.
+    handler.serve(&req, Box::new(w), &done);
     let _ = conn.shutdown(Shutdown::Both);
 }
 
@@ -1469,25 +1469,31 @@ struct TcpWriter {
     head_only: bool,
     status: Option<u16>,
     chunked: bool,
+    /// The response is complete: later writes are dropped.
+    finished: bool,
 }
 
 impl TcpWriter {
     fn new(conn: TcpStream, head_only: bool) -> Self {
-        Self { conn, headers: http::HeaderMap::new(), head_only, status: None, chunked: false }
+        Self { conn, headers: http::HeaderMap::new(), head_only, status: None, chunked: false, finished: false }
     }
+}
 
+impl ResponseWriter for TcpWriter {
     fn finish(&mut self) {
+        if self.finished {
+            return;
+        }
         if self.status.is_none() {
             self.write_header(200);
         }
+        self.finished = true;
         if self.chunked {
             let _ = self.conn.write_all(b"0\r\n\r\n");
         }
         let _ = self.conn.flush();
     }
-}
 
-impl ResponseWriter for TcpWriter {
     fn headers_mut(&mut self) -> &mut http::HeaderMap {
         &mut self.headers
     }
@@ -1515,6 +1521,9 @@ impl ResponseWriter for TcpWriter {
     fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
         if self.status.is_none() {
             self.write_header(200);
+        }
+        if self.finished {
+            return Err(std::io::Error::other("http: response already finished"));
         }
         if self.chunked && !data.is_empty() {
             self.conn.write_all(format!("{:x}\r\n", data.len()).as_bytes())?;

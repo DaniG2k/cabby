@@ -8,18 +8,21 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use cabby_core::common::{CommandResult, ConnectResult, EncodedMessage, Message, SentFrame, SessionEnv, StreamMessage};
-use cabby_server::pusher_sse_deps::{
-    self as deps, CachedEncodedMessage as RsCached, CallResult, Controller, Encoder as _, HeadersExtractor,
-    NodeOptions, ResponseWriter,
+use cabby_core::common::{
+    CommandResult, ConnectResult, Controller, ControllerError, EncodedMessage, Message, Outcome, SentFrame, SessionEnv,
+    StreamMessage,
 };
+use cabby_core::encoders::{CachedEncodedMessage as RsCached, EncodeError, Encoder as _};
+use cabby_server::metrics::{Instrumenter, Metrics};
+use cabby_server::node::{self as node_rs, Node as RsNode, NodeOption};
+use cabby_server::server::{DefaultHeadersExtractor, ResponseWriter};
 use cabby_server::sse as rs;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::go_types::{command_result_to_go, connect_result_to_go};
-use super::pusher::{ApiResponse, GoApiResponse, GoDecoded, GoFrameResult, GoParsed, encoded_message_json, rust_frame};
+use super::pusher::{ApiResponse, GoApiResponse, GoDecoded, GoFrameResult, GoParsed, encoded_message_json};
 use crate::{Backend, backend, bridge};
 
 // ------------------------------------------------------------------ config
@@ -87,6 +90,11 @@ pub fn decode_config_toml(s: &str) -> Result<rs::Config, String> {
 
 // ------------------------------------------------------------------ encoder
 
+/// A Rust encoder result as the Go `(frame, err)` pair (`None`: a nil frame).
+pub(crate) fn rust_frame(r: Result<Option<SentFrame>, EncodeError>) -> Result<Option<SentFrame>, String> {
+    r.map_err(|e| e.0)
+}
+
 fn go_encoder(e: &rs::Encoder) -> Value {
     json!({"RawData": e.raw_data, "UnwrapData": e.unwrap_data, "CommentPings": e.comment_pings})
 }
@@ -102,7 +110,7 @@ pub fn encoder_id(enc: &rs::Encoder) -> String {
 /// `coder.Encode(msg)`.
 pub fn encode(enc: &rs::Encoder, msg: &EncodedMessage) -> Result<Option<SentFrame>, String> {
     match backend() {
-        Backend::Rust => rust_frame(enc.encode(msg)),
+        Backend::Rust => rust_frame(enc.encode_optional(msg)),
         Backend::Go => bridge::call::<_, GoFrameResult>(
             "sse.Encoder.Encode",
             json!({"Encoder": go_encoder(enc), "Msg": encoded_message_json(msg)}),
@@ -114,7 +122,7 @@ pub fn encode(enc: &rs::Encoder, msg: &EncodedMessage) -> Result<Option<SentFram
 /// `coder.EncodeTransmission(raw)`.
 pub fn encode_transmission(enc: &rs::Encoder, raw: &str) -> Result<Option<SentFrame>, String> {
     match backend() {
-        Backend::Rust => rust_frame(enc.encode_transmission(raw)),
+        Backend::Rust => rust_frame(enc.encode_transmission_optional(raw)),
         Backend::Go => bridge::call::<_, GoFrameResult>(
             "sse.Encoder.EncodeTransmission",
             json!({"Encoder": go_encoder(enc), "Raw": raw}),
@@ -152,7 +160,7 @@ impl CachedEncodedMessage {
 
     pub fn fetch(&self, enc: &rs::Encoder) -> Result<Option<SentFrame>, String> {
         match &self.rust {
-            Some(c) => rust_frame(c.fetch(&enc.id(), &|m| enc.encode(m))),
+            Some(c) => c.fetch(&enc.id(), |m| enc.encode_optional(m)).map(|f| Some((*f).clone())).map_err(|e| e.0),
             None => {
                 self.fetched.borrow_mut().push(*enc);
                 let encoders: Vec<Value> = self.fetched.borrow().iter().map(go_encoder).collect();
@@ -283,6 +291,11 @@ impl ResponseWriter for OwnedRecorder {
             self.write_header(200);
         }
         self.shared.0.lock().unwrap().flushed = true;
+    }
+
+    fn finish(&mut self) {
+        // The handler returned: Go's recorder shows its final header map.
+        self.publish_headers();
     }
 }
 
@@ -550,9 +563,9 @@ impl MockController {
         }
     }
 
-    fn forbidden<T>(&self, call: String) -> CallResult<T> {
+    fn forbidden<T>(&self, call: String) -> Outcome<T> {
         self.unexpected.lock().unwrap().push(call.clone());
-        CallResult { result: None, error: Some(deps::Error(format!("mocks.Controller: unexpected call {call}"))) }
+        Outcome { result: None, error: Some(ControllerError::new(format!("mocks.Controller: unexpected call {call}"))) }
     }
 }
 
@@ -563,43 +576,43 @@ struct GoCalls {
 }
 
 impl Controller for MockController {
-    fn start(&self) -> Result<(), deps::Error> {
+    fn start(&self) -> Result<(), ControllerError> {
         self.unexpected.lock().unwrap().push("Start()".into());
-        Err(deps::Error("mocks.Controller: unexpected call Start()".into()))
+        Err(ControllerError::new("mocks.Controller: unexpected call Start()"))
     }
 
-    fn shutdown(&self) -> Result<(), deps::Error> {
+    fn shutdown(&self) -> Result<(), ControllerError> {
         Ok(())
     }
 
-    fn authenticate(&self, sid: &str, _env: &SessionEnv) -> CallResult<ConnectResult> {
+    fn authenticate(&self, sid: &str, _env: Option<&SessionEnv>) -> Outcome<ConnectResult> {
         self.calls.lock().unwrap().push(vec!["Authenticate".into(), sid.into()]);
         let found = self.authenticate.lock().unwrap().iter().find(|(s, _)| s == sid).map(|(_, r)| r.clone());
         match found {
-            Some(res) => CallResult { result: Some(res), error: None },
+            Some(res) => Outcome { result: Some(res), error: None },
             None => self.forbidden(format!("Authenticate(_, {sid:?}, _)")),
         }
     }
 
-    fn subscribe(&self, sid: &str, _env: &SessionEnv, ids: &str, channel: &str) -> CallResult<CommandResult> {
+    fn subscribe(&self, sid: &str, _env: Option<&SessionEnv>, ids: &str, channel: &str) -> Outcome<CommandResult> {
         self.calls.lock().unwrap().push(vec!["Subscribe".into(), sid.into(), ids.into(), channel.into()]);
         let key = (sid.to_owned(), ids.to_owned(), channel.to_owned());
         let found = self.subscribe.lock().unwrap().iter().find(|(k, _)| *k == key).map(|(_, r)| r.clone());
         match found {
-            Some(res) => CallResult { result: Some(res), error: None },
+            Some(res) => Outcome { result: Some(res), error: None },
             None => self.forbidden(format!("Subscribe(_, {sid:?}, _, {ids:?}, {channel:?})")),
         }
     }
 
-    fn unsubscribe(&self, sid: &str, _: &SessionEnv, ids: &str, channel: &str) -> CallResult<CommandResult> {
+    fn unsubscribe(&self, sid: &str, _: Option<&SessionEnv>, ids: &str, channel: &str) -> Outcome<CommandResult> {
         self.forbidden(format!("Unsubscribe(_, {sid:?}, _, {ids:?}, {channel:?})"))
     }
 
-    fn perform(&self, sid: &str, _: &SessionEnv, _: &str, channel: &str, _: &str) -> CallResult<CommandResult> {
+    fn perform(&self, sid: &str, _: Option<&SessionEnv>, _: &str, channel: &str, _: &str) -> Outcome<CommandResult> {
         self.forbidden(format!("Perform(_, {sid:?}, _, _, {channel:?}, _)"))
     }
 
-    fn disconnect(&self, _: &str, _: &SessionEnv, _: &str, _: &[String]) -> Result<(), deps::Error> {
+    fn disconnect(&self, _: &str, _: Option<&SessionEnv>, _: &str, _: &[String]) -> Result<(), ControllerError> {
         Ok(())
     }
 }
@@ -608,7 +621,7 @@ impl Controller for MockController {
 /// `mocks.Controller`, legacy broker) with `TestSSEHandler`'s disconnect queue
 /// (rate 1); against Go the node is started right away (`go appNode.Start()`).
 pub struct Node {
-    rust: Option<Arc<deps::Node>>,
+    rust: Option<Arc<RsNode>>,
     go: Option<i64>,
 }
 
@@ -616,11 +629,22 @@ pub fn build_node() -> (Node, Arc<MockController>) {
     match backend() {
         Backend::Rust => {
             let controller = Arc::new(MockController::new(None));
-            let node = deps::Node::new(
-                NodeOptions { hub_pool_size: 2, ping_interval: Duration::from_secs(3), disconnect_rate: Some(1) },
-                controller.clone(),
+            let mut config = node_rs::Config::new();
+            config.hub_gopool_size = 2;
+            let node = RsNode::new(
+                config,
+                vec![
+                    NodeOption::Controller(controller.clone()),
+                    NodeOption::Instrumenter(Arc::new(Metrics::new(Vec::new(), 10)) as Arc<dyn Instrumenter>),
+                ],
             );
-            (Node { rust: Some(Arc::new(node)), go: None }, controller)
+            let subscriber = Arc::new(node_rs::LegacySubscriber::new(node.clone()));
+            node.set_broker(Arc::new(cabby_core::broker::Legacy::new(subscriber)));
+            // TestSSEHandler: a disconnect queue with rate 1, never run.
+            let mut dconfig = node_rs::DisconnectQueueConfig::new();
+            dconfig.rate = 1;
+            node.set_disconnector(Arc::new(node_rs::DisconnectQueue::new(node.clone(), &dconfig)));
+            (Node { rust: Some(node), go: None }, controller)
         }
         Backend::Go => {
             let h: i64 = bridge::call("sse.Harness.New", json!({}));
@@ -644,7 +668,7 @@ impl Node {
     /// `appNode.Shutdown(context.Background())`.
     pub fn shutdown(&self) {
         match &self.rust {
-            Some(n) => n.shutdown().expect("node shutdown"),
+            Some(n) => n.shutdown(&cabby_server::rpc::Context::default()).expect("node shutdown"),
             None => {
                 bridge::call::<_, Value>("sse.Harness.Shutdown", json!({"Harness": self.go()}));
             }
@@ -732,7 +756,8 @@ pub fn sse_handler(node: &Node, conf: &rs::Config) -> Handler {
     let shutdown = CancellationToken::new();
     match &node.rust {
         Some(n) => {
-            let h = rs::sse_handler(n.clone(), shutdown.clone(), HeadersExtractor::default(), conf);
+            let extractor: rs::SharedHeadersExtractor = Arc::new(DefaultHeadersExtractor::default());
+            let h = rs::sse_handler(n.clone(), None, shutdown.clone(), Some(extractor), conf);
             Handler { rust: Some(Arc::new(h)), shutdown, go: None }
         }
         None => {
@@ -811,10 +836,12 @@ impl Handler {
         let req = req.clone();
         let done = request_done.clone();
         std::thread::spawn(move || {
-            let mut w = w;
-            h.serve(req.to_http(), &mut w, &done);
-            drop(w);
-            let _ = dtx.send(());
+            // The handler finishes the writer before it returns. A panic is reported
+            // to the test (`wait`) instead of looking like a hung handler.
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                h.serve(req.to_http(), Box::new(w), &done);
+            }));
+            let _ = dtx.send(res.err().map(|p| panic_message(p.as_ref())));
         });
         Streaming {
             inner: StreamingInner::Rust {
@@ -830,6 +857,14 @@ impl Handler {
     }
 }
 
+/// The text of a panic payload.
+fn panic_message(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| p.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "non-string panic payload".to_owned())
+}
+
 enum StreamingInner {
     Rust {
         recorder: Recorder,
@@ -837,7 +872,8 @@ enum StreamingInner {
         original: Recorder,
         events: Receiver<Vec<u8>>,
         status: Receiver<u16>,
-        finished: Mutex<Option<Receiver<()>>>,
+        /// The handler returned: `Some(message)` if it panicked.
+        finished: Mutex<Option<Receiver<Option<String>>>>,
         request_done: CancellationToken,
         _stop_timer: Sender<()>,
     },
@@ -958,7 +994,9 @@ impl Streaming {
                 let mut f = finished.lock().unwrap();
                 if let Some(rx) = f.as_ref() {
                     match rx.recv_timeout(timeout) {
-                        Ok(()) | Err(RecvTimeoutError::Disconnected) => *f = None,
+                        Ok(None) => *f = None,
+                        Ok(Some(p)) => panic!("handler panicked: {p}"),
+                        Err(RecvTimeoutError::Disconnected) => panic!("handler thread vanished"),
                         Err(RecvTimeoutError::Timeout) => return None,
                     }
                 }

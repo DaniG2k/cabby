@@ -73,17 +73,56 @@ impl EncodedMessage for common::EncodedMessage {
 pub struct EncodeError(pub String);
 
 /// A client protocol encoder (upstream `encoders.Encoder`).
+///
+/// Upstream encoders may return a nil frame with a nil error: nothing to send
+/// (e.g. an SSE encoder in raw mode skips protocol events). Such encoders
+/// implement [`Encoder::encode_optional`] and
+/// [`Encoder::encode_transmission_optional`], returning `Ok(None)`; their
+/// [`Encoder::encode`] and [`Encoder::encode_transmission`] report the missing
+/// frame as an error, so callers that only know the frame-returning methods
+/// skip the message, as upstream does. Callers that want upstream's exact
+/// semantics (send nothing, report nothing) use the optional variants.
 pub trait Encoder {
     fn id(&self) -> String;
     fn encode(&self, msg: &dyn EncodedMessageJson) -> Result<SentFrame, EncodeError>;
     fn encode_transmission(&self, msg: &str) -> Result<SentFrame, EncodeError>;
     fn decode(&self, payload: &[u8]) -> Result<Message, EncodeError>;
+
+    /// Upstream `Encode` with its nil frame: `Ok(None)` means nothing to send.
+    fn encode_optional(&self, msg: &dyn EncodedMessageJson) -> Result<Option<SentFrame>, EncodeError> {
+        self.encode(msg).map(Some)
+    }
+
+    /// Upstream `EncodeTransmission` with its nil frame: `Ok(None)` means nothing to send.
+    fn encode_transmission_optional(&self, msg: &str) -> Result<Option<SentFrame>, EncodeError> {
+        self.encode_transmission(msg).map(Some)
+    }
 }
+
+/// The error an encoder's frame-returning methods report where upstream returns
+/// a nil frame (see [`Encoder`]).
+pub fn no_frame() -> EncodeError {
+    EncodeError(NO_FRAME.to_owned())
+}
+
+/// Text of [`no_frame`].
+pub const NO_FRAME: &str = "nothing to encode";
 
 /// Messages the JSON encoder can serialize (upstream relies on `json.Marshal` of
 /// any `EncodedMessage`).
 pub trait EncodedMessageJson: EncodedMessage {
     fn to_json_value(&self) -> serde_json::Value;
+
+    /// The message as a `*common.Reply`, if it is one (upstream encoders use a
+    /// type assertion, e.g. `msg.(*common.Reply)`).
+    fn as_reply(&self) -> Option<&Reply> {
+        None
+    }
+
+    /// The message as a `*common.DisconnectMessage`, if it is one.
+    fn as_disconnect(&self) -> Option<&DisconnectMessage> {
+        None
+    }
 
     /// Appends the Go `json.Marshal` encoding to `out`. The default goes through
     /// [`EncodedMessageJson::to_json_value`]; the `common` types write directly.
@@ -107,7 +146,40 @@ macro_rules! serialize_json {
     )*};
 }
 
-serialize_json!(Reply, PingMessage, DisconnectMessage, common::EncodedMessage);
+/// Implements [`EncodedMessageJson`] for a `Serialize` type with Go JSON tags,
+/// with the given type assertions.
+macro_rules! serialize_json_as {
+    ($ty:ty { $($method:ident -> $target:ty = |$m:ident| $body:expr),* }) => {
+        impl EncodedMessageJson for $ty {
+            fn to_json_value(&self) -> serde_json::Value {
+                serde_json::to_value(self).expect("JSON value of a message")
+            }
+
+            fn write_json(&self, out: &mut Vec<u8>) {
+                gojson::write(out, self);
+            }
+
+            $(fn $method(&self) -> Option<&$target> {
+                let $m = self;
+                $body
+            })*
+        }
+    };
+}
+
+serialize_json!(PingMessage);
+serialize_json_as!(Reply { as_reply -> Reply = |m| Some(m) });
+serialize_json_as!(DisconnectMessage { as_disconnect -> DisconnectMessage = |m| Some(m) });
+serialize_json_as!(common::EncodedMessage {
+    as_reply -> Reply = |m| match m {
+        common::EncodedMessage::Reply(r) => Some(r),
+        _ => None,
+    },
+    as_disconnect -> DisconnectMessage = |m| match m {
+        common::EncodedMessage::Disconnect(d) => Some(d),
+        _ => None,
+    }
+});
 
 /// Identifier of the [`Json`] encoder.
 pub const JSON_ENCODER_ID: &str = "json";
@@ -254,9 +326,10 @@ impl CachedEncodedMessage {
         frame
     }
 
-    /// [`fetch`](Self::fetch) with `encoder.encode` as the callback.
+    /// [`fetch`](Self::fetch) with `encoder.encode` as the callback (its nil
+    /// frames included, see [`Encoder::encode_optional`]).
     pub fn fetch_with(&self, encoder: &dyn Encoder) -> SharedFrame {
-        self.fetch(&encoder.id(), |msg| encoder.encode(msg).map(Some))
+        self.fetch(&encoder.id(), |msg| encoder.encode_optional(msg))
     }
 
     /// The [`Json`] encoder's (shared) frame for this message.
@@ -298,5 +371,13 @@ impl EncodedMessageJson for CachedEncodedMessage {
 
     fn write_json(&self, out: &mut Vec<u8>) {
         self.target.write_json(out);
+    }
+
+    fn as_reply(&self) -> Option<&Reply> {
+        self.target.as_reply()
+    }
+
+    fn as_disconnect(&self) -> Option<&DisconnectMessage> {
+        self.target.as_disconnect()
     }
 }
