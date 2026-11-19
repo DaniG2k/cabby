@@ -1206,6 +1206,10 @@ fn process_stats() -> (u64, u64) {
 /// Upstream `HandleCommand`: dispatches a client command; `pong` only keeps the
 /// session alive.
 impl Executor for Node {
+    fn is_inline(&self, msg: &Message) -> bool {
+        matches!(msg.command.as_str(), "ping" | "pong")
+    }
+
     fn handle_command(&self, session: &Arc<Session>, msg: &Message) -> Result<(), NodeError> {
         session.keepalive();
 

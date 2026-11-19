@@ -11,6 +11,10 @@
 //! Cabby keeps the same limits and the same blocking contract, with one mutex-guarded
 //! state and two condition variables instead of channels:
 //!
+//! * Workers start **on demand** and an idle worker exits after [`WORKER_IDLE_TIMEOUT`].
+//!   Upstream starts `size / 5` goroutines eagerly, which costs nothing in Go; as OS
+//!   threads that would be dozens of idle threads per pool (51 for the hub's
+//!   remote-commands pool), so Cabby keeps only the workers recent load needed.
 //! * Workers are **OS threads**, not Tokio tasks. Scheduled tasks are synchronous
 //!   closures that may block (for example a session disconnect that waits for its
 //!   writer), and running them on dedicated threads keeps them off the async runtime's
@@ -42,6 +46,9 @@ use std::time::{Duration, Instant};
 /// Tasks a worker runs before it is replaced by a fresh one (upstream
 /// `workerRespawnThreshold`).
 pub const WORKER_RESPAWN_THRESHOLD: usize = 1 << 16;
+
+/// How long a parked worker waits for a task before it exits.
+pub const WORKER_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Identity of a pool worker (upstream tests compare goroutine IDs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -104,6 +111,7 @@ struct Shared {
     name: String,
     size: usize,
     queue_cap: usize,
+    idle_timeout: Duration,
     state: Mutex<State>,
     /// Parked workers wait here.
     work: Condvar,
@@ -124,21 +132,26 @@ enum Placement {
 }
 
 impl GoPool {
-    /// Creates a pool with up to `size` workers (at least one). Starts `size / 5`
-    /// workers (at least one, at most 1024) and buffers up to `size / 2` tasks (at
-    /// least one), like upstream `NewGoPool`.
+    /// Creates a pool with up to `size` workers (at least one) that buffers up to
+    /// `size / 2` tasks (at least one), like upstream `NewGoPool`. No worker is
+    /// started until a task is scheduled (see the module docs).
     pub fn new(name: &str, size: usize) -> Self {
+        Self::with_idle_timeout(name, size, WORKER_IDLE_TIMEOUT)
+    }
+
+    /// Like [`new`](Self::new), with a custom [`WORKER_IDLE_TIMEOUT`].
+    pub fn with_idle_timeout(name: &str, size: usize, idle_timeout: Duration) -> Self {
         let size = size.max(1);
         let queue_cap = (size / 2).max(1);
-        let spawn = (size / 5).clamp(1, 1024);
 
         let shared = Arc::new(Shared {
             name: name.to_owned(),
             size,
             queue_cap,
+            idle_timeout,
             state: Mutex::new(State {
                 queue: VecDeque::with_capacity(queue_cap),
-                workers: spawn,
+                workers: 0,
                 idle: 0,
                 wakeups: 0,
                 blocked: 0,
@@ -147,11 +160,6 @@ impl GoPool {
             work: Condvar::new(),
             space: Condvar::new(),
         });
-
-        for _ in 0..spawn {
-            // Upstream starts them with a no-op task, which counts towards the threshold.
-            spawn_worker(&shared, None, 1);
-        }
 
         lock(&POOLS).push(Arc::downgrade(&shared));
 
@@ -321,8 +329,16 @@ fn worker(shared: Arc<Shared>, id: WorkerId, first: Option<Task>, mut counter: u
                 return;
             }
             st.idle += 1;
+            let deadline = Instant::now() + shared.idle_timeout;
             while st.wakeups == 0 && !st.closed {
-                st = shared.work.wait(st).unwrap_or_else(|e| e.into_inner());
+                let now = Instant::now();
+                if now >= deadline {
+                    // Nobody handed this worker a task: give the slot back and exit.
+                    st.idle -= 1;
+                    st.workers -= 1;
+                    return;
+                }
+                st = shared.work.wait_timeout(st, deadline - now).unwrap_or_else(|e| e.into_inner()).0;
             }
             if st.wakeups > 0 {
                 st.wakeups -= 1;
@@ -382,6 +398,39 @@ mod tests {
         let err = pool.schedule_timeout(Duration::from_millis(20), Box::new(|| {})).unwrap_err();
         assert_eq!("schedule error: timed out", err.to_string());
         release_tx.send(()).unwrap();
+    }
+
+    #[test]
+    fn starts_workers_on_demand_and_retires_idle_ones() {
+        let pool = GoPool::with_idle_timeout("t", 8, Duration::from_millis(100));
+        assert_eq!(lock(&pool.shared.state).workers, 0);
+
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        for _ in 0..4 {
+            let (rx, tx) = (release_rx.clone(), done_tx.clone());
+            pool.schedule(Box::new(move || {
+                let _ = lock(&rx).recv();
+                tx.send(()).unwrap();
+            }));
+        }
+        assert_eq!(lock(&pool.shared.state).workers, 4);
+        for _ in 0..4 {
+            release_tx.send(()).unwrap();
+            done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while lock(&pool.shared.state).workers > 0 {
+            assert!(Instant::now() < deadline, "idle workers did not exit");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        // A retired pool still runs new work.
+        let (tx, rx) = std::sync::mpsc::channel();
+        pool.schedule(Box::new(move || tx.send(()).unwrap()));
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 
     #[test]

@@ -132,6 +132,13 @@ pub trait Executor: Send + Sync {
     fn handle_command(&self, session: &Arc<Session>, msg: &Message) -> Result<(), NodeError>;
     fn disconnect(&self, session: &Arc<Session>) -> Result<(), NodeError>;
 
+    /// Whether `msg` only touches the session itself (never the controller, the
+    /// broker or anything else that may block), so it can run on the transport's
+    /// thread when the session has nothing else queued (client pings).
+    fn is_inline(&self, _msg: &Message) -> bool {
+        false
+    }
+
     /// The time source sessions of this executor schedule their timers on (the
     /// node's clock). `None` keeps the session's own clock.
     fn clock(&self) -> Option<Arc<dyn Clock>> {
@@ -1081,15 +1088,37 @@ impl Session {
             }
         };
 
+        self.execute_decoded(message.len(), &command, false);
+        Ok(())
+    }
+
+    /// Decodes `message` and executes it right away if the executor says it
+    /// never blocks ([`Executor::is_inline`]); `false` (nothing done) otherwise.
+    fn try_read_inline(self: &Arc<Self>, message: &[u8]) -> bool {
+        let Ok(command) = self.encoder().decode(message) else {
+            return false;
+        };
+        match self.executor() {
+            Some(executor) if executor.is_inline(&command) => {
+                self.execute_decoded(message.len(), &command, true);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn execute_decoded(self: &Arc<Self>, len: usize, command: &Message, count_data: bool) {
+        let metrics = self.metrics();
+        if count_data {
+            metrics.counter_add(METRICS_DATA_RECEIVED, len as u64);
+        }
         metrics.counter_increment(METRICS_RECEIVED_MSG);
 
         if let Some(executor) = self.executor()
-            && executor.handle_command(self, &command).is_err()
+            && executor.handle_command(self, command).is_err()
         {
             metrics.counter_increment(METRICS_FAILED_COMMAND_RECEIVED);
         }
-
-        Ok(())
     }
 
     /// Encodes and queues a message (upstream `Send`).
@@ -1338,8 +1367,41 @@ impl std::fmt::Debug for SessionReader {
 
 impl SessionReader {
     /// A client message; `permit` is dropped once it has been executed.
+    ///
+    /// A client ping that arrives while the session has nothing queued is answered
+    /// on the calling (transport) thread: it only queues a pong, and running it
+    /// here keeps it from waiting behind other sessions' RPC-bound commands on a
+    /// busy command pool. Order is kept, as nothing of this session is pending.
     pub fn message(&self, msg: Bytes, permit: ReadPermit) {
+        if may_be_inline(&msg) && self.try_inline(&msg) {
+            drop(permit);
+            return;
+        }
         self.push(ReadEvent::Message(msg, permit));
+    }
+
+    /// Runs `msg` now if the session is idle and the command never blocks.
+    fn try_inline(&self, msg: &[u8]) -> bool {
+        {
+            let mut state = lock(&self.inner.state);
+            if state.running || state.finished || !state.events.is_empty() {
+                return false;
+            }
+            state.running = true;
+        }
+        let session = &self.inner.session;
+        let done = !session.is_closed() && session.try_read_inline(msg);
+
+        let mut state = lock(&self.inner.state);
+        if state.events.is_empty() {
+            state.running = false;
+            return done;
+        }
+        // Messages arrived meanwhile: hand them to the command pool (still `running`).
+        drop(state);
+        let inner = self.inner.clone();
+        super::tasks::execute(Box::new(move || inner.drain()));
+        done
     }
 
     /// The connection ended with `err` (a read failure or a close): the session
@@ -1419,6 +1481,12 @@ impl ReaderInner {
             callback();
         }
     }
+}
+
+/// Cheap filter for [`SessionReader::try_inline`]: short frames that mention a
+/// ping or pong (the only inline commands; other frames skip the extra decode).
+fn may_be_inline(msg: &[u8]) -> bool {
+    msg.len() <= 256 && msg.windows(4).any(|w| w == b"ping" || w == b"pong")
 }
 
 /// A uniformly distributed duration in `[0, span)` (`ZERO` for an empty span).
