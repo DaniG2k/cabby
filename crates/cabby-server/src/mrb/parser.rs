@@ -2,14 +2,14 @@
 
 use std::fmt;
 
-use cabby_core::pending;
+use cabby_mruby_sys as sys;
 
-use super::{Mrb, MrbValue, NotSend};
+use super::{Mrb, MrbValue};
 
 /// A parser (`*Parser`, `mrb_parser_state`), created with captured errors.
 #[derive(Debug)]
 pub struct Parser {
-    _p: NotSend,
+    p: sys::Parser,
 }
 
 /// A parser warning or error (`ParserMessage`).
@@ -30,60 +30,73 @@ pub struct ParserError {
 
 /// `Error()`: `Ruby parse error!\n\n` followed by `line L:C: message` lines.
 impl fmt::Display for ParserError {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        pending!("mrb::ParserError::fmt")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Ruby parse error!\n\n")?;
+        for e in &self.errors {
+            writeln!(f, "line {}:{}: {}", e.line, e.col, e.message)?;
+        }
+        Ok(())
     }
 }
 
 impl std::error::Error for ParserError {}
 
+fn messages(list: Vec<sys::ParserMessage>) -> Vec<ParserMessage> {
+    list.into_iter().map(|m| ParserMessage { col: m.col, line: m.line, message: m.message }).collect()
+}
+
 impl Parser {
     /// `NewParser`.
-    pub fn new(_m: &Mrb) -> Parser {
-        pending!("mrb::Parser::new")
+    pub fn new(m: &Mrb) -> Parser {
+        Parser { p: sys::Parser::new(&m.vm) }
     }
 
     pub fn close(self) {
-        pending!("mrb::Parser::close")
+        drop(self.p);
     }
 
     /// Parses `code`, returning its warnings (empty where Go returns nil).
-    pub fn parse(&mut self, _code: &str, _ctx: Option<&CompileContext>) -> Result<Vec<ParserMessage>, ParserError> {
-        pending!("mrb::Parser::parse")
+    pub fn parse(&mut self, code: &str, ctx: Option<&CompileContext>) -> Result<Vec<ParserMessage>, ParserError> {
+        let (errors, warnings) = self.p.parse(code, ctx.map(|c| &c.c));
+        let warnings = messages(warnings);
+        if errors.is_empty() { Ok(warnings) } else { Err(ParserError { errors: messages(errors), warnings }) }
     }
 
-    /// Compiles the last parse into a proc (`GenerateCode`).
+    /// Compiles the last parse into a proc (`GenerateCode`). The value is nil
+    /// when there is nothing to run: the last parse failed (go-mruby generates
+    /// code from the partial tree) or code generation failed (go-mruby
+    /// crashes).
     pub fn generate_code(&mut self) -> MrbValue {
-        pending!("mrb::Parser::generate_code")
+        MrbValue { v: self.p.generate_code() }
     }
 }
 
 /// Compile options such as the file name used in backtraces (`*CompileContext`).
 #[derive(Debug)]
 pub struct CompileContext {
-    _c: NotSend,
+    c: sys::Context,
 }
 
 impl CompileContext {
     /// `NewCompileContext`.
-    pub fn new(_m: &Mrb) -> CompileContext {
-        pending!("mrb::CompileContext::new")
+    pub fn new(m: &Mrb) -> CompileContext {
+        CompileContext { c: sys::Context::new(&m.vm) }
     }
 
     pub fn close(self) {
-        pending!("mrb::CompileContext::close")
+        drop(self.c);
     }
 
     /// The file name; empty when unset (`Filename`).
     pub fn filename(&self) -> String {
-        pending!("mrb::CompileContext::filename")
+        self.c.filename()
     }
 
-    pub fn set_filename(&mut self, _name: &str) {
-        pending!("mrb::CompileContext::set_filename")
+    pub fn set_filename(&mut self, name: &str) {
+        self.c.set_filename(name);
     }
 
-    pub fn capture_errors(&mut self, _yes: bool) {
-        pending!("mrb::CompileContext::capture_errors")
+    pub fn capture_errors(&mut self, yes: bool) {
+        self.c.capture_errors(yes);
     }
 }

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/cabby-bench", "crates/cabby-core", "crates/cabby-server", "crates/cabby-testkit", "tests", "tools/xtask"]
+members = ["crates/cabby-bench", "crates/cabby-core", "crates/cabby-mruby-sys", "crates/cabby-server", "crates/cabby-testkit", "tests", "tools/xtask"]
 
 [workspace.package]
 edition = "2024"
@@ -12,6 +12,7 @@ license = "MIT"
 [workspace.dependencies]
 cabby-bench = { path = "crates/cabby-bench" }
 cabby-core = { path = "crates/cabby-core" }
+cabby-mruby-sys = { path = "crates/cabby-mruby-sys", default-features = false }
 cabby-server = { path = "crates/cabby-server" }
 cabby-testkit = { path = "crates/cabby-testkit" }
 anyhow = "1.0.104"
@@ -19,6 +20,8 @@ arc-swap = "1.9.3"
 async-nats = { version = "=0.51.0", default-features = false, features = ["jetstream", "kv", "ring", "nuid", "server_2_10", "server_2_11"] }
 base64 = "0.22.1"
 bytes = "1.12.1"
+# Builds the vendored mruby (cabby-mruby-sys); already in the lockfile through ring.
+cc = "1.11.2"
 clap = { version = "4.6.7", features = ["derive"] }
 getrandom = "0.4.3"
 hmac = "0.13.0"

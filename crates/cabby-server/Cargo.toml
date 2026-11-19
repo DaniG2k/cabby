@@ -11,8 +11,15 @@ license.workspace = true
 name = "cabby"
 path = "src/main.rs"
 
+[features]
+default = ["mruby"]
+# Embedded mruby scripting (upstream's `mrb` build tag): builds the vendored
+# mruby 1.2.0 on Linux and macOS. Without it `mrb::supported()` is false.
+mruby = ["cabby-mruby-sys/vendored"]
+
 [dependencies]
 cabby-core.workspace = true
+cabby-mruby-sys.workspace = true
 async-nats.workspace = true
 getrandom.workspace = true
 hmac.workspace = true

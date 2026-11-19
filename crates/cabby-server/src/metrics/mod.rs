@@ -14,11 +14,11 @@ use std::time::Duration;
 use arc_swap::ArcSwap;
 use cabby_core::common::StringMap;
 use cabby_core::logger::{Attr, Level, LogValue};
-use cabby_core::pending;
 use tokio_util::sync::CancellationToken;
 
 mod config;
 mod counter;
+mod custom_printer;
 mod gauge;
 mod printer;
 mod prometheus;
@@ -26,6 +26,7 @@ mod statsd;
 
 pub use config::{Config, StatsdConfig};
 pub use counter::Counter;
+pub use custom_printer::RubyPrinter;
 pub use gauge::Gauge;
 pub use printer::BasePrinter;
 pub(crate) use printer::log;
@@ -77,9 +78,9 @@ impl Instrumenter for NoopMetrics {
     fn register_gauge(&self, _name: &str, _desc: &str) {}
 }
 
-/// Upstream `NewCustomPrinter`: the mruby log formatter (M6).
-fn new_custom_printer(_path: &str) -> Result<Arc<dyn IntervalWriter>, MetricsError> {
-    pending!("metrics::new_custom_printer")
+/// Upstream `NewCustomPrinter`: the mruby log formatter.
+fn new_custom_printer(path: &str) -> Result<Arc<dyn IntervalWriter>, MetricsError> {
+    Ok(Arc::new(RubyPrinter::new(path)?))
 }
 
 /// Where the Prometheus endpoint is served.

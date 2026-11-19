@@ -7,7 +7,9 @@ with the `mrb` Go build tag on Linux and macOS. This document records the embedd
 (SPEC §3), how the translated tests map Go mechanics to Rust invariants, and how those
 tests run against the Go reference.
 
-Status: only the interface exists (`crates/cabby-server/src/mrb/`). Every body is `pending!`.
+Status: implemented. All 58 translated cases (`go_mruby`, `mrb`) and the
+`features/mruby_printers` scenario pass on Cabby; the CLI start line reports
+` (with mruby 1.2.0 (2015-11-17))` and telemetry reports mruby support, as upstream.
 
 ## What upstream links
 
@@ -49,30 +51,71 @@ about 60 mruby C functions, small enough to bind directly.
 ### Shape
 
 ```text
-crates/cabby-mruby-sys/        unsafe FFI; allows `unsafe_code` (the workspace forbids it)
-  mruby/                       mruby 1.2.0 source tree + mruby-env at the pinned commit
-  generated/                   outputs of one upstream-style build, checked in with sha256s:
-                               parse.c (bison), mrblib.c, per-gem gem_init.c (mrbc bytecode),
-                               build/host/mrbgems/gem_init.c
-  shim/cabby_mruby.c           the gomruby.h equivalents (exception protection, getters)
-  build.rs                     cc::Build over the file list of the reference build
-crates/cabby-server/src/mrb/   safe API (Mrb, MrbValue, Class, ...); `forbid(unsafe_code)`
-                               stays in force; the safe layer lives in the sys crate's
-                               `safe` module and cabby-server wraps it
+crates/cabby-mruby-sys/        the only crate with `unsafe` (it does not inherit the
+                               workspace lint table; it denies undocumented unsafe blocks)
+  mruby/                       mruby 1.2.0 sources compiled into upstream's libmruby.a
+                               (core, mrblib, default gembox minus the CLI tools,
+                               mruby-compiler), their .rb sources, MITL/LEGAL/AUTHORS
+  mruby-env/                   iij/mruby-env at 056ae324 (src/env.c, mrblib/env.rb)
+  generated/                   outputs of the reference build: mrbgems/mruby-compiler/core/
+                               y.tab.c (bison), mrblib/mrblib.c and mrbgems/**/gem_init.c
+                               (mrbc bytecode, little-endian)
+  SHA256SUMS                   of every vendored file
+  shim/cabby_mruby.c           the gomruby.h equivalents: every raising call behind its own
+                               jump buffer, type checks before mruby dereferences a value,
+                               the trampoline for Rust methods
+  shim/gc_live.c               compiles mruby's gc.c plus a liveness test that needs its
+                               private layout (built instead of src/gc.c)
+  build.rs                     cc::Build over that file list, -std=gnu99 -O3 (upstream's
+                               flags); only with feature `vendored` on Linux/macOS
+  src/ffi.rs                   raw declarations of the shim (stubs when not compiled in)
+  src/safe.rs                  safe handles: Vm, Val, Raised, Parser, Context
+crates/cabby-server/src/mrb/   go-mruby's API and behavior on the safe handles;
+                               `forbid(unsafe_code)` stays in force
+compat/scripts/vendor-mruby.sh refreshes the vendored tree from the reference build
 ```
 
-- A `generate` xtask regenerates `generated/` in `ruby:2.7` with bison, using upstream's
-  `etc/build_config.rb`, and checks the file list and hashes against
-  `compat/upstream.lock`. Normal builds never run it.
-- Cargo feature `mruby` on `cabby-server` replaces the `mrb` build tag. It is on by default on
-  Linux and macOS. `mrb::supported()` reports it, and without it `mrb::version()` returns
-  `unknown`, as upstream does.
-- License: mruby is MIT ("Copyright (c) 2015 mruby developers", `MITL`). mruby-env is MIT
-  (`mrbgem.rake`). go-mruby is MIT (© 2017 Mitchell Hashimoto,
-  `compat/licenses/go-mruby-LICENSE`): Cabby copies none of its code, but the API is
-  modeled on it and the translated tests carry its notice. Add mruby's and mruby-env's
-  notices under `compat/licenses/` when the sources are vendored. The final parity claim
-  must disclose the remaining C dependency (statically linked libmruby).
+- `compat/scripts/vendor-mruby.sh` copies the sources and generated files from the
+  reference build (`cargo xtask reference-mruby`, upstream's Makefile in `ruby:2.7` with
+  `etc/build_config.rb`) after checking that its `libmruby.a` matches the sha256 in
+  `compat/upstream.lock`, and writes `SHA256SUMS`. Normal builds never run it. The object
+  list matches the reference `libmruby.a` (75 members).
+- Cargo feature `mruby` on `cabby-server` (default) enables `cabby-mruby-sys/vendored`,
+  replacing the `mrb` build tag; the C is built on Linux and macOS only, 64-bit
+  little-endian. `mrb::supported()` reports it, and without it `mrb::version()` returns
+  `unknown` and `--metrics_log_formatter` fails with `unsupported`, as upstream.
+- License: mruby is MIT ("Copyright (c) 2015 mruby developers", `compat/licenses/mruby-MITL`).
+  mruby-env is MIT (© 2012 Internet Initiative Japan Inc., `compat/licenses/mruby-env-LICENSE`).
+  go-mruby is MIT (© 2017 Mitchell Hashimoto, `compat/licenses/go-mruby-LICENSE`): Cabby
+  copies none of its code, but the API is modeled on it and the translated tests carry its
+  notice. The final parity claim must disclose the remaining C dependency (statically
+  linked mruby).
+
+### Memory-safety model
+
+go-mruby hands raw pointers to mruby and trusts the caller. Cabby's safe API must not
+let safe Rust cause undefined behavior, so `cabby-mruby-sys` keeps these invariants:
+
+- **No longjmp across Rust.** Rust calls only shim functions. Each one that can raise
+  sets its own jump buffer, so a raise ends in C and leaves the exception in `mrb->exc`;
+  Rust then collects and clears it (`Raised`). Rust methods run from the C trampoline
+  through a dispatch callback that returns before anything raises.
+- **No unwinding into C.** Rust methods run under `catch_unwind`. A panic becomes a
+  `RuntimeError` inside the VM and is re-raised in Rust as soon as the VM call returns.
+- **No freed memory.** A closed VM nulls its state and every later operation panics.
+  A value is passed to C only after `cabby_value_live` confirms it is an immediate or a
+  live object of its recorded type in one of the VM's live heap pages (values are
+  arena-protected exactly as in go-mruby, so they can be collected; TestMrbFullGC relies
+  on that). A slot reused by a new object of the same type passes the check: that is
+  memory-safe, merely a different object.
+- **Checked types.** The shim checks types where mruby casts without checking (procs for
+  `Run`/`Yield`/blocks, arrays, hashes, classes), limits `mrb_gc_arena_restore` and the
+  `mrb_context_run` stack keep to initialized slots, and only accepts exception objects as
+  errors of Rust methods.
+
+Where go-mruby would read freed memory, crash or abort, Cabby returns an error or panics
+(deviation D-032). What no binding can fix are memory-safety bugs inside mruby 1.2.0
+itself, which is why scripts must be trusted operator input.
 
 ### Binding semantics the implementation must keep
 
@@ -106,7 +149,9 @@ An mruby VM is single-threaded, so `Mrb`, `MrbValue`, `Class` and `Engine` are `
 Independent VMs on different threads are independent (TestMrbGetArgs and
 TestMrbDefineMethodConcurrent check this). Upstream shares one `DefaultEngine` per process
 behind a mutex. Cabby keeps one default engine per thread that asks for it. The metrics
-printer owns its engine on the thread that formats snapshots.
+printer (`metrics/custom_printer.rs`) owns a thread that holds its engine and receives
+snapshots over a channel, and restores the GC arena after each snapshot (upstream's arena
+grows with every print). See deviation D-033.
 
 ## Translated tests
 

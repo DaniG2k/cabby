@@ -2,22 +2,23 @@
 //! `args.go`).
 
 use std::ops::BitOr;
+use std::rc::Rc;
 
-use cabby_core::pending;
+use cabby_mruby_sys as sys;
 
-use super::{Exception, Mrb, MrbValue, NotSend, Value};
+use super::{Exception, Mrb, MrbValue, Value, expect_ok};
 
 /// A class or module (`*Class`).
 #[derive(Debug, Clone)]
 pub struct Class {
-    _c: NotSend,
+    pub(super) v: sys::Val,
 }
 
 /// Whether both handles denote the same class (Go compares `*Class` with
 /// `reflect.DeepEqual`).
 impl PartialEq for Class {
-    fn eq(&self, _other: &Self) -> bool {
-        pending!("mrb::Class::eq")
+    fn eq(&self, other: &Self) -> bool {
+        self.v.same(&other.v)
     }
 }
 
@@ -27,42 +28,42 @@ impl PartialEq for Class {
 pub struct ArgSpec(u32);
 
 impl ArgSpec {
-    /// `ArgsAny`.
+    /// `ArgsAny` (`MRB_ARGS_REST()`).
     pub fn any() -> ArgSpec {
-        pending!("mrb::ArgSpec::any")
+        ArgSpec(1 << 12)
     }
 
     /// `ArgsNone`.
     pub fn none() -> ArgSpec {
-        pending!("mrb::ArgSpec::none")
+        ArgSpec(0)
     }
 
     /// `ArgsBlock`.
     pub fn block() -> ArgSpec {
-        pending!("mrb::ArgSpec::block")
+        ArgSpec(1)
     }
 
     /// `ArgsReq(n)`.
-    pub fn req(_n: u32) -> ArgSpec {
-        pending!("mrb::ArgSpec::req")
+    pub fn req(n: u32) -> ArgSpec {
+        ArgSpec((n & 0x1f) << 18)
     }
 
     /// `ArgsOpt(n)`.
-    pub fn opt(_n: u32) -> ArgSpec {
-        pending!("mrb::ArgSpec::opt")
+    pub fn opt(n: u32) -> ArgSpec {
+        ArgSpec((n & 0x1f) << 13)
     }
 
     /// `ArgsArg(r, o)`.
-    pub fn arg(_required: u32, _optional: u32) -> ArgSpec {
-        pending!("mrb::ArgSpec::arg")
+    pub fn arg(required: u32, optional: u32) -> ArgSpec {
+        ArgSpec::req(required) | ArgSpec::opt(optional)
     }
 }
 
 impl BitOr for ArgSpec {
     type Output = ArgSpec;
 
-    fn bitor(self, _rhs: ArgSpec) -> ArgSpec {
-        pending!("mrb::ArgSpec::bitor")
+    fn bitor(self, rhs: ArgSpec) -> ArgSpec {
+        ArgSpec(self.0 | rhs.0)
     }
 }
 
@@ -73,29 +74,51 @@ pub trait Func: Fn(&Mrb, &MrbValue) -> Result<Option<Value>, Value> + 'static {}
 
 impl<F: Fn(&Mrb, &MrbValue) -> Result<Option<Value>, Value> + 'static> Func for F {}
 
+/// Adapts a [`Func`] to the binding's method type (go-mruby `goMRBFuncCall`):
+/// nil for `None`, the exception value converted in the calling VM.
+fn method(f: impl Func) -> sys::Method {
+    Rc::new(move |vm: &sys::Vm, this: &sys::Val| {
+        let m = Mrb { vm: vm.clone() };
+        let this = MrbValue { v: this.clone() };
+        match f(&m, &this) {
+            Ok(None) => Ok(None),
+            Ok(Some(v)) => Ok(Some(v.mrb_value(&m).v)),
+            Err(e) => Err(e.mrb_value(&m).v),
+        }
+    })
+}
+
 impl Class {
+    fn vm(&self) -> sys::Vm {
+        self.v.vm()
+    }
+
     /// Defines a class method (`DefineClassMethod`).
-    pub fn define_class_method(&self, _name: &str, _f: impl Func, _spec: ArgSpec) {
-        pending!("mrb::Class::define_class_method")
+    pub fn define_class_method(&self, name: &str, f: impl Func, spec: ArgSpec) {
+        expect_ok(self.vm().define_method(&self.v, name, spec.0, true, method(f)), "DefineClassMethod");
     }
 
     /// Defines an instance method (`DefineMethod`).
-    pub fn define_method(&self, _name: &str, _f: impl Func, _spec: ArgSpec) {
-        pending!("mrb::Class::define_method")
+    pub fn define_method(&self, name: &str, f: impl Func, spec: ArgSpec) {
+        expect_ok(self.vm().define_method(&self.v, name, spec.0, false, method(f)), "DefineMethod");
     }
 
-    pub fn define_const(&self, _name: &str, _value: &Value) {
-        pending!("mrb::Class::define_const")
+    pub fn define_const(&self, name: &str, value: &Value) {
+        let vm = self.vm();
+        let value = value.mrb_value(&Mrb { vm: vm.clone() });
+        expect_ok(vm.define_const(&self.v, name, &value.v), "DefineConst");
     }
 
     /// The class as a value (`MrbValue`).
     pub fn mrb_value(&self, _m: &Mrb) -> MrbValue {
-        pending!("mrb::Class::mrb_value")
+        MrbValue { v: self.v.clone() }
     }
 
     /// Instantiates the class (`New`); an exception from `initialize` is
     /// returned and cleared.
-    pub fn new_instance(&self, _args: &[Value]) -> Result<MrbValue, Exception> {
-        pending!("mrb::Class::new_instance")
+    pub fn new_instance(&self, args: &[Value]) -> Result<MrbValue, Exception> {
+        let m = Mrb { vm: self.vm() };
+        let args: Vec<_> = args.iter().map(|a| a.mrb_value(&m).v).collect();
+        self.v.obj_new(&args).map(|v| MrbValue { v }).map_err(Exception::from_raised)
     }
 }
