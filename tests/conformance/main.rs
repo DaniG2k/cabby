@@ -24,6 +24,7 @@ mod issues;
 mod origin;
 mod pusher;
 mod sse;
+mod threads;
 
 mod anyt_core;
 mod anyt_ext;

@@ -20,9 +20,10 @@ use crate::server::{
 pub type SessionCallback = Box<dyn FnOnce() + Send>;
 
 /// Sets up the session of an upgraded connection (upstream `sessionHandler`).
-/// It runs on Tokio's blocking pool (the node API is synchronous and
-/// authentication performs an RPC call) and should return once the session is
-/// serving; an error is logged.
+/// It runs on the node's bounded command pool ([`crate::node::execute`]: the node
+/// API is synchronous and authentication performs an RPC call) and should return
+/// once the session is serving, without waiting for it to end; an error is
+/// logged.
 pub type SessionHandler = Arc<dyn Fn(WsConnection, RequestInfo, SessionCallback) -> Result<(), String> + Send + Sync>;
 
 /// Headers extractor shared with the upgrade tasks.
@@ -200,7 +201,7 @@ impl Inner {
                     );
                 }
                 let handler = Arc::clone(&self.session_handler);
-                tokio::task::spawn_blocking(move || {
+                crate::node::execute(Box::new(move || {
                     let sid = info.uid.clone();
                     log(
                         Level::Debug,
@@ -222,7 +223,7 @@ impl Inner {
                             &[Attr::new("sid", LogValue::String(sid)), Attr::new("error", LogValue::String(e))],
                         );
                     }
-                });
+                }));
             }
         }
         // Nothing of the request outlives the setup: an idle connection holds only

@@ -68,6 +68,11 @@ fn test_binaries() -> Result<Vec<(String, String)>> {
 fn run_binary(exe: &str, backend: Backend, sut_bin: &str, filter: Option<&str>) -> Result<(String, bool)> {
     let mut cmd = Command::new(exe);
     cmd.env("CABBY_BACKEND", backend.as_str()).env("SUT_BIN", sut_bin);
+    // Cabby's embedded NATS (`--embed_nats`) runs an external `nats-server`
+    // (docs/enats.md); tests use the one built from the pinned module.
+    if std::env::var_os("CABBY_NATS_SERVER").is_none() {
+        cmd.env("CABBY_NATS_SERVER", root().join("target/test-services/nats-server"));
+    }
     if std::env::var_os("CABBY_GO_BRIDGE").is_none() {
         cmd.env("CABBY_GO_BRIDGE", root().join("target/reference-adapters/bridge"));
     }
@@ -173,6 +178,20 @@ fn combine(outcomes: &[Outcome]) -> Outcome {
     }
 }
 
+/// Builds `target/test-services/nats-server` from the reference's pinned module
+/// if missing (the same binary `cabby_testkit::nats` uses).
+fn ensure_nats_server() -> Result<()> {
+    let out = root().join("target/test-services/nats-server");
+    if out.exists() || std::env::var_os("CABBY_NATS_SERVER").is_some() {
+        return Ok(());
+    }
+    sh(Command::new("go")
+        .args(["build", "-o"])
+        .arg(&out)
+        .arg("github.com/nats-io/nats-server/v2")
+        .current_dir(root().join("compat/reference")))
+}
+
 pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
     let root = root();
     let sut_bin = match backend {
@@ -192,6 +211,7 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
     };
     let sut_bin = std::env::var("SUT_BIN").unwrap_or_else(|_| sut_bin.to_string_lossy().into_owned());
 
+    ensure_nats_server()?;
     let mut results: BTreeMap<String, Outcome> = BTreeMap::new();
     let mut errors: Vec<String> = Vec::new();
     // Tests pinning fixes for upstream issues may fail on Go: that failure is the
