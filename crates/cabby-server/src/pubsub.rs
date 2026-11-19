@@ -1,7 +1,8 @@
 //! Redis and NATS pub/sub subscribers (upstream package `pubsub`; the
 //! interfaces are in `cabby_core::pubsub`).
 //!
-//! Status: interfaces only; every behavior is `pending!`.
+//! Status: implemented: Redis and NATS multi-node subscribers (the legacy
+//! single-node subscriber lives in `cabby_core::pubsub`).
 
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
@@ -9,7 +10,6 @@ use std::sync::mpsc::Sender;
 use cabby_core::common::{PubSubMessage, RemoteCommandMessage, StreamMessage, pub_sub_message_from_json};
 use cabby_core::gojson;
 use cabby_core::nats::client::{Connection, Incoming};
-use cabby_core::pending;
 use cabby_core::pubsub::{Handler, PubSubError, Subscriber};
 use cabby_core::toml_config::{self, TomlSection};
 
@@ -82,43 +82,156 @@ impl NatsConfig {
 }
 
 /// Redis pub/sub subscriber (upstream `pubsub.RedisSubscriber`).
+///
+/// Streams map to Redis channels of the same name; the internal channel
+/// carries remote commands. Subscriptions are kept alive by
+/// [`crate::redis::subscription`] (heartbeat, resubscription after unsolicited
+/// unsubscribes and reconnects: deviation D-003); publishing uses a separate
+/// connection.
 pub struct RedisSubscriber {
-    _private: (),
+    node: Arc<dyn Handler>,
+    channel: String,
+    redis: RedisClientConfig,
+    spec: crate::redis::connect::ConnectSpec,
+    subscriptions: Arc<redis_sub::Subscriptions>,
+    publisher: std::sync::Mutex<Option<crate::redis::publisher::Publisher>>,
+}
+
+use crate::redis::subscription as redis_sub;
+
+/// Delivers pub/sub messages to the node (upstream `OnMessage` hook).
+struct NodeSink {
+    node: Arc<dyn Handler>,
+}
+
+impl redis_sub::Sink for NodeSink {
+    fn message(&self, channel: &str, payload: &[u8]) {
+        match cabby_core::common::pub_sub_message_from_json(payload) {
+            Ok(cabby_core::common::PubSubMessage::Stream(msg)) => self.node.broadcast(&msg),
+            Ok(cabby_core::common::PubSubMessage::RemoteCommand(cmd)) => self.node.execute_remote_command(&cmd),
+            // Upstream handles stream messages and remote commands only.
+            Ok(cabby_core::common::PubSubMessage::Batch(_)) => {}
+            Err(e) => crate::redis::log(
+                cabby_core::logger::Level::Warn,
+                "pubsub",
+                "failed to parse pubsub message",
+                &[
+                    ("channel", channel.to_owned()),
+                    ("data", String::from_utf8_lossy(payload).into_owned()),
+                    ("error", e.to_string()),
+                ],
+            ),
+        }
+    }
 }
 
 impl RedisSubscriber {
-    pub fn new(_node: Arc<dyn Handler>, _config: &RedisConfig) -> Result<Self, PubSubError> {
-        pending!("pubsub::new_redis_subscriber")
+    pub fn new(node: Arc<dyn Handler>, config: &RedisConfig) -> Result<Self, PubSubError> {
+        let mut redis = crate::redis::or_defaults(config.redis.as_ref());
+        redis.to_client_options().map_err(|e| PubSubError(e.0))?;
+        let spec = redis.connect_spec().map_err(|e| PubSubError(e.0))?;
+        let subscriptions = redis_sub::Subscriptions::new(redis_sub::Settings {
+            context: "pubsub",
+            primary: config.channel.clone(),
+            max_reconnect_attempts: redis.max_reconnect_attempts,
+            connected_msg: "connected",
+            reconnected_msg: "reconnected",
+            exhausted_error: "failed to reconnect to Redis: attempts exceeded",
+        });
+        Ok(Self {
+            node,
+            channel: config.channel.clone(),
+            redis,
+            spec,
+            subscriptions,
+            publisher: std::sync::Mutex::new(None),
+        })
+    }
+
+    fn publish(&self, channel: &str, payload: Vec<u8>) {
+        if let Some(p) = self.publisher.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            p.publish(channel, payload);
+        }
     }
 }
 
 impl Subscriber for RedisSubscriber {
-    fn start(&self, _done: Sender<PubSubError>) -> Result<(), PubSubError> {
-        pending!("pubsub::redis_start")
+    fn start(&self, done: Sender<PubSubError>) -> Result<(), PubSubError> {
+        crate::redis::log(
+            cabby_core::logger::Level::Info,
+            "pubsub",
+            &crate::redis::pubsub_start_message("Starting Redis pub/sub", &self.redis),
+            &[],
+        );
+
+        // Add internal channel to subscriptions
+        self.subscriptions.subscribe(&self.channel);
+
+        let mut publisher = self.publisher.lock().unwrap_or_else(|e| e.into_inner());
+        if publisher.is_none() {
+            *publisher = Some(crate::redis::publisher::Publisher::start(self.spec.clone(), "pubsub"));
+        }
+        drop(publisher);
+
+        let sink = Arc::new(NodeSink { node: Arc::clone(&self.node) });
+        self.subscriptions.start(
+            self.spec.clone(),
+            sink,
+            Box::new(move |err| {
+                let _ = done.send(PubSubError(err));
+            }),
+        );
+        Ok(())
     }
 
     fn shutdown(&self) -> Result<(), PubSubError> {
-        pending!("pubsub::redis_shutdown")
+        let Some(publisher) = self.publisher.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+            return Ok(());
+        };
+        crate::redis::log(cabby_core::logger::Level::Debug, "pubsub", "shutting down Redis pub/sub", &[]);
+        publisher.shutdown();
+        self.subscriptions.shutdown(std::time::Duration::from_secs(2));
+        Ok(())
     }
 
-    fn broadcast(&self, _msg: &StreamMessage) {
-        pending!("pubsub::redis_broadcast")
+    fn broadcast(&self, msg: &StreamMessage) {
+        self.publish(&msg.stream, cabby_core::gojson::to_vec(msg));
     }
 
-    fn broadcast_command(&self, _cmd: &RemoteCommandMessage) {
-        pending!("pubsub::redis_broadcast_command")
+    fn broadcast_command(&self, cmd: &RemoteCommandMessage) {
+        self.publish(&self.channel, cabby_core::gojson::to_vec(cmd));
     }
 
-    fn subscribe(&self, _stream: &str) {
-        pending!("pubsub::redis_subscribe")
+    fn subscribe(&self, stream: &str) {
+        self.subscriptions.subscribe(stream);
     }
 
-    fn unsubscribe(&self, _stream: &str) {
-        pending!("pubsub::redis_unsubscribe")
+    fn unsubscribe(&self, stream: &str) {
+        self.subscriptions.unsubscribe(stream);
     }
 
     fn is_multi_node(&self) -> bool {
-        pending!("pubsub::redis_is_multi_node")
+        true
+    }
+}
+
+/// Brokers publish through the subscriber's `Broadcaster` subset (upstream passes
+/// a `pubsub.Subscriber` where a `broker.Broadcaster` is expected).
+impl cabby_core::broker::Broadcaster for RedisSubscriber {
+    fn broadcast(&self, msg: &StreamMessage) {
+        Subscriber::broadcast(self, msg);
+    }
+
+    fn broadcast_command(&self, msg: &RemoteCommandMessage) {
+        Subscriber::broadcast_command(self, msg);
+    }
+
+    fn subscribe(&self, stream: &str) {
+        Subscriber::subscribe(self, stream);
+    }
+
+    fn unsubscribe(&self, stream: &str) {
+        Subscriber::unsubscribe(self, stream);
     }
 }
 
