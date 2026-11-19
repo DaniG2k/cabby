@@ -1,9 +1,6 @@
 //! Cabby's port of Benchi (`etc/benchi` upstream): a load harness for
 //! AnyCable-compatible servers.
 //!
-//! Status: interfaces only (SPEC.md §1 steps 1–3). Every behavior is a
-//! [`cabby_core::pending!`] marker until its translated tests are promoted.
-//!
 //! # Architecture: an external harness
 //!
 //! Upstream Benchi embeds the Go server (`cli.Embedded`) in the scenario process, so
@@ -29,6 +26,49 @@
 //!   embedded server exposed in-process (disconnect queue size, RPC counters) are read
 //!   from the server's metrics endpoint.
 //!
+//! * The generator is asynchronous: every client, publisher worker and RPC handler
+//!   is a task on one multi-threaded Tokio runtime ([`runtime`]), so thousands of
+//!   connections cost no threads, and the hot paths (receive counters, latency
+//!   histograms, per-client ledgers) are lock-free or use uncontended per-client
+//!   locks.
+//!
+//! # Accuracy safeguards
+//!
+//! * **Monotonic clock** for every timing: schedules, latencies, sampling
+//!   (throughput samples carry wall-clock values derived from it).
+//! * **Delivery reconciled by id**, not by accepted publications: each broadcast is
+//!   `<stream>:<seq>`, and [`ledger::DeliveryLedger`] reports missing ids,
+//!   duplicates, per-publisher-worker ordering violations and misrouted messages,
+//!   next to upstream's count reconciliation.
+//! * **End-to-end latency**: the publisher stamps each POST body with its dispatch
+//!   time; receivers record dispatch → delivery.
+//! * **Generator saturation is reported** (`generator_saturated`, with the evidence:
+//!   late schedule ticks, runtime timer lag, harness CPU use), so a run that measured
+//!   the generator instead of the server is visible in its output.
+//! * **Server-side truth** from the server process: peak RSS/threads/sockets, CPU
+//!   time over the measured window, residual sockets/fds after the clients leave,
+//!   and gauges from its metrics endpoint (a stale gauge never ends a wait early,
+//!   see [`scenarios::reconnect_floods::wave_drained`]).
+//!
+//! # Comparing servers
+//!
+//! Build both servers in release mode, then run the same scenario against each
+//! (`cabby-bench <scenario> --help` lists the flags):
+//!
+//! ```text
+//! cargo build --release -p cabby-server -p cabby-bench
+//! cargo xtask reference-build   # target/reference-bin/anycable-go
+//! for sut in target/release/cabby target/reference-bin/anycable-go; do
+//!   target/release/cabby-bench stress_publications --sut "$sut" \
+//!     -c 2000 -r 2000 -d 30s -S 100 -s 5 --non-interactive
+//! done
+//! ```
+//!
+//! `--server-arg=<flag>` passes extra flags to the server (`--server-arg=--broker=memory`).
+//! `CABBY_BENCH_THREADS` sets the generator's worker threads; on one host, pin the
+//! generator and the server to separate cores (`taskset`) and keep runs whose
+//! summary says `generator_saturated=true` out of the comparison.
+//!
 //! Module map (upstream file in parentheses): [`cable`] (`client/client.go`),
 //! [`client`] (`lib/client.go`), [`counter`] (`lib/counter.go`), [`histogram`]
 //! (`lib/histogram.go`), [`pool`] (`lib/pool.go`), [`publisher`] (`lib/publisher.go`),
@@ -40,13 +80,17 @@ pub mod cable;
 pub mod cancel;
 pub mod client;
 pub mod counter;
+mod gojson;
 pub mod histogram;
 pub mod ledger;
+mod net;
 pub mod pool;
 pub mod publisher;
 pub mod reconnecting_client;
 pub mod resources;
+mod rng;
 pub mod rpc_server;
+pub mod runtime;
 pub mod scenarios;
 pub mod server;
 pub mod throughput;

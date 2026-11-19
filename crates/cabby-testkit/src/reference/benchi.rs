@@ -646,6 +646,7 @@ pub fn build_pool(cfg: PoolConfig<'_>) -> PoolBuild {
                 tolerance: cfg.tolerance,
                 seed: cfg.seed,
                 accumulator,
+                ledger: None,
                 streams: cfg.streams,
                 on_connect: None,
                 on_subscribe: None,
