@@ -864,9 +864,19 @@ fn default_rpc_controller() -> ControllerFactory {
     })
 }
 
-/// Upstream `initMRuby`: the mruby version suffix of the start line.
+/// Upstream `initMRuby`: the mruby version suffix of the start line, e.g.
+/// ` (with mruby 1.2.0 (2015-11-17))`; empty without mruby support.
 fn mruby_support() -> String {
-    String::new()
+    if !crate::mrb::supported() {
+        return String::new();
+    }
+    match crate::mrb::version() {
+        Ok(v) => format!(" (with {v})"),
+        Err(e) => {
+            crate::metrics::log(Level::Error, &format!("mruby failed to initialize: {e}"), &[]);
+            String::new()
+        }
+    }
 }
 
 /// Upstream `utils.OpenFileLimit`: the soft limit of open files (from

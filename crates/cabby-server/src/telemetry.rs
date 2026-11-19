@@ -351,8 +351,7 @@ impl Inner {
         };
         set("version", Value::from(VERSION));
         set("os", Value::from(go_os()));
-        // mruby scripting is not compiled in (M6).
-        set("mruby", Value::from(false));
+        set("mruby", Value::from(crate::mrb::supported()));
         let ci = ci_vendor(self.env.as_ref());
         set("ci", Value::from(ci.is_some()));
         if let Some(name) = ci {
