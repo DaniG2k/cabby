@@ -5,9 +5,11 @@
 pub mod api;
 pub mod broadcast;
 pub mod cli;
+mod client_tls;
 pub mod config;
 pub mod ds;
 pub mod enats;
+mod http_client;
 pub mod metrics;
 pub mod mrb;
 pub mod nats;

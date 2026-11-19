@@ -1,27 +1,42 @@
 //! Server metrics (upstream package `metrics`): counters and gauges, interval
 //! rotation, log/StatsD writers and the Prometheus endpoint.
+//!
+//! The registry is copy-on-write: registering a metric publishes a new name map
+//! (rare, at startup), while lookups by name on the hot path read the current
+//! map without taking a lock ([`arc_swap`]). Counters and gauges are plain
+//! atomics.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 
+use arc_swap::ArcSwap;
 use cabby_core::common::StringMap;
+use cabby_core::logger::{Attr, Level, LogValue};
 use cabby_core::pending;
+use tokio_util::sync::CancellationToken;
 
 mod config;
 mod counter;
 mod gauge;
 mod printer;
+mod prometheus;
 mod statsd;
 
 pub use config::{Config, StatsdConfig};
 pub use counter::Counter;
 pub use gauge::Gauge;
 pub use printer::BasePrinter;
+pub(crate) use printer::log;
 pub use statsd::StatsdWriter;
 
 /// Default rotation interval (seconds).
 pub const DEFAULT_ROTATE_INTERVAL: u64 = 15;
 /// Prefix of every Prometheus metric name.
 pub const PROMETHEUS_NAMESPACE: &str = "anycable_go";
+/// The main HTTP server's default bind host (upstream `server.Host`).
+pub const DEFAULT_SERVER_HOST: &str = "localhost";
 
 /// Error reported by metrics writers and the metrics server.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -61,9 +76,52 @@ impl Instrumenter for NoopMetrics {
     fn register_gauge(&self, _name: &str, _desc: &str) {}
 }
 
+/// Upstream `NewCustomPrinter`: the mruby log formatter (M6).
+fn new_custom_printer(_path: &str) -> Result<Arc<dyn IntervalWriter>, MetricsError> {
+    pending!("metrics::new_custom_printer")
+}
+
+/// Where the Prometheus endpoint is served.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpEndpoint {
+    /// Request path (`metrics.http_path`).
+    pub path: String,
+    pub port: i64,
+    /// `Some(host)`: a dedicated server bound to `host:port`, run by
+    /// [`Metrics::run`]. `None`: mounted on the main server for `port`
+    /// (upstream `server.ForPort`), which the server owner does with
+    /// [`Metrics::prometheus_handler`].
+    pub dedicated_host: Option<String>,
+}
+
+type Registry<T> = ArcSwap<HashMap<String, Arc<T>>>;
+
+/// What the Prometheus endpoint reads (shared with the dedicated server task).
+pub(crate) struct Shared {
+    pub(crate) counters: Registry<Counter>,
+    pub(crate) gauges: Registry<Gauge>,
+    pub(crate) tags: RwLock<Option<StringMap>>,
+}
+
+impl Shared {
+    pub(crate) fn prometheus(&self) -> String {
+        let tags = self.tags.read().unwrap_or_else(|e| e.into_inner());
+        prometheus::render(&self.counters.load(), &self.gauges.load(), tags.as_ref())
+    }
+}
+
 /// The metrics registry (upstream `Metrics`).
 pub struct Metrics {
-    _private: (),
+    shared: Arc<Shared>,
+    /// Serializes registrations (copy-on-write of the maps) and rotation.
+    registering: Mutex<()>,
+    writers: Mutex<Vec<Arc<dyn IntervalWriter>>>,
+    rotate_interval: Duration,
+    http: Option<HttpEndpoint>,
+    shutdown: CancellationToken,
+    closed: Mutex<bool>,
+    /// The dedicated server's bound address, once listening.
+    server_addr: Mutex<Option<SocketAddr>>,
 }
 
 impl std::fmt::Debug for Metrics {
@@ -72,94 +130,264 @@ impl std::fmt::Debug for Metrics {
     }
 }
 
+fn sorted<T>(map: &HashMap<String, Arc<T>>) -> Vec<&Arc<T>> {
+    let mut items: Vec<(&String, &Arc<T>)> = map.iter().collect();
+    items.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    items.into_iter().map(|(_, v)| v).collect()
+}
+
 impl Metrics {
     /// Upstream `NewMetrics(writers, rotateIntervalSeconds)`.
-    pub fn new(_writers: Vec<Arc<dyn IntervalWriter>>, _rotate_interval_seconds: u64) -> Self {
-        pending!("metrics::new_metrics")
+    pub fn new(writers: Vec<Arc<dyn IntervalWriter>>, rotate_interval_seconds: u64) -> Self {
+        Self {
+            shared: Arc::new(Shared {
+                counters: ArcSwap::from_pointee(HashMap::new()),
+                gauges: ArcSwap::from_pointee(HashMap::new()),
+                tags: RwLock::new(None),
+            }),
+            registering: Mutex::new(()),
+            writers: Mutex::new(writers),
+            rotate_interval: Duration::from_secs(rotate_interval_seconds),
+            http: None,
+            shutdown: CancellationToken::new(),
+            closed: Mutex::new(false),
+            server_addr: Mutex::new(None),
+        }
     }
 
     /// Upstream `NewFromConfig`: log printer, tags and the Prometheus HTTP server
     /// (dedicated when `config.host` differs from the main server host).
-    pub fn from_config(_config: &Config) -> Result<Self, MetricsError> {
-        pending!("metrics::new_from_config")
+    pub fn from_config(config: &Config) -> Result<Self, MetricsError> {
+        Self::from_config_with_server_host(config, DEFAULT_SERVER_HOST)
     }
 
-    pub fn default_tags(&self, _tags: StringMap) {
-        pending!("metrics::default_tags")
+    /// [`Metrics::from_config`] with the main server's bind host (upstream
+    /// `server.Host`, set from `server.host` by the CLI).
+    pub fn from_config_with_server_host(config: &Config, server_host: &str) -> Result<Self, MetricsError> {
+        let mut writers: Vec<Arc<dyn IntervalWriter>> = Vec::new();
+        if config.log_enabled() {
+            if config.log_formatter_enabled() {
+                writers.push(new_custom_printer(&config.log_formatter)?);
+            } else {
+                writers.push(Arc::new(BasePrinter::new(config.log_filter.clone())));
+            }
+        }
+
+        let rotate = u64::try_from(config.rotate_interval).unwrap_or(0);
+        let mut instance = Self::new(writers, rotate);
+        if let Some(tags) = &config.tags {
+            instance.default_tags(tags.clone());
+        }
+        if config.http_enabled() {
+            let dedicated = !config.host.is_empty() && config.host != server_host;
+            instance.http = Some(HttpEndpoint {
+                path: config.http.clone(),
+                port: config.port,
+                dedicated_host: dedicated.then(|| config.host.clone()),
+            });
+        }
+        Ok(instance)
     }
 
-    pub fn register_writer(&self, _writer: Arc<dyn IntervalWriter>) {
-        pending!("metrics::register_writer")
+    /// The Prometheus endpoint, when enabled.
+    pub fn http_endpoint(&self) -> Option<&HttpEndpoint> {
+        self.http.as_ref()
+    }
+
+    /// The dedicated metrics server's address once it listens.
+    pub fn server_addr(&self) -> Option<SocketAddr> {
+        *self.server_addr.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn default_tags(&self, tags: StringMap) {
+        *self.shared.tags.write().unwrap_or_else(|e| e.into_inner()) = Some(tags);
+    }
+
+    pub fn register_writer(&self, writer: Arc<dyn IntervalWriter>) {
+        self.writers.lock().unwrap_or_else(|e| e.into_inner()).push(writer);
     }
 
     /// Starts the metrics server (if any) and the writers, then rotates every
     /// interval until [`Metrics::shutdown`]. Returns when shut down or the
     /// dedicated server fails.
     pub async fn run(&self) -> Result<(), MetricsError> {
-        pending!("metrics::run")
+        let mut has_server = false;
+        if let Some(HttpEndpoint { path, port, dedicated_host: Some(host) }) = &self.http {
+            has_server = true;
+            // The server runs in its own task (it never blocks rotation); a bind
+            // failure ends `run`, as upstream's server error does.
+            let listener = prometheus::bind(host, *port)
+                .await
+                .map_err(|e| MetricsError(format!("metrics HTTP server at {host}:{port} stopped: {e}")))?;
+            let addr = listener.local_addr().ok();
+            *self.server_addr.lock().unwrap_or_else(|e| e.into_inner()) = addr;
+            let shown = addr.map_or_else(|| format!("{host}:{port}"), |a| a.to_string());
+            printer::log(
+                Level::Info,
+                &format!("Serve metrics at {shown}{path}"),
+                &[Attr::new("context", LogValue::String("metrics".into()))],
+            );
+            prometheus::serve(listener, path.clone(), Arc::clone(&self.shared), self.shutdown.clone());
+        }
+
+        let writers: Vec<Arc<dyn IntervalWriter>> = self.writers.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if writers.is_empty() {
+            if has_server {
+                // No rotation to drive; keep running until shut down.
+                self.shutdown.cancelled().await;
+            }
+            return Ok(());
+        }
+
+        let interval = if self.rotate_interval.is_zero() {
+            Duration::from_secs(DEFAULT_ROTATE_INTERVAL)
+        } else {
+            self.rotate_interval
+        };
+
+        for writer in &writers {
+            writer.run(interval.as_secs())?;
+        }
+
+        loop {
+            tokio::select! {
+                () = self.shutdown.cancelled() => return Ok(()),
+                () = tokio::time::sleep(interval) => {
+                    self.rotate();
+                    for writer in &writers {
+                        if let Err(e) = writer.write(self) {
+                            printer::log(
+                                Level::Error,
+                                "metrics writer failed to write",
+                                &[
+                                    Attr::new("context", LogValue::String("metrics".into())),
+                                    Attr::new("error", LogValue::String(e.0)),
+                                ],
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub async fn shutdown(&self) -> Result<(), MetricsError> {
-        pending!("metrics::shutdown")
+        {
+            let mut closed = self.closed.lock().unwrap_or_else(|e| e.into_inner());
+            if *closed {
+                return Ok(());
+            }
+            *closed = true;
+        }
+        self.shutdown.cancel();
+        let writers: Vec<Arc<dyn IntervalWriter>> = self.writers.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        for writer in writers {
+            writer.stop();
+        }
+        Ok(())
     }
 
-    pub fn counter(&self, _name: &str) -> Option<Arc<Counter>> {
-        pending!("metrics::counter")
+    pub fn counter(&self, name: &str) -> Option<Arc<Counter>> {
+        self.shared.counters.load().get(name).cloned()
     }
 
-    pub fn gauge(&self, _name: &str) -> Option<Arc<Gauge>> {
-        pending!("metrics::gauge")
+    pub fn gauge(&self, name: &str) -> Option<Arc<Gauge>> {
+        self.shared.gauges.load().get(name).cloned()
     }
 
-    pub fn each_counter(&self, _f: &mut dyn FnMut(&Counter)) {
-        pending!("metrics::each_counter")
+    /// Visits the counters in name order.
+    pub fn each_counter(&self, f: &mut dyn FnMut(&Counter)) {
+        let counters = self.shared.counters.load();
+        for c in sorted(&counters) {
+            f(c);
+        }
     }
 
-    pub fn each_gauge(&self, _f: &mut dyn FnMut(&Gauge)) {
-        pending!("metrics::each_gauge")
+    /// Visits the gauges in name order.
+    pub fn each_gauge(&self, f: &mut dyn FnMut(&Gauge)) {
+        let gauges = self.shared.gauges.load();
+        for g in sorted(&gauges) {
+            f(g);
+        }
     }
 
     /// Counter interval values and gauge values by name.
-    pub fn interval_snapshot(&self) -> std::collections::HashMap<String, u64> {
-        pending!("metrics::interval_snapshot")
+    pub fn interval_snapshot(&self) -> HashMap<String, u64> {
+        let counters = self.shared.counters.load();
+        let gauges = self.shared.gauges.load();
+        let mut snapshot = HashMap::with_capacity(counters.len() + gauges.len());
+        for (name, c) in counters.iter() {
+            snapshot.insert(name.clone(), c.interval_value());
+        }
+        for (name, g) in gauges.iter() {
+            snapshot.insert(name.clone(), g.value());
+        }
+        snapshot
     }
 
     /// Updates every counter's interval delta (upstream unexported `rotate`).
     pub fn rotate(&self) {
-        pending!("metrics::rotate")
+        // Rotation and registration are serialized, as upstream (one lock).
+        let _guard = self.registering.lock().unwrap_or_else(|e| e.into_inner());
+        for c in self.shared.counters.load().values() {
+            c.update_delta();
+        }
     }
 
     /// Prometheus text exposition of all counters and gauges.
     pub fn prometheus(&self) -> String {
-        pending!("metrics::prometheus")
+        self.shared.prometheus()
     }
 
     /// The Prometheus HTTP endpoint handler.
     pub fn prometheus_handler(&self, _request: &http::Request<()>) -> http::Response<String> {
-        pending!("metrics::prometheus_handler")
+        prometheus::response(self.prometheus())
+    }
+
+    fn register<T>(&self, registry: &Registry<T>, name: &str, metric: T) {
+        let _guard = self.registering.lock().unwrap_or_else(|e| e.into_inner());
+        let mut next = HashMap::clone(&registry.load());
+        // Re-registering replaces the metric, as upstream.
+        next.insert(name.to_owned(), Arc::new(metric));
+        registry.store(Arc::new(next));
     }
 }
 
 impl Instrumenter for Metrics {
-    fn counter_increment(&self, _name: &str) {
-        pending!("metrics::counter_increment")
+    #[inline]
+    fn counter_increment(&self, name: &str) {
+        if let Some(c) = self.shared.counters.load().get(name) {
+            c.inc();
+        }
     }
-    fn counter_add(&self, _name: &str, _value: u64) {
-        pending!("metrics::counter_add")
+    #[inline]
+    fn counter_add(&self, name: &str, value: u64) {
+        if let Some(c) = self.shared.counters.load().get(name) {
+            c.add(value);
+        }
     }
-    fn gauge_increment(&self, _name: &str) {
-        pending!("metrics::gauge_increment")
+    #[inline]
+    fn gauge_increment(&self, name: &str) {
+        if let Some(g) = self.shared.gauges.load().get(name) {
+            g.inc();
+        }
     }
-    fn gauge_decrement(&self, _name: &str) {
-        pending!("metrics::gauge_decrement")
+    #[inline]
+    fn gauge_decrement(&self, name: &str) {
+        if let Some(g) = self.shared.gauges.load().get(name) {
+            g.dec();
+        }
     }
-    fn gauge_set(&self, _name: &str, _value: u64) {
-        pending!("metrics::gauge_set")
+    #[inline]
+    fn gauge_set(&self, name: &str, value: u64) {
+        if let Some(g) = self.shared.gauges.load().get(name) {
+            g.set64(value);
+        }
     }
-    fn register_counter(&self, _name: &str, _desc: &str) {
-        pending!("metrics::register_counter")
+    fn register_counter(&self, name: &str, desc: &str) {
+        self.register(&self.shared.counters, name, Counter::new(name, desc));
     }
-    fn register_gauge(&self, _name: &str, _desc: &str) {
-        pending!("metrics::register_gauge")
+    fn register_gauge(&self, name: &str, desc: &str) {
+        self.register(&self.shared.gauges, name, Gauge::new(name, desc));
     }
 }
