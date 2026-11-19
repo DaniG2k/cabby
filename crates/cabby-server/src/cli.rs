@@ -1,22 +1,21 @@
 //! Command-line interface and server runner (upstream package `cli`).
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use cabby_core::common::{RemoteCommandMessage, StreamMessage};
 use cabby_core::pending;
 
-use crate::config::{Config, EnvMap};
+use crate::config::Config;
+
+mod flags;
+mod options;
+
+pub use options::{new_config_from_cli, new_config_from_cli_to, parse_tags};
 
 /// A CLI or runner failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
 pub struct CliError(pub String);
-
-/// Parses `--metrics_tags` (`key:value,key:value`; upstream unexported `parseTags`).
-pub fn parse_tags(_s: &str) -> HashMap<String, String> {
-    pending!("cli::parse_tags")
-}
 
 /// A string flag added by an embedding application (upstream `cli.StringFlag`
 /// passed through `WithCLICustomOptions`). The parsed value is stored in `destination`.
@@ -38,13 +37,10 @@ pub enum CliOption {
     CustomOptions(Vec<StringFlag>),
 }
 
-/// Builds the configuration from command-line `args` (`args[0]` is the program
-/// name), configuration files and `env` (upstream `NewConfigFromCLI`).
-///
-/// `Ok((config, true))` means the run was interrupted (usage or version shown) and
-/// no further action is required; upstream returns an empty config then.
-pub fn new_config_from_cli(_args: &[&str], _env: &EnvMap, _opts: Vec<CliOption>) -> Result<(Config, bool), CliError> {
-    pending!("cli::new_config_from_cli")
+/// Runs a server node with the configuration from [`new_config_from_cli`]
+/// (upstream `main`: `NewRunner` with the default components, then `Run`).
+pub fn run(_config: Config) -> Result<(), CliError> {
+    pending!("cli::run")
 }
 
 // --- Runner -------------------------------------------------------------------
