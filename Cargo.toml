@@ -51,3 +51,11 @@ futures-util = { version = "0.3.34", default-features = false, features = ["sink
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# Keep test builds small on disk: line tables still give file:line backtraces
+# for Cabby's code; dependencies carry no debug info.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
