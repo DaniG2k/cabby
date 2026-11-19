@@ -406,3 +406,65 @@ fn deviation_d021_invalid_utf8_text_closes_with_1007() {
     }
     server.shutdown();
 }
+
+type Delivery = (Vec<u8>, ReadPermit);
+
+/// Records push-mode deliveries.
+struct Pushed {
+    messages: Mutex<mpsc::Sender<Delivery>>,
+    ends: Mutex<mpsc::Sender<String>>,
+}
+
+impl InboundHandler for Pushed {
+    fn on_message(&self, msg: bytes::Bytes, permit: ReadPermit) {
+        let _ = self.messages.lock().unwrap().send((msg.to_vec(), permit));
+    }
+
+    fn on_end(&self, err: ConnectionError) {
+        let _ = self.ends.lock().unwrap().send(err.0);
+    }
+}
+
+fn pushed() -> (Arc<Pushed>, mpsc::Receiver<Delivery>, mpsc::Receiver<String>) {
+    let (mtx, messages) = mpsc::channel();
+    let (etx, ends) = mpsc::channel();
+    (Arc::new(Pushed { messages: Mutex::new(mtx), ends: Mutex::new(etx) }), messages, ends)
+}
+
+#[test]
+fn push_mode_delivers_one_message_at_a_time_then_the_end() {
+    let (server, addr, rx) = ws_server(&Config::new());
+    let mut ws = client(addr, "actioncable-v1-json");
+    let (conn, _info) = session(&rx);
+
+    // Received before the handler is set: delivered when it is.
+    ws.send(Message::text("one")).unwrap();
+    std::thread::sleep(Duration::from_millis(50));
+    let (handler, messages, ends) = pushed();
+    conn.set_inbound_handler(handler);
+    ws.send(Message::text("two")).unwrap();
+    ws.send(Message::binary(vec![3])).unwrap();
+
+    let (first, permit) = messages.recv_timeout(IO_DEADLINE).expect("the first message");
+    assert_eq!(b"one".to_vec(), first);
+    assert!(messages.recv_timeout(Duration::from_millis(200)).is_err(), "the next message waits for the permit");
+    drop(permit);
+    let (second, permit) = messages.recv_timeout(IO_DEADLINE).expect("the second message");
+    assert_eq!(b"two".to_vec(), second);
+    drop(permit);
+    let (third, permit) = messages.recv_timeout(IO_DEADLINE).expect("the third message");
+    assert_eq!(vec![3], third);
+    drop(permit);
+
+    ws.close(None).unwrap();
+    let _ = ws.flush();
+    let end = ends.recv_timeout(IO_DEADLINE).expect("the end");
+    assert!(is_close_error(&ConnectionError(end.clone())), "{end}");
+    assert!(ends.recv_timeout(Duration::from_millis(100)).is_err(), "the end is reported once");
+
+    // A handler set after the end gets it right away.
+    let (late, _messages, late_ends) = pushed();
+    conn.set_inbound_handler(late);
+    assert_eq!(end, late_ends.recv_timeout(IO_DEADLINE).unwrap());
+    server.shutdown();
+}
