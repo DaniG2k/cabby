@@ -1,6 +1,6 @@
 # Cabby: tests-first AnyCable Rust port specification
 
-Status: M0–M3 complete; M4 transport and CLI parsing done, server wiring in progress; M5 Redis/NATS done (AnyCable issue 275 fix adopted), SSE/Pusher/durable streams in progress. 516 mapped cases pass against Cabby.
+Status: M0–M4 complete (cabby runs; all AnyT conformance scenarios pass end to end). M5 Redis/NATS done (AnyCable issue 275 fix adopted); SSE, Pusher and durable streams in progress. 583 mapped cases pass against Cabby.
 Prepared: 2026-11-17. Progress: `cargo xtask report`; baseline evidence: `compat/baseline/README.md`.
 Project name: **Cabby**. Directory and planned binary: `cabby` (an independent AnyCable-compatible implementation).
 
