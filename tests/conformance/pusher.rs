@@ -5,6 +5,7 @@
 
 use std::time::{Duration, Instant};
 
+use cabby_testkit::cable_client::{CableClient, Options};
 use cabby_testkit::pusher_auth::{channel_auth, get_channel_users, md5_hex, now_timestamp, signed_target};
 use cabby_testkit::raw_http;
 use cabby_testkit::sut::Sut;
@@ -215,4 +216,72 @@ fn rest_api_channel_users() {
 
     let err = users(&sut, "private-room").expect_err("an error");
     assert!(err.contains("400"), "{err}");
+}
+
+/// A `subscribe` on the Action Cable endpoint; returns the reply type.
+fn cable_subscribe(cable: &mut CableClient, identifier: &str) -> String {
+    cable.send(&json!({"command": "subscribe", "identifier": identifier}));
+    loop {
+        let reply = cable.receive().unwrap_or_else(|e| panic!("no reply to {identifier}: {e:?}"));
+        // On Go the bypassing subscriptions also get the channels' presence events.
+        if reply["type"] == "presence" {
+            continue;
+        }
+        assert_eq!(Some(identifier), reply["identifier"].as_str(), "{reply}");
+        return reply["type"].as_str().unwrap_or_default().to_owned();
+    }
+}
+
+/// regression-for: pusher/executor_test.go#TestHandleCommand/Subscribe_(private_+_failure_bad_signature)
+/// regression-for: pusher/executor_test.go#TestHandleCommand/Subscribe_(presence)
+/// note: Deviation D-055: with Pusher enabled, a `$pusher` identifier subscribed on /cable (no Pusher signature: the check lives in the Pusher endpoint's executor) is rejected by Cabby, for private, presence and public channels and for an escaped channel name; Go confirms them (the reviewed bypass, pinned by the Go arm). Signed private and presence subscriptions at /app/<key> still succeed on both, and a bad signature is still rejected.
+#[test]
+fn deviation_d055_pusher_channel_is_refused_outside_the_pusher_endpoint() {
+    let sut = start(&["--noauth", "--norpc", "--broker=memory"]);
+
+    let opts = Options { ignore: vec!["ping".into()], ..Options::default() };
+    let mut cable = CableClient::connect(&format!("ws://{}/cable", sut.addr()), opts).expect("connect");
+    assert_eq!(Some("welcome"), cable.receive().expect("welcome")["type"].as_str());
+
+    let expected = match cabby_testkit::backend() {
+        cabby_testkit::Backend::Rust => "reject_subscription",
+        cabby_testkit::Backend::Go => "confirm_subscription",
+    };
+    for identifier in [
+        r#"{"channel":"$pusher","stream":"private-foobar"}"#,
+        r#"{"channel":"$pusher","stream":"presence-foobar"}"#,
+        r#"{"channel":"$pusher","stream":"all-chat"}"#,
+        r#"{"channel":"$pusher","stream":"private-escaped"}"#,
+    ] {
+        assert_eq!(expected, cable_subscribe(&mut cable, identifier), "{identifier}");
+    }
+
+    // Legitimate Pusher subscriptions are unaffected.
+    let mut ws = connect(&sut, "1234.1234");
+    recv(&mut ws);
+    subscribe(&mut ws, json!({"channel": "private-foobar", "auth": SIGNATURE}));
+    assert_eq!(
+        r#"{"event":"pusher_internal:subscription_succeeded","data":"{}","channel":"private-foobar"}"#,
+        recv(&mut ws)
+    );
+    subscribe(
+        &mut ws,
+        json!({"channel": "presence-foobar", "auth": PRESENCE_SIGNATURE, "channel_data": PRESENCE_DATA}),
+    );
+    let presence = recv(&mut ws);
+    assert!(presence.starts_with(r#"{"event":"pusher_internal:subscription_succeeded""#), "{presence}");
+    assert!(presence.contains(r#"\"10\":{\"name\":\"Mr. Channels\"}"#), "{presence}");
+    subscribe(&mut ws, json!({"channel": "private-other", "auth": "bla-bla"}));
+    let rejected = loop {
+        let frame = recv(&mut ws);
+        // The member's own join event may come first.
+        if !frame.contains("pusher_internal:member_added") {
+            break frame;
+        }
+    };
+    assert_eq!(r#"{"event":"pusher:error","data":{"message":"rejected","code":4009}}"#, rejected);
+
+    // `$pubsub` on /cable is unaffected (and needs a signature without `--public`).
+    let pubsub = json!({"channel": "$pubsub", "stream_name": "private-foobar"}).to_string();
+    assert_eq!("reject_subscription", cable_subscribe(&mut cable, &pubsub));
 }

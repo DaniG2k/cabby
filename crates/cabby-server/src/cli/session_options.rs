@@ -17,6 +17,12 @@ const PING_PRECISION_PARAMETER: &str = "ptp";
 const PREV_SESSION_HEADER: &str = "X-ANYCABLE-RESTORE-SID";
 const PREV_SESSION_PARAM: &str = "sid";
 
+/// The largest ping interval a client may ask for with `?pi=` (seconds), D-054.
+/// Go multiplies the value by `time.Second` with wrapping arithmetic, and some
+/// huge values make its first-ping jitter call `rand.Int63n` with a
+/// non-positive argument, which panics and stops the process.
+pub const MAX_CLIENT_PING_INTERVAL_SECS: i64 = 24 * 60 * 60;
+
 /// Upstream `common.ActionCableV1JSON`.
 pub const ACTION_CABLE_V1_JSON: &str = "actioncable-v1-json";
 /// Upstream `common.ActionCableV1ExtJSON`.
@@ -75,8 +81,8 @@ impl SessionSettings {
             // Session cache and presence keepalive intervals, slightly less than
             // the corresponding TTLs.
             opts.push(SessionOption::KeepaliveIntervals {
-                sessions_ttl: Duration::from_millis(u64::try_from(self.sessions_ttl * 500).unwrap_or(0)),
-                presence_ttl: Duration::from_millis(u64::try_from(self.presence_ttl * 500).unwrap_or(0)),
+                sessions_ttl: Duration::from_millis(u64::try_from(self.sessions_ttl.saturating_mul(500)).unwrap_or(0)),
+                presence_ttl: Duration::from_millis(u64::try_from(self.presence_ttl.saturating_mul(500)).unwrap_or(0)),
             });
             if self.pong_timeout > 0 {
                 opts.push(SessionOption::PongTimeout(secs(self.pong_timeout)));
@@ -94,7 +100,9 @@ impl SessionSettings {
         let raw = info.param(PING_INTERVAL_PARAMETER);
         if !raw.is_empty() {
             match go_atoi(&raw) {
-                Some(val) => opts.push(SessionOption::PingInterval(secs(val))),
+                // Zero and negative values disable pings, as upstream; values over
+                // a day are clamped to a day (D-054).
+                Some(val) => opts.push(SessionOption::PingInterval(secs(val.min(MAX_CLIENT_PING_INTERVAL_SECS)))),
                 None => crate::metrics::log(
                     Level::Warn,
                     "invalid ping interval value, must be integer",
@@ -191,6 +199,34 @@ mod tests {
         assert_eq!(Some(-1), go_atoi("-1"));
         assert_eq!(None, go_atoi("1.5"));
         assert_eq!(None, go_atoi(""));
+    }
+
+    fn ping_interval_from(query: &str) -> Vec<Duration> {
+        let req = crate::server::HttpRequest { target: format!("/cable?{query}"), ..Default::default() };
+        let info = RequestInfo::new(&req, None).expect("request info");
+        SessionSettings::params_options(&info)
+            .into_iter()
+            .filter_map(|o| match o {
+                SessionOption::PingInterval(d) => Some(d),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Deviation D-054: `?pi=` values over a day are clamped to a day; zero and
+    /// negative values disable pings, as upstream.
+    #[test]
+    fn client_ping_intervals_are_clamped() {
+        assert_eq!(vec![Duration::from_secs(3)], ping_interval_from("pi=3"));
+        assert_eq!(vec![Duration::from_secs(86_400)], ping_interval_from("pi=86400"));
+        assert_eq!(vec![Duration::from_secs(86_400)], ping_interval_from("pi=86401"));
+        assert_eq!(vec![Duration::from_secs(86_400)], ping_interval_from("pi=9223372036854775807"));
+        assert_eq!(vec![Duration::from_secs(86_400)], ping_interval_from("pi=6148914691236517206"));
+        assert_eq!(vec![Duration::ZERO], ping_interval_from("pi=0"));
+        assert_eq!(vec![Duration::ZERO], ping_interval_from("pi=-1"));
+        assert_eq!(vec![Duration::ZERO], ping_interval_from("pi=-9223372036854775808"));
+        // Out of `int` range: invalid, as `strconv.Atoi`.
+        assert!(ping_interval_from("pi=9223372036854775808").is_empty());
     }
 
     #[test]

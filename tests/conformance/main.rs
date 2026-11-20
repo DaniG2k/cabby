@@ -29,6 +29,7 @@ mod logging_transport;
 mod origin;
 mod pusher;
 mod rpc_sessions;
+mod security;
 mod sse;
 mod threads;
 

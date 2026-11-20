@@ -741,6 +741,9 @@ impl Runner {
         let c = self.config.clone();
         let broker = self.node_broker.clone().ok_or_else(|| assertion_failed("broker is not initialized"))?;
 
+        // Only the Pusher endpoint verifies channel signatures (D-055).
+        node.reserve_pusher_channel();
+
         let ws_path = c.pusher.websocket_path();
         let extractor: Option<crate::ws::SharedHeadersExtractor> =
             Some(Arc::new(super::session_options::headers_extractor(&c)));

@@ -51,6 +51,7 @@ use cabby_core::common::{
     SERVER_RESTART_REASON, SLOW_CLIENT_REASON, SessionEnv, StringMap,
 };
 use cabby_core::encoders::{EncodedMessageJson, Encoder, FrameType, Json, SentFrame};
+use cabby_core::gojson::deep::DeepNestingError;
 use cabby_core::logger::{LogValue, LogValuer, Logger, compact_value, compact_value_bytes};
 use cabby_core::utils::{Item, PushResult, Queue};
 use cabby_core::{log_debug, log_error, log_warn};
@@ -193,6 +194,17 @@ const WRITE_QUEUE_CAPACITY: usize = 16;
 /// Default write deadline (upstream `BuildSession`).
 const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// The longest timer interval a session keeps (about ten years): longer ping,
+/// pong, keepalive and write intervals are clamped, so deadline arithmetic
+/// (`interval * 3 / 2`, `now + interval`) cannot overflow (D-054). Clients are
+/// limited much lower (`cli::MAX_CLIENT_PING_INTERVAL_SECS`); this bounds
+/// operator settings and library callers.
+pub const MAX_TIMER_INTERVAL: Duration = Duration::from_secs(10 * 365 * 24 * 60 * 60);
+
+fn bounded(d: Duration) -> Duration {
+    d.min(MAX_TIMER_INTERVAL)
+}
+
 fn lock<T: ?Sized>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -302,6 +314,9 @@ pub struct Session {
     writer: AtomicU8,
     max_pending_size: AtomicU64,
     timers: Mutex<Timers>,
+    /// Commands go through the Pusher executor, which verifies channel
+    /// signatures: only such sessions may subscribe to `$pusher` (D-055).
+    pusher: AtomicBool,
     /// The transport queues writes without blocking ([`Connection::nonblocking`]).
     nonblocking: bool,
     /// A frame the non-blocking transport refused: written first once it is writable.
@@ -433,6 +448,7 @@ impl Session {
             writer: AtomicU8::new(WRITER_DETACHED),
             max_pending_size: AtomicU64::new(0),
             timers: Mutex::new(Timers::default()),
+            pusher: AtomicBool::new(false),
         });
         if nonblocking {
             let me = Arc::downgrade(&session);
@@ -464,7 +480,7 @@ impl Session {
             s.executor = Some(node.clone() as Arc<dyn Executor>);
             s.broker = Some(node.broker());
             s.clock = node.clock();
-            s.ping_interval = Duration::from_secs(config.ping_interval.max(0) as u64);
+            s.ping_interval = bounded(Duration::from_secs(config.ping_interval.max(0) as u64));
             s.ping_precision.clone_from(&config.ping_timestamp_precision);
             s.native_ping = config.enable_native_ping;
             s.uid = uid.to_owned();
@@ -529,18 +545,18 @@ impl Session {
                 opt => {
                     let mut s = write(&self.settings);
                     match opt {
-                        SessionOption::PingInterval(d) => s.ping_interval = d,
+                        SessionOption::PingInterval(d) => s.ping_interval = bounded(d),
                         SessionOption::PingPrecision(p) => s.ping_precision = p,
                         SessionOption::Encoder(e) => s.encoder = e,
                         SessionOption::Executor(e) => Self::adopt_executor(&mut s, e),
                         SessionOption::Metrics(m) => s.metrics = m,
                         SessionOption::KeepaliveIntervals { sessions_ttl, presence_ttl } => {
-                            s.resume_interval = sessions_ttl;
-                            s.presence_interval = presence_ttl;
+                            s.resume_interval = bounded(sessions_ttl);
+                            s.presence_interval = bounded(presence_ttl);
                         }
                         SessionOption::PrevSid(sid) => s.prev_sid = sid,
-                        SessionOption::PongTimeout(d) => s.pong_timeout = d,
-                        SessionOption::WriteTimeout(d) => s.write_timeout = d,
+                        SessionOption::PongTimeout(d) => s.pong_timeout = bounded(d),
+                        SessionOption::WriteTimeout(d) => s.write_timeout = bounded(d),
                         SessionOption::Inactive => s.inactive = true,
                         SessionOption::HandshakeMessageDeadline(_) | SessionOption::MaxPendingSize(_) => {
                             unreachable!()
@@ -908,7 +924,7 @@ impl Session {
         };
         let mut t = lock(&self.timers);
         let Some(pong) = t.pong else { return };
-        t.pong = Some(pong + pong_timeout);
+        t.pong = Some(pong.checked_add(pong_timeout).unwrap_or(pong));
         self.arm(&mut t, &clock);
     }
 
@@ -927,14 +943,25 @@ impl Session {
         self.send(&Reply { kind: PONG_TYPE.to_owned(), ..Default::default() });
     }
 
+    /// Marks the session as served by the Pusher executor, which verifies
+    /// `private-`/`presence-` signatures before subscribing (D-055).
+    pub fn mark_pusher(&self) {
+        self.pusher.store(true, Ordering::Release);
+    }
+
+    /// Whether the session's commands go through the Pusher executor.
+    pub fn is_pusher(&self) -> bool {
+        self.pusher.load(Ordering::Acquire)
+    }
+
     /// Overrides the ping interval (upstream unexported field `pingInterval`).
     pub fn set_ping_interval(&self, interval: Duration) {
-        write(&self.settings).ping_interval = interval;
+        write(&self.settings).ping_interval = bounded(interval);
     }
 
     /// Overrides the cache keepalive interval (upstream unexported field `resumeInterval`).
     pub fn set_resume_interval(&self, interval: Duration) {
-        write(&self.settings).resume_interval = interval;
+        write(&self.settings).resume_interval = bounded(interval);
     }
 
     /// Overrides the pending bytes limit (upstream unexported `maxPendingSize.Store`).
@@ -1128,12 +1155,22 @@ impl Session {
             Err(e) if cabby_core::gojson::deep::hit_default_limit(&e.0) => {
                 // Nested deeper than serde_json's default limit, perhaps within
                 // Go's: decoded, handled and dropped on a thread whose stack fits it.
-                return cabby_core::gojson::deep::with_deep_nesting(|| self.read_deep_message(message)).unwrap_or_else(
-                    || {
+                return match cabby_core::gojson::deep::with_deep_nesting(|| self.read_deep_message(message)) {
+                    Ok(res) => res,
+                    Err(DeepNestingError::Busy) => {
+                        // Deviation D-056: too many deep messages at once; this
+                        // one is dropped and the session keeps reading.
+                        metrics.counter_increment(METRICS_FAILED_COMMAND_RECEIVED);
+                        log_warn!(self.logger(), "failed to handle incoming message",
+                            "data" => compact_value_bytes(message).log_value(),
+                            "error" => DeepNestingError::Busy.to_string());
+                        Ok(())
+                    }
+                    Err(DeepNestingError::Spawn) => {
                         metrics.counter_increment(METRICS_FAILED_COMMAND_RECEIVED);
                         Err(NodeError(e.0))
-                    },
-                );
+                    }
+                };
             }
             Err(e) => {
                 metrics.counter_increment(METRICS_FAILED_COMMAND_RECEIVED);
@@ -1789,6 +1826,31 @@ mod tests {
         clock.advance(Duration::from_secs(3));
         assert!(next(&rx).starts_with(r#"{"type":"ping","message":"#));
         assert_eq!(1, clock.pending(), "one timer armed for the next ping");
+    }
+
+    /// Deviation D-054: huge intervals are clamped, so scheduling never
+    /// overflows `Duration`/`Instant` arithmetic (it panicked with
+    /// `?pi=9223372036854775807`).
+    #[test]
+    fn huge_intervals_do_not_overflow_the_timers() {
+        let clock = TestClock::new();
+        let huge = Duration::from_secs(u64::MAX);
+        let (s, _rx) = session(
+            &clock,
+            vec![
+                SessionOption::PingInterval(huge),
+                SessionOption::PongTimeout(huge),
+                SessionOption::KeepaliveIntervals { sessions_ttl: huge, presence_ttl: huge },
+                SessionOption::WriteTimeout(huge),
+            ],
+        );
+        s.set_connected(true);
+        s.start_timers();
+        s.schedule_ping();
+        s.reset_pong();
+        assert_eq!(MAX_TIMER_INTERVAL, s.settings().ping_interval);
+        assert_eq!(1, clock.pending(), "one timer armed");
+        assert!(!s.is_closed());
     }
 
     #[test]

@@ -896,6 +896,8 @@ impl NodeExecutor for Executor {
 
     fn handle_command(&self, session: &Arc<Session>, msg: &Message) -> Result<(), NodeError> {
         if msg.command == "subscribe" {
+            // Subscriptions verified here may use `$pusher` (D-055).
+            session.mark_pusher();
             let mut subscribe =
                 Message { command: msg.command.clone(), identifier: msg.identifier.clone(), ..Default::default() };
 

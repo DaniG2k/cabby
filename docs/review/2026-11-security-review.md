@@ -47,4 +47,7 @@ argument. `${SCRATCH}` in them stands for a scratch directory.
 
 | ID | Status |
 |---|---|
-| F1–F4 | to be confirmed with the repro scripts and fixed (F2 diverging from Go, as a deviation) |
+| F1 | confirmed (Cabby: a contained panic per attempt; Go: `?pi=6148914691236517206` or `?pi=9223372036` stops the process with `panic: invalid argument to Int63n`). Fixed as D-054: `?pi=` is clamped to a day, session timer intervals to ten years, timer deadlines cannot overflow |
+| F2 | confirmed on both servers. Fixed as D-055: `$pusher` subscriptions are refused outside the Pusher endpoint. The public-channel namespace (repro case 1b) is how Pusher works and is unchanged; operator notes in [`docs/pusher.md`](../pusher.md) |
+| F3 | no crash, but one 64 MiB-stack thread per concurrent deep message. Fixed as D-056: at most 4 such threads; a deep message that waits 250 ms for one is dropped with a warning, its session keeps reading |
+| F4 | left at parity with Go (no per-connection cap): any cap is an observable limit Go does not have; connections can be bounded with `--max_conn` and frames with `--max_message_size`; documented here as parity |
