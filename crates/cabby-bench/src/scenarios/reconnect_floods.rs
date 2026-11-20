@@ -13,6 +13,18 @@
 //! process) become `peak_server_threads` / `peak_server_rss_mb` of the server process
 //! (see [`crate::resources`]). The summary ends with the generator's health
 //! (`generator_*` keys, see [`super::GeneratorReport`]).
+//!
+//! # Servers without RPC or metrics
+//!
+//! A server that runs the application in-process (Action Cable, `bench/actioncable`)
+//! makes no RPC calls; it gets the fake RPC app's latency in its environment
+//! ([`app_latency_env`]) to apply in its own callbacks. A server without a metrics
+//! endpoint ([`Server::has_metrics`]) prints `server_metrics=false`; the gauge-based
+//! keys (`disconnect_discarded`, `rpc_canceled_calls`, `rpc_wait_timeout_calls`,
+//! `peak_disconnect_queue`, `peak_rpc_pending`, `peak_server_sessions`) are then left
+//! out, the disconnect-queue drain is not observable (`wave_<n>_drained_seconds=-1`,
+//! and the last wave ends at recovery), and without RPC calls the command stall is
+//! unknown (`max_command_stall_seconds=-1`).
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -475,6 +487,7 @@ pub fn run_with_config(interrupt: &CancelToken, cfg: RunConfig, stdout: &mut dyn
             stats_refresh_interval: Some(STATS_REFRESH.as_secs() as u32),
         },
         extra_args: cfg.server_args.clone(),
+        env: app_latency_env(&cfg),
         ..ServerConfig::new(&sut)
     }) {
         Ok(s) => Arc::new(s),
@@ -485,6 +498,7 @@ pub fn run_with_config(interrupt: &CancelToken, cfg: RunConfig, stdout: &mut dyn
         }
     };
 
+    let metrics = server.has_metrics();
     let channels: Vec<String> = (1..=cfg.s).map(|i| format!(r#"{{"channel":"BenchChannel","id":"{i}"}}"#)).collect();
     let ctx = CancelToken::new();
     let mut tasks = Vec::new();
@@ -594,6 +608,10 @@ pub fn run_with_config(interrupt: &CancelToken, cfg: RunConfig, stdout: &mut dyn
                         ),
                     );
                 }
+                if last && !metrics && w.recovery.is_some() {
+                    // Without the queue gauge the drain is not observable.
+                    break;
+                }
                 drain.track_rpc(rpc.stats(RpcMethod::Disconnect).started);
                 if let Some(recovered_at) = w.recovery.map(|r| fired + r)
                     && w.drained.is_none()
@@ -635,6 +653,7 @@ pub fn run_with_config(interrupt: &CancelToken, cfg: RunConfig, stdout: &mut dyn
     sampler.stop();
     let samples = sampler.all();
     let mut sum = build_summary(&cfg, setup_ok, recovered, interrupted, start.elapsed(), waves, &stats, &rpc, &samples);
+    sum.server_metrics = metrics;
     sum.generator = generator.finish();
     print_summary(stdout, &sum);
     if let Some(path) = &cfg.timeline
@@ -661,6 +680,21 @@ pub fn run_with_config(interrupt: &CancelToken, cfg: RunConfig, stdout: &mut dyn
         return 1;
     }
     0
+}
+
+/// The fake RPC app's per-method latency (milliseconds) and jitter, for servers that
+/// run the application in-process instead of calling it:
+/// `CABBY_BENCH_APP_LATENCY_{CONNECT,COMMAND,DISCONNECT}_MS` and
+/// `CABBY_BENCH_APP_LATENCY_JITTER`. Servers that use the RPC app ignore them.
+pub fn app_latency_env(cfg: &RunConfig) -> Vec<(String, String)> {
+    let effective = |d: Duration| if d.is_zero() { cfg.rpc_latency } else { d };
+    let mut env: Vec<(String, String)> =
+        [("CONNECT", cfg.connect_latency), ("COMMAND", cfg.command_latency), ("DISCONNECT", cfg.disconnect_latency)]
+            .into_iter()
+            .map(|(m, d)| (format!("CABBY_BENCH_APP_LATENCY_{m}_MS"), format!("{}", ms(effective(d)))))
+            .collect();
+    env.push(("CABBY_BENCH_APP_LATENCY_JITTER".to_owned(), cfg.rpc_jitter.to_string()));
+    env
 }
 
 /// How long the disconnect queue must read empty, with no Disconnect progress,
@@ -889,7 +923,8 @@ struct Summary {
     rpc_calls: [i64; 3],
     rpc_after_close: [i64; 2],
     discarded: u64,
-    max_command_stall: Duration,
+    /// `None` when the server made no RPC calls (the stall is measured on them).
+    max_command_stall: Option<Duration>,
     welcome: HistogramSnapshot,
     confirm: HistogramSnapshot,
     healthy: HistogramSnapshot,
@@ -901,6 +936,8 @@ struct Summary {
     peak_sessions: u64,
     peak_server_threads: u64,
     peak_server_rss: u64,
+    /// The server has a metrics endpoint ([`Server::has_metrics`]).
+    server_metrics: bool,
     generator: GeneratorReport,
 }
 
@@ -930,7 +967,7 @@ fn build_summary(
         rpc_calls: [0; 3],
         rpc_after_close: [0; 2],
         discarded: 0,
-        max_command_stall: command_stall(samples).1,
+        max_command_stall: (rpc.stats(RpcMethod::Connect).started > 0).then(|| command_stall(samples).1),
         welcome: stats.welcome.snapshot(),
         confirm: stats.confirm.snapshot(),
         healthy: stats.healthy.snapshot(),
@@ -942,6 +979,7 @@ fn build_summary(
         peak_sessions: 0,
         peak_server_threads: 0,
         peak_server_rss: 0,
+        server_metrics: true,
         generator: GeneratorReport::default(),
     };
     for (i, m) in RpcMethod::ALL.iter().enumerate() {
@@ -995,12 +1033,16 @@ fn print_summary(w: &mut dyn Write, s: &Summary) {
     o.push_str(&format!("rpc_connect_calls={}\n", s.rpc_calls[0]));
     o.push_str(&format!("rpc_command_calls={}\n", s.rpc_calls[1]));
     o.push_str(&format!("rpc_disconnect_calls={}\n", s.rpc_calls[2]));
-    o.push_str(&format!("rpc_canceled_calls={}\n", s.rpc_canceled));
-    o.push_str(&format!("rpc_wait_timeout_calls={}\n", s.rpc_wait_timeout));
+    if s.server_metrics {
+        o.push_str(&format!("rpc_canceled_calls={}\n", s.rpc_canceled));
+        o.push_str(&format!("rpc_wait_timeout_calls={}\n", s.rpc_wait_timeout));
+    }
     o.push_str(&format!("rpc_connect_after_close_calls={}\n", s.rpc_after_close[0]));
     o.push_str(&format!("rpc_command_after_close_calls={}\n", s.rpc_after_close[1]));
-    o.push_str(&format!("disconnect_discarded={}\n", s.discarded));
-    o.push_str(&format!("max_command_stall_seconds={:.0}\n", s.max_command_stall.as_secs_f64()));
+    if s.server_metrics {
+        o.push_str(&format!("disconnect_discarded={}\n", s.discarded));
+    }
+    o.push_str(&format!("max_command_stall_seconds={:.0}\n", dur_or_neg(s.max_command_stall)));
     for (name, h) in [("welcome", &s.welcome), ("confirm", &s.confirm), ("healthy", &s.healthy), ("probe", &s.probe)] {
         o.push_str(&format!("{name}_count={}\n", h.count));
         o.push_str(&format!("{name}_p50_ms={:.1}\n", ms(h.quantile(0.5))));
@@ -1008,11 +1050,14 @@ fn print_summary(w: &mut dyn Write, s: &Summary) {
         o.push_str(&format!("{name}_p99_ms={:.1}\n", ms(h.quantile(0.99))));
         o.push_str(&format!("{name}_max_ms={:.1}\n", ms(h.max)));
     }
-    o.push_str(&format!("peak_disconnect_queue={}\n", s.peak_disconnect_queue));
-    o.push_str(&format!("peak_rpc_pending={}\n", s.peak_rpc_pending));
-    o.push_str(&format!("peak_server_sessions={}\n", s.peak_sessions));
+    if s.server_metrics {
+        o.push_str(&format!("peak_disconnect_queue={}\n", s.peak_disconnect_queue));
+        o.push_str(&format!("peak_rpc_pending={}\n", s.peak_rpc_pending));
+        o.push_str(&format!("peak_server_sessions={}\n", s.peak_sessions));
+    }
     o.push_str(&format!("peak_server_threads={}\n", s.peak_server_threads));
     o.push_str(&format!("peak_server_rss_mb={:.1}\n", mib(s.peak_server_rss)));
+    o.push_str(&format!("server_metrics={}\n", s.server_metrics));
     // Cabby addition: whether the generator kept up (a starved generator misses
     // pings and confirmations by itself).
     s.generator.write(&mut o, s.generator.starved());

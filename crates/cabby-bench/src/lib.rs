@@ -64,6 +64,11 @@
 //! done
 //! ```
 //!
+//! Rails' Action Cable runs the same way through `bench/actioncable/sut`, which takes the
+//! AnyCable flags and execs Puma. It has no metrics endpoint and no RPC; see
+//! [`server`] and [`scenarios::reconnect_floods`] for how the scenarios handle that, and
+//! `compat/scripts/bench-compare.sh` for the three-way comparison.
+//!
 //! `--server-arg=<flag>` passes extra flags to the server (`--server-arg=--broker=memory`).
 //! `CABBY_BENCH_THREADS` sets the generator's worker threads; on one host, pin the
 //! generator and the server to separate cores (`taskset`) and keep runs whose
