@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Soketi as a cabby-bench server under test (`cabby-bench <scenario> --protocol=pusher --sut bench/soketi/sut`).
+#
+# Accepts the AnyCable CLI flags the harness passes, keeps the ones Soketi can honour (host, port,
+# Pusher app id/key/secret), ignores the rest (paths, broker, RPC, metrics, tuning) and execs Node,
+# so the PID the harness started is the Soketi server. Settings: Soketi's defaults (one process,
+# local adapter, no metrics, debug off), see bench/pusher/README.md.
+#
+# Node: $SOKETI_NODE, else mise's install of the version in .node-version (uWebSockets.js 20.10,
+# which Soketi 1.6 pins, ships binaries for Node 14 to 18 only). Packages: `npm ci` first.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+node="${SOKETI_NODE:-}"
+if [[ -z "${node}" ]]; then
+  node="$(mise where "node@$(cat "${here}/.node-version")")/bin/node"
+fi
+
+host=127.0.0.1 port=6001 app_id="" app_key="" secret=""
+while (($#)); do
+  arg="$1"
+  shift
+  value=""
+  case "${arg}" in
+    --*=*) value="${arg#*=}" arg="${arg%%=*}" ;;
+    --host | --port | --pusher_app_id | --pusher_app_key | --pusher_secret)
+      value="${1:-}"
+      shift || true
+      ;;
+  esac
+  case "${arg}" in
+    --version)
+      exec "${node}" -e 'const p = require(process.argv[1]); console.log(`soketi ${p.version} (node ${process.version})`)' \
+        "${here}/node_modules/@soketi/soketi/package.json"
+      ;;
+    --host) host="${value}" ;;
+    --port) port="${value}" ;;
+    --pusher_app_id) app_id="${value}" ;;
+    --pusher_app_key) app_key="${value}" ;;
+    --pusher_secret) secret="${value}" ;;
+    *) ;; # other AnyCable flags have no Soketi counterpart
+  esac
+done
+[[ -n "${app_id}" && -n "${app_key}" && -n "${secret}" ]] || {
+  echo "soketi sut: --pusher_app_id, --pusher_app_key and --pusher_secret are required (run with --protocol=pusher)" >&2
+  exit 2
+}
+
+# Soketi reads SOKETI_* variables (JSON-parsed when they parse) and a .env in its working directory.
+for v in $(compgen -e | grep '^SOKETI_' || true); do unset "${v}"; done
+export NODE_ENV=production SOKETI_HOST="${host}" SOKETI_PORT="${port}" SOKETI_DEBUG=false \
+  SOKETI_METRICS_ENABLED=false SOKETI_DEFAULT_APP_ID="${app_id}" SOKETI_DEFAULT_APP_KEY="${app_key}" \
+  SOKETI_DEFAULT_APP_SECRET="${secret}"
+cd "${here}"
+exec "${node}" "${here}/node_modules/@soketi/soketi/bin/server.js" start

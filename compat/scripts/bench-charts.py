@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Render the README benchmark charts (SVG, light and dark) from bench-compare.sh results.
 
-Usage: compat/scripts/bench-charts.py [RESULTS_DIR] [OUT_DIR]
+Usage: compat/scripts/bench-charts.py [RESULTS_DIR] [OUT_DIR] [--protocol=pusher]
        (defaults: docs/benchmarks/results, docs/benchmarks)
+With --protocol=pusher (results of bench-compare-pusher.sh, default docs/benchmarks/pusher-results)
+the charts are named pusher-*.svg and their titles say so.
 Medians of the runs that were not generator-saturated, as in bench-summary.py. One series per server
-found in the results (Action Cable, AnyCable, Cabby). A server that did not sustain a workload (missing
+found in the results (Action Cable, Soketi, Reverb, AnyCable, Cabby). A server that did not sustain a workload (missing
 messages, dropped publications, failed POSTs) gets no bar there but a "not sustained" label: its latency
 and CPU would describe a server that fell behind, not the same load.
 """
@@ -13,8 +15,12 @@ import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
-results = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "docs/benchmarks/results"
-out_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else root / "docs/benchmarks"
+pusher = "--protocol=pusher" in sys.argv
+args = [a for a in sys.argv[1:] if not a.startswith("--")]
+results = Path(args[0]) if args else root / ("docs/benchmarks/pusher-results" if pusher else "docs/benchmarks/results")
+out_dir = Path(args[1]) if len(args) > 1 else root / "docs/benchmarks"
+PREFIX = "pusher-" if pusher else ""
+TITLE_SUFFIX = ", Pusher protocol" if pusher else ""
 
 
 NOT_SUSTAINED = "not sustained"
@@ -57,14 +63,20 @@ def med_raw(workload, sut, key):
     return statistics.median(vals) if vals else None
 
 
-ALL_SERIES = [("actioncable", "Action Cable (Ruby)"), ("anycable-go", "AnyCable (Go)"), ("cabby", "Cabby (Rust)")]
-SERIES = [(k, n) for k, n in ALL_SERIES if any(results.glob(f"*.{k}.*.txt"))] or ALL_SERIES[1:]
-# Categorical slots aqua, blue, orange; each server keeps its colour whichever servers are shown.
+# Series order keeps yellow (Soketi) away from orange (Cabby): the validated adjacent pairs.
+ALL_SERIES = [("actioncable", "Action Cable (Ruby)"), ("soketi", "Soketi (Node.js)"), ("reverb", "Reverb (PHP)"),
+              ("anycable-go", "AnyCable (Go)"), ("cabby", "Cabby (Rust)")]
+SERIES = [(k, n) for k, n in ALL_SERIES if any(results.glob(f"*.{k}.*.txt"))] or \
+    [s for s in ALL_SERIES if s[0] in ("anycable-go", "cabby")]
+# Categorical slots aqua, blue, orange, yellow, magenta; each server keeps its colour whichever servers
+# are shown. Yellow and magenta are below 3:1 on the light surface: every bar carries its value label.
 STYLE = """
   .surface { fill: #fcfcfb; } .actioncable { fill: #1baf7a; } .anycable-go { fill: #2a78d6; } .cabby { fill: #eb6834; }
+  .soketi { fill: #eda100; } .reverb { fill: #e87ba4; }
   .t1 { fill: #0b0b0b; } .t2 { fill: #52514e; } .grid { stroke: #e4e3df; } .axis { stroke: #b9b8b2; }
   @media (prefers-color-scheme: dark) {
     .surface { fill: #1a1a19; } .actioncable { fill: #199e70; } .anycable-go { fill: #3987e5; } .cabby { fill: #d95926; }
+    .soketi { fill: #c98500; } .reverb { fill: #d55181; }
     .t1 { fill: #f0efec; } .t2 { fill: #c3c2b7; } .grid { stroke: #383835; } .axis { stroke: #5e5d58; }
   }
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
@@ -93,6 +105,7 @@ def chart(path, title, subtitle, groups, values, unit, digits=0):
     n = len(SERIES)
     bw = min(56 if n <= 2 else 48, gw * 0.6 / n)
     gap = 2
+    label_size = 11 if n <= 3 else 10
     y = lambda v: top + ph - ph * v / vmax  # noqa: E731
     fmt = lambda v: "no data" if v is None else v if isinstance(v, str) else f"{v:,.{digits}f}"  # noqa: E731
     unit_of = lambda v: f" {unit}" if isinstance(v, (int, float)) else ""  # noqa: E731
@@ -124,6 +137,12 @@ def chart(path, title, subtitle, groups, values, unit, digits=0):
             if not isinstance(v, (int, float)):
                 # No bar: say why in the bar's place, above the baseline.
                 words = {NOT_SUSTAINED: ["not", "sustained"], FAILED: ["run", "failed"]}.get(v, ["no", "data"])
+                if n > 3:
+                    # Narrow bars: one vertical line, so neighbours' notes do not collide.
+                    tx, ty = x + bw / 2 + 3, y(0) - 6
+                    s.append(f'<text class="t2" x="{tx:.1f}" y="{ty:.1f}" font-size="10" '
+                             f'transform="rotate(-90 {tx:.1f} {ty:.1f})">{" ".join(words)}</text>')
+                    continue
                 for k, word in enumerate(words):
                     s.append(f'<text class="t2" x="{x + bw / 2:.1f}" y="{y(0) - 22 + 12 * k:.1f}" font-size="10" '
                              f'text-anchor="middle">{word}</text>')
@@ -134,7 +153,7 @@ def chart(path, title, subtitle, groups, values, unit, digits=0):
             # rounded data end, square at the baseline
             s.append(f'<path class="{key}" d="M{x:.1f},{base:.1f} V{top_y + r:.1f} Q{x:.1f},{top_y:.1f} {x + r:.1f},{top_y:.1f} '
                      f'H{x + bw - r:.1f} Q{x + bw:.1f},{top_y:.1f} {x + bw:.1f},{top_y + r:.1f} V{base:.1f} Z"/>')
-            s.append(f'<text class="t1" x="{x + bw / 2:.1f}" y="{top_y - 6:.1f}" font-size="11" text-anchor="middle">{fmt(v)}</text>')
+            s.append(f'<text class="t1" x="{x + bw / 2:.1f}" y="{top_y - 6:.1f}" font-size="{label_size}" text-anchor="middle">{fmt(v)}</text>')
         s.append(f'<text class="t2" x="{cx:.1f}" y="{top + ph + 20}" font-size="12" text-anchor="middle">{g}</text>')
     s.append("</svg>\n")
     path.write_text("\n".join(s))
@@ -142,17 +161,17 @@ def chart(path, title, subtitle, groups, values, unit, digits=0):
 
 out_dir.mkdir(parents=True, exist_ok=True)
 suts = [k for k, _ in SERIES]
-chart(out_dir / "memory.svg", "Server memory (RSS)", "Peak resident memory; lower is better",
+chart(out_dir / f"{PREFIX}memory.svg", f"Server memory (RSS){TITLE_SUFFIX}", "Peak resident memory; lower is better",
       ["1,000 idle clients", "10,000 idle clients", "5,000-client room, 100k msg/s"],
       [[med("idle-1k", s, "peak_server_rss_mb"), med("idle-10k", s, "peak_server_rss_mb"), med("room-5k", s, "peak_server_rss_mb")] for s in suts],
       "MB")
 fan = [("fanout-50k", "50k msg/s"), ("fanout-100k", "100k msg/s"), ("fanout-150k", "150k msg/s")]
-chart(out_dir / "latency.svg", "Broadcast delivery latency, p99", "Publish to client delivery, 1,000 clients; lower is better",
+chart(out_dir / f"{PREFIX}latency.svg", f"Broadcast delivery latency, p99{TITLE_SUFFIX}", "Publish to client delivery, 1,000 clients; lower is better",
       [g for _, g in fan], [[med(w, s, "latency_p99_ms") for w, _ in fan] for s in suts], "ms", digits=2)
-chart(out_dir / "cpu.svg", "Server CPU at the same delivered rate", "Average cores used while delivering the load; lower is better",
+chart(out_dir / f"{PREFIX}cpu.svg", f"Server CPU at the same delivered rate{TITLE_SUFFIX}", "Average cores used while delivering the load; lower is better",
       [g for _, g in fan], [[med(w, s, "server_cpu_cores") for w, _ in fan] for s in suts], "cores", digits=2)
 tput = fan + [("room-5k", "5,000-client room, 100k msg/s")]
-chart(out_dir / "throughput.svg", "Messages delivered per second",
+chart(out_dir / f"{PREFIX}throughput.svg", f"Messages delivered per second{TITLE_SUFFIX}",
       "What each server delivered of the offered load (50k, 100k, 150k, 100k msg/s); higher is better",
       [g for _, g in tput],
       [[(lambda v: None if v is None else v / 1000)(med_raw(w, s, "throughput_msgs_per_sec")) for w, _ in tput] for s in suts],

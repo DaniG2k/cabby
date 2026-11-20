@@ -23,6 +23,15 @@
 //!   clients or a lower rate, or give the harness its own cores (`taskset`,
 //!   `CABBY_BENCH_THREADS`). Late ticks also flag a host whose CPUs are all busy
 //!   (server plus generator), which skews any comparison.
+//!
+//! # Pusher mode
+//!
+//! `--protocol=pusher` runs the same workload over the Pusher protocol ([`crate::pusher`]):
+//! the server is started in Pusher mode, each stream is a public Pusher channel of the
+//! same name, the clients speak pusher-js's protocol 7, and the publisher posts signed
+//! events to the Pusher HTTP API (`--publish-batch` above 1 uses `batch_events`, capped
+//! at 10 events). Payloads, reconciliation, latency stamping and the summary are those
+//! of the Action Cable mode.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -37,6 +46,7 @@ use crate::histogram::HistogramSnapshot;
 use crate::ledger::{self, DeliveryLedger};
 use crate::pool::{ClientPool, PoolConfig, PoolHook};
 use crate::publisher::{Publisher, PublisherOptions};
+use crate::pusher::Protocol;
 use crate::resources::ResourceMonitor;
 use crate::rng::Rng;
 use crate::server::{Server, ServerConfig};
@@ -71,6 +81,8 @@ pub struct RunConfig {
     pub sut: Option<PathBuf>,
     /// `--server-arg`, repeatable.
     pub server_args: Vec<String>,
+    /// `--protocol`, default Action Cable.
+    pub protocol: Protocol,
 }
 
 /// Runs after the server, pool and publisher are built, before the publish window.
@@ -181,7 +193,7 @@ const DEFS: &[FlagDef] = &[
         name: "publish-batch",
         kind: Kind::Int,
         default: "64",
-        usage: "max broadcasts coalesced into a single POST under backpressure (1 disables batching)",
+        usage: "max broadcasts coalesced into a single POST under backpressure (1 disables batching); Pusher mode: default 1, at most 10 (batch_events, which AnyCable's Pusher API lacks)",
     },
     FlagDef {
         name: "setup-failure-tolerance",
@@ -201,6 +213,7 @@ const DEFS: &[FlagDef] = &[
         default: "",
         usage: "suppress lifecycle logs on stderr; emit only the key=value summary on stdout (auto-on when stderr is not a TTY)",
     },
+    super::PROTOCOL_FLAG,
     SUT_FLAGS[0],
     SUT_FLAGS[1],
 ];
@@ -238,6 +251,7 @@ pub fn parse_flags(args: &[String], stderr: &mut dyn Write) -> Result<RunConfig,
         return Err(format!("-s ({s}) must be <= -S ({big_s})"));
     }
     let sut = p.string("sut");
+    let protocol = Protocol::parse(&p.string("protocol"))?;
     Ok(RunConfig {
         c: positive(c),
         r: positive(r),
@@ -247,12 +261,15 @@ pub fn parse_flags(args: &[String], stderr: &mut dyn Write) -> Result<RunConfig,
         drain_timeout: p.duration("drain-timeout", Duration::from_secs(30)),
         max_inflight: positive(p.int("max-inflight", 4096)),
         publish_workers: positive(p.int("publish-workers", 64)),
-        publish_batch: positive(p.int("publish-batch", 64)),
+        // AnyCable's Pusher API has no batch_events endpoint (a batch is accepted and
+        // dropped), so Pusher mode batches only when asked to.
+        publish_batch: positive(p.int("publish-batch", if protocol == Protocol::ActionCable { 64 } else { 1 })),
         tolerance: positive(p.int("setup-failure-tolerance", 0)),
         seed: p.int("seed", 1) as u64,
         non_interactive: p.boolean("non-interactive"),
         sut: (!sut.is_empty()).then(|| PathBuf::from(sut)),
         server_args: p.list("server-arg"),
+        protocol,
     })
 }
 
@@ -264,7 +281,11 @@ pub fn run_with_config(cfg: RunConfig, opts: RunOpts, stdout: &mut dyn Write, st
     };
 
     ui.log(stderr, &format!("starting server {}...", sut.display()));
-    let server = match Server::build(ServerConfig { extra_args: cfg.server_args.clone(), ..ServerConfig::new(&sut) }) {
+    let server = match Server::build(ServerConfig {
+        extra_args: cfg.server_args.clone(),
+        pusher: cfg.protocol.pusher().cloned(),
+        ..ServerConfig::new(&sut)
+    }) {
         Ok(s) => s,
         Err(e) => {
             let _ = writeln!(stdout, "server build failed: {e}");
@@ -299,6 +320,7 @@ pub fn run_with_config(cfg: RunConfig, opts: RunOpts, stdout: &mut dyn Write, st
         streams: opts.stream_subsets,
         on_connect: Some(counter(&connected)),
         on_subscribe: Some(counter(&subscribed)),
+        wire: cfg.protocol.wire(),
     }) {
         Ok(p) => p,
         Err(e) => {
@@ -318,13 +340,14 @@ pub fn run_with_config(cfg: RunConfig, opts: RunOpts, stdout: &mut dyn Write, st
     );
 
     let broadcast_url = opts.broadcast_url.clone().unwrap_or_else(|| server.broadcast_url());
-    let publisher = Publisher::new(
+    let publisher = Publisher::with_protocol(
         &broadcast_url,
         cfg.max_inflight as i64,
         PublisherOptions::default()
             .with_workers(cfg.publish_workers as i64)
             .with_batch_size(cfg.publish_batch as i64)
             .with_stamping(true),
+        &cfg.protocol,
     );
     if let Some(hook) = opts.setup_hook {
         hook(&server, &pool, &publisher);
