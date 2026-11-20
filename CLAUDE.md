@@ -20,10 +20,9 @@ plan and progress. Don't rely on earlier conversations.
   1. Pusher-protocol benchmark (Cabby/AnyCable Pusher modes vs Soketi and Laravel Reverb), needing
      a Pusher client mode in `crates/cabby-bench`.
   2. A soak test for AnyCable #265.
-- **Pending owner decision:** a private security report to the AnyCable maintainers.
-  `?pi=9223372036` crashes the Go server, and `$pusher` is reachable from `/cable` without a
-  signature; both are fixed in Cabby (D-054, D-055). Don't publish details (README, issues)
-  before that.
+- **Security report to AnyCable: not sent, by the owner's decision.** `?pi=9223372036` crashes the
+  Go server, and `$pusher` is reachable from `/cable` without a signature; both are fixed in Cabby
+  (D-054, D-055). Keep the details out of the README.
 - **Go is removed from this machine.** Go-backend runs (`cargo xtask test --backend go`) happen in
   CI (Go is no longer in `mise.toml`; see the comment there to run it locally). Kept: `target/reference-bin/anycable-go` (the
   benchmarks need it) and `target/test-services/nats-server` (Cabby's tests need it). Move both
