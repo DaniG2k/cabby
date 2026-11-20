@@ -74,6 +74,11 @@
 //! `bench/soketi/sut` and `bench/reverb/sut`; `compat/scripts/bench-compare-pusher.sh` is
 //! that four-way comparison (`bench/pusher/README.md`).
 //!
+//! `cabby-bench soak` is a memory-stability run (AnyCable issue 265, deviation D-005):
+//! RPC-mode connection and subscription churn with few broadcasts for hours, sampling the
+//! server's RSS, threads, fds and sockets ([`scenarios::soak`]);
+//! `compat/scripts/soak-compare.sh` runs it against AnyCable and Cabby side by side.
+//!
 //! `--server-arg=<flag>` passes extra flags to the server (`--server-arg=--broker=memory`).
 //! `CABBY_BENCH_THREADS` sets the generator's worker threads; on one host, pin the
 //! generator and the server to separate cores (`taskset`) and keep runs whose

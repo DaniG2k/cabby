@@ -84,7 +84,7 @@ implement it; move it to "Implemented in Cabby" once it is.
 
 | ID | Area | Go behavior | Proposed Cabby behavior | Why | Pinning test | Go result |
 |---|---|---|---|---|---|---|
-| D-005 | Memory stability | Slow RSS growth under traffic over days | No unbounded growth: after repeated connect/subscribe/broadcast/disconnect churn, RSS, threads, sockets and file descriptors return to within a fixed margin of baseline | AnyCable issue 265 (open) | Planned soak workload in `crates/cabby-bench` (M7), run against both servers | to measure |
+| D-005 | Memory stability | Slow RSS growth under traffic over days | No unbounded growth: after repeated connect/subscribe/broadcast/disconnect churn, RSS, threads, sockets and file descriptors return to within a fixed margin of baseline | AnyCable issue 265 (open) | Soak workload `cabby-bench soak` (RPC churn, RSS/threads/fds/sockets sampled, slope after warm-up, residual after drain); `compat/scripts/soak-compare.sh` runs both servers side by side, results in `docs/benchmarks/soak/` | to measure |
 
 ## Resolved (no longer deviations)
 
