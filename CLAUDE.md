@@ -11,21 +11,26 @@ plan and progress. Don't rely on earlier conversations.
 - `compat/deviations.md`: every observable difference from Go, adopted or proposed.
 - `cargo xtask report --by-package`: live progress, from `compat/test-map.json`.
 
-## Where things stand (2026-11-20)
-- **M0–M6 done.** All 923 upstream cases pass against Cabby (1173 tests); Go suite clean
-  (9 not_observable, 4 upstream_failure = AnyCable #275, fixed in Cabby as D-003).
-- **Independent review** (Fable 5.2): `docs/review/2026-11-fable-review.md`, with repro
-  scripts. All findings fixed; status table at the end.
-- All review findings, including H7 (logging parity), are fixed and merged; 1188 tests pass.
-- **Then M7 benchmarks**: three-way comparison (Action Cable vs AnyCable vs Cabby) with the
-  external harness, on the fixed build, **on the Linux box with the machine idle** (the harness
-  uses `taskset` and `/proc`; it doesn't run on macOS). `compat/scripts/bench-compare.sh`
-  (warm-up, shuffled rounds, 5 runs; Action Cable app in `bench/actioncable`, gems via
-  `mise exec ruby@4.0.9 -- bundle install` into `vendor/bundle`), then `bench-summary.py` and
-  `bench-charts.py`, and rewrite the README benchmark section from the new results. The
-  current README numbers are the older Go-vs-Cabby run.
-- **Then the end items** in SPEC §11: remove the local Go toolchain once done, and lift the
-  README's "don't use in production" note once H7 and the benchmarks are in.
+## Where things stand (2026-11-21)
+- **Done:** all 923 upstream cases pass (1191 tests). The general review
+  (`docs/review/2026-11-fable-review.md`) and the security review
+  (`docs/review/2026-11-security-review.md`) are fixed. The README has the three-way benchmark
+  (Action Cable vs AnyCable vs Cabby), with raw results in `docs/benchmarks/results`.
+- **Next:**
+  1. Pusher-protocol benchmark (Cabby/AnyCable Pusher modes vs Soketi and Laravel Reverb), needing
+     a Pusher client mode in `crates/cabby-bench`.
+  2. A soak test for AnyCable #265.
+- **Pending owner decision:** a private security report to the AnyCable maintainers.
+  `?pi=9223372036` crashes the Go server, and `$pusher` is reachable from `/cable` without a
+  signature; both are fixed in Cabby (D-054, D-055). Don't publish details (README, issues)
+  before that.
+- **Go is removed from this machine.** Go-backend runs (`cargo xtask test --backend go`) happen in
+  CI; locally, `mise install` would bring Go back. Kept: `target/reference-bin/anycable-go` (the
+  benchmarks need it) and `target/test-services/nats-server` (Cabby's tests need it). Move both
+  aside before any `cargo clean`.
+- **Benchmarks only run on this Linux box,** with the machine idle (`taskset`, `/proc`). The
+  Action Cable app needs its gems:
+  `cd bench/actioncable && mise exec ruby@4.0.9 -- bundle config set --local path vendor/bundle && mise exec ruby@4.0.9 -- bundle install`.
 - Owner preference: run tests and benchmarks yourself and report; don't walk the owner through
   manual testing unless asked.
 
