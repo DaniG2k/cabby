@@ -180,7 +180,8 @@ cargo xtask test --backend rust         # against Cabby: pass or explicitly pend
 cargo xtask report --by-package
 ```
 
-See [`docs/implementing.md`](docs/implementing.md) and
+To try it by hand (start, connect, broadcast, SSE, metrics), follow
+[`docs/manual-testing.md`](docs/manual-testing.md). See [`docs/implementing.md`](docs/implementing.md) and
 [`docs/translating-tests.md`](docs/translating-tests.md).
 
 ## License and attribution
