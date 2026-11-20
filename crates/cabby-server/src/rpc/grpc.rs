@@ -114,10 +114,13 @@ struct Subchannel {
 struct Counted {
     inner: ClientStream,
     state: Arc<State>,
+    /// The peer address (upstream logs it on `stats.ConnBegin`/`ConnEnd`).
+    addr: String,
 }
 
 impl Drop for Counted {
     fn drop(&mut self) {
+        cabby_core::log_debug!(grpc_logger(), "disconnected", "addr" => &self.addr);
         self.state.active.fetch_sub(1, Ordering::Relaxed);
     }
 }
@@ -168,13 +171,13 @@ impl std::fmt::Debug for GrpcClient {
     }
 }
 
+/// Upstream `l.With("impl", "grpc")` on the controller's `context=rpc` logger.
+fn grpc_logger() -> cabby_core::logger::Logger {
+    cabby_core::logger::Logger::default().with("context", "rpc").with("impl", "grpc")
+}
+
 fn log(level: Level, msg: &str) {
-    use cabby_core::logger::{Attr, LogValue};
-    crate::metrics::log(
-        level,
-        msg,
-        &[Attr::new("context", LogValue::String("rpc".into())), Attr::new("impl", LogValue::String("grpc".into()))],
-    );
+    grpc_logger().log(level, msg, &[]);
 }
 
 impl GrpcClient {
@@ -274,8 +277,20 @@ impl GrpcClient {
                     Some(addr) => TcpStream::connect(addr).await,
                     None => TcpStream::connect((s.host.as_str(), s.port)).await,
                 };
+                let addr =
+                    tcp.as_ref().ok().and_then(|t| t.peer_addr().ok()).map(|a| a.to_string()).unwrap_or_default();
                 let stream = match (tcp, tls) {
-                    (Err(e), _) => Err(e),
+                    // grpc-go's text for a failed dial (what `RPC failed` logs).
+                    (Err(e), _) => {
+                        let target = s.addr.map_or_else(|| format!("{}:{}", s.host, s.port), |a| a.to_string());
+                        let text = crate::http_client::go_dial_error(&e);
+                        Err(io::Error::new(
+                            e.kind(),
+                            format!(
+                                "connection error: desc = \"transport: Error while dialing: dial tcp {target}: {text}\""
+                            ),
+                        ))
+                    }
                     (Ok(tcp), None) => {
                         let _ = tcp.set_nodelay(true);
                         Ok(ClientStream::Plain(tcp))
@@ -288,8 +303,9 @@ impl GrpcClient {
                 match stream {
                     Ok(inner) => {
                         s.failing.store(false, Ordering::Relaxed);
+                        cabby_core::log_debug!(grpc_logger(), "connected", "addr" => &addr);
                         state.active.fetch_add(1, Ordering::Relaxed);
-                        Ok(TokioIo::new(Counted { inner, state }))
+                        Ok(TokioIo::new(Counted { inner, state, addr }))
                     }
                     Err(e) => {
                         s.failing.store(true, Ordering::Relaxed);

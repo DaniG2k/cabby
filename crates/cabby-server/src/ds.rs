@@ -25,8 +25,9 @@ use base64::Engine as _;
 use cabby_core::broker::Broker;
 use cabby_core::common::{Message, PING_TYPE, Status, StreamMessage};
 use cabby_core::encoders::{EncodeError, EncodedMessageJson, Encoder as NodeEncoder, SentFrame, no_frame};
-use cabby_core::logger::{Attr, Level, LogValue};
+use cabby_core::logger::{Attr, Level, LogValue, Logger};
 use cabby_core::streams::StreamsController;
+use cabby_core::{log_debug, log_error};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
@@ -151,11 +152,18 @@ impl Config {
     }
 }
 
+/// Records of the handler before a session exists (upstream `l.With("transport", "ds")`).
 fn log(level: Level, msg: &str, attrs: &[Attr]) {
     let mut all = Vec::with_capacity(attrs.len() + 1);
     all.push(Attr::new("transport", LogValue::String("ds".into())));
     all.extend_from_slice(attrs);
     crate::metrics::log(level, msg, &all);
+}
+
+/// The session's logger (upstream `session.Log.With("ds", path)`, where
+/// `session.Log` is the node's logger with the session id).
+fn session_logger(sid: &str, path: &str) -> Logger {
+    Logger::default().with("context", "node").with("sid", sid).with("ds", path)
 }
 
 fn attr(key: &str, value: impl std::fmt::Display) -> Attr {
@@ -824,6 +832,7 @@ pub fn endpoint(handler: Arc<Handler>) -> impl server::Handler {
 struct StreamGuard {
     session: Arc<Session>,
     gauge: Option<(Arc<dyn Instrumenter>, &'static str)>,
+    log: Logger,
 }
 
 impl Drop for StreamGuard {
@@ -831,6 +840,7 @@ impl Drop for StreamGuard {
         if let Some((m, name)) = self.gauge.take() {
             m.gauge_decrement(name);
         }
+        log_debug!(self.log, "session completed");
         self.session.disconnect("done", CLOSE_NORMAL_CLOSURE);
     }
 }
@@ -930,7 +940,7 @@ impl Handler {
         let session = Session::new(&self.node, conn.clone(), &info.url, info.headers.clone(), &info.uid, opts);
 
         if self.config.skip_auth {
-            log(Level::Debug, "skip authentication", &[attr("ds", &stream.params.path)]);
+            log_debug!(session_logger(&info.uid, &stream.params.path), "skip authentication");
             self.node.authenticated(&session, &format!("ds::{}", session.get_id()));
         } else {
             match self.node.authenticate(&session, &[]) {
@@ -990,7 +1000,8 @@ impl Handler {
         let ds = match ds {
             Ok(ds) => ds,
             Err(e) => {
-                log(Level::Debug, "unauthenticated", &[attr("err", e)]);
+                // Upstream logs through the handler's logger here, without `transport`.
+                log_debug!(Logger::default(), "unauthenticated", "err" => e.to_string());
                 poll.close(401, "Auth Failed");
                 return None;
             }
@@ -998,6 +1009,7 @@ impl Handler {
         let DsSession { stream, session, poll, sse: sse_conn } = ds;
         let sp = &stream.params;
         let sid = session.get_id();
+        let slog = session_logger(&sid, &sp.path);
 
         // Stream access check: the verified stream (e.g. of a signed stream name)
         // must be the requested one, since the data is read by the URL's name.
@@ -1008,24 +1020,20 @@ impl Handler {
             Err(e) => Err(e.message),
         };
         if let Err(e) = verified {
-            log(Level::Debug, "unauthorized", &[attr("sid", &sid), attr("err", e)]);
+            log_debug!(slog, "unauthorized", "err" => e);
             poll.close(401, "unauthorized");
             // Make sure it is removed from the node.
             session.disconnect("unauthorized", 401);
             return None;
         }
 
-        log(
-            Level::Debug,
-            "session established",
-            &[attr("sid", &sid), attr("mode", &sp.live_mode), attr("offset", &sp.raw_offset)],
-        );
-        let mut guard = StreamGuard { session: session.clone(), gauge: None };
+        log_debug!(slog, "session established", "mode" => &sp.live_mode, "offset" => &sp.raw_offset);
+        let mut guard = StreamGuard { session: session.clone(), gauge: None, log: slog.clone() };
 
         let tail = match self.broker.peak(&sp.name) {
             Ok(tail) => tail.unwrap_or_default(),
             Err(e) => {
-                log(Level::Error, "failed to get stream metadata", &[attr("sid", &sid), attr("err", e.message)]);
+                log_error!(slog, "failed to get stream metadata", "err" => e.message);
                 poll.close(500, "");
                 return None;
             }
@@ -1064,7 +1072,7 @@ impl Handler {
         mut tail: StreamMessage,
         guard: &mut StreamGuard,
     ) -> Option<Live> {
-        let sid = guard.session.get_id();
+        let slog = guard.log.clone();
         {
             let mut w = lock_writer(w);
             let h = w.headers_mut();
@@ -1076,7 +1084,7 @@ impl Handler {
         let backlog = match fetch_history(self.broker.as_ref(), &s.params) {
             Ok(b) => b,
             Err(e) => {
-                log(Level::Error, "failed to fetch history", &[attr("sid", &sid), attr("err", e)]);
+                log_error!(slog, "failed to fetch history", "err" => e.to_string());
                 // Either the offset is unreachable or the epoch has changed.
                 poll.close(410, "");
                 return None;
@@ -1104,13 +1112,13 @@ impl Handler {
                 set_header(lock_writer(w).headers_mut(), "etag", &etag);
 
                 if etag_matches(req.header("If-None-Match"), &etag) {
-                    log(Level::Debug, "not modified", &[attr("sid", &sid)]);
+                    log_debug!(slog, "not modified");
                     poll.close(304, "");
                     return None;
                 }
             }
 
-            log(Level::Debug, "write history", &[attr("sid", &sid), attr("len", backlog.len())]);
+            log_debug!(slog, "write history", "len" => backlog.len());
             poll.close(200, "");
             // Upstream ignores this error too.
             let _ = lock_writer(w).write(&encode_json_batch(&backlog));
@@ -1131,7 +1139,7 @@ impl Handler {
         }
 
         if let Err(e) = self.node.subscribe(&guard.session, &s.params.to_subscribe_command()) {
-            log(Level::Error, "failed to subscribe", &[attr("sid", &sid), attr("err", e)]);
+            log_error!(slog, "failed to subscribe", "err" => e.to_string());
             poll.close(500, "");
             return None;
         }
@@ -1151,7 +1159,7 @@ impl Handler {
         mut tail: StreamMessage,
         guard: &mut StreamGuard,
     ) -> Option<Live> {
-        let sid = session.get_id();
+        let slog = guard.log.clone();
         {
             let mut w = lock_writer(w);
             let h = w.headers_mut();
@@ -1172,7 +1180,7 @@ impl Handler {
         let backlog = match fetch_history(self.broker.as_ref(), &s.params) {
             Ok(b) => b,
             Err(e) => {
-                log(Level::Error, "failed to fetch history", &[attr("sid", &sid), attr("err", e)]);
+                log_error!(slog, "failed to fetch history", "err" => e.to_string());
                 poll.close(410, "");
                 return None;
             }
@@ -1189,7 +1197,7 @@ impl Handler {
         let cursor = s.next_cursor();
 
         if !backlog.is_empty() {
-            log(Level::Debug, "write history", &[attr("sid", &sid), attr("len", backlog.len())]);
+            log_debug!(slog, "write history", "len" => backlog.len());
             let mut w = lock_writer(w);
             let mut out = encode_sse_data_event(&backlog);
             out.extend_from_slice(b"\n\n");
@@ -1203,7 +1211,7 @@ impl Handler {
         conn.established();
 
         if let Err(e) = self.node.subscribe(session, &s.params.to_subscribe_command()) {
-            log(Level::Error, "failed to subscribe", &[attr("sid", &sid), attr("err", e)]);
+            log_error!(slog, "failed to subscribe", "err" => e.to_string());
             return None;
         }
 
@@ -1212,6 +1220,7 @@ impl Handler {
 
     /// Waits for the live response to complete.
     async fn wait(&self, active: &Active, request_done: &CancellationToken) {
+        let slog = &active.guard.log;
         match &active.live {
             Live::LongPoll(poll) => {
                 let flushed = poll.context();
@@ -1222,7 +1231,7 @@ impl Handler {
                     tokio::select! {
                         () = self.shutdown.cancelled(), if !shutdown_received => {
                             shutdown_received = true;
-                            log(Level::Debug, "server shutdown", &[]);
+                            log_debug!(slog, "server shutdown");
                             poll.close(410, "Server shutdown");
                         }
                         () = &mut timeout => {
@@ -1230,11 +1239,11 @@ impl Handler {
                             return;
                         }
                         () = request_done.cancelled() => {
-                            log(Level::Debug, "polling request terminated", &[]);
+                            log_debug!(slog, "polling request terminated");
                             return;
                         }
                         () = flushed.cancelled() => {
-                            log(Level::Debug, "polling request fulfilled", &[]);
+                            log_debug!(slog, "polling request fulfilled");
                             return;
                         }
                     }
@@ -1245,16 +1254,16 @@ impl Handler {
                 let ttl = if self.config.sse_ttl == 0 { 60 } else { self.config.sse_ttl.max(0) as u64 };
                 tokio::select! {
                     () = self.shutdown.cancelled() => {
-                        log(Level::Debug, "server shutdown", &[]);
+                        log_debug!(slog, "server shutdown");
                         conn.close(CLOSE_GOING_AWAY, "Server shutdown");
                     }
                     () = request_done.cancelled() => {
-                        log(Level::Debug, "client disconnected", &[]);
+                        log_debug!(slog, "client disconnected");
                         // Closed synchronously, so no write happens after the handler returns.
                         conn.close(CLOSE_NORMAL_CLOSURE, "Client disconnected");
                     }
                     () = closed.cancelled() => {
-                        log(Level::Debug, "connection closed", &[]);
+                        log_debug!(slog, "connection closed");
                     }
                     () = tokio::time::sleep(Duration::from_secs(ttl)) => {
                         conn.close(200, "No content");
