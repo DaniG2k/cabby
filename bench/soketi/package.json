@@ -1,0 +1,8 @@
+{
+  "name": "cabby-bench-soketi",
+  "private": true,
+  "description": "Soketi as a cabby-bench server under test (see bench/pusher/README.md)",
+  "dependencies": {
+    "@soketi/soketi": "1.6.1"
+  }
+}

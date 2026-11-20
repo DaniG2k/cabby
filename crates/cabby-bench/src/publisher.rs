@@ -8,6 +8,10 @@
 //! connection, sending one POST at a time. The publisher also reports the
 //! generator-side signals a benchmark needs to tell a slow server from a saturated
 //! generator: the peak queue depth and the POST round-trip histogram.
+//!
+//! [`Publisher::with_protocol`] with [`Protocol::Pusher`] posts to the Pusher HTTP API
+//! instead: one event per `POST .../events`, or `POST .../batch_events` for a batch (at
+//! most [`crate::pusher::MAX_BATCH`]), each request signed ([`crate::pusher::signed_path`]).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
@@ -24,6 +28,7 @@ use tokio::task::JoinHandle;
 use crate::gojson;
 use crate::histogram::{Histogram, HistogramSnapshot};
 use crate::net::{self, Target};
+use crate::pusher::{self, Protocol, PusherApp};
 use crate::runtime::{block_on, now_ns, rt};
 
 /// Per-request deadline (upstream `http.Client.Timeout`).
@@ -74,6 +79,15 @@ struct Task {
     data: String,
 }
 
+/// Where a POST goes and what its body looks like.
+#[derive(Clone)]
+enum Format {
+    /// AnyCable's broadcast endpoint: a JSON array of `{"stream","data"}`.
+    AnyCable,
+    /// The Pusher HTTP API, signed for `app`.
+    Pusher { app: Arc<PusherApp>, events: Arc<str>, batch: Arc<str> },
+}
+
 struct Counters {
     issued: AtomicI64,
     dropped: AtomicI64,
@@ -96,6 +110,26 @@ pub struct Publisher {
 impl Publisher {
     /// `max_inflight < 1` is raised to 1.
     pub fn new(url: &str, max_inflight: i64, opts: PublisherOptions) -> Self {
+        Self::with_protocol(url, max_inflight, opts, &Protocol::ActionCable)
+    }
+
+    /// [`Publisher::new`] for `protocol`. In Pusher mode `url` is the events endpoint
+    /// (`.../apps/<id>/events`); batches go to the `batch_events` endpoint next to it and
+    /// are capped at Pusher's limit.
+    pub fn with_protocol(url: &str, max_inflight: i64, opts: PublisherOptions, protocol: &Protocol) -> Self {
+        let target = net::parse_url(url);
+        let (format, batch_size) = match protocol {
+            Protocol::ActionCable => (Format::AnyCable, opts.batch_size.max(1)),
+            Protocol::Pusher(app) => {
+                let events = target.as_ref().map_or_else(|_| app.events_path(), |t| t.path.clone());
+                let batch = match events.strip_suffix("/events") {
+                    Some(prefix) => format!("{prefix}/batch_events"),
+                    None => app.batch_events_path(),
+                };
+                let format = Format::Pusher { app: Arc::new(app.clone()), events: events.into(), batch: batch.into() };
+                (format, opts.batch_size.clamp(1, pusher::MAX_BATCH))
+            }
+        };
         let max_inflight = usize::try_from(max_inflight).unwrap_or(0).max(1);
         let (tx, rx) = mpsc::channel(max_inflight);
         let rx = Arc::new(tokio::sync::Mutex::new(rx));
@@ -107,7 +141,6 @@ impl Publisher {
             posts: AtomicI64::new(0),
             round_trip: Histogram::new(),
         });
-        let target = net::parse_url(url);
         let workers = (0..opts.workers.max(1))
             .map(|i| {
                 let w = Worker {
@@ -115,8 +148,9 @@ impl Publisher {
                     target: target.clone(),
                     rx: Arc::clone(&rx),
                     counters: Arc::clone(&counters),
-                    batch_size: opts.batch_size.max(1),
+                    batch_size,
                     stamp: opts.stamp,
+                    format: format.clone(),
                     conn: None,
                 };
                 rt().spawn(w.run())
@@ -231,6 +265,7 @@ struct Worker {
     counters: Arc<Counters>,
     batch_size: usize,
     stamp: bool,
+    format: Format,
     conn: Option<SendRequest<Full<Bytes>>>,
 }
 
@@ -258,6 +293,9 @@ impl Worker {
     /// accepts an object or an array, and an array serves every batch size.
     fn body(&self, batch: &[Task]) -> String {
         let stamp = self.stamp.then(|| format!("|{}|{}", self.index, now_ns()));
+        if let Format::Pusher { .. } = self.format {
+            return Self::pusher_body(batch, stamp.as_deref());
+        }
         let mut out = String::with_capacity(batch.len() * 48);
         out.push('[');
         for (i, t) in batch.iter().enumerate() {
@@ -277,15 +315,48 @@ impl Worker {
         out
     }
 
+    /// One `{"name","channel","data"}` event, or `{"batch":[..]}` for several.
+    fn pusher_body(batch: &[Task], stamp: Option<&str>) -> String {
+        let mut out = String::with_capacity(batch.len() * 64 + 12);
+        let single = batch.len() == 1;
+        if !single {
+            out.push_str("{\"batch\":[");
+        }
+        for (i, t) in batch.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            match stamp {
+                Some(s) => pusher::push_event(&mut out, &t.stream, &format!("{}{s}", t.data)),
+                None => pusher::push_event(&mut out, &t.stream, &t.data),
+            }
+        }
+        if !single {
+            out.push_str("]}");
+        }
+        out
+    }
+
+    /// The request path (and query) of a POST of `body` carrying `n` broadcasts.
+    fn request_path(&self, target: &Target, n: usize, body: &str) -> String {
+        match &self.format {
+            Format::AnyCable => target.path.clone(),
+            Format::Pusher { app, events, batch } => {
+                pusher::signed_path(app, if n == 1 { events } else { batch }, body.as_bytes())
+            }
+        }
+    }
+
     async fn dispatch(&mut self, batch: &[Task]) {
         let Ok(target) = self.target.clone() else {
             self.counters.failed_posts.fetch_add(1, Ordering::Relaxed);
             return;
         };
         let body = self.body(batch);
+        let path = self.request_path(&target, batch.len(), &body);
         self.counters.posts.fetch_add(1, Ordering::Relaxed);
         let started = Instant::now();
-        let ok = matches!(tokio::time::timeout(REQUEST_TIMEOUT, self.post(&target, body)).await, Ok(Ok(true)));
+        let ok = matches!(tokio::time::timeout(REQUEST_TIMEOUT, self.post(&target, &path, body)).await, Ok(Ok(true)));
         self.counters.round_trip.record(started.elapsed());
         if ok {
             self.counters.completed.fetch_add(batch.len() as i64, Ordering::Relaxed);
@@ -312,10 +383,10 @@ impl Worker {
         self.conn.as_mut().ok_or_else(|| "no connection".to_owned())
     }
 
-    /// POSTs `body`; whether the server answered 2xx.
-    async fn post(&mut self, target: &Target, body: String) -> Result<bool, String> {
+    /// POSTs `body` to `path`; whether the server answered 2xx.
+    async fn post(&mut self, target: &Target, path: &str, body: String) -> Result<bool, String> {
         let host = format!("{}:{}", target.host, target.port);
-        let req = http::Request::post(target.path.as_str())
+        let req = http::Request::post(path)
             .header(http::header::HOST, host)
             .header(http::header::CONTENT_TYPE, "application/json")
             .body(Full::new(Bytes::from(body)))

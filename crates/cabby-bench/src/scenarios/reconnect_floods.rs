@@ -25,6 +25,20 @@
 //! out, the disconnect-queue drain is not observable (`wave_<n>_drained_seconds=-1`,
 //! and the last wave ends at recovery), and without RPC calls the command stall is
 //! unknown (`max_command_stall_seconds=-1`).
+//!
+//! # Pusher mode
+//!
+//! `--protocol=pusher` runs the same waves over the Pusher protocol
+//! ([`crate::reconnecting_client`], [`crate::pusher`]). Pusher has no RPC: channels are
+//! public (`bench-1..bench-<s>`), the server authorizes nothing and calls no
+//! application, so there is no application latency (`--rpc-*` flags only tune Cabby's
+//! and AnyCable's unused RPC settings) and no disconnect queue to drain. The scenario
+//! then measures what Pusher servers do on a reconnect storm: accept the connections,
+//! confirm the subscriptions and keep answering pings. The gauge-based keys are left out
+//! for every server, as for a server without metrics (`server_metrics=false`), so the
+//! four Pusher servers print the same keys, and the last wave ends at recovery. The
+//! watchdog is client-driven (`pusher:ping` after `--ping-interval` seconds without a
+//! server message), since Pusher servers do not all ping on a schedule.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -35,6 +49,7 @@ use std::time::{Duration, Instant};
 use super::{FlagDef, FlagError, GeneratorMonitor, GeneratorReport, Kind, SUT_FLAGS, SignalScope, Ui, mib, ms};
 use crate::cancel::CancelToken;
 use crate::histogram::HistogramSnapshot;
+use crate::pusher::Protocol;
 use crate::reconnecting_client::{
     Backoff, ClientState, ClientStats, CloseReason, ReconnectingClient, ReconnectingClientConfig,
 };
@@ -104,6 +119,8 @@ pub struct RunConfig {
     pub server_log: Option<PathBuf>,
     pub sut: Option<PathBuf>,
     pub server_args: Vec<String>,
+    /// `--protocol`, default Action Cable.
+    pub protocol: Protocol,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -239,7 +256,12 @@ const DEFS: &[FlagDef] = &[
         default: "8192",
         usage: "server: max_disconnect_backlog_size (Disconnect calls over the limit are discarded)",
     },
-    FlagDef { name: "ping-interval", kind: Kind::Int, default: "3", usage: "server: ping_interval in seconds" },
+    FlagDef {
+        name: "ping-interval",
+        kind: Kind::Int,
+        default: "3",
+        usage: "server: ping_interval in seconds (Pusher mode: the clients send pusher:ping after this many seconds without a server message)",
+    },
     FlagDef {
         name: "ping-timeout",
         kind: Kind::Duration,
@@ -297,6 +319,7 @@ const DEFS: &[FlagDef] = &[
         default: "",
         usage: "suppress the live status on stderr; emit only the key=value summary on stdout (auto-on when stderr is not a TTY)",
     },
+    super::PROTOCOL_FLAG,
     SUT_FLAGS[0],
     SUT_FLAGS[1],
 ];
@@ -371,6 +394,7 @@ pub fn parse_flags(args: &[String], stderr: &mut dyn Write) -> Result<RunConfig,
     let to_u32 = |v: i64| u32::try_from(v).unwrap_or(u32::MAX);
     let nonneg = |ns: i64| Duration::from_nanos(u64::try_from(ns).unwrap_or(0));
     let wait_timeout = p.duration_ns("rpc-wait-timeout", -1);
+    let protocol = Protocol::parse(&p.string("protocol"))?;
     Ok(RunConfig {
         c: c as usize,
         s: s as usize,
@@ -405,6 +429,7 @@ pub fn parse_flags(args: &[String], stderr: &mut dyn Write) -> Result<RunConfig,
         server_log: optional_path(p.string("server-log")),
         sut: optional_path(p.string("sut")),
         server_args: p.list("server-arg"),
+        protocol,
     })
 }
 
@@ -475,9 +500,12 @@ pub fn run_with_config(interrupt: &CancelToken, cfg: RunConfig, stdout: &mut dyn
         session_closed: Some(Arc::new(move |sid: &str| s1.session_closed(sid) || s2.session_closed(sid))),
     }));
 
+    let pusher = cfg.protocol.pusher().cloned();
     let server = match Server::build(ServerConfig {
         log: cfg.server_log.clone().map_or(ServerLog::Discard, ServerLog::File),
-        rpc_host: Some(rpc.url()),
+        // Pusher channels are public: no RPC application.
+        rpc_host: pusher.is_none().then(|| rpc.url()),
+        pusher: pusher.clone(),
         tuning: ServerTuning {
             ping_interval: Some(cfg.ping_interval),
             rpc_concurrency: Some(cfg.rpc_concurrency),
@@ -487,7 +515,7 @@ pub fn run_with_config(interrupt: &CancelToken, cfg: RunConfig, stdout: &mut dyn
             stats_refresh_interval: Some(STATS_REFRESH.as_secs() as u32),
         },
         extra_args: cfg.server_args.clone(),
-        env: app_latency_env(&cfg),
+        env: if pusher.is_none() { app_latency_env(&cfg) } else { Vec::new() },
         ..ServerConfig::new(&sut)
     }) {
         Ok(s) => Arc::new(s),
@@ -498,8 +526,15 @@ pub fn run_with_config(interrupt: &CancelToken, cfg: RunConfig, stdout: &mut dyn
         }
     };
 
-    let metrics = server.has_metrics();
-    let channels: Vec<String> = (1..=cfg.s).map(|i| format!(r#"{{"channel":"BenchChannel","id":"{i}"}}"#)).collect();
+    // In Pusher mode no server has a disconnect queue to drain, and the keys stay the
+    // same for every server (see the module docs).
+    let metrics = pusher.is_none() && server.has_metrics();
+    let channels: Vec<String> = match pusher {
+        Some(_) => (1..=cfg.s).map(|i| format!("bench-{i}")).collect(),
+        None => (1..=cfg.s).map(|i| format!(r#"{{"channel":"BenchChannel","id":"{i}"}}"#)).collect(),
+    };
+    let wire = cfg.protocol.wire();
+    let keepalive = Duration::from_secs(u64::from(cfg.ping_interval.max(1)));
     let ctx = CancelToken::new();
     let mut tasks = Vec::new();
     let mut clients = Vec::with_capacity(cfg.c);
@@ -515,6 +550,8 @@ pub fn run_with_config(interrupt: &CancelToken, cfg: RunConfig, stdout: &mut dyn
             backoff: Backoff { min: cfg.backoff_min, max: cfg.backoff_max },
             stats: Arc::clone(&stats),
             seed: cfg.seed.wrapping_add(i as u64),
+            wire,
+            keepalive,
         }));
         let delay = Duration::from_secs(1).mul_f64(i as f64 / f64::from(cfg.ramp_rate.max(1)));
         let (c, t) = (Arc::clone(&client), ctx.clone());
@@ -535,6 +572,8 @@ pub fn run_with_config(interrupt: &CancelToken, cfg: RunConfig, stdout: &mut dyn
             backoff: Backoff { min: cfg.backoff_min, max: cfg.backoff_max },
             stats: Arc::clone(&probe_stats),
             seed: cfg.seed.wrapping_add((cfg.c + i) as u64),
+            wire,
+            keepalive,
         });
         let t = ctx.clone();
         tasks.push(rt().spawn(async move { probe.run_async(&t, Duration::ZERO).await }));

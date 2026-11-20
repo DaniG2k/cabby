@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Summarize compat/scripts/bench-compare.sh results as a Markdown table: the median of each metric
-per workload and server, one column per server found in the results (Action Cable, AnyCable, Cabby).
+per workload and server, one column per server found in the results (Action Cable, AnyCable, Cabby;
+for bench-compare-pusher.sh results in docs/benchmarks/pusher-results: Soketi, Reverb, AnyCable, Cabby).
 
 Runs where the generator was saturated are excluded, and runs that printed no summary (the server
 or the client pool failed to start) are listed as failures below the table. Runs that completed but
@@ -20,8 +21,9 @@ root = Path(__file__).resolve().parents[2]
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 results = Path(args[0]) if args else root / "docs/benchmarks/results"
 
-ORDER = ["actioncable", "anycable-go", "cabby"]
-LABELS = {"actioncable": "Action Cable (Ruby)", "anycable-go": "AnyCable (Go)", "cabby": "Cabby (Rust)"}
+ORDER = ["actioncable", "soketi", "reverb", "anycable-go", "cabby"]
+LABELS = {"actioncable": "Action Cable (Ruby)", "soketi": "Soketi (Node.js)", "reverb": "Reverb (PHP)",
+          "anycable-go": "AnyCable (Go)", "cabby": "Cabby (Rust)"}
 MARK = "†"
 
 runs = defaultdict(list)  # (workload, sut) -> [dict]

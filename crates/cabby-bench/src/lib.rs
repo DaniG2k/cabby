@@ -69,6 +69,11 @@
 //! [`server`] and [`scenarios::reconnect_floods`] for how the scenarios handle that, and
 //! `compat/scripts/bench-compare.sh` for the three-way comparison.
 //!
+//! `--protocol=pusher` runs both scenarios over the Pusher protocol instead ([`pusher`]):
+//! Cabby and `anycable-go` in Pusher mode, Soketi and Laravel Reverb through
+//! `bench/soketi/sut` and `bench/reverb/sut`; `compat/scripts/bench-compare-pusher.sh` is
+//! that four-way comparison (`bench/pusher/README.md`).
+//!
 //! `--server-arg=<flag>` passes extra flags to the server (`--server-arg=--broker=memory`).
 //! `CABBY_BENCH_THREADS` sets the generator's worker threads; on one host, pin the
 //! generator and the server to separate cores (`taskset`) and keep runs whose
@@ -91,6 +96,7 @@ pub mod ledger;
 mod net;
 pub mod pool;
 pub mod publisher;
+pub mod pusher;
 pub mod reconnecting_client;
 pub mod resources;
 mod rng;

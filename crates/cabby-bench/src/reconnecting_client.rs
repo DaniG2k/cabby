@@ -9,6 +9,16 @@
 //!
 //! A client is one task on the harness runtime ([`ReconnectingClient::run_async`]),
 //! so a scenario can run tens of thousands of them.
+//!
+//! With [`Wire::Pusher`] the same life cycle runs over the Pusher protocol
+//! ([`crate::pusher`]): the welcome is `pusher:connection_established`, channels are
+//! public Pusher channels confirmed by `pusher_internal:subscription_succeeded`, a
+//! subscription error rejects and `pusher:error` counts as a server disconnect. Pusher
+//! servers do not all ping on a schedule, so the watchdog is client-driven, as in
+//! pusher-js: any server message pushes the read deadline forward, the client sends
+//! `pusher:ping` after [`ReconnectingClientConfig::keepalive`] without one, and it
+//! answers the server's `pusher:ping` with `pusher:pong`. Probes send `pusher:ping` and
+//! time the `pusher:pong`.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
@@ -26,6 +36,7 @@ use tungstenite::protocol::frame::coding::CloseCode;
 use crate::cancel::CancelToken;
 use crate::histogram::Histogram;
 use crate::net::{self, Ws};
+use crate::pusher::{self, Wire};
 use crate::rng::Rng;
 use crate::runtime::block_on;
 
@@ -222,6 +233,11 @@ pub struct ReconnectingClientConfig {
     pub stats: std::sync::Arc<ClientStats>,
     /// Seeds the backoff jitter.
     pub seed: u64,
+    /// Action Cable or Pusher frames.
+    pub wire: Wire,
+    /// Pusher only: send `pusher:ping` when nothing arrived for this long (zero: never).
+    /// Probes ping on their own schedule instead.
+    pub keepalive: Duration,
 }
 
 /// The open connection, as [`ReconnectingClient::drop_connection`] sees it.
@@ -254,6 +270,49 @@ struct ServerMessage {
     kind: String,
     #[serde(default)]
     identifier: Option<String>,
+}
+
+/// A server message, whatever the wire format.
+enum Incoming {
+    Ping,
+    Pong,
+    Welcome,
+    /// The subscription with this identifier (Action Cable) or channel (Pusher) is confirmed.
+    Confirm(Option<String>),
+    Reject,
+    Disconnect,
+    Other,
+}
+
+impl Incoming {
+    fn parse(wire: Wire, text: &str) -> Option<Self> {
+        Some(match wire {
+            Wire::ActionCable => {
+                let msg = serde_json::from_str::<ServerMessage>(text).ok()?;
+                match msg.kind.as_str() {
+                    "ping" => Incoming::Ping,
+                    "pong" => Incoming::Pong,
+                    "welcome" => Incoming::Welcome,
+                    "confirm_subscription" => Incoming::Confirm(msg.identifier),
+                    "reject_subscription" => Incoming::Reject,
+                    "disconnect" => Incoming::Disconnect,
+                    _ => Incoming::Other,
+                }
+            }
+            Wire::Pusher => {
+                let f = serde_json::from_str::<pusher::Frame>(text).ok()?;
+                match f.event.as_ref() {
+                    pusher::PING => Incoming::Ping,
+                    pusher::PONG => Incoming::Pong,
+                    pusher::CONNECTION_ESTABLISHED => Incoming::Welcome,
+                    pusher::SUBSCRIPTION_SUCCEEDED => Incoming::Confirm(f.channel.map(|c| c.into_owned())),
+                    e if pusher::is_subscription_error(e) => Incoming::Reject,
+                    pusher::ERROR => Incoming::Disconnect,
+                    _ => Incoming::Other,
+                }
+            }
+        })
+    }
 }
 
 /// One channel's subscribe command until it is confirmed.
@@ -393,6 +452,10 @@ impl ReconnectingClient {
             t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             t
         });
+        // Pusher: ping the server once it has been quiet for the keepalive period (the
+        // deadline moves with every message and every ping sent).
+        let keepalive = cfg.wire == Wire::Pusher && probe.is_none() && !cfg.keepalive.is_zero();
+        let mut ping_due = Instant::now() + cfg.keepalive;
         let mut ping_sent_at: Option<Instant> = None;
         let mut pending: Option<HashMap<String, Pending>> = None;
         let mut unsent: VecDeque<String> = VecDeque::new();
@@ -408,6 +471,12 @@ impl ReconnectingClient {
                         continue;
                     }
                     ping_sent_at = Some(Instant::now());
+                    if self.send(&mut sink, "ping", "").await.is_err() {
+                        return (healthy, CloseReason::ServerClosed);
+                    }
+                }
+                () = tokio::time::sleep_until(ping_due), if keepalive => {
+                    ping_due = Instant::now() + cfg.keepalive;
                     if self.send(&mut sink, "ping", "").await.is_err() {
                         return (healthy, CloseReason::ServerClosed);
                     }
@@ -437,15 +506,25 @@ impl ReconnectingClient {
                         Ok(Some(Ok(WsMessage::Binary(_) | WsMessage::Ping(_) | WsMessage::Pong(_) | WsMessage::Frame(_)))) => continue,
                         Ok(Some(Ok(WsMessage::Close(_))) | Some(Err(_)) | None) => return (healthy, CloseReason::ServerClosed),
                     };
-                    let Ok(msg) = serde_json::from_str::<ServerMessage>(text.as_str()) else { continue };
-                    match msg.kind.as_str() {
-                        "ping" => read_deadline = Instant::now() + cfg.ping_timeout,
-                        "pong" => {
+                    let Some(msg) = Incoming::parse(cfg.wire, text.as_str()) else { continue };
+                    if cfg.wire == Wire::Pusher {
+                        // Any message shows the connection is alive.
+                        read_deadline = Instant::now() + cfg.ping_timeout;
+                        ping_due = Instant::now() + cfg.keepalive;
+                    }
+                    match msg {
+                        Incoming::Ping => {
+                            read_deadline = Instant::now() + cfg.ping_timeout;
+                            if cfg.wire == Wire::Pusher && self.send(&mut sink, "pong", "").await.is_err() {
+                                return (healthy, CloseReason::ServerClosed);
+                            }
+                        }
+                        Incoming::Pong => {
                             if let Some(sent) = ping_sent_at.take() {
                                 stats.probe.record(sent.elapsed());
                             }
                         }
-                        "welcome" => {
+                        Incoming::Welcome => {
                             if subscribed {
                                 continue;
                             }
@@ -470,10 +549,10 @@ impl ReconnectingClient {
                                 healthy = true;
                             }
                         }
-                        "confirm_subscription" => {
+                        Incoming::Confirm(identifier) => {
                             let Some(p) = pending.as_mut() else { continue };
                             // A late confirmation for a re-sent command is ignored.
-                            let Some(sub) = msg.identifier.as_deref().and_then(|id| p.remove(id)) else { continue };
+                            let Some(sub) = identifier.as_deref().and_then(|id| p.remove(id)) else { continue };
                             stats.confirm.record(sub.sent_at.elapsed());
                             if let Some(id) = unsent.pop_front() {
                                 let now = Instant::now();
@@ -488,12 +567,12 @@ impl ReconnectingClient {
                                 healthy = true;
                             }
                         }
-                        "reject_subscription" => {
+                        Incoming::Reject => {
                             close_gracefully(&mut sink).await;
                             return (healthy, CloseReason::Rejected);
                         }
-                        "disconnect" => return (healthy, CloseReason::ServerDisconnect),
-                        _ => {}
+                        Incoming::Disconnect => return (healthy, CloseReason::ServerDisconnect),
+                        Incoming::Other => {}
                     }
                 }
             }
@@ -501,13 +580,19 @@ impl ReconnectingClient {
     }
 
     /// `{"command":..,"identifier":..}` (Go marshals the map with sorted keys), with
-    /// the ping timeout as write deadline.
+    /// the ping timeout as write deadline. Pusher: `pusher:subscribe` to channel
+    /// `identifier`, `pusher:ping` or `pusher:pong`.
     async fn send(&self, sink: &mut WsSink, command: &str, identifier: &str) -> Result<(), ()> {
-        let text = format!(
-            "{{\"command\":{},\"identifier\":{}}}",
-            crate::gojson::string(command),
-            crate::gojson::string(identifier)
-        );
+        let text = match (self.cfg.wire, command) {
+            (Wire::Pusher, "subscribe") => pusher::subscribe_frame(identifier),
+            (Wire::Pusher, "ping") => pusher::PING_FRAME.to_owned(),
+            (Wire::Pusher, _) => pusher::PONG_FRAME.to_owned(),
+            (Wire::ActionCable, _) => format!(
+                "{{\"command\":{},\"identifier\":{}}}",
+                crate::gojson::string(command),
+                crate::gojson::string(identifier)
+            ),
+        };
         match tokio::time::timeout(self.cfg.ping_timeout, sink.send(WsMessage::text(text))).await {
             Ok(Ok(())) => Ok(()),
             _ => Err(()),
