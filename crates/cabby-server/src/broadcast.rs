@@ -368,6 +368,7 @@ impl RedisConfig {
 /// by one node.
 pub struct RedisBroadcaster {
     stream: String,
+    consumer: String,
     redis: RedisClientConfig,
     streamer: crate::redis::Streamer,
 }
@@ -376,24 +377,31 @@ impl RedisBroadcaster {
     pub fn new(node: Arc<dyn Handler>, config: &RedisConfig) -> Self {
         let name = crate::redis::connect::nanoid6();
         let redis = crate::redis::or_defaults(config.redis.as_ref());
+        // Upstream: `l.With("context", "broadcast").With("provider", "redisx").With("consumer", name)`.
+        let log = crate::redis::LogContext {
+            context: "broadcast",
+            attrs: vec![("provider", "redisx".to_owned()), ("consumer", name.clone())],
+        };
+        let attrs = log.attrs.clone();
         let handler: crate::redis::StreamHandler = Arc::new(move |message| match message.get("payload") {
             Some(payload) => {
-                crate::redis::log(cabby_core::logger::Level::Debug, "broadcast", "received broadcast", &[]);
+                crate::redis::log(cabby_core::logger::Level::Debug, "broadcast", "received broadcast", &attrs);
                 node.handle_broadcast(payload.as_bytes()).map_err(|e| crate::redis::RedisError(e.0))
             }
             None => Err(crate::redis::RedisError("missing payload field".to_owned())),
         });
-        let streamer = crate::redis::Streamer::new(
+        let streamer = crate::redis::Streamer::with_log(
             &config.stream,
             &config.group,
             &redis,
             crate::redis::StreamerOptions {
                 block_ms: Some(config.stream_read_block_milliseconds),
-                consumer_name: Some(name),
+                consumer_name: Some(name.clone()),
                 handler: Some(handler),
             },
+            log,
         );
-        Self { stream: config.stream.clone(), redis, streamer }
+        Self { stream: config.stream.clone(), consumer: name, redis, streamer }
     }
 }
 
@@ -417,7 +425,7 @@ impl Broadcaster for RedisBroadcaster {
             cabby_core::logger::Level::Info,
             "broadcast",
             &msg,
-            &[("provider", "redisx".to_owned()), ("stream", self.stream.clone())],
+            &[("provider", "redisx".to_owned()), ("consumer", self.consumer.clone()), ("stream", self.stream.clone())],
         );
         Ok(())
     }
@@ -475,7 +483,12 @@ struct PubSubSink {
 
 impl crate::redis::subscription::Sink for PubSubSink {
     fn message(&self, _channel: &str, payload: &[u8]) {
-        crate::redis::log(cabby_core::logger::Level::Debug, "broadcast", "received pubsub message", &[]);
+        crate::redis::log(
+            cabby_core::logger::Level::Debug,
+            "broadcast",
+            "received pubsub message",
+            &[("provider", "redis".to_owned())],
+        );
         self.node.handle_pubsub(payload);
     }
 }
@@ -490,6 +503,11 @@ impl LegacyRedisBroadcaster {
             connected_msg: "subscribed to Redis channel",
             reconnected_msg: "reconnected to Redis channel",
             exhausted_error: "Redis reconnect attempts exceeded",
+            lost: &[
+                (cabby_core::logger::Level::Error, "Redis subscription error"),
+                (cabby_core::logger::Level::Warn, "Redis connection failed"),
+            ],
+            attrs: vec![("provider", "redis".to_owned())],
         });
         subscriptions.subscribe(&config.channel);
         Self { node, redis, subscriptions, started: std::sync::atomic::AtomicBool::new(false) }
@@ -526,7 +544,12 @@ impl Broadcaster for LegacyRedisBroadcaster {
         if !self.started.swap(false, std::sync::atomic::Ordering::SeqCst) {
             return Ok(());
         }
-        crate::redis::log(cabby_core::logger::Level::Debug, "broadcast", "shutting down Redis pub/sub", &[]);
+        crate::redis::log(
+            cabby_core::logger::Level::Debug,
+            "broadcast",
+            "shutting down Redis pub/sub",
+            &[("provider", "redis".to_owned())],
+        );
         self.subscriptions.shutdown(std::time::Duration::from_secs(2));
         Ok(())
     }

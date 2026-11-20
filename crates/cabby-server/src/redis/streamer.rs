@@ -60,6 +60,7 @@ fn closed_error() -> redis::RedisError {
 }
 
 struct Inner {
+    log: LogContext,
     stream: String,
     group: String,
     consumer: String,
@@ -80,8 +81,31 @@ pub struct Streamer {
     inner: Arc<Inner>,
 }
 
-fn log(level: Level, msg: &str) {
-    super::log(level, "redis", msg, &[]);
+/// The attributes of the streamer's log records (upstream passes the
+/// streamer its owner's logger).
+#[derive(Clone)]
+pub(crate) struct LogContext {
+    pub context: &'static str,
+    pub attrs: Vec<(&'static str, String)>,
+}
+
+impl Default for LogContext {
+    fn default() -> Self {
+        Self { context: "redis", attrs: Vec::new() }
+    }
+}
+
+impl LogContext {
+    fn log(&self, level: Level, msg: &str) {
+        super::log(level, self.context, msg, &self.attrs);
+    }
+
+    /// A record with an `error` attribute (upstream `log.Error(msg, "error", err)`).
+    fn error(&self, msg: &str, err: impl std::fmt::Display) {
+        let mut attrs = self.attrs.clone();
+        attrs.push(("error", err.to_string()));
+        super::log(Level::Error, self.context, msg, &attrs);
+    }
 }
 
 fn now_ms() -> i64 {
@@ -90,9 +114,21 @@ fn now_ms() -> i64 {
 
 impl Streamer {
     pub fn new(stream: &str, group: &str, config: &RedisConfig, options: StreamerOptions) -> Self {
+        Self::with_log(stream, group, config, options, LogContext::default())
+    }
+
+    /// [`Streamer::new`] logging with `log`'s attributes.
+    pub(crate) fn with_log(
+        stream: &str,
+        group: &str,
+        config: &RedisConfig,
+        options: StreamerOptions,
+        log: LogContext,
+    ) -> Self {
         let handler: StreamHandler = options.handler.unwrap_or_else(|| Arc::new(|_| Ok(())));
         Self {
             inner: Arc::new(Inner {
+                log,
                 stream: stream.to_owned(),
                 group: group.to_owned(),
                 consumer: options.consumer_name.unwrap_or_else(connect::nanoid6),
@@ -122,7 +158,7 @@ impl Streamer {
         inner.shutdown.cancel();
         let Some(client) = inner.current_client() else { return Ok(()) };
 
-        log(Level::Debug, "shutting down Redis streamer");
+        inner.log.log(Level::Debug, "shutting down Redis streamer");
 
         let block = Duration::from_millis(inner.block_ms.max(0) as u64);
         inner.finished.wait(block + SHUTDOWN_GRACE);
@@ -136,8 +172,8 @@ impl Streamer {
         let c = Arc::clone(&client);
         match connect::wait_on(SHUTDOWN_GRACE, async move { c.query(&cmd).await }) {
             Some(Ok(_)) => {}
-            Some(Err(e)) => log(Level::Error, &format!("failed to remove Redis stream consumer: {e}")),
-            None => log(Level::Error, "failed to remove Redis stream consumer: timeout"),
+            Some(Err(e)) => inner.log.error("failed to remove Redis stream consumer", e),
+            None => inner.log.error("failed to remove Redis stream consumer", "timeout"),
         }
 
         client.closed.store(true, Ordering::SeqCst);
@@ -197,7 +233,7 @@ impl Inner {
             let client = match self.init_client().await {
                 Ok(c) => c,
                 Err(e) => {
-                    log(Level::Error, &format!("failed to connect to Redis: {e}"));
+                    self.log.error("failed to connect to Redis", e);
                     if self.maybe_reconnect(&mut attempt).await {
                         continue 'connect;
                     }
@@ -206,7 +242,7 @@ impl Inner {
             };
 
             if attempt > 0 {
-                log(Level::Info, "reconnected to Redis");
+                self.log.log(Level::Info, "reconnected to Redis");
             }
             attempt = 0;
 
@@ -222,9 +258,9 @@ impl Inner {
                 // Upstream only reacts to Redis (server) errors here.
                 if e.kind() != redis::ErrorKind::Io && e.code().is_some() {
                     if e.code() == Some("BUSYGROUP") {
-                        log(Level::Debug, "Redis consumer group already exists");
+                        self.log.log(Level::Debug, "Redis consumer group already exists");
                     } else {
-                        log(Level::Error, &format!("failed to create consumer group: {e}"));
+                        self.log.error("failed to create consumer group", e);
                         if self.maybe_reconnect(&mut attempt).await {
                             continue 'connect;
                         }
@@ -240,7 +276,7 @@ impl Inner {
 
             loop {
                 if self.shutdown.is_cancelled() {
-                    log(Level::Debug, "stop consuming stream");
+                    self.log.log(Level::Debug, "stop consuming stream");
                     self.finished.set();
                     return;
                 }
@@ -248,7 +284,7 @@ impl Inner {
                 if last_claimed_at + block < now_ms() {
                     match self.autoclaim(&client).await {
                         Err(e) => {
-                            log(Level::Error, &format!("failed to claim from Redis stream: {e}"));
+                            self.log.error("failed to claim from Redis stream", e);
                             if self.maybe_reconnect(&mut attempt).await {
                                 continue 'connect;
                             }
@@ -257,7 +293,9 @@ impl Inner {
                         Ok(reclaimed) => {
                             last_claimed_at = now_ms();
                             if !reclaimed.is_empty() {
-                                log(Level::Debug, &format!("reclaimed messages: size={}", reclaimed.len()));
+                                let mut attrs = self.log.attrs.clone();
+                                attrs.push(("size", reclaimed.len().to_string()));
+                                super::log(Level::Debug, self.log.context, "reclaimed messages", &attrs);
                                 self.handle_range(&client, reclaimed).await;
                             }
                         }
@@ -266,7 +304,7 @@ impl Inner {
 
                 match self.read(&client).await {
                     Err(e) => {
-                        log(Level::Error, &format!("failed to read from Redis stream: {e}"));
+                        self.log.error("failed to read from Redis stream", e);
                         if self.maybe_reconnect(&mut attempt).await {
                             continue 'connect;
                         }
@@ -323,7 +361,7 @@ impl Inner {
 
     async fn handle_range(&self, client: &Client, messages: Vec<Entry>) {
         for (id, fields) in messages {
-            log(Level::Debug, "received message");
+            self.log.log(Level::Debug, "received message");
             match (self.handler)(fields) {
                 Ok(()) => {
                     let mut pipe = redis::pipe();
@@ -332,13 +370,13 @@ impl Inner {
                     match client.query_pipeline(&pipe).await {
                         Ok(replies) => {
                             if let Some(Value::ServerError(e)) = replies.first() {
-                                log(Level::Error, &format!("failed to ack message: {e:?}"));
+                                self.log.error("failed to ack message", format!("{e:?}"));
                             }
                         }
-                        Err(e) => log(Level::Error, &format!("failed to ack message: {e}")),
+                        Err(e) => self.log.error("failed to ack message", e),
                     }
                 }
-                Err(e) => log(Level::Error, &format!("Redis stream handler failed: {e}")),
+                Err(e) => self.log.error("Redis stream handler failed", e),
             }
         }
     }
@@ -348,7 +386,7 @@ impl Inner {
     async fn maybe_reconnect(&self, attempt: &mut i64) -> bool {
         if *attempt >= self.max_reconnect_attempts {
             self.finished.set();
-            log(Level::Error, "failed to reconnect to Redis: attempts exceeded");
+            self.log.log(Level::Error, "failed to reconnect to Redis: attempts exceeded");
             return false;
         }
 
@@ -356,7 +394,7 @@ impl Inner {
 
         let delay = connect::next_retry((*attempt - 1) as u32);
 
-        log(Level::Info, &format!("next Redis reconnect attempt in {}", go_duration(delay)));
+        self.log.log(Level::Info, &format!("next Redis reconnect attempt in {}", go_duration(delay)));
         tokio::select! {
             () = tokio::time::sleep(delay) => {}
             () = self.shutdown.cancelled() => {
@@ -365,7 +403,7 @@ impl Inner {
             }
         }
 
-        log(Level::Info, "reconnecting to Redis...");
+        self.log.log(Level::Info, "reconnecting to Redis...");
 
         if let Some(old) = self.client.lock().unwrap_or_else(|e| e.into_inner()).take() {
             old.closed.store(true, Ordering::SeqCst);

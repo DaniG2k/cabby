@@ -8,6 +8,10 @@
 //!
 //! Connections are classified as *subscriber* connections once the client sends
 //! a `SUBSCRIBE`/`PSUBSCRIBE`/`SSUBSCRIBE` command through them.
+//!
+//! [`FaultProxy::freeze`] stalls every connection (a black hole: nothing is
+//! forwarded either way, sockets stay open) until [`FaultProxy::thaw`]; it works
+//! for any TCP protocol (Redis, NATS).
 
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
@@ -27,6 +31,14 @@ pub struct FaultProxy {
     addr: SocketAddr,
     conns: Arc<Mutex<Vec<Arc<Conn>>>>,
     stop: Arc<AtomicBool>,
+    frozen: Arc<AtomicBool>,
+}
+
+/// Waits while the proxy is frozen.
+fn hold(frozen: &AtomicBool) {
+    while frozen.load(Ordering::SeqCst) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// Whether a client chunk carries a (P/S)SUBSCRIBE command (not UNSUBSCRIBE).
@@ -42,13 +54,15 @@ impl FaultProxy {
         let addr = listener.local_addr().expect("proxy addr");
         let conns: Arc<Mutex<Vec<Arc<Conn>>>> = Arc::default();
         let stop = Arc::new(AtomicBool::new(false));
-        let (c, st) = (Arc::clone(&conns), Arc::clone(&stop));
+        let frozen = Arc::new(AtomicBool::new(false));
+        let (c, st, fz) = (Arc::clone(&conns), Arc::clone(&stop), Arc::clone(&frozen));
         std::thread::spawn(move || {
             for client in listener.incoming() {
                 if st.load(Ordering::SeqCst) {
                     break;
                 }
                 let Ok(client) = client else { continue };
+                hold(&fz);
                 let Ok(server) = TcpStream::connect_timeout(&upstream, Duration::from_secs(5)) else {
                     let _ = client.shutdown(Shutdown::Both);
                     continue;
@@ -61,9 +75,11 @@ impl FaultProxy {
                 c.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::clone(&conn));
                 // client -> Redis
                 let (mut from_client, cn) = (client.try_clone().expect("clone client"), Arc::clone(&conn));
+                let f = Arc::clone(&fz);
                 std::thread::spawn(move || {
                     let mut buf = [0u8; 16 * 1024];
                     while let Ok(n @ 1..) = from_client.read(&mut buf) {
+                        hold(&f);
                         if cn.severed.load(Ordering::SeqCst) {
                             continue; // half-open: swallow everything
                         }
@@ -85,9 +101,11 @@ impl FaultProxy {
                 });
                 // Redis -> client
                 let (mut from_server, mut to_client, cn) = (server, client, conn);
+                let f = Arc::clone(&fz);
                 std::thread::spawn(move || {
                     let mut buf = [0u8; 16 * 1024];
                     while let Ok(n @ 1..) = from_server.read(&mut buf) {
+                        hold(&f);
                         if cn.severed.load(Ordering::SeqCst) || to_client.write_all(&buf[..n]).is_err() {
                             break;
                         }
@@ -99,7 +117,18 @@ impl FaultProxy {
                 });
             }
         });
-        Self { addr, conns, stop }
+        Self { addr, conns, stop, frozen }
+    }
+
+    /// Stops forwarding on every connection, both ways, and holds new
+    /// connections, until [`FaultProxy::thaw`]: the server sees a stalled peer.
+    pub fn freeze(&self) {
+        self.frozen.store(true, Ordering::SeqCst);
+    }
+
+    /// Resumes forwarding (data held meanwhile is delivered).
+    pub fn thaw(&self) {
+        self.frozen.store(false, Ordering::SeqCst);
     }
 
     pub fn addr(&self) -> SocketAddr {
@@ -165,6 +194,7 @@ impl FaultProxy {
 impl Drop for FaultProxy {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
+        self.frozen.store(false, Ordering::SeqCst);
         let _ = TcpStream::connect_timeout(&self.addr, Duration::from_millis(200));
     }
 }
