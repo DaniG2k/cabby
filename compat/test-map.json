@@ -23,7 +23,7 @@
       "pass": 923
     },
     "rust_only": {
-      "cases": 67
+      "cases": 82
     },
     "translation": {
       "reviewed": 923
@@ -26377,6 +26377,141 @@
       "relation": "issue",
       "links": [
         "anycable/anycable#263"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging::broadcast_and_presence_lines_match_go_at_debug_level",
+      "relation": "regression",
+      "links": [
+        "26a1a703:node/node_test.go#TestBroadcasting/HandleBroadcast"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging::deviation_d052_rejected_redis_publications_are_logged",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pubsub/redis_test.go#TestRedisCommon/Broadcast"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging::failing_rpc_calls_are_logged_like_go",
+      "relation": "regression",
+      "links": [
+        "26a1a703:node/node_test.go#TestPerform/Error_during_perform"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging::logprobe_lines_match_go_at_debug_level",
+      "relation": "regression",
+      "links": [
+        "26a1a703:node/node_test.go#TestUnsubscribe"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging::logprobe_lines_match_go_at_the_default_level",
+      "relation": "regression",
+      "links": [
+        "26a1a703:node/node_test.go#TestUnsubscribe"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging_server::http_endpoints_log_requests",
+      "relation": "regression",
+      "links": [
+        "26a1a703:sse/handler_test.go#TestSSEHandler"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging_server::jwt_identifier_logs_rejected_tokens",
+      "relation": "regression",
+      "links": [
+        "26a1a703:identity/jwt_test.go#TestJWTIdentifierIdentify/with_invalid_token"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging_server::metrics_writers_log_their_lines",
+      "relation": "regression",
+      "links": [
+        "26a1a703:metrics/metrics_test.go#TestRunWithDedicatedServerStartsRotation"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging_server::unreachable_grpc_rpc_logs_failed_calls",
+      "relation": "regression",
+      "links": [
+        "26a1a703:rpc/rpc_test.go#TestAuthenticate/Error"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging_server::unreachable_http_rpc_logs_failed_calls",
+      "relation": "regression",
+      "links": [
+        "26a1a703:rpc/rpc_test.go#TestAuthenticate/Error"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging_server::websocket_upgrade_failures_are_logged",
+      "relation": "regression",
+      "links": [
+        "26a1a703:ws/handler_test.go#TestCheckOrigin"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging_transport::nats_broker_logs_its_jetstream_consumers",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Epoch"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging_transport::nats_pubsub_and_broadcaster_log_like_go",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pubsub/nats_test.go#TestNATSCommon/Broadcast"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging_transport::nats_reconnect_is_logged_per_component",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pubsub/nats_test.go#TestNATSReconnect"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::logging_transport::redis_pubsub_and_broadcaster_log_like_go",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pubsub/redis_test.go#TestRedisCommon/Broadcast"
       ],
       "reference_status": "pass",
       "rust_status": "pass"
