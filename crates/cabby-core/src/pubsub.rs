@@ -6,7 +6,7 @@ use std::sync::mpsc::Sender;
 
 use crate::broker::Broadcaster;
 use crate::common::{RemoteCommandMessage, StreamMessage};
-use crate::logger::{Attr, LogValue, LogValuer};
+use crate::logger::{LogValue, LogValuer};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
@@ -14,10 +14,7 @@ pub struct PubSubError(pub String);
 
 /// Upstream `RemoteCommandMessage.LogValue()`: the command and the raw payload.
 pub fn remote_command_log_value(m: &RemoteCommandMessage) -> LogValue {
-    LogValue::Group(vec![
-        Attr::new("command", LogValue::String(m.command.clone())),
-        Attr::new("payload", LogValue::String(m.payload.clone())),
-    ])
+    m.log_value()
 }
 
 /// What subscribers log as a published message's `data` (upstream passes the
