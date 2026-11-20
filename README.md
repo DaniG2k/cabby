@@ -126,7 +126,9 @@ What this shows:
 - **Go uses fewer OS threads.** Go multiplexes its goroutines onto about one thread per CPU.
   Cabby has a fixed set of helper threads (hub shards, timers, adapters) plus a bounded
   command pool that grows during connect bursts and shrinks after 30 s idle. Thread count
-  never scales with connections in either server.
+  never scales with idle connections in either server. A session waiting for an RPC slot
+  or response holds a thread in Cabby (a goroutine in Go), so a slow RPC application adds
+  one thread per waiting session until its calls finish or time out (D-036).
 - **Not measured yet:** slow readers mixed with healthy clients, a slow or unavailable RPC with
   queue saturation, and multi-node (Redis/NATS) broadcast.
 

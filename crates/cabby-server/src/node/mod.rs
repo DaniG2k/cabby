@@ -18,11 +18,13 @@
 //! # Threads
 //!
 //! No thread is tied to a connection. Transports push client messages to a
-//! [`SessionReader`], which executes them in order on the bounded command pool
-//! ([`execute`]); session writes drain on a shared task pool; timers share one
-//! timer thread.
+//! [`SessionReader`], which executes them in order on the command pool
+//! ([`execute`]); a command blocked in an RPC call gives its pool seat up
+//! ([`blocking`]), so it never delays other sessions' commands; session writes
+//! drain on a shared task pool; timers share one timer thread.
 
 mod app;
+pub mod call_context;
 mod clock;
 mod config;
 mod deps;
@@ -42,7 +44,9 @@ pub use deps::{Hub, LegacySubscriber};
 pub use disconnect_queue::{DisconnectQueue, Disconnector, InlineDisconnector, NoopDisconnectQueue};
 pub use session::{Connection, ConnectionError, Executor, ReadPermit, Session, SessionOption, SessionReader};
 pub use subscription_state::SubscriptionState;
-pub use tasks::{DEFAULT_COMMAND_CONCURRENCY, command_concurrency, execute, set_command_concurrency};
+pub use tasks::{
+    DEFAULT_COMMAND_CONCURRENCY, MAX_BLOCKED, blocking, command_concurrency, execute, set_command_concurrency,
+};
 
 pub use app::{AuthOption, Clock, Node, NodeOption, NullController, SystemClock, Ticker, Timer};
 

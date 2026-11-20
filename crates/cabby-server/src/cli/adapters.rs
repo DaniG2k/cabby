@@ -333,7 +333,11 @@ impl Broadcaster for CoreBroadcaster {
 
 /// The RPC controller (asynchronous) as the node's synchronous controller: each
 /// call blocks the calling thread (a command pool thread) until the RPC
-/// completes on the runtime.
+/// completes on the runtime. The thread gives its command pool seat up while it
+/// waits ([`crate::node::blocking`]), so other sessions' commands never queue
+/// behind RPC calls, and session calls carry the session's close signal
+/// ([`crate::node::call_context`]): a session that closes cancels its pending or
+/// in-flight call (upstream passes `s.closeCtx`).
 pub(super) struct RpcController {
     inner: rpc::Controller,
     runtime: Handle,
@@ -357,6 +361,22 @@ fn env_or_default(env: Option<&SessionEnv>) -> SessionEnv {
     env.cloned().unwrap_or_default()
 }
 
+/// The context of a session call: cancelled when the session closes.
+fn session_context() -> Context {
+    Context { cancel: crate::node::call_context::close_context().unwrap_or_default(), ..Context::default() }
+}
+
+impl RpcController {
+    /// Runs an RPC call to completion with the command pool seat given up.
+    fn call<F>(&self, fut: F) -> F::Output
+    where
+        F: Future + Send,
+        F::Output: Send,
+    {
+        crate::node::blocking(|| block_on(&self.runtime, fut))
+    }
+}
+
 impl Controller for RpcController {
     fn start(&self) -> Result<(), ControllerError> {
         let _guard = self.runtime.enter();
@@ -369,17 +389,17 @@ impl Controller for RpcController {
 
     fn authenticate(&self, sid: &str, env: Option<&SessionEnv>) -> Outcome<ConnectResult> {
         let env = env_or_default(env);
-        outcome(block_on(&self.runtime, self.inner.authenticate(&Context::default(), sid, &env)))
+        outcome(self.call(self.inner.authenticate(&session_context(), sid, &env)))
     }
 
     fn subscribe(&self, sid: &str, env: Option<&SessionEnv>, ids: &str, channel: &str) -> Outcome<CommandResult> {
         let env = env_or_default(env);
-        outcome(block_on(&self.runtime, self.inner.subscribe(&Context::default(), sid, &env, ids, channel)))
+        outcome(self.call(self.inner.subscribe(&session_context(), sid, &env, ids, channel)))
     }
 
     fn unsubscribe(&self, sid: &str, env: Option<&SessionEnv>, ids: &str, channel: &str) -> Outcome<CommandResult> {
         let env = env_or_default(env);
-        outcome(block_on(&self.runtime, self.inner.unsubscribe(&Context::default(), sid, &env, ids, channel)))
+        outcome(self.call(self.inner.unsubscribe(&session_context(), sid, &env, ids, channel)))
     }
 
     fn perform(
@@ -391,7 +411,7 @@ impl Controller for RpcController {
         data: &str,
     ) -> Outcome<CommandResult> {
         let env = env_or_default(env);
-        outcome(block_on(&self.runtime, self.inner.perform(&Context::default(), sid, &env, ids, channel, data)))
+        outcome(self.call(self.inner.perform(&session_context(), sid, &env, ids, channel, data)))
     }
 
     fn disconnect(
@@ -402,8 +422,8 @@ impl Controller for RpcController {
         subscriptions: &[String],
     ) -> Result<(), ControllerError> {
         let env = env_or_default(env);
-        block_on(&self.runtime, self.inner.disconnect(&Context::default(), sid, &env, ids, subscriptions))
-            .map_err(controller_error)
+        // Upstream: `context.Background()` (the session is gone already).
+        self.call(self.inner.disconnect(&Context::default(), sid, &env, ids, subscriptions)).map_err(controller_error)
     }
 }
 
