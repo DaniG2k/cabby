@@ -275,14 +275,13 @@ fn typed_data_log_text(v: &(dyn std::any::Any + Send + Sync)) -> Option<String> 
             ("Auth".to_owned(), s(&d.auth)),
             ("ChannelData".to_owned(), s(&d.channel_data)),
         ]
-    } else if let Some(e) = v.downcast_ref::<PusherClientEvent>() {
+    } else {
+        let e = v.downcast_ref::<PusherClientEvent>()?;
         vec![
             ("Event".to_owned(), s(&e.event)),
             ("Channel".to_owned(), s(&e.channel)),
             ("Data".to_owned(), AnyValue::Json(e.data.clone().unwrap_or(Value::Null))),
         ]
-    } else {
-        return None;
     };
     Some(format!("&{}", plus_v(&AnyValue::Struct(fields))))
 }
