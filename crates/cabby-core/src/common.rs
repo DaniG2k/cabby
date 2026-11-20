@@ -600,12 +600,11 @@ impl LogValuer for PingMessage {
 }
 
 impl LogValuer for RemoteCommandMessage {
-    /// Upstream renders the raw payload (`json.RawMessage`) with `%+v`: its bytes.
+    /// The raw payload (`json.RawMessage`) is shown as written.
     fn log_value(&self) -> LogValue {
-        let bytes: Vec<String> = self.payload.bytes().map(|b| b.to_string()).collect();
         LogValue::Group(vec![
             Attr::new("command", LogValue::String(self.command.clone())),
-            Attr::new("payload", LogValue::String(format!("[{}]", bytes.join(" ")))),
+            Attr::new("payload", LogValue::String(self.payload.clone())),
         ])
     }
 }
