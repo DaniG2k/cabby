@@ -74,9 +74,11 @@ fn main() {
     let mruby = root.join("mruby");
 
     let mut files = Vec::new();
-    // Core, with gc.c compiled through shim/gc_live.c (see there).
-    files.extend(c_files(&mruby.join("src")).into_iter().filter(|p| !p.ends_with("gc.c")));
+    // Core, with gc.c and vm.c compiled through shim/gc_live.c and
+    // shim/vm_live.c (see there).
+    files.extend(c_files(&mruby.join("src")).into_iter().filter(|p| !p.ends_with("gc.c") && !p.ends_with("vm.c")));
     files.push(root.join("shim/gc_live.c"));
+    files.push(root.join("shim/vm_live.c"));
     files.push(mruby.join("mrbgems/mruby-compiler/core/codegen.c"));
     for gem in GEMS_WITH_C {
         files.extend(c_files(&mruby.join("mrbgems").join(gem).join("src")));
