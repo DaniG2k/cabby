@@ -61,7 +61,7 @@ pub fn run(config: Config) -> Result<(), CliError> {
         Runner::new(
             config,
             vec![
-                RunnerOption::Name("AnyCable".into()),
+                RunnerOption::Name("Cabby".into()),
                 RunnerOption::DefaultRpcController,
                 RunnerOption::DefaultBroker,
                 RunnerOption::DefaultSubscriber,
