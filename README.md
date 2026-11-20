@@ -10,9 +10,12 @@ same RPC contract with your Rails app, the same CLI flags, environment variables
 configuration file. Cabby is an independent implementation; it is not affiliated with the
 AnyCable project or Evil Martians.
 
-> **Status: feature-complete.** `cabby` passes all 923 translated upstream test cases, including
-> the full AnyT conformance suite end to end, with SSE, Pusher, durable streams, Redis, NATS and
-> mruby (see [`SPEC.md`](SPEC.md)).
+> **Status: feature-complete, hardening.** `cabby` passes all 923 translated upstream test cases,
+> including the full AnyT conformance suite end to end, with SSE, Pusher, durable streams, Redis,
+> NATS and mruby. An [independent review](docs/review/2026-11-fable-review.md) found the wire
+> protocol faithful to AnyCable but several failure and overload behaviors that differ (DNS
+> changes, stalled Redis/NATS, slow RPC, idle keep-alive connections, logging); fixes are in
+> progress. Until they land, don't use it in production.
 
 ## Action Cable, AnyCable and Cabby
 
@@ -81,12 +84,16 @@ your channels, your broadcasts) and the JavaScript client stay as they are.
 | Concurrency model | Ruby threads | goroutines | Tokio tasks; no OS thread per connection |
 
 AnyCable features above are those of the pinned open-source server
-(`anycable/anycable@26a1a703`); AnyCable Pro features are out of scope. Every difference from
-the Go server is recorded, with a pinning test, in [`compat/deviations.md`](compat/deviations.md).
+(`anycable/anycable@26a1a703`); AnyCable Pro features are out of scope. Intended differences from
+the Go server are recorded, with pinning tests, in [`compat/deviations.md`](compat/deviations.md);
+differences found by the review and not yet fixed are listed in
+[`docs/review/2026-11-fable-review.md`](docs/review/2026-11-fable-review.md).
 
 ## Benchmarks: Go vs Rust
 
-Release builds of both servers, launched with identical AnyCable flags by Cabby's external load
+Release builds of both servers, launched with identical AnyCable flags (`--norpc --noauth
+--public_streams`, in-memory broker, HTTP broadcasts, about 20-byte payloads over loopback; the
+churn workload adds a 5 ms HTTP RPC) by Cabby's external load
 harness ([`crates/cabby-bench`](crates/cabby-bench)), measured on one machine (AMD Ryzen 5 PRO
 6650H, Linux 7.3). The server under test was pinned to 2 physical cores (4 CPUs); the load
 generator ran on the other 4 cores. Each value is the median of 3 runs. Every delivered message
@@ -118,8 +125,9 @@ was reconciled by ID, and no run lost, duplicated or reordered a message.
 What this shows:
 
 - **Memory is where Cabby wins clearly**: about a third of Go's per connection and overall.
-- **Latency and CPU are modestly better** (17–42% lower p99 latency, 1–10% less CPU at the
-  same delivered rate). Neither server hit its throughput ceiling at 150k deliveries/s on
+- **Latency and CPU are no worse.** Cabby's medians were lower (p99 latency by 17–42%, CPU by
+  1–10% at the same delivered rate), but the CPU differences are within run-to-run spread and the
+  low p99 values are near the load generator's own timing noise, so treat them as a tie. Neither server hit its throughput ceiling at 150k deliveries/s on
   2 cores, so peak throughput is not compared here.
 - **Reconnect recovery is identical**: it is governed by the clients' backoff and the
   disconnect-queue rate, which both servers implement the same way.
