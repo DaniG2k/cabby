@@ -11,9 +11,10 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::BenchError;
-use crate::cable::{Command, Conn, Route, Sink, SubFlags};
+use crate::cable::{Conn, Route, Sink, SubFlags};
 use crate::gojson;
 use crate::pool::Recorder;
+use crate::pusher::Wire;
 use crate::runtime::block_on;
 
 /// Merged queue capacity (upstream `defaultMergedCapacity`).
@@ -60,6 +61,7 @@ pub struct Client {
     merged_tx: Mutex<Option<mpsc::Sender<Message>>>,
     merged_rx: tokio::sync::Mutex<mpsc::Receiver<Message>>,
     subscribed: Mutex<HashSet<String>>,
+    wire: Wire,
     /// When set (pool clients), messages are recorded in the reader instead of
     /// going through the merged queue.
     recorder: Mutex<Option<Arc<Recorder>>>,
@@ -71,6 +73,12 @@ pub struct Client {
 impl Client {
     /// Rejects an empty URL; does not dial.
     pub fn build(server_url: &str) -> Result<Client, BenchError> {
+        Self::build_with(server_url, Wire::ActionCable)
+    }
+
+    /// [`Client::build`] for a wire format: with [`Wire::Pusher`] a stream is a public
+    /// Pusher channel ([`crate::pusher`]).
+    pub fn build_with(server_url: &str, wire: Wire) -> Result<Client, BenchError> {
         if server_url.is_empty() {
             return Err(BenchError("server URL is required".into()));
         }
@@ -81,6 +89,7 @@ impl Client {
             merged_tx: Mutex::new(Some(tx)),
             merged_rx: tokio::sync::Mutex::new(rx),
             subscribed: Mutex::new(HashSet::new()),
+            wire,
             recorder: Mutex::new(None),
             closed: AtomicBool::new(false),
             cancel: CancellationToken::new(),
@@ -100,7 +109,7 @@ impl Client {
     }
 
     pub(crate) async fn connect_async(&self, timeout: Option<Duration>) -> Result<(), BenchError> {
-        let dial = Conn::dial(&self.url);
+        let dial = Conn::dial_with(&self.url, self.wire);
         let conn = tokio::select! {
             r = dial => r?,
             () = sleep_or_forever(timeout) => return Err(BenchError("context deadline exceeded".into())),
@@ -141,7 +150,7 @@ impl Client {
                 failed.push(stream.clone());
                 continue;
             };
-            let id = stream_identifier(stream);
+            let (id, frame) = conn.subscription(stream);
             let flags = SubFlags::new();
             let sink = match &recorder {
                 Some(r) => Sink::Record { recorder: Arc::clone(r), stream: stream.as_str().into() },
@@ -149,11 +158,7 @@ impl Client {
             };
             let route = Route { flags: Arc::clone(&flags), sink };
             let sent = match conn.register(&id, route) {
-                Ok(()) => {
-                    let cmd =
-                        Command { command: "subscribe".into(), identifier: Some(id.clone()), ..Default::default() };
-                    conn.send_command(&cmd).await
-                }
+                Ok(()) => conn.send_text(frame).await,
                 Err(e) => Err(e),
             };
             match sent {
