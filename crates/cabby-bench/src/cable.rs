@@ -28,7 +28,11 @@ use tungstenite::Message as WsMessage;
 use crate::BenchError;
 use crate::gojson;
 use crate::net::{self, Ws};
+use crate::pusher::{self, Wire};
 use crate::runtime::{block_on, rt};
+
+/// `activity_timeout` assumed when `pusher:connection_established` has none.
+const PUSHER_ACTIVITY_DEFAULT: u64 = 30;
 
 /// Per-subscription queue capacity when [`Client::set_subscription_capacity`] was
 /// not called (upstream `DefaultSubscriptionCapacity`).
@@ -204,6 +208,7 @@ pub(crate) struct Conn {
     cancel: CancellationToken,
     reader: Mutex<Option<JoinHandle<()>>>,
     raw: std::net::TcpStream,
+    wire: Wire,
 }
 
 fn read_error(e: impl std::fmt::Display) -> BenchError {
@@ -214,6 +219,12 @@ impl Conn {
     /// Dials `url`, waits for the welcome message and starts the reader. Any other
     /// first message is an error.
     pub(crate) async fn dial(url: &str) -> Result<Arc<Conn>, BenchError> {
+        Self::dial_with(url, Wire::ActionCable).await
+    }
+
+    /// [`Conn::dial`] for `wire`: with [`Wire::Pusher`] the welcome is
+    /// `pusher:connection_established`, whose `activity_timeout` sets the keepalive.
+    pub(crate) async fn dial_with(url: &str, wire: Wire) -> Result<Arc<Conn>, BenchError> {
         let dialed =
             net::dial(url).await.map_err(|e| BenchError(format!("error connecting to AnyCable server: {e}")))?;
         let (sink, mut stream) = dialed.ws.split();
@@ -235,13 +246,28 @@ impl Conn {
                 }
             }
         };
-        let ev: RawEvent = serde_json::from_str(first.as_str()).map_err(|e| {
+        let undecodable = |e: serde_json::Error| {
             net::abort(&dialed.raw);
             BenchError(format!("could not deserialize message {}: {e}", first.as_str()))
-        })?;
-        if ev.kind != "welcome" {
-            net::abort(&dialed.raw);
-            return Err(BenchError(format!("unexpected message type: {}", ev.kind.as_ref())));
+        };
+        let mut activity = None;
+        match wire {
+            Wire::ActionCable => {
+                let ev: RawEvent = serde_json::from_str(first.as_str()).map_err(undecodable)?;
+                if ev.kind != "welcome" {
+                    net::abort(&dialed.raw);
+                    return Err(BenchError(format!("unexpected message type: {}", ev.kind.as_ref())));
+                }
+            }
+            Wire::Pusher => {
+                let f: pusher::Frame = serde_json::from_str(first.as_str()).map_err(undecodable)?;
+                if f.event != pusher::CONNECTION_ESTABLISHED {
+                    net::abort(&dialed.raw);
+                    return Err(BenchError(format!("unexpected message: {}", first.as_str())));
+                }
+                let secs = pusher::activity_timeout(f.data).unwrap_or(PUSHER_ACTIVITY_DEFAULT).clamp(1, 120);
+                activity = Some(Duration::from_secs(secs));
+            }
         }
         let conn = Arc::new(Conn {
             writer: tokio::sync::Mutex::new(Some(sink)),
@@ -249,8 +275,12 @@ impl Conn {
             cancel: CancellationToken::new(),
             reader: Mutex::new(None),
             raw: dialed.raw,
+            wire,
         });
-        let reader = rt().spawn(Arc::clone(&conn).read_loop(stream));
+        let reader = match activity {
+            Some(a) => rt().spawn(Arc::clone(&conn).read_loop_pusher(stream, a)),
+            None => rt().spawn(Arc::clone(&conn).read_loop(stream)),
+        };
         *conn.reader.lock().unwrap_or_else(|e| e.into_inner()) = Some(reader);
         Ok(conn)
     }
@@ -302,10 +332,89 @@ impl Conn {
                 }
             }
         }
-        // Connection lost or closed: close every queue and resolve every wait.
+        self.close_routes();
+    }
+
+    /// Connection lost or closed: close every queue and resolve every wait.
+    fn close_routes(&self) {
         let routes = self.routes.lock().unwrap_or_else(|e| e.into_inner()).take();
         for route in routes.into_iter().flat_map(HashMap::into_values) {
             route.flags.signal_done();
+        }
+    }
+
+    /// The Pusher reader: routes events by channel, resolves subscriptions, answers
+    /// `pusher:ping` and, like pusher-js, sends `pusher:ping` when nothing arrived for
+    /// `activity` (the server's `activity_timeout`).
+    async fn read_loop_pusher(self: Arc<Self>, mut stream: futures_util::stream::SplitStream<Ws>, activity: Duration) {
+        // Checked every half timeout, so a ping follows at most one timeout of silence.
+        let check = activity / 2;
+        let mut keepalive = tokio::time::interval_at(tokio::time::Instant::now() + check, check);
+        keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut active = false;
+        loop {
+            let msg = tokio::select! {
+                () = self.cancel.cancelled() => break,
+                _ = keepalive.tick() => {
+                    if !std::mem::take(&mut active) {
+                        let _ = self.send_text(pusher::PING_FRAME.to_owned()).await;
+                    }
+                    continue;
+                }
+                m = stream.next() => m,
+            };
+            let text = match msg {
+                Some(Ok(WsMessage::Text(t))) => t,
+                Some(Ok(WsMessage::Ping(_) | WsMessage::Pong(_) | WsMessage::Frame(_))) => continue,
+                // Binary frames, close frames, errors and EOF end the connection.
+                _ => break,
+            };
+            active = true;
+            let Ok(f) = serde_json::from_str::<pusher::Frame>(text.as_str()) else { break };
+            match f.event.as_ref() {
+                pusher::PING => {
+                    let _ = self.send_text(pusher::PONG_FRAME.to_owned()).await;
+                }
+                // A fatal error is followed by the server's close.
+                pusher::PONG | pusher::ERROR => {}
+                pusher::SUBSCRIPTION_SUCCEEDED => {
+                    if let Some(flags) = f.channel.as_deref().and_then(|c| self.route_flags(c)) {
+                        flags.subscribed.store(true, Ordering::SeqCst);
+                        flags.signal_done();
+                    }
+                }
+                e if pusher::is_subscription_error(e) => {
+                    if let Some(r) = f.channel.as_deref().and_then(|c| self.unregister(c)) {
+                        r.flags.rejected.store(true, Ordering::SeqCst);
+                        r.flags.signal_done();
+                    }
+                }
+                _ => {
+                    let sink = f.channel.as_deref().and_then(|c| self.route_sink(c));
+                    if let Some(sink) = sink {
+                        let ev = RawEvent { kind: f.event, message: f.data, identifier: f.channel };
+                        tokio::select! {
+                            () = self.cancel.cancelled() => break,
+                            () = sink.deliver(ev) => {}
+                        }
+                    }
+                }
+            }
+        }
+        self.close_routes();
+    }
+
+    /// The route key and the subscribe frame of `stream`: the `$pubsub` identifier and a
+    /// `subscribe` command, or the Pusher channel (the stream itself) and
+    /// `pusher:subscribe`.
+    pub(crate) fn subscription(&self, stream: &str) -> (String, String) {
+        match self.wire {
+            Wire::ActionCable => {
+                let id = crate::client::stream_identifier(stream);
+                let cmd = Command { command: "subscribe".into(), identifier: Some(id.clone()), ..Default::default() };
+                (id, cmd.encode())
+            }
+            Wire::Pusher => (stream.to_owned(), pusher::subscribe_frame(stream)),
         }
     }
 
