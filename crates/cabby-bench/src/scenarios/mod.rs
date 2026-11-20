@@ -9,7 +9,10 @@
 //!   `$CABBY_BENCH_SUT`;
 //! * `--server-arg <flag>` (repeatable): extra server CLI flags.
 //!
-//! `--protocol=pusher` (both scenarios) switches clients, publisher and server to the
+//! `soak` is a Cabby addition without an upstream counterpart (memory stability,
+//! [`soak`]).
+//!
+//! `--protocol=pusher` (both upstream scenarios) switches clients, publisher and server to the
 //! Pusher protocol ([`crate::pusher`]).
 //!
 //! Go-runtime flags have no meaning for an external Rust harness and are not
@@ -26,6 +29,7 @@ use std::time::{Duration, Instant};
 use crate::cancel::CancelToken;
 
 pub mod reconnect_floods;
+pub mod soak;
 pub mod stress_publications;
 
 /// Environment variable naming the default server binary (`--sut`).
