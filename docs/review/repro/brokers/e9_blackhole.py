@@ -54,7 +54,7 @@ try:
     while time.time() - tu < 40:
         ms = ws.recv_all(1.0)
         for m in ms:
-            if isinstance(m.get("message"), dict):
+            if isinstance(m, dict) and isinstance(m.get("message"), dict):
                 got += 1; oldest = max(oldest, time.time() - m["message"]["t"]); last = time.time()
         if time.time() - last > 6: break
     print(f"after unfreeze: stale messages delivered={got} of {total} accepted during outage; oldest age at delivery={oldest:.1f}s; flood lasted {last-tu:.1f}s; rss_kb={srv.rss_kb()} alive={srv.alive()}")

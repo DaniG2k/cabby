@@ -528,7 +528,38 @@ fn first_byte(raw: &[u8]) -> Option<u8> {
     raw.iter().copied().find(|b| !matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
 }
 
+/// Go's `json.Unmarshal` replaces each byte of an invalid UTF-8 sequence inside
+/// a string with U+FFFD (outside strings such bytes are a syntax error either
+/// way); serde_json rejects the input instead.
+fn go_lossy_utf8(raw: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    if std::str::from_utf8(raw).is_ok() {
+        return std::borrow::Cow::Borrowed(raw);
+    }
+    let mut out = Vec::with_capacity(raw.len() + 16);
+    let mut rest = raw;
+    while !rest.is_empty() {
+        match std::str::from_utf8(rest) {
+            Ok(valid) => {
+                out.extend_from_slice(valid.as_bytes());
+                break;
+            }
+            Err(e) => {
+                let (valid, after) = rest.split_at(e.valid_up_to());
+                out.extend_from_slice(valid);
+                // Go decodes an invalid sequence one byte at a time.
+                let bad = e.error_len().unwrap_or(after.len());
+                for _ in 0..bad {
+                    out.extend_from_slice("\u{FFFD}".as_bytes());
+                }
+                rest = &after[bad..];
+            }
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 pub(super) fn decode_pub_sub_message(raw: &[u8]) -> Result<PubSubMessage, DecodeError> {
+    let raw = &*go_lossy_utf8(raw);
     // Upstream tries a stream message, a batch, then a remote command, and returns the
     // last error. Only an object can be a stream message (or a remote command) and only
     // an array a batch, so the input is parsed at most twice.
@@ -571,6 +602,19 @@ pub(super) fn decode_remote_disconnect(raw: &[u8]) -> Result<RemoteDisconnectMes
 
 #[cfg(test)]
 mod tests {
+    /// Go delivers pub/sub payloads with invalid UTF-8, each bad byte replaced by U+FFFD.
+    #[test]
+    fn pub_sub_messages_with_invalid_utf8_decode_like_go() {
+        let raw = b"{\"stream\":\"s\xff\",\"data\":\"a\xe2\x82b\xf0\"}";
+        match decode_pub_sub_message(raw) {
+            Ok(PubSubMessage::Stream(m)) => {
+                assert_eq!("s\u{FFFD}", m.stream);
+                assert_eq!("a\u{FFFD}\u{FFFD}b\u{FFFD}", m.data);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
     use super::*;
     use serde_json::json;
 

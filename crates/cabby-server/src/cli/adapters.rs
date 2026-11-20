@@ -47,11 +47,24 @@ where
 /// failures after start through their own typed channel). The forwarding
 /// thread exits once the component drops its sender.
 pub(super) fn forward_errors<E: Display + Send + 'static>(events: &Events, what: &'static str) -> Sender<E> {
+    forward_errors_with(events, move |e| format!("{what}: {e}"))
+}
+
+/// [`forward_errors`] with the component's error text as is (upstream sends
+/// the error itself to the runner's error channel).
+pub(super) fn forward_errors_verbatim<E: Display + Send + 'static>(events: &Events) -> Sender<E> {
+    forward_errors_with(events, |e: E| e.to_string())
+}
+
+fn forward_errors_with<E: Display + Send + 'static>(
+    events: &Events,
+    text: impl FnOnce(E) -> String + Send + 'static,
+) -> Sender<E> {
     let (tx, rx) = mpsc::channel::<E>();
     let events = events.clone();
     let spawned = std::thread::Builder::new().name("cabby-errors".into()).spawn(move || {
         if let Ok(e) = rx.recv() {
-            let _ = events.send(Err(CliError(format!("{what}: {e}"))));
+            let _ = events.send(Err(CliError(text(e))));
         }
     });
     drop(spawned);

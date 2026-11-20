@@ -26,7 +26,7 @@ use tokio::runtime::Handle;
 
 use super::adapters::{
     CoreBroadcaster, CoreBroker, CoreSubscriber, DeferredController, Events, NodeBroker, NodeHandler, RpcController,
-    ShutdownContext, ShutdownFn, SubscriberBroadcaster, block_on, remaining,
+    ShutdownContext, ShutdownFn, SubscriberBroadcaster, block_on, forward_errors_verbatim, remaining,
 };
 use super::session_options::default_websocket_handler;
 use super::{
@@ -507,6 +507,12 @@ impl Runner {
 
         if self.config.embedded_nats.enabled {
             let service = Arc::new(crate::enats::Service::new(&self.config.embedded_nats));
+            // Upstream's server runs in-process: it cannot die on its own and
+            // leave AnyCable running.
+            let events = self.events.clone();
+            service.on_exit(move |e| {
+                let _ = events.send(Err(CliError(e.0)));
+            });
             service.start().map_err(|e| decorate(e, "failed to start embedded NATS server"))?;
             log_info(&format!("Embedded NATS server started: {}", self.config.embedded_nats.service_addr));
             self.shutdownables.push(Arc::new(ShutdownFn(move || service.shutdown().map_err(|e| CliError(e.0)))));
@@ -696,7 +702,11 @@ impl Runner {
                     "nats" => {
                         // Upstream: JetStream is only needed when NATS is the broker.
                         c.embedded_nats.jetstream = true;
-                        Arc::new(core_broker::Nats::new(Some(br), &c.broker, &c.nats))
+                        let nats = core_broker::Nats::new(Some(br), &c.broker, &c.nats);
+                        // Upstream `Start(r.errChan)`: a JetStream that never
+                        // becomes available stops the server.
+                        nats.set_done(forward_errors_verbatim::<core_broker::BrokerError>(&self.events));
+                        Arc::new(nats)
                     }
                     other => return Err(illegal_argument(&format!("Unsupported broker adapter: {other}"))),
                 };

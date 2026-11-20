@@ -34,6 +34,7 @@ use super::{
     SystemClock, lock, nanoid, read, write,
 };
 use crate::common::{PresenceEvent, PresenceInfo, RemoteCommandMessage, StreamMessage};
+use crate::logger::{Attr, Level, LogValue};
 use crate::nats::client::{self, block_on, blocking, runtime};
 
 const KV_BUCKET: &str = "_anycable_";
@@ -72,6 +73,22 @@ fn is_retryable(e: &(dyn std::error::Error + 'static)) -> bool {
     text.contains("timed out") || text.contains("no responders")
 }
 
+/// The text of a JetStream API error as nats.go reports it: a server without
+/// JetStream does not answer API requests, which nats.go reports as
+/// `ErrJetStreamNotEnabled`; other errors keep async-nats' text.
+fn js_error_text(e: &(dyn std::error::Error + 'static)) -> String {
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(e);
+    while let Some(err) = cur {
+        if let Some(account) = err.downcast_ref::<jetstream::context::AccountError>()
+            && account.kind() == jetstream::context::AccountErrorKind::JetStreamUnavailable
+        {
+            return "nats: API error: code=503 err_code=10076 description=jetstream not enabled".to_owned();
+        }
+        cur = err.source();
+    }
+    e.to_string()
+}
+
 /// Whether a create failed because a stream with this name exists with a
 /// different configuration (Go `jetstream.ErrStreamNameAlreadyInUse`).
 fn stream_name_in_use(e: &(dyn std::error::Error + 'static)) -> bool {
@@ -86,6 +103,22 @@ fn stream_name_in_use(e: &(dyn std::error::Error + 'static)) -> bool {
         cur = e.source();
     }
     false
+}
+
+/// Writes a record with the broker's attributes (upstream
+/// `l.With("context", "broker").With("provider", "nats")`).
+fn log(level: Level, msg: &str, attrs: &[(&str, String)]) {
+    let mut all = vec![
+        Attr::new("context", LogValue::String("broker".into())),
+        Attr::new("provider", LogValue::String("nats".into())),
+    ];
+    all.extend(attrs.iter().map(|(k, v)| Attr::new(k, LogValue::String(v.clone()))));
+    crate::logger::log(level, msg, &all);
+}
+
+/// Go's `time.Duration.String()` for the delays `next_retry` returns.
+fn go_duration(d: Duration) -> String {
+    if d < Duration::from_secs(1) { format!("{}ms", d.as_millis()) } else { format!("{}s", d.as_secs()) }
 }
 
 fn secs(n: i64) -> Duration {
@@ -118,8 +151,8 @@ impl Ready {
         self.cv.notify_all();
     }
 
-    fn is_ready(&self) -> bool {
-        *lock(&self.state) == ReadyState::Ready
+    fn state(&self) -> ReadyState {
+        lock(&self.state).clone()
     }
 
     fn wait(&self, timeout: Duration) -> Result<(), BrokerError> {
@@ -348,6 +381,10 @@ struct Inner {
     /// Background tasks (initialization, epoch watcher), aborted on shutdown.
     tasks: Mutex<Vec<AbortHandle>>,
     closed: AtomicBool,
+    /// Where a failed JetStream initialization is reported (upstream `done`).
+    done: Mutex<Option<std::sync::mpsc::Sender<BrokerError>>>,
+    /// Delay before JetStream initialization attempt `n + 1` (upstream `utils.NextRetry`).
+    retry_delay: fn(u32) -> Duration,
 }
 
 impl Nats {
@@ -371,8 +408,16 @@ impl Nats {
                 stream_sync: StreamsSynchronizer::default(),
                 tasks: Mutex::new(Vec::new()),
                 closed: AtomicBool::new(false),
+                done: Mutex::new(None),
+                retry_delay: client::next_retry,
             }),
         }
+    }
+
+    /// Where to report a JetStream initialization that failed for good after
+    /// [`Broker::start`] (upstream `Start(done)`; the runner exits with it).
+    pub fn set_done(&self, done: std::sync::mpsc::Sender<BrokerError>) {
+        *lock(&self.inner.done) = Some(done);
     }
 
     /// Waits until JetStream is initialized (upstream `Ready(timeout)`).
@@ -499,12 +544,15 @@ impl Inner {
                 Ok(()) => return Ok(()),
                 Err(e) => e,
             };
-            let delay = client::next_retry(attempt);
+            let delay = (self.retry_delay)(attempt);
             attempt += 1;
             if attempt > 5 {
                 return Err(format!("JetStream is unavailable, cause: {e}"));
             }
+            log(Level::Warn, "JetStream initialization failed", &[("error", e)]);
+            log(Level::Info, &format!("next JetStream initialization attempt in {}", go_duration(delay)), &[]);
             tokio::time::sleep(delay).await;
+            log(Level::Info, "re-initializing JetStream...", &[]);
         }
     }
 
@@ -536,6 +584,7 @@ impl Inner {
             });
             self.track(task.abort_handle());
         }
+        log(Level::Info, "NATS broker is ready", &[("epoch", epoch)]);
         Ok(())
     }
 
@@ -630,13 +679,16 @@ impl Inner {
 
     fn backlog_add(self: &Arc<Self>, msg: StreamMessage) {
         let mut backlog = lock(&self.backlog);
-        if !self.ready.is_ready() {
-            backlog.push(msg);
-            return;
+        match self.ready.state() {
+            ReadyState::Pending => backlog.push(msg),
+            // JetStream became ready meanwhile (the backlog may already be flushed).
+            ReadyState::Ready => {
+                drop(backlog);
+                let _ = self.publish(&msg);
+            }
+            // It never will be: nothing is kept (the runner exits with the error).
+            ReadyState::Failed(_) => {}
         }
-        // JetStream became ready meanwhile (the backlog may already be flushed).
-        drop(backlog);
-        let _ = self.publish(&msg);
     }
 
     fn backlog_flush(self: &Arc<Self>) {
@@ -782,7 +834,7 @@ async fn fetch_bucket_with_ttl(js: &jetstream::Context, key: &str, ttl: Duration
                 // The TTL changed: discard the bucket and create a new one.
                 js.delete_key_value(key).await.map_err(|e| decorate(format!("failed to delete bucket: {key}"), e))?;
             }
-            Err(e) => return Err(decorate(format!("failed to create bucket: {key}"), e)),
+            Err(e) => return Err(decorate(format!("failed to create bucket: {key}"), js_error_text(&e))),
         }
     }
 }
@@ -805,9 +857,12 @@ impl Broker for Nats {
                         .spawn(move || flusher.backlog_flush());
                 }
                 Err(e) => {
-                    inner.ready.set(ReadyState::Failed(e));
+                    inner.ready.set(ReadyState::Failed(e.clone()));
                     // Messages kept while waiting can no longer be published.
                     lock(&inner.backlog).clear();
+                    if let Some(done) = lock(&inner.done).take() {
+                        let _ = done.send(err(e));
+                    }
                 }
             }
         });
@@ -839,6 +894,7 @@ impl Broker for Nats {
             return Ok(());
         }
         if self.inner.ready.wait(JETSTREAM_READY_TIMEOUT).is_err() {
+            log(Level::Debug, "JetStream is not ready yet to publish messages, add to backlog", &[]);
             self.inner.backlog_add(msg.clone());
             return Ok(());
         }
@@ -1019,6 +1075,47 @@ mod tests {
         assert_eq!("s", broker.subscribe("s"));
         assert!(broker.inner.tracker.has("s"));
         broker.shutdown().unwrap();
+    }
+
+    /// A JetStream that never becomes available (a NATS server without
+    /// JetStream) is reported through `done` after the retries, as upstream
+    /// reports it to the runner (which exits); broadcasts made afterwards are
+    /// not kept (D-023: nothing grows once initialization has failed).
+    #[test]
+    fn jetstream_initialization_failure_is_reported_and_nothing_is_kept() {
+        let Some(bin) = nats_server_binary() else { return };
+        let port = free_port();
+        let mut server = std::process::Command::new(bin)
+            .args(["-a", "127.0.0.1", "-p", &port.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let rec = Arc::new(Recorder::default());
+        let mut broker = Nats::new(Some(rec.clone()), &Config::new(), &nats_config(port));
+        Arc::get_mut(&mut broker.inner).expect("not shared yet").retry_delay = |_| Duration::from_millis(10);
+        let (done, failed) = std::sync::mpsc::channel();
+        broker.set_done(done);
+        broker.start().unwrap();
+
+        let e = failed.recv_timeout(Duration::from_secs(30)).expect("the failure is reported");
+        let msg = StreamMessage { stream: "s".into(), data: "a".into(), ..Default::default() };
+        for _ in 0..100 {
+            broker.handle_broadcast(&msg).unwrap();
+        }
+        let kept = lock(&broker.inner.backlog).len();
+        broker.shutdown().unwrap();
+        let _ = server.kill();
+        let _ = server.wait();
+
+        assert!(
+            e.message.starts_with(
+                "JetStream is unavailable, cause: failed to connect to JetStream KV, cause: failed to create bucket: _anycable_, cause: nats: API error: code=503 err_code=10076 description=jetstream not enabled"
+            ),
+            "{e}"
+        );
+        assert_eq!(0, kept);
+        assert!(lock(&rec.0).is_empty());
     }
 
     /// Broadcasts made while JetStream is not ready are published once it is

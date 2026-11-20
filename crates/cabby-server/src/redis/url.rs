@@ -212,6 +212,8 @@ pub(crate) struct ParsedRedisUrl {
     pub password: String,
     pub select_db: i64,
     pub dial_timeout: Duration,
+    /// `write_timeout` query parameter (rueidis `ConnWriteTimeout`); zero when unset.
+    pub write_timeout: Duration,
     /// `rediss://` (rueidis sets a TLS config).
     pub tls: bool,
     /// `skip_verify` query parameter (only with TLS).
@@ -277,7 +279,7 @@ pub(crate) fn parse_rueidis(raw: &str) -> Result<ParsedRedisUrl, String> {
         opt.dial_timeout = parse_duration(t).ok_or_else(|| format!("redis: invalid dial timeout: {t:?}"))?;
     }
     if let Some(t) = u.query_get("write_timeout") {
-        parse_duration(t).ok_or_else(|| format!("redis: invalid write timeout: {t:?}"))?;
+        opt.write_timeout = parse_duration(t).ok_or_else(|| format!("redis: invalid write timeout: {t:?}"))?;
     }
     for addr in u.query_all("addr") {
         let (_, addr) = parse_addr(addr);
