@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use async_nats::jetstream::{self, consumer, kv, stream};
@@ -34,8 +34,9 @@ use super::{
     SystemClock, lock, nanoid, read, write,
 };
 use crate::common::{PresenceEvent, PresenceInfo, RemoteCommandMessage, StreamMessage};
-use crate::logger::{Attr, Level, LogValue};
+use crate::logger::Logger;
 use crate::nats::client::{self, block_on, blocking, runtime};
+use crate::{log_debug, log_error, log_info, log_warn};
 
 const KV_BUCKET: &str = "_anycable_";
 const EPOCH_BUCKET: &str = "_anycable_epoch_";
@@ -105,20 +106,50 @@ fn stream_name_in_use(e: &(dyn std::error::Error + 'static)) -> bool {
     false
 }
 
-/// Writes a record with the broker's attributes (upstream
-/// `l.With("context", "broker").With("provider", "nats")`).
-fn log(level: Level, msg: &str, attrs: &[(&str, String)]) {
-    let mut all = vec![
-        Attr::new("context", LogValue::String("broker".into())),
-        Attr::new("provider", LogValue::String("nats".into())),
-    ];
-    all.extend(attrs.iter().map(|(k, v)| Attr::new(k, LogValue::String(v.clone()))));
-    crate::logger::log(level, msg, &all);
+/// The broker's logger (upstream `l.With("context", "broker").With("provider", "nats")`).
+fn log() -> &'static Logger {
+    static LOG: OnceLock<Logger> = OnceLock::new();
+    LOG.get_or_init(|| Logger::default().with("context", "broker").with("provider", "nats"))
 }
 
-/// Go's `time.Duration.String()` for the delays `next_retry` returns.
-fn go_duration(d: Duration) -> String {
-    if d < Duration::from_secs(1) { format!("{}ms", d.as_millis()) } else { format!("{}s", d.as_secs()) }
+/// Go's `time.Duration.String()` (`1h0m0s`, `5m0s`, `1.5s`, `500ms`, `0s`).
+pub(crate) fn go_duration(d: Duration) -> String {
+    let nanos = d.as_nanos();
+    if nanos == 0 {
+        return "0s".to_owned();
+    }
+    let fraction = |value: u128, unit: u128, suffix: &str| {
+        let whole = value / unit;
+        let rest = value % unit;
+        if rest == 0 {
+            return format!("{whole}{suffix}");
+        }
+        let width = unit.ilog10() as usize;
+        let digits = format!("{rest:0width$}");
+        format!("{whole}.{}{suffix}", digits.trim_end_matches('0'))
+    };
+    if nanos < 1_000 {
+        return format!("{nanos}ns");
+    }
+    if nanos < 1_000_000 {
+        return fraction(nanos, 1_000, "\u{b5}s");
+    }
+    if nanos < 1_000_000_000 {
+        return fraction(nanos, 1_000_000, "ms");
+    }
+    let secs = d.as_secs();
+    let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
+    let seconds = fraction(u128::from(s) * 1_000_000_000 + u128::from(d.subsec_nanos()), 1_000_000_000, "s");
+    match (h, m) {
+        (0, 0) => seconds,
+        (0, m) => format!("{m}m{seconds}"),
+        (h, m) => format!("{h}h{m}m{seconds}"),
+    }
+}
+
+/// Upstream `shouldRetryOnError`'s warning before a retry.
+fn log_retry(cooldown: Duration, e: &dyn std::fmt::Display) {
+    log_warn!(log(), &format!("operation failed, retrying in {}...", go_duration(cooldown)), "error" => e.to_string());
 }
 
 fn secs(n: i64) -> Duration {
@@ -549,10 +580,10 @@ impl Inner {
             if attempt > 5 {
                 return Err(format!("JetStream is unavailable, cause: {e}"));
             }
-            log(Level::Warn, "JetStream initialization failed", &[("error", e)]);
-            log(Level::Info, &format!("next JetStream initialization attempt in {}", go_duration(delay)), &[]);
+            log_warn!(log(), "JetStream initialization failed", "error" => e);
+            log_info!(log(), &format!("next JetStream initialization attempt in {}", go_duration(delay)));
             tokio::time::sleep(delay).await;
-            log(Level::Info, "re-initializing JetStream...", &[]);
+            log_info!(log(), "re-initializing JetStream...");
         }
     }
 
@@ -566,26 +597,33 @@ impl Inner {
         self.write_epoch(&epoch);
         self.local.start().map_err(|e| format!("failed to start internal memory broker, cause: {e}"))?;
         *write(&self.js) = Some(Js { js, kv });
-        // A failed watcher is not fatal (upstream logs it).
-        if let Ok(mut watch) = epoch_kv.watch_with_history(EPOCH_KEY).await {
-            let inner = Arc::downgrade(self);
-            let task = runtime().spawn(async move {
-                while let Some(entry) = watch.next().await {
-                    let Ok(entry) = entry else { continue };
-                    if entry.operation != kv::Operation::Put {
-                        continue;
-                    }
-                    let Some(inner) = inner.upgrade() else { return };
-                    let value = String::from_utf8_lossy(&entry.value).into_owned();
-                    if inner.epoch() != value {
-                        inner.write_epoch(&value);
-                    }
-                }
-            });
-            self.track(task.abort_handle());
+        // A failed watcher is not fatal.
+        match epoch_kv.watch_with_history(EPOCH_KEY).await {
+            Err(e) => log_warn!(log(), "failed to set up epoch watcher", "error" => e.to_string()),
+            Ok(watch) => self.watch_epoch(watch),
         }
-        log(Level::Info, "NATS broker is ready", &[("epoch", epoch)]);
+        log_info!(log(), "NATS broker is ready", "epoch" => epoch);
         Ok(())
+    }
+
+    /// Upstream `watchEpoch`'s goroutine: follows epoch changes made by other nodes.
+    fn watch_epoch(self: &Arc<Self>, mut watch: kv::Watch) {
+        let inner = Arc::downgrade(self);
+        let task = runtime().spawn(async move {
+            while let Some(entry) = watch.next().await {
+                let Ok(entry) = entry else { continue };
+                if entry.operation != kv::Operation::Put {
+                    continue;
+                }
+                let Some(inner) = inner.upgrade() else { return };
+                let value = String::from_utf8_lossy(&entry.value).into_owned();
+                if inner.epoch() != value {
+                    log_warn!(log(), "epoch updated", "epoch" => &value);
+                    inner.write_epoch(&value);
+                }
+            }
+        });
+        self.track(task.abort_handle());
     }
 
     /// Upstream `calculateEpoch`: the epoch stored in the epoch bucket, or a new
@@ -610,6 +648,7 @@ impl Inner {
                 }
                 Err(e) if attempts > 0 && is_retryable(&e) => {
                     attempts -= 1;
+                    log_retry(Duration::from_secs(1), &e);
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
                 Err(e) => return Err(format!("failed to create key: {EPOCH_KEY}, cause: {e}")),
@@ -644,6 +683,7 @@ impl Inner {
                 Ok(()) => return Ok(()),
                 Err(e) if attempts > 0 && is_retryable(&e) => {
                     attempts -= 1;
+                    log_retry(Duration::from_millis(500), &e);
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
                 Err(e) => return Err(err(e.to_string())),
@@ -701,7 +741,8 @@ impl Inner {
     /// Upstream `addStreamConsumer`: makes sure the stream exists and a
     /// consumer copies it into the local broker.
     async fn add_stream_consumer(self: Arc<Self>, js: Js, stream: String) {
-        if self.ensure_stream_exists(&js.js, &stream).await.is_err() {
+        if let Err(e) = self.ensure_stream_exists(&js.js, &stream).await {
+            log_error!(log(), "failed to create JetStream stream", "stream" => &stream, "error" => e.message);
             return;
         }
         let mut attempts = 5;
@@ -714,6 +755,7 @@ impl Inner {
                 Ok(_) => return,
                 Err(e) if attempts > 0 && is_retryable(e.as_ref()) => {
                     attempts -= 1;
+                    log_retry(Duration::from_millis(500), &e);
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
                 Err(_) => return,
@@ -733,11 +775,17 @@ impl Inner {
                 consumer::pull::Config { ack_policy: consumer::AckPolicy::None, ..Default::default() },
                 &prefixed,
             )
-            .await?;
+            .await
+            .inspect_err(|e| {
+                log_error!(log(), "failed to create JetStream stream consumer", "stream" => stream, "error" => e.to_string());
+            })?;
+        log_debug!(log(), "created JetStream consumer", "consumer" => &cons.cached_info().name, "stream" => stream);
         self.stream_sync.touch(stream);
 
         let batch_size = if self.conf.history_limit == 0 { 100 } else { self.conf.history_limit };
-        let mut batch = cons.fetch().max_messages(batch_size).messages().await?;
+        let mut batch = cons.fetch().max_messages(batch_size).messages().await.inspect_err(|e| {
+            log_error!(log(), "failed to fetch initial messages from JetStream", "error" => e.to_string());
+        })?;
         while let Some(msg) = batch.next().await {
             match msg {
                 Ok(m) => self.consume_message(stream, &m),
@@ -764,6 +812,7 @@ impl Inner {
     }
 
     async fn drop_consumer(&self, js: &Js, handle: ConsumerHandle) {
+        log_debug!(log(), "deleting JetStream consumer", "consumer" => &handle.name, "stream" => &handle.stream);
         handle.task.abort();
         self.stream_sync.remove(&handle.stream);
         let _ = js.js.delete_consumer_from_stream(&handle.name, format!("{STREAM_PREFIX}{}", handle.stream)).await;
@@ -771,10 +820,18 @@ impl Inner {
 
     fn consume_message(&self, stream: &str, msg: &jetstream::Message) {
         self.stream_sync.touch(stream);
-        let Ok(info) = msg.info() else { return };
+        let info = match msg.info() {
+            Ok(info) => info,
+            Err(e) => {
+                log_error!(log(), "failed to get JetStream message metadata", "error" => e.to_string());
+                return;
+            }
+        };
         let nanos = info.published.unix_timestamp_nanos();
         let ts = u64::try_from(nanos).map(|n| UNIX_EPOCH + Duration::from_nanos(n)).unwrap_or(UNIX_EPOCH);
-        let _ = self.local.store(stream, &msg.payload, info.stream_sequence, Some(ts));
+        if let Err(e) = self.local.store(stream, &msg.payload, info.stream_sequence, Some(ts)) {
+            log_error!(log(), "failed to store message in local broker", "error" => e.message);
+        }
     }
 
     /// Stops background work and closes the connection (idempotent).
@@ -817,6 +874,7 @@ async fn fetch_bucket_with_ttl(js: &jetstream::Context, key: &str, ttl: Duration
             Ok(store) => return Ok(store),
             Err(e) if e.kind() == jetstream::context::CreateKeyValueErrorKind::TimedOut && attempts > 0 => {
                 attempts -= 1;
+                log_warn!(log(), "failed to retrieve bucket, retrying in 500ms...", "bucket" => key);
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             Err(e) if stream_name_in_use(&e) => {
@@ -832,6 +890,13 @@ async fn fetch_bucket_with_ttl(js: &jetstream::Context, key: &str, ttl: Duration
                     return Ok(bucket);
                 }
                 // The TTL changed: discard the bucket and create a new one.
+                log_warn!(
+                    log(),
+                    "bucket TTL has been changed, recreating the bucket",
+                    "bucket" => key,
+                    "old_ttl" => go_duration(status.max_age()),
+                    "ttl" => go_duration(ttl),
+                );
                 js.delete_key_value(key).await.map_err(|e| decorate(format!("failed to delete bucket: {key}"), e))?;
             }
             Err(e) => return Err(decorate(format!("failed to create bucket: {key}"), js_error_text(&e))),
@@ -843,7 +908,7 @@ impl Broker for Nats {
     /// Connects (in the background, retrying) and initializes JetStream asynchronously.
     fn start(&self) -> Result<(), BrokerError> {
         let nconf = self.inner.nconf.clone();
-        let client = block_on(async move { client::connect(&nconf).await }).map_err(|e| err(e.0))?;
+        let client = block_on(async move { client::connect(&nconf, log().clone()).await }).map_err(|e| err(e.0))?;
         *lock(&self.inner.client) = Some(client.clone());
         let inner = self.inner.clone();
         let task = runtime().spawn(async move {
@@ -894,7 +959,7 @@ impl Broker for Nats {
             return Ok(());
         }
         if self.inner.ready.wait(JETSTREAM_READY_TIMEOUT).is_err() {
-            log(Level::Debug, "JetStream is not ready yet to publish messages, add to backlog", &[]);
+            log_debug!(log(), "JetStream is not ready yet to publish messages, add to backlog");
             self.inner.backlog_add(msg.clone());
             return Ok(());
         }
@@ -1156,6 +1221,18 @@ mod tests {
         assert_eq!(1, published.len(), "{published:?}");
         assert_eq!(("a", 1), (published[0].data.as_str(), published[0].offset));
         assert_eq!(broker.epoch(), published[0].epoch);
+    }
+
+    /// Go's `time.Duration.String()`, as logged in TTL and retry records.
+    #[test]
+    fn durations_print_like_go() {
+        assert_eq!("0s", go_duration(Duration::ZERO));
+        assert_eq!("500ms", go_duration(Duration::from_millis(500)));
+        assert_eq!("1.5s", go_duration(Duration::from_millis(1500)));
+        assert_eq!("5m0s", go_duration(Duration::from_secs(300)));
+        assert_eq!("1h0m0s", go_duration(Duration::from_secs(3600)));
+        assert_eq!("50h0m0s", go_duration(Duration::from_secs(180_000)));
+        assert_eq!("1.5\u{b5}s", go_duration(Duration::from_nanos(1500)));
     }
 
     #[test]

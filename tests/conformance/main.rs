@@ -25,6 +25,7 @@ mod health;
 mod issues;
 mod logging;
 mod logging_server;
+mod logging_transport;
 mod origin;
 mod pusher;
 mod rpc_sessions;
