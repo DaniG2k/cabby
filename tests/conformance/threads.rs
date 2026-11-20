@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use cabby_testkit::publish::Target;
 use cabby_testkit::sut::Sut;
+use cabby_testkit::text_ws::TextWs;
 use serde_json::json;
 use tungstenite::{ClientRequestBuilder, Message, WebSocket};
 
@@ -156,4 +157,48 @@ fn broadcast_fan_out_does_not_add_threads() {
         "broadcasting to {} connections grew the server from {baseline} to {peak} threads",
         CONNECTIONS + 1
     );
+}
+
+/// Idle Pusher connections opened on top of the baseline.
+const PUSHER_CONNECTIONS: usize = 1000;
+
+/// Opens a Pusher connection and waits for `pusher:connection_established`.
+fn connect_pusher(sut: &Sut) -> TextWs {
+    let mut ws = TextWs::connect(sut.addr(), "/app/threads-key", &[]).unwrap_or_else(|e| {
+        sut.process.propagate_pending();
+        panic!("connecting failed: {e:#}\nSUT output:\n{}", sut.process.output())
+    });
+    let welcome = ws.recv_text(IO_DEADLINE).expect("connection_established");
+    assert!(welcome.contains("pusher:connection_established"), "unexpected first frame {welcome}");
+    ws
+}
+
+/// issue: anycable/anycable#265
+/// note: Cabby invariant: Pusher sessions are served like Action Cable ones (the connection pushes messages to the session's reader), so no OS thread is tied to a Pusher connection either (review 2026-11, M1: each Pusher session had a reader thread).
+/// note: Opens 1000 idle Pusher connections one after another (each waits for pusher:connection_established) and checks that the server's thread count grew by at most 16.
+#[test]
+fn idle_pusher_connections_do_not_add_threads() {
+    let sut = Sut::start(&[
+        "--pusher_app_id=threads",
+        "--pusher_app_key=threads-key",
+        "--pusher_secret=threads-secret",
+        "--broadcast_adapter=http",
+        "--disconnect_mode=never",
+    ]);
+    let pid = sut.process.pid();
+
+    let mut clients = vec![connect_pusher(&sut)];
+    let baseline = threads(pid);
+
+    for _ in 0..PUSHER_CONNECTIONS {
+        clients.push(connect_pusher(&sut));
+    }
+    let after = threads(pid);
+    eprintln!("server threads: {baseline} with one Pusher connection, {after} with {}", PUSHER_CONNECTIONS + 1);
+
+    assert!(
+        after <= baseline + MAX_EXTRA_THREADS,
+        "{PUSHER_CONNECTIONS} idle Pusher connections grew the server from {baseline} to {after} threads"
+    );
+    drop(clients);
 }

@@ -377,8 +377,13 @@ fn go_struct<'a>(v: &'a Value, ty: &str) -> Result<Option<&'a Map<String, Value>
     }
 }
 
+/// Parses JSON with the current thread's nesting limit (Go's on a deep-nesting
+/// thread, see [`cabby_core::gojson::deep`]).
 fn parse_json(raw: &[u8]) -> Result<Value, EncodeError> {
-    serde_json::from_slice(raw).map_err(|e| encode_error(e.to_string()))
+    let mut de = cabby_core::gojson::deep::deserializer(raw).map_err(encode_error)?;
+    let value = serde::Deserialize::deserialize(&mut de).map_err(|e: serde_json::Error| encode_error(e.to_string()))?;
+    de.end().map_err(|e| encode_error(e.to_string()))?;
+    Ok(value)
 }
 
 /// The fields of a `common.Reply` the encoder reads.
@@ -925,7 +930,7 @@ pub fn session_handler(node: Arc<Node>, conf: &Config, presence_ttl: i64) -> ws:
         ];
 
         let socket_id = generate_socket_id(&info.uid);
-        let session = Session::new(&node, Arc::new(conn), &info.url, info.headers, &socket_id, opts);
+        let session = Session::new(&node, Arc::new(conn.clone()), &info.url, info.headers, &socket_id, opts);
 
         let sid = session.get_id();
         node.authenticated(&session, &format!(r#"{{"sid":"{sid}"}}"#));
@@ -934,7 +939,10 @@ pub fn session_handler(node: Arc<Node>, conf: &Config, presence_ttl: i64) -> ws:
 
         session.send(&Reply { kind: common::WELCOME_TYPE.to_owned(), sid, ..Default::default() });
 
-        session.serve(callback).map_err(|e| e.0)
+        // Served like Action Cable sessions: the connection pushes messages to the
+        // session's reader, so an idle Pusher session holds no thread.
+        conn.set_inbound_handler(Arc::new(session.reader(callback)));
+        Ok(())
     })
 }
 
