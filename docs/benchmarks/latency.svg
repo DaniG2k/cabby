@@ -2,9 +2,11 @@
 <title id="t">Broadcast delivery latency, p99</title><desc id="d">Publish to client delivery, 1,000 clients; lower is better. 50k msg/s: Action Cable (Ruby) not sustained, AnyCable (Go) 0.86 ms, Cabby (Rust) 0.67 ms; 100k msg/s: Action Cable (Ruby) not sustained, AnyCable (Go) 2.77 ms, Cabby (Rust) 1.78 ms; 150k msg/s: Action Cable (Ruby) not sustained, AnyCable (Go) 11.93 ms, Cabby (Rust) 7.69 ms</desc>
 <style>
   .surface { fill: #fcfcfb; } .actioncable { fill: #1baf7a; } .anycable-go { fill: #2a78d6; } .cabby { fill: #eb6834; }
+  .soketi { fill: #eda100; } .reverb { fill: #e87ba4; }
   .t1 { fill: #0b0b0b; } .t2 { fill: #52514e; } .grid { stroke: #e4e3df; } .axis { stroke: #b9b8b2; }
   @media (prefers-color-scheme: dark) {
     .surface { fill: #1a1a19; } .actioncable { fill: #199e70; } .anycable-go { fill: #3987e5; } .cabby { fill: #d95926; }
+    .soketi { fill: #c98500; } .reverb { fill: #d55181; }
     .t1 { fill: #f0efec; } .t2 { fill: #c3c2b7; } .grid { stroke: #383835; } .axis { stroke: #5e5d58; }
   }
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }

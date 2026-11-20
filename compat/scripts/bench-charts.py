@@ -175,5 +175,5 @@ chart(out_dir / f"{PREFIX}throughput.svg", f"Messages delivered per second{TITLE
       "What each server delivered of the offered load (50k, 100k, 150k, 100k msg/s); higher is better",
       [g for _, g in tput],
       [[(lambda v: None if v is None else v / 1000)(med_raw(w, s, "throughput_msgs_per_sec")) for w, _ in tput] for s in suts],
-      "thousand msg/s", digits=1)
+      "thousand msg/s", digits=0 if len(SERIES) >= 4 else 1)
 print("charts written to", out_dir)
