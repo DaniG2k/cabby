@@ -6,15 +6,16 @@
 //! `docs/enats.md` for the strategy and its limits). The binary is found in
 //! `CABBY_NATS_SERVER`, next to the Cabby executable, or on `PATH`.
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Read};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use cabby_core::logger::{Attr, Level, LogValue};
+use cabby_core::logger::{Level, Logger};
 use cabby_core::toml_config::string_list;
+use cabby_core::{log_at, log_debug, log_error};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnatsError(pub String);
@@ -267,6 +268,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// `nats-server` child process.
 pub struct Service {
     config: Config,
+    log: Logger,
     name: Mutex<String>,
     running: Arc<Mutex<Option<Running>>>,
     on_exit: Arc<Mutex<Option<ExitHandler>>>,
@@ -277,6 +279,7 @@ impl Service {
     pub fn new(config: &Config) -> Self {
         Self {
             config: config.clone(),
+            log: Logger::default().with("context", "enats"),
             name: Mutex::new(String::new()),
             running: Arc::default(),
             on_exit: Arc::default(),
@@ -405,29 +408,42 @@ impl Service {
             .spawn()
             .map_err(|e| EnatsError(format!("failed to start NATS server, cause: running {bin:?}: {e}")))?;
 
-        // Drain the output continuously; it is echoed to stderr in debug mode
-        // (upstream routes server logs to its logger only when debugging).
+        // Drain the output continuously. In debug mode its records go to the
+        // log (upstream sets the server's logger to `log.With("service",
+        // "nats")` only when debugging).
         let output = Arc::new(Mutex::new(OutputTail::default()));
-        let echo = self.config.debug || self.config.trace;
+        let echo = self.config.debug.then(|| self.log.with("service", "nats"));
         let streams: [Box<dyn Read + Send>; 2] = [
             Box::new(child.stdout.take().expect("piped stdout")),
             Box::new(child.stderr.take().expect("piped stderr")),
         ];
         for stream in streams {
             let sink = Arc::clone(&output);
+            let echo = echo.clone();
             std::thread::spawn(move || {
                 for line in BufReader::new(stream).lines().map_while(Result::ok) {
-                    if echo {
-                        let _ = writeln!(std::io::stderr(), "{line}");
+                    if let Some(log) = &echo {
+                        let (level, msg) = server_log_record(&line);
+                        log_at!(log, level, msg);
                     }
                     lock(&sink).push_line(line.as_bytes());
                 }
             });
         }
 
+        let url = format!("nats://{host}:{port}");
         *lock(&self.running) = Some(Running { child, output, conf_path, host, port });
         self.wait_ready()?;
         self.watch();
+        // Upstream waits for JetStream in the background (`go WaitJetStreamReady`),
+        // only logging the outcome.
+        if self.config.jetstream {
+            let max = Duration::from_secs(u64::try_from(self.config.jetstream_ready_timeout).unwrap_or(0));
+            let (leader, log) = (self.is_jetstream_leader(), self.log.clone());
+            let _ = std::thread::Builder::new()
+                .name("cabby-enats-jetstream".into())
+                .spawn(move || wait_jetstream(url, max, leader, log));
+        }
         Ok(())
     }
 
@@ -435,6 +451,7 @@ impl Service {
     /// the exit is logged and reported to the [`Service::on_exit`] handler.
     fn watch(&self) {
         let (running, on_exit) = (Arc::clone(&self.running), Arc::clone(&self.on_exit));
+        let log = self.log.clone();
         let spawned = std::thread::Builder::new().name("cabby-enats-watch".into()).spawn(move || {
             loop {
                 std::thread::sleep(WATCH_INTERVAL);
@@ -446,15 +463,7 @@ impl Service {
                 let _ = std::fs::remove_file(&r.conf_path);
                 let output = lock(&r.output).text(EXIT_OUTPUT_LIMIT);
                 let err = EnatsError(format!("embedded NATS server exited unexpectedly: {status}"));
-                crate::metrics::log(
-                    Level::Error,
-                    "embedded NATS server exited unexpectedly",
-                    &[
-                        Attr::new("context", LogValue::String("enats".into())),
-                        Attr::new("status", LogValue::String(status.to_string())),
-                        Attr::new("output", LogValue::String(output)),
-                    ],
-                );
+                log_error!(log, "embedded NATS server exited unexpectedly", "status" => status.to_string(), "output" => output);
                 if let Some(handler) = lock(&on_exit).as_ref() {
                     handler(err);
                 }
@@ -506,21 +515,13 @@ impl Service {
             format!("nats://{}:{}", r.host, r.port)
         };
         let max = Duration::from_secs(u64::try_from(max_seconds).unwrap_or(0));
-        cabby_core::nats::client::block_on(async move {
-            let start = Instant::now();
-            loop {
-                if start.elapsed() > max {
-                    return Err(EnatsError(format!("JetStream is not ready after {} seconds", max.as_secs())));
-                }
-                if let Ok(client) = async_connect(&url).await {
-                    let js = async_nats::jetstream::new(client);
-                    if js.query_account().await.is_ok() {
-                        return Ok(());
-                    }
-                }
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-        })
+        wait_jetstream(url, max, self.is_jetstream_leader(), self.log.clone())
+    }
+
+    /// Upstream's `JetStreamIsLeader()` is true for a server outside a cluster;
+    /// a clustered child does not say whether it leads the meta group (false).
+    fn is_jetstream_leader(&self) -> bool {
+        self.config.cluster_addr.is_empty() || self.config.cluster_name.is_empty()
     }
 
     /// A one-line summary for logs (upstream `Description`).
@@ -552,6 +553,57 @@ impl Service {
         let _ = std::fs::remove_file(&r.conf_path);
         Ok(())
     }
+}
+
+/// A `nats-server` output line (`[pid] date time [LVL] message`) as upstream's
+/// `LogEntry` logs it: `Noticef` and `Infof` at info, `Tracef` and `Debugf` at
+/// debug, `Warnf` at warn, `Errorf` (and `Fatalf`) at error. Lines in another
+/// format are logged whole at info.
+fn server_log_record(line: &str) -> (Level, &str) {
+    let tagged = (|| {
+        let rest = line.strip_prefix('[')?.split_once("] ")?.1;
+        let rest = rest.split_once(' ')?.1.split_once(' ')?.1;
+        let (tag, msg) = rest.strip_prefix('[')?.split_once("] ")?;
+        let level = match tag {
+            "INF" => Level::Info,
+            "DBG" | "TRC" => Level::Debug,
+            "WRN" => Level::Warn,
+            "ERR" | "FTL" => Level::Error,
+            _ => return None,
+        };
+        Some((level, msg))
+    })();
+    tagged.unwrap_or((Level::Info, line))
+}
+
+/// Upstream `WaitJetStreamReady`'s loop: waits up to `max` for JetStream to
+/// answer API requests at `url`.
+fn wait_jetstream(url: String, max: Duration, leader: bool, log: Logger) -> Result<(), EnatsError> {
+    cabby_core::nats::client::block_on(async move {
+        let start = Instant::now();
+        loop {
+            if start.elapsed() > max {
+                return Err(EnatsError(format!("JetStream is not ready after {} seconds", max.as_secs())));
+            }
+            match async_connect(&url).await {
+                Err(e) => {
+                    log_debug!(log, "NATS server not accepting connections", "error" => e.to_string());
+                    // Upstream retries at once (in-process connections fail fast).
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+                Ok(client) => {
+                    let js = async_nats::jetstream::new(client);
+                    if js.query_account().await.is_ok() {
+                        log_debug!(log, "JetStream cluster is ready", "leader" => leader);
+                        return Ok(());
+                    }
+                }
+            }
+            log_debug!(log, "JetStream cluster is not ready yet, waiting for 1 second...");
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    })
 }
 
 async fn async_connect(url: &str) -> Result<async_nats::Client, async_nats::ConnectError> {
@@ -591,6 +643,18 @@ impl Drop for Service {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_output_maps_to_log_levels() {
+        assert_eq!(
+            (Level::Info, "Starting nats-server"),
+            server_log_record("[123] 2026/11/20 16:55:06.373456 [INF] Starting nats-server")
+        );
+        assert_eq!((Level::Debug, "x [y] z"), server_log_record("[1] 2026/11/20 16:55:06.373 [TRC] x [y] z"));
+        assert_eq!((Level::Warn, "w"), server_log_record("[1] 2026/11/20 16:55:06.373 [WRN] w"));
+        assert_eq!((Level::Error, "e"), server_log_record("[1] 2026/11/20 16:55:06.373 [FTL] e"));
+        assert_eq!((Level::Info, "plain text"), server_log_record("plain text"));
+    }
 
     #[test]
     fn parses_addresses() {

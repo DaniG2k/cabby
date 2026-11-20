@@ -27,7 +27,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use cabby_core::logger::Level;
+use cabby_core::log_at;
+use cabby_core::logger::{Attr, Level, Logger};
 use redis::aio::MultiplexedConnection;
 use redis::{PushInfo, PushKind, Value};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -56,8 +57,6 @@ pub(crate) trait Sink: Send + Sync + 'static {
 
 /// Static settings of an engine.
 pub(crate) struct Settings {
-    /// Log `context`.
-    pub context: &'static str,
     /// The channel whose confirmation means "connected" (resets reconnect attempts).
     pub primary: String,
     pub max_reconnect_attempts: i64,
@@ -66,10 +65,12 @@ pub(crate) struct Settings {
     pub reconnected_msg: &'static str,
     /// Reported to `on_fatal` when reconnect attempts are exhausted.
     pub exhausted_error: &'static str,
+    /// Logged (with the error) when a `SUBSCRIBE` fails on a live connection.
+    pub subscribe_failed: &'static str,
     /// Logged (with the error) when the connection is lost.
     pub lost: &'static [(Level, &'static str)],
-    /// Attributes of every log record besides `context` (upstream logger fields).
-    pub attrs: Vec<(&'static str, String)>,
+    /// The owner's logger (upstream `l.With("context", ...)...`).
+    pub log: Logger,
 }
 
 /// A handle to a subscription engine.
@@ -105,18 +106,22 @@ impl Subscriptions {
         self.desired().contains(channel)
     }
 
-    /// Wants `channel` subscribed (idempotent).
-    pub(crate) fn subscribe(&self, channel: &str) {
-        if self.desired().insert(channel.to_owned()) {
+    /// Wants `channel` subscribed (idempotent); false if it already was.
+    pub(crate) fn subscribe(&self, channel: &str) -> bool {
+        let added = self.desired().insert(channel.to_owned());
+        if added {
             let _ = self.tx.send(channel.to_owned());
         }
+        added
     }
 
-    /// Wants `channel` released (idempotent).
-    pub(crate) fn unsubscribe(&self, channel: &str) {
-        if self.desired().remove(channel) {
+    /// Wants `channel` released (idempotent); false if it was not wanted.
+    pub(crate) fn unsubscribe(&self, channel: &str) -> bool {
+        let removed = self.desired().remove(channel);
+        if removed {
             let _ = self.tx.send(channel.to_owned());
         }
+        removed
     }
 
     /// Starts the engine (once); `on_fatal` gets the error that stops it.
@@ -135,16 +140,18 @@ impl Subscriptions {
     }
 
     fn log(&self, level: Level, msg: &str, channel: Option<&str>) {
-        let mut attrs = self.settings.attrs.clone();
-        attrs.extend(channel.map(|c| ("channel", c.to_owned())));
-        super::log(level, self.settings.context, msg, &attrs);
+        if !cabby_core::logger::enabled(level) {
+            return;
+        }
+        match channel {
+            Some(c) => self.settings.log.log(level, msg, &[Attr::new("channel", c.into())]),
+            None => self.settings.log.log(level, msg, &[]),
+        }
     }
 
     /// A record with an `error` attribute (upstream `log.Error(msg, "error", err)`).
     fn log_error(&self, level: Level, msg: &str, err: impl std::fmt::Display) {
-        let mut attrs = self.settings.attrs.clone();
-        attrs.push(("error", err.to_string()));
-        super::log(level, self.settings.context, msg, &attrs);
+        log_at!(self.settings.log, level, msg, "error" => err.to_string());
     }
 }
 
@@ -188,7 +195,10 @@ impl Engine {
                     self.shared.log(Level::Debug, "initialized pub/sub client", None);
                     let mut session = Session::new(conn, push_rx);
                     match session.run(&mut self).await {
-                        End::Stop => break,
+                        End::Stop => {
+                            self.shared.log(Level::Debug, "close pub/sub channel", None);
+                            break;
+                        }
                         End::Lost(reason) => {
                             for (level, msg) in self.shared.settings.lost {
                                 self.shared.log_error(*level, msg, &reason);
@@ -340,7 +350,6 @@ impl Session {
             }
             PushKind::Subscribe => {
                 let Some(channel) = push.data.first().and_then(text) else { return Ok(()) };
-                shared.log(Level::Debug, "subscribe", Some(&channel));
                 // Upstream subscribes once per connection and logs each
                 // confirmation of the primary channel; the periodic
                 // reconciliation re-subscribes it, so only the first one counts.
@@ -354,7 +363,11 @@ impl Session {
                     shared.log(Level::Info, msg, Some(&channel));
                     engine.attempt = 0;
                 }
-                self.confirmed.insert(channel.clone());
+                // Confirmations of the reconciliation's re-subscriptions (D-003)
+                // are not logged: upstream subscribes a channel once.
+                if self.confirmed.insert(channel.clone()) {
+                    shared.log(Level::Debug, "subscribe", Some(&channel));
+                }
                 self.check_count(&push.data);
                 touched.insert(channel);
             }
@@ -453,7 +466,7 @@ impl Session {
                 if is_fatal(&e) {
                     return Err(End::Lost(e.to_string()));
                 }
-                engine.shared.log_error(Level::Error, "failed to resubscribe", e);
+                engine.shared.log_error(Level::Error, engine.shared.settings.subscribe_failed, e);
             }
         }
         Ok(())
@@ -463,7 +476,6 @@ impl Session {
         for batch in channels.chunks(BATCH_SIZE) {
             for c in batch {
                 *self.expected_unsub.entry(c.clone()).or_default() += 1;
-                engine.shared.log(Level::Debug, "unsubscribing", Some(c));
             }
             if let Err(e) = self.conn.unsubscribe(batch).await {
                 if is_fatal(&e) {
