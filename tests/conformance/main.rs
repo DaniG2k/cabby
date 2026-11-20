@@ -27,6 +27,7 @@ mod logging;
 mod logging_server;
 mod logging_transport;
 mod origin;
+mod ping_intervals;
 mod pusher;
 mod rpc_sessions;
 mod sse;

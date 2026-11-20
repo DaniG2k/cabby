@@ -54,6 +54,62 @@ fn messages_nested_up_to_go_limit_are_processed() {
     }
 }
 
+/// Threads of process `pid` named `name` (Linux procfs; 0 elsewhere).
+fn threads_named(pid: u32, name: &str) -> usize {
+    let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else { return 0 };
+    tasks
+        .filter_map(Result::ok)
+        .filter(|t| std::fs::read_to_string(t.path().join("comm")).is_ok_and(|c| c.trim_end() == name))
+        .count()
+}
+
+/// Cabby's cap on concurrent deep-nesting threads (`MAX_CONCURRENT_DEEP_THREADS`).
+const MAX_DEEP_THREADS: usize = 4;
+
+/// regression-for: encoders/json_test.go#TestJSONEncoder/.Decode
+/// note: Deviation D-056: many sessions sending messages nested 10000 levels deep at once all keep working (a following subscription is confirmed). On Cabby, at most 4 deep-decoding threads (`cabby-deep-json`, 64 MiB stacks) run at once; a deep message that finds them busy for 250 ms is dropped with a warning instead of being handled, and its session keeps reading. Go decodes every one on its goroutine (the thread check does not apply).
+#[test]
+fn deviation_d056_concurrent_deep_messages_are_capped() {
+    const SESSIONS: usize = 24;
+    const MESSAGES: usize = 3;
+    let sut = Sut::start(&["--public", "--broadcast_adapter=http", "--disconnect_mode=never"]);
+    let pid = sut.process.pid();
+    let mut clients: Vec<CableClient> = (0..SESSIONS).map(|_| connect(&sut)).collect();
+
+    // Count the deep threads while the messages are being handled.
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let sampler = {
+        let done = done.clone();
+        std::thread::spawn(move || {
+            let mut peak = 0;
+            while !done.load(std::sync::atomic::Ordering::SeqCst) {
+                peak = peak.max(threads_named(pid, "cabby-deep-json"));
+                std::thread::yield_now();
+            }
+            peak
+        })
+    };
+
+    let message = nested_message(GO_MAX_DEPTH);
+    for _ in 0..MESSAGES {
+        for c in &mut clients {
+            c.send_raw(&message);
+        }
+    }
+    for (i, c) in clients.iter_mut().enumerate() {
+        let stream = format!("after-{i}");
+        subscribe_public(c, &stream);
+        let ack = c.receive().unwrap_or_else(|e| panic!("session {i}: no reply after deep messages: {e}"));
+        assert_eq!(Some("confirm_subscription"), ack["type"].as_str(), "session {i}: {ack}");
+    }
+    done.store(true, std::sync::atomic::Ordering::SeqCst);
+    let peak = sampler.join().expect("sampler");
+
+    if cabby_testkit::backend() == cabby_testkit::Backend::Rust {
+        assert!(peak <= MAX_DEEP_THREADS, "{peak} deep-nesting threads at once");
+    }
+}
+
 /// external-for: encoders/json_test.go#TestJSONEncoder/.Decode
 /// note: A message nested 10001 levels deep fails to decode (Go: `exceeded max depth`), which ends the session's reader as any decode error does: a following subscription gets no reply within AnyT's 0.5s window.
 #[test]

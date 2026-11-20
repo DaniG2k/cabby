@@ -8,8 +8,15 @@
 //! stack sized for Go's limit ([`with_deep_nesting`]). On that thread, the
 //! decoders built with [`deserializer`] (client messages) accept up to Go's limit.
 //! A value decoded there must not leave the thread: drop it there.
+//!
+//! At most [`MAX_CONCURRENT_DEEP_THREADS`] such threads run at once (D-056): a
+//! message that finds them all busy waits up to [`DEEP_PERMIT_WAIT`] and is
+//! otherwise refused ([`DeepNestingError::Busy`]), so many clients sending deep
+//! messages together cannot multiply big stacks.
 
 use std::cell::Cell;
+use std::sync::{Condvar, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 /// Go's `encoding/json` nesting limit (`maxNestingDepth`).
 pub const MAX_NESTING_DEPTH: usize = 10_000;
@@ -21,9 +28,89 @@ pub const MAX_NESTING_DEPTH: usize = 10_000;
 /// are committed.
 const DEEP_STACK_SIZE: usize = 64 << 20;
 
+/// How many deep-nesting threads may run at once, process-wide (D-056).
+pub const MAX_CONCURRENT_DEEP_THREADS: usize = 4;
+
+/// How long a deep message waits for a deep-nesting thread before it is refused.
+pub const DEEP_PERMIT_WAIT: Duration = Duration::from_millis(250);
+
 thread_local! {
     static DEEP: Cell<bool> = const { Cell::new(false) };
 }
+
+/// Why [`with_deep_nesting`] did not run its closure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeepNestingError {
+    /// [`MAX_CONCURRENT_DEEP_THREADS`] were busy for [`DEEP_PERMIT_WAIT`].
+    Busy,
+    /// The thread could not be started.
+    Spawn,
+}
+
+impl std::fmt::Display for DeepNestingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Busy => "too many deeply nested messages in progress",
+            Self::Spawn => "failed to start a thread for a deeply nested message",
+        })
+    }
+}
+
+/// A counting semaphore with a bounded wait (no fairness needed: waiters only
+/// ever wait [`DEEP_PERMIT_WAIT`]).
+struct Limiter {
+    in_use: Mutex<usize>,
+    released: Condvar,
+    max: usize,
+}
+
+struct Permit<'a>(&'a Limiter);
+
+impl Drop for Permit<'_> {
+    fn drop(&mut self) {
+        let mut in_use = self.0.in_use.lock().unwrap_or_else(PoisonError::into_inner);
+        *in_use -= 1;
+        drop(in_use);
+        self.0.released.notify_one();
+    }
+}
+
+impl Limiter {
+    const fn new(max: usize) -> Self {
+        Self { in_use: Mutex::new(0), released: Condvar::new(), max }
+    }
+
+    fn acquire(&self, wait: Duration) -> Option<Permit<'_>> {
+        let deadline = Instant::now() + wait;
+        let mut in_use = self.in_use.lock().unwrap_or_else(PoisonError::into_inner);
+        while *in_use >= self.max {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return None;
+            }
+            in_use = self.released.wait_timeout(in_use, left).unwrap_or_else(PoisonError::into_inner).0;
+        }
+        *in_use += 1;
+        Some(Permit(self))
+    }
+
+    fn run<R: Send>(&self, wait: Duration, f: impl FnOnce() -> R + Send) -> Result<R, DeepNestingError> {
+        let _permit = self.acquire(wait).ok_or(DeepNestingError::Busy)?;
+        std::thread::scope(|s| {
+            let handle = std::thread::Builder::new()
+                .name("cabby-deep-json".into())
+                .stack_size(DEEP_STACK_SIZE)
+                .spawn_scoped(s, || {
+                    DEEP.with(|d| d.set(true));
+                    f()
+                })
+                .map_err(|_| DeepNestingError::Spawn)?;
+            Ok(handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
+        })
+    }
+}
+
+static DEEP_THREADS: Limiter = Limiter::new(MAX_CONCURRENT_DEEP_THREADS);
 
 /// Whether the current thread may decode beyond serde_json's default limit.
 pub fn is_deep_thread() -> bool {
@@ -37,19 +124,10 @@ pub fn hit_default_limit(err: &str) -> bool {
 }
 
 /// Runs `f` on a thread whose stack fits Go's nesting limit, with deep decoding
-/// enabled, and waits for it. `None` when no thread could be started.
-pub fn with_deep_nesting<R: Send>(f: impl FnOnce() -> R + Send) -> Option<R> {
-    std::thread::scope(|s| {
-        let handle = std::thread::Builder::new()
-            .name("cabby-deep-json".into())
-            .stack_size(DEEP_STACK_SIZE)
-            .spawn_scoped(s, || {
-                DEEP.with(|d| d.set(true));
-                f()
-            })
-            .ok()?;
-        Some(handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
-    })
+/// enabled, and waits for it. Fails when [`MAX_CONCURRENT_DEEP_THREADS`] stay
+/// busy for [`DEEP_PERMIT_WAIT`], or when no thread could be started.
+pub fn with_deep_nesting<R: Send>(f: impl FnOnce() -> R + Send) -> Result<R, DeepNestingError> {
+    DEEP_THREADS.run(DEEP_PERMIT_WAIT, f)
 }
 
 /// Fails with Go's scanner error when arrays and objects in `raw` (outside
@@ -126,6 +204,73 @@ mod tests {
             let too_deep = nested(MAX_NESTING_DEPTH + 1);
             (v.is_ok(), deserializer(too_deep.as_bytes()).err())
         });
-        assert_eq!(Some((true, Some("invalid character '[' exceeded max depth".into()))), ok);
+        assert_eq!(Ok((true, Some("invalid character '[' exceeded max depth".into()))), ok);
+    }
+
+    /// Deviation D-056: at most `max` deep threads run at once; a call that finds
+    /// them busy for the whole wait is refused, and a permit freed during the
+    /// wait is taken.
+    #[test]
+    fn concurrent_deep_threads_are_capped() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Barrier, mpsc};
+
+        const MAX: usize = 3;
+        const CALLERS: usize = 12;
+        let limiter = Arc::new(Limiter::new(MAX));
+        let running = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let entered = Arc::new(Barrier::new(MAX + 1));
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+
+        // `MAX` callers hold their threads until released.
+        let holders: Vec<_> = (0..MAX)
+            .map(|_| {
+                let (limiter, running, peak, entered, release_rx) =
+                    (limiter.clone(), running.clone(), peak.clone(), entered.clone(), release_rx.clone());
+                std::thread::spawn(move || {
+                    limiter.run(Duration::from_secs(30), || {
+                        let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(now, Ordering::SeqCst);
+                        assert!(is_deep_thread());
+                        entered.wait();
+                        release_rx.lock().unwrap().recv().unwrap();
+                        running.fetch_sub(1, Ordering::SeqCst);
+                    })
+                })
+            })
+            .collect();
+        entered.wait();
+
+        // Everyone else finds the threads busy and is refused after the wait.
+        let refused: Vec<_> = (0..CALLERS - MAX)
+            .map(|_| {
+                let limiter = limiter.clone();
+                std::thread::spawn(move || limiter.run(Duration::from_millis(50), || ()))
+            })
+            .collect();
+        for r in refused {
+            assert_eq!(Err(DeepNestingError::Busy), r.join().unwrap());
+        }
+
+        // A waiter gets the permit a holder frees.
+        let limiter2 = limiter.clone();
+        let waiter = std::thread::spawn(move || limiter2.run(Duration::from_secs(30), || 7));
+        release_tx.send(()).unwrap();
+        assert_eq!(Ok(7), waiter.join().unwrap());
+
+        for _ in 1..MAX {
+            release_tx.send(()).unwrap();
+        }
+        for h in holders {
+            assert_eq!(Ok(()), h.join().unwrap());
+        }
+        assert_eq!(MAX, peak.load(Ordering::SeqCst));
+        assert_eq!(0, *limiter.in_use.lock().unwrap());
+        // Permits come back after a panicking closure too.
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| limiter.run(Duration::ZERO, || panic!("x"))));
+        assert!(r.is_err());
+        assert_eq!(0, *limiter.in_use.lock().unwrap());
     }
 }
