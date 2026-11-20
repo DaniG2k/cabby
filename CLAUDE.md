@@ -15,12 +15,8 @@ plan and progress. Don't rely on earlier conversations.
 - **M0–M6 done.** All 923 upstream cases pass against Cabby (1173 tests); Go suite clean
   (9 not_observable, 4 upstream_failure = AnyCable #275, fixed in Cabby as D-003).
 - **Independent review** (Fable 5.2): `docs/review/2026-11-fable-review.md`, with repro
-  scripts. All findings fixed except **H7 (logging parity)**; status table at the end.
-- **H7 in progress** on branch `h7-logging-wip` (pushed, builds): partial log calls in hub,
-  node, session, disconnect queue. Left: the remaining Go log call sites, a coverage table in
-  `docs/logging.md`, and a logprobe conformance test comparing both backends' log output
-  (`docs/review/repro/core/logprobe.py`). Reuse `cabby_core::logger::set_sink`/`log`.
-  Deviation IDs D-050..D-054 are reserved for it.
+  scripts. All findings fixed; status table at the end.
+- All review findings, including H7 (logging parity), are fixed and merged; 1188 tests pass.
 - **Then M7 benchmarks**: three-way comparison (Action Cable vs AnyCable vs Cabby) with the
   external harness, on the fixed build, **on the Linux box with the machine idle** (the harness
   uses `taskset` and `/proc`; it doesn't run on macOS). `compat/scripts/bench-compare.sh`

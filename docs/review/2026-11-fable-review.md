@@ -78,7 +78,7 @@ Each fix has regression tests that fail before it and pass after it, run against
 | H4 | fixed (D-036) | threads blocked in RPC give up their command-pool seat: fresh client served in 0.00 s with 600 pending RPCs (before 17.5 s, Go 0.00 s) |
 | H5 | fixed | Go's `ReadHeaderTimeout` semantics; idle keep-alive connections stay open |
 | H6 | fixed | cluster batches split per slot: 30/30 published (before 3/30); also checked on a real single-node cluster |
-| H7 | in progress | |
+| H7 | fixed (D-050..D-053) | 304 of 308 Go log call sites matched, 4 not applicable (`docs/logging.md`); logprobe default level 28 lines on both (before 19), debug 59 vs Go 58 (random reconnect backoff); conformance tests compare both backends' log output |
 | M1 | fixed | Pusher uses the push-model reader: 1,000 idle Pusher connections add 5 threads (before 1,005, Go 7) |
 | M2 | fixed | session close cancels in-flight RPC and RPC-slot waits, with Go's metrics |
 | M3 | fixed | API checks method and auth before reading the body |
