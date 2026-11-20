@@ -1,6 +1,6 @@
 # Cabby: tests-first AnyCable Rust port specification
 
-Status: M0–M6 complete: all 923 translated upstream cases pass against Cabby. M7: Go vs Rust benchmarks published in the README (docs/benchmarks); remaining: independent review, manual testing guide, release.
+Status: M0–M7 benchmarks done: all 923 upstream cases pass; general review fixed; three-way benchmark (Action Cable / AnyCable / Cabby) in the README. Remaining: Pusher-protocol benchmark, AnyCable issue 265 soak test.
 Prepared: 2026-11-17. Progress: `cargo xtask report`; baseline evidence: `compat/baseline/README.md`.
 Project name: **Cabby**. Directory and planned binary: `cabby` (an independent AnyCable-compatible implementation).
 
@@ -300,11 +300,14 @@ The next coding deliverable is the test workspace, manifest, and baseline eviden
 
 ### Owner requests to complete at the end
 
-- [ ] Independent review of the whole project with Fable 5.2 (not anchored on the implementer's summary).
+- [ ] Pusher-protocol benchmark: Cabby and AnyCable Pusher modes vs Soketi and Laravel Reverb, through a Pusher client mode in the harness.
+- [ ] Soak test for AnyCable issue 265 (memory over hours of churn), Cabby vs AnyCable.
+
+- [x] Independent review of the whole project with Fable 5.2 (not anchored on the implementer's summary).
 - [x] Fill the README's Go vs Rust comparison table with measured results from the external harness (`crates/cabby-bench`), including workloads where Rust is not faster.
 - [x] Hand over manual testing instructions (`docs/manual-testing.md`, each step verified against a live server).
-- [ ] Three-way stress test with thousands of connections (Action Cable vs AnyCable vs Cabby) through the external harness, published in the README; run only when the machine is idle.
-- [ ] Once the rewrite is complete, remove the local Go toolchain and Go reference artifacts from the development machine (mise Go install, Go caches, `cabby-reference`/`ruby:2.7` Docker images and volumes, `compat/reference` build outputs). Go-vs-Rust verification then runs only in CI.
+- [x] Three-way stress test with thousands of connections (Action Cable vs AnyCable vs Cabby) through the external harness, published in the README; run only when the machine is idle.
+- [x] Once the rewrite is complete, remove the local Go toolchain and Go reference artifacts from the development machine (mise Go install, Go caches, `cabby-reference`/`ruby:2.7` Docker images and volumes, `compat/reference` build outputs). Go-vs-Rust verification then runs only in CI.
 
 ## Sources
 
