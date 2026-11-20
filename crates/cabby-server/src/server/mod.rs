@@ -17,8 +17,8 @@ pub use mounts::{api_handler, metrics_handler};
 pub use cabby_core::logger::TomlError;
 pub use http_server::{
     Body, BodyError, BoxError, ConnInfo, Handler, HttpServer, Request, Response, ResponseFuture, ServerDefaults,
-    ServerError, conn_info, current_defaults, empty, error_response, for_port, full, not_found, read_body,
-    runtime_handle, set_defaults, status_response,
+    ServerError, client_closed, conn_info, current_defaults, empty, error_response, for_port, full, not_found,
+    read_body, runtime_handle, set_defaults, status_response,
 };
 pub use request::{
     DefaultHeadersExtractor, HEALTH_MESSAGE, HeadersExtractor, HttpRequest, HttpResponse, REMOTE_ADDR_HEADER,
@@ -26,12 +26,21 @@ pub use request::{
 };
 pub use response_writer::{
     ChannelResponseWriter, MAX_BUFFERED, ResponseWriter, SharedResponseWriter, WRITE_TIMEOUT, channel_response,
-    lock_writer, shared_writer,
+    channel_response_for, lock_writer, shared_writer,
 };
 
 /// The health endpoint as a server handler (upstream `http.HandlerFunc(HealthHandler)`).
+/// The handler sets no content type; Go's server sniffs the body, which gives
+/// `text/plain; charset=utf-8`.
 pub fn health_endpoint() -> impl Handler {
-    |_req: Request| async { ::http::Response::new(full(HEALTH_MESSAGE)) }
+    |_req: Request| async {
+        let mut resp = ::http::Response::new(full(HEALTH_MESSAGE));
+        resp.headers_mut().insert(
+            ::http::header::CONTENT_TYPE,
+            ::http::HeaderValue::from_static(response_writer::sniff_content_type(HEALTH_MESSAGE)),
+        );
+        resp
+    }
 }
 
 /// Whether an `Origin` header value matches one of the allowed host patterns

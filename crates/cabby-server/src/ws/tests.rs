@@ -468,3 +468,104 @@ fn push_mode_delivers_one_message_at_a_time_then_the_end() {
     assert_eq!(end, late_ends.recv_timeout(IO_DEADLINE).unwrap());
     server.shutdown();
 }
+
+// --- gorilla close and protocol-error frames (independent review, Low) ---------
+
+/// A raw socket past the handshake, with its session.
+fn raw_session(addr: SocketAddr, rx: &mpsc::Receiver<Event>) -> (TcpStream, WsConnection) {
+    let mut stream = connect(addr);
+    write!(
+        stream,
+        "GET /cable HTTP/1.1\r\nHost: {addr}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    )
+    .unwrap();
+    assert_eq!(101, read_response(&mut stream).status);
+    let (conn, _) = session(rx);
+    (stream, conn)
+}
+
+/// A client frame: masked unless `unmasked`; `b0` is FIN/RSV/opcode.
+fn raw_frame(b0: u8, payload: &[u8], unmasked: bool) -> Vec<u8> {
+    let mut out = vec![b0];
+    let mask = [0x11, 0x22, 0x33, 0x44];
+    let len = u8::try_from(payload.len()).expect("short payload");
+    if unmasked {
+        out.push(len);
+        out.extend_from_slice(payload);
+    } else {
+        out.push(0x80 | len);
+        out.extend_from_slice(&mask);
+        out.extend(payload.iter().enumerate().map(|(i, b)| b ^ mask[i % 4]));
+    }
+    out
+}
+
+/// Reads the server's next frame: `(opcode, payload)`.
+fn read_raw_frame(stream: &mut TcpStream) -> (u8, Vec<u8>) {
+    use std::io::Read;
+    let mut head = [0u8; 2];
+    stream.read_exact(&mut head).unwrap();
+    assert_eq!(0, head[1] & 0x80, "server frames are not masked");
+    let mut payload = vec![0; usize::from(head[1] & 0x7f)];
+    stream.read_exact(&mut payload).unwrap();
+    (head[0] & 0x0f, payload)
+}
+
+/// gorilla's default close handler answers a close frame with its code and
+/// no reason (an empty payload for none). Before, the reason was echoed.
+#[test]
+fn echoes_close_codes_without_the_reason() {
+    let (server, addr, rx) = ws_server(&Config::new());
+    for (payload, echo, end) in [
+        (&b"\x03\xe8bye"[..], &b"\x03\xe8"[..], "websocket: close 1000 (normal): bye"),
+        (b"\x0f\xa0custom", b"\x0f\xa0", "websocket: close 4000: custom"),
+        (b"", b"", "websocket: close 1005 (no status)"),
+        (b"\x03", b"", "websocket: close 1005 (no status)"),
+    ] {
+        let (mut stream, conn) = raw_session(addr, &rx);
+        stream.write_all(&raw_frame(0x88, payload, false)).unwrap();
+        assert_eq!(Err(ConnectionError(end.into())), conn.read(), "{payload:?}");
+        assert_eq!((8, echo.to_vec()), read_raw_frame(&mut stream), "{payload:?}");
+    }
+    server.shutdown();
+}
+
+/// Protocol errors close with 1002 and gorilla's texts. Before, the close
+/// reasons were tungstenite's error messages.
+#[test]
+fn closes_protocol_errors_with_gorilla_texts() {
+    let (server, addr, rx) = ws_server(&Config::new());
+    let cases: [(Vec<u8>, &str); 9] = [
+        (raw_frame(0x81, b"{}", true), "bad MASK"),
+        (raw_frame(0xC1, b"{}", false), "RSV1 set"),
+        (raw_frame(0xF1, b"{}", true), "RSV1 set, RSV2 set, RSV3 set, bad MASK"),
+        (raw_frame(0x83, b"x", false), "bad opcode 3"),
+        (raw_frame(0x80, b"x", false), "continuation after FIN"),
+        (raw_frame(0x09, b"", false), "FIN not set on control"),
+        ([raw_frame(0x01, b"a", false), raw_frame(0x81, b"b", false)].concat(), "data before FIN"),
+        (raw_frame(0x88, b"\x03\xed", false), "bad close code 1005"),
+        (raw_frame(0x88, b"\x03\xe8\xff", false), "invalid utf8 payload in close frame"),
+    ];
+    for (bytes, text) in cases {
+        let (mut stream, conn) = raw_session(addr, &rx);
+        stream.write_all(&bytes).unwrap();
+        assert_eq!(Err(ConnectionError(format!("websocket: {text}"))), conn.read());
+        let mut expected = 1002u16.to_be_bytes().to_vec();
+        expected.extend_from_slice(text.as_bytes());
+        assert_eq!((8, expected), read_raw_frame(&mut stream), "{text}");
+    }
+
+    // A control frame over 125 bytes (gorilla checks the 7-bit length).
+    let (mut stream, conn) = raw_session(addr, &rx);
+    stream.write_all(&[0x89, 0x80 | 126, 0, 200, 1, 2, 3, 4]).unwrap();
+    assert_eq!(Err(ConnectionError("websocket: len > 125 for control".into())), conn.read());
+    assert_eq!(8, read_raw_frame(&mut stream).0);
+
+    // Valid frames before an invalid one in the same read are delivered.
+    let (mut stream, conn) = raw_session(addr, &rx);
+    stream.write_all(&[raw_frame(0x81, b"ok", false), raw_frame(0x83, b"x", false)].concat()).unwrap();
+    assert_eq!(Ok(b"ok".to_vec()), conn.read());
+    assert_eq!(Err(ConnectionError("websocket: bad opcode 3".into())), conn.read());
+    server.shutdown();
+}
