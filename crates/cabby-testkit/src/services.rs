@@ -461,16 +461,24 @@ impl NatsService {
     }
 }
 
-/// Path to a `nats-server` binary: `CABBY_NATS_SERVER_BIN`, or built once from the
-/// Go module cache (the version pinned by the reference `go.sum`, the same server
+/// Path to a `nats-server` binary: `CABBY_NATS_SERVER_BIN` or `CABBY_NATS_SERVER`, one
+/// already built under `target/`, or else built once from the Go module cache (the version pinned by the reference `go.sum`, the same server
 /// upstream embeds through `enats`).
 fn nats_server_binary() -> PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
     BIN.get_or_init(|| {
-        if let Ok(p) = std::env::var("CABBY_NATS_SERVER_BIN") {
-            return PathBuf::from(p);
+        for var in ["CABBY_NATS_SERVER_BIN", "CABBY_NATS_SERVER"] {
+            if let Some(p) = std::env::var_os(var).map(PathBuf::from).filter(|p| p.exists()) {
+                return p;
+            }
         }
         let root = crate::workspace_root();
+        // Binaries built earlier (by the xtask runner or by this function) need no Go.
+        for built in ["target/test-services/nats-server", "target/reference-adapters/nats-server"] {
+            if root.join(built).exists() {
+                return root.join(built);
+            }
+        }
         let out = root.join("target/reference-adapters/nats-server");
         let status = Command::new("go")
             .args(["build", "-o"])
