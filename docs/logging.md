@@ -63,9 +63,12 @@ client path adds one.
 | D-051 | `handle batch-broadcast message` lists the messages, not element addresses |
 | D-052 | Redis publishing failures are logged (Go ignores them) |
 | D-053 | embedded NATS server records come from the child process |
+| D-055 | `the Pusher channel is only available at the Pusher endpoint` (debug) for a refused `$pusher` subscription |
+| D-056 | `failed to handle incoming message` with `error="too many deeply nested messages in progress"` for a deep message dropped at the cap |
 
 Lines Cabby logs that Go does not, all recorded: the D-003 Redis resubscription warnings,
-D-044's `embedded NATS server exited unexpectedly`, D-052's publishing failures.
+D-044's `embedded NATS server exited unexpectedly`, D-052's publishing failures, D-055's
+refused `$pusher` subscriptions, D-056's dropped deep messages.
 
 ## Coverage
 
