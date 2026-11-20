@@ -25,7 +25,7 @@ plan and progress. Don't rely on earlier conversations.
   signature; both are fixed in Cabby (D-054, D-055). Don't publish details (README, issues)
   before that.
 - **Go is removed from this machine.** Go-backend runs (`cargo xtask test --backend go`) happen in
-  CI; locally, `mise install` would bring Go back. Kept: `target/reference-bin/anycable-go` (the
+  CI (Go is no longer in `mise.toml`; see the comment there to run it locally). Kept: `target/reference-bin/anycable-go` (the
   benchmarks need it) and `target/test-services/nats-server` (Cabby's tests need it). Move both
   aside before any `cargo clean`.
 - **Benchmarks only run on this Linux box,** with the machine idle (`taskset`, `/proc`). The
