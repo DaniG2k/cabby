@@ -17,7 +17,13 @@
 //! --rpc_impl=http`, auth and public streams off). [`ServerTuning`] maps to the
 //! matching node flags; `extra_args` come last. The metrics endpoint shares the
 //! main port unless another one is given. The environment is cleared of
-//! `ANYCABLE_*` variables and telemetry is disabled (`ANYCABLE_DISABLE_TELEMETRY`).
+//! `ANYCABLE_*` variables, telemetry is disabled (`ANYCABLE_DISABLE_TELEMETRY`) and
+//! [`ServerConfig::env`] is added.
+//!
+//! The metrics endpoint is optional: a server without one (Action Cable, see
+//! `bench/actioncable`) answers it with an HTTP error, [`Server::has_metrics`] then
+//! reports `false`, every later read fails fast, and scenarios report what depends on
+//! server gauges as unknown instead of waiting for it.
 //! Every wait (readiness, shutdown) has a deadline; shutdown sends SIGTERM, then
 //! SIGKILL.
 
@@ -87,6 +93,8 @@ pub struct ServerConfig {
     pub tuning: ServerTuning,
     /// Extra CLI flags appended after the defaults (upstream `ExtraOptions`).
     pub extra_args: Vec<String>,
+    /// Extra environment variables for the server process.
+    pub env: Vec<(String, String)>,
     /// Deadline for the server to accept connections.
     pub start_timeout: Duration,
     /// Time between SIGTERM and SIGKILL on shutdown.
@@ -102,6 +110,7 @@ impl ServerConfig {
             rpc_host: None,
             tuning: ServerTuning::default(),
             extra_args: Vec::new(),
+            env: Vec::new(),
             start_timeout: Duration::from_secs(20),
             shutdown_grace: Duration::from_secs(5),
         }
@@ -262,6 +271,8 @@ pub struct Server {
     readers: Mutex<Vec<JoinHandle<()>>>,
     grace: Duration,
     stopped: Mutex<bool>,
+    /// Whether the metrics endpoint exists ([`Server::has_metrics`]), probed once.
+    metrics_served: OnceLock<bool>,
 }
 
 fn capture(mut stream: impl Read + Send + 'static, sink: Arc<Mutex<Captured>>, forward: bool) -> JoinHandle<()> {
@@ -308,6 +319,7 @@ impl Server {
             }
         }
         cmd.env("ANYCABLE_DISABLE_TELEMETRY", "true").args(cfg.args(port, port)).stdin(Stdio::null());
+        cmd.envs(cfg.env.iter().map(|(k, v)| (k, v)));
         let forward = cfg.log == ServerLog::Stderr;
         match &cfg.log {
             ServerLog::File(path) => {
@@ -339,6 +351,7 @@ impl Server {
             readers: Mutex::new(readers),
             grace: cfg.shutdown_grace,
             stopped: Mutex::new(false),
+            metrics_served: OnceLock::new(),
         };
         let deadline = Instant::now() + cfg.start_timeout;
         loop {
@@ -459,9 +472,29 @@ impl Server {
         result
     }
 
-    /// All server metrics from the metrics endpoint.
+    /// All server metrics from the metrics endpoint; an error without a request when
+    /// the server has none ([`Server::has_metrics`]).
     pub fn metrics(&self) -> Result<Metrics, BenchError> {
-        fetch_metrics(self.metrics_port).map(|t| Metrics::parse(&t))
+        if !self.has_metrics() {
+            return Err(BenchError("the server has no metrics endpoint".into()));
+        }
+        fetch_metrics(self.metrics_port).map(|t| Metrics::parse(&t)).map_err(MetricsError::into_bench)
+    }
+
+    /// Whether the server serves the metrics endpoint, probed on first use: an HTTP
+    /// error answer means it has none; transport errors are retried a few times.
+    pub fn has_metrics(&self) -> bool {
+        *self.metrics_served.get_or_init(|| {
+            const ATTEMPTS: usize = 3;
+            for _ in 0..ATTEMPTS {
+                match fetch_metrics(self.metrics_port) {
+                    Ok(_) => return true,
+                    Err(MetricsError::Status(_)) => return false,
+                    Err(MetricsError::Other(_)) => std::thread::sleep(Duration::from_millis(100)),
+                }
+            }
+            false
+        })
     }
 
     /// Server gauge `name` from the metrics endpoint (0 when unknown). Gauges lag by
@@ -504,9 +537,26 @@ impl Drop for Server {
     }
 }
 
+/// Why a metrics read failed.
+enum MetricsError {
+    /// The server answered with a non-2xx status line.
+    Status(String),
+    /// Transport error or malformed response.
+    Other(String),
+}
+
+impl MetricsError {
+    fn into_bench(self) -> BenchError {
+        match self {
+            MetricsError::Status(line) => BenchError(format!("metrics endpoint answered {line}")),
+            MetricsError::Other(e) => BenchError(e),
+        }
+    }
+}
+
 /// GETs the metrics page over plain HTTP/1.0 (no chunked encoding).
-fn fetch_metrics(port: u16) -> Result<String, BenchError> {
-    let err = |e: std::io::Error| BenchError(format!("metrics endpoint: {e}"));
+fn fetch_metrics(port: u16) -> Result<String, MetricsError> {
+    let err = |e: std::io::Error| MetricsError::Other(format!("metrics endpoint: {e}"));
     let mut conn = TcpStream::connect_timeout(&loopback(port), METRICS_TIMEOUT).map_err(err)?;
     conn.set_read_timeout(Some(METRICS_TIMEOUT)).map_err(err)?;
     conn.set_write_timeout(Some(METRICS_TIMEOUT)).map_err(err)?;
@@ -514,9 +564,10 @@ fn fetch_metrics(port: u16) -> Result<String, BenchError> {
     let mut raw = Vec::new();
     conn.read_to_end(&mut raw).map_err(err)?;
     let text = String::from_utf8_lossy(&raw);
-    let (head, body) = text.split_once("\r\n\r\n").ok_or_else(|| BenchError("malformed metrics response".into()))?;
+    let (head, body) =
+        text.split_once("\r\n\r\n").ok_or_else(|| MetricsError::Other("malformed metrics response".into()))?;
     if !head.split_whitespace().nth(1).is_some_and(|s| s.starts_with('2')) {
-        return Err(BenchError(format!("metrics endpoint answered {}", head.lines().next().unwrap_or_default())));
+        return Err(MetricsError::Status(head.lines().next().unwrap_or_default().to_owned()));
     }
     Ok(body.to_owned())
 }
