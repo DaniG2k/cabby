@@ -12,7 +12,8 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, OnceLock};
 
 mod config;
 mod format;
@@ -26,6 +27,14 @@ pub use values::{
     AnyValue, CompactAny, CompactValue, FilteredMap, FilteredUrl, compact_any, compact_value, compact_value_bytes,
     compact_values, compact_values_bytes,
 };
+
+/// Go `fmt.Sprintf("%+v", v)` (slog's text rendering of a value without a
+/// `LogValue` method).
+pub fn plus_v(v: &AnyValue) -> String {
+    let mut out = String::new();
+    gofmt::write_plus_v(&mut out, v);
+    out
+}
 
 /// Values longer than this are truncated by the compact wrappers (upstream `maxValueLength`).
 pub const MAX_VALUE_LENGTH: usize = 100;
@@ -217,22 +226,225 @@ pub fn filtered_map(val: Option<&BTreeMap<String, String>>) -> FilteredMap {
     LogFilter::global().filtered_map(val)
 }
 
-/// Where records written by core components go (upstream's default `slog`
-/// logger). The process logger installs itself with [`set_sink`]; until then
-/// records are dropped.
-pub type Sink = fn(Level, &str, &[Attr]);
+/// One record handed to the process logger.
+#[derive(Debug, Clone, Copy)]
+pub struct Record<'a> {
+    pub level: Level,
+    pub msg: &'a str,
+    /// The logger's context attributes (upstream `logger.With(...)`), before `attrs`.
+    pub context: &'a [Attr],
+    /// The call's own attributes.
+    pub attrs: &'a [Attr],
+    /// Whether the process-wide attributes (upstream `slog.With("nodeid", id)`,
+    /// which the runner passes to most components) come first. Upstream
+    /// components that log through `slog.With(...)` directly do not get them.
+    pub with_base: bool,
+}
+
+/// Where records go (upstream's default `slog` logger). The process logger
+/// installs itself with [`set_sink`]; until then records are dropped.
+pub type Sink = fn(&Record<'_>);
 
 static SINK: OnceLock<Sink> = OnceLock::new();
+
+/// Lowest level written ([`Level::rank`]); [`LEVEL_OFF`] discards everything.
+static MIN_LEVEL: AtomicU8 = AtomicU8::new(1);
+const LEVEL_OFF: u8 = 4;
+
+impl Level {
+    /// Ordering of levels (slog: debug < info < warn < error).
+    pub fn rank(self) -> u8 {
+        match self {
+            Level::Debug => 0,
+            Level::Info => 1,
+            Level::Warn => 2,
+            Level::Error => 3,
+        }
+    }
+}
 
 /// Installs the process logger (the first call wins).
 pub fn set_sink(sink: Sink) {
     let _ = SINK.set(sink);
 }
 
-/// Writes a record to the process logger.
+/// Sets the lowest level that is written (`None`: nothing is). The process
+/// logger keeps it in sync with its configuration.
+pub fn set_min_level(level: Option<Level>) {
+    MIN_LEVEL.store(level.map_or(LEVEL_OFF, Level::rank), Ordering::Relaxed);
+}
+
+/// Whether a record at `level` would be written: an atomic load and a
+/// comparison, so callers check it before building attributes (debug records
+/// on hot paths cost next to nothing when debug is off).
+#[inline]
+pub fn enabled(level: Level) -> bool {
+    level.rank() >= MIN_LEVEL.load(Ordering::Relaxed) && SINK.get().is_some()
+}
+
+/// Writes a record without context to the process logger.
 pub fn log(level: Level, msg: &str, attrs: &[Attr]) {
-    if let Some(sink) = SINK.get() {
-        sink(level, msg, attrs);
+    Logger::default().log(level, msg, attrs);
+}
+
+/// A logger with context attributes (upstream `*slog.Logger` values built with
+/// `With(...)`). Cloning is cheap; [`Logger::with`] allocates the new context.
+#[derive(Debug, Clone)]
+pub struct Logger {
+    context: Arc<[Attr]>,
+    with_base: bool,
+}
+
+impl Default for Logger {
+    /// The runner's logger (upstream `slog.With("nodeid", id)`).
+    fn default() -> Self {
+        Logger { context: Arc::from(Vec::new()), with_base: true }
+    }
+}
+
+impl Logger {
+    /// A logger without the process-wide attributes (upstream `slog.With(...)`
+    /// on the default logger, bypassing the runner's).
+    pub fn root() -> Self {
+        Logger { with_base: false, ..Logger::default() }
+    }
+
+    /// A logger with one more context attribute (upstream `With(key, value)`).
+    pub fn with(&self, key: &str, value: impl Into<LogValue>) -> Logger {
+        let mut context = Vec::with_capacity(self.context.len() + 1);
+        context.extend_from_slice(&self.context);
+        context.push(Attr::new(key, value.into()));
+        Logger { context: Arc::from(context), with_base: self.with_base }
+    }
+
+    /// The context attributes.
+    pub fn context(&self) -> &[Attr] {
+        &self.context
+    }
+
+    /// See [`enabled`].
+    #[inline]
+    pub fn enabled(&self, level: Level) -> bool {
+        enabled(level)
+    }
+
+    /// Writes a record (context attributes first). Prefer the `log_*!` macros,
+    /// which skip building the attributes of disabled records.
+    pub fn log(&self, level: Level, msg: &str, attrs: &[Attr]) {
+        if !enabled(level) {
+            return;
+        }
+        if let Some(sink) = SINK.get() {
+            sink(&Record { level, msg, context: &self.context, attrs, with_base: self.with_base });
+        }
+    }
+}
+
+/// Logs through a [`Logger`] at a level, building the attributes only when the
+/// level is enabled: `log_at!(logger, Level::Debug, "msg", "key" => value, ...)`.
+/// Values are anything `Into<LogValue>`.
+#[macro_export]
+macro_rules! log_at {
+    ($logger:expr, $level:expr, $msg:expr $(, $key:expr => $value:expr)* $(,)?) => {{
+        let level = $level;
+        if $crate::logger::enabled(level) {
+            $logger.log(level, $msg, &[$($crate::logger::Attr::new($key, $crate::logger::LogValue::from($value))),*]);
+        }
+    }};
+}
+
+/// [`log_at!`] at debug level.
+#[macro_export]
+macro_rules! log_debug {
+    ($logger:expr, $($rest:tt)*) => { $crate::log_at!($logger, $crate::logger::Level::Debug, $($rest)*) };
+}
+
+/// [`log_at!`] at info level.
+#[macro_export]
+macro_rules! log_info {
+    ($logger:expr, $($rest:tt)*) => { $crate::log_at!($logger, $crate::logger::Level::Info, $($rest)*) };
+}
+
+/// [`log_at!`] at warn level.
+#[macro_export]
+macro_rules! log_warn {
+    ($logger:expr, $($rest:tt)*) => { $crate::log_at!($logger, $crate::logger::Level::Warn, $($rest)*) };
+}
+
+/// [`log_at!`] at error level.
+#[macro_export]
+macro_rules! log_error {
+    ($logger:expr, $($rest:tt)*) => { $crate::log_at!($logger, $crate::logger::Level::Error, $($rest)*) };
+}
+
+impl From<&str> for LogValue {
+    fn from(v: &str) -> Self {
+        LogValue::String(v.to_owned())
+    }
+}
+
+impl From<String> for LogValue {
+    fn from(v: String) -> Self {
+        LogValue::String(v)
+    }
+}
+
+impl From<&String> for LogValue {
+    fn from(v: &String) -> Self {
+        LogValue::String(v.clone())
+    }
+}
+
+impl From<bool> for LogValue {
+    fn from(v: bool) -> Self {
+        LogValue::Bool(v)
+    }
+}
+
+impl From<i32> for LogValue {
+    fn from(v: i32) -> Self {
+        LogValue::Int(v.into())
+    }
+}
+
+impl From<i64> for LogValue {
+    fn from(v: i64) -> Self {
+        LogValue::Int(v)
+    }
+}
+
+impl From<u32> for LogValue {
+    fn from(v: u32) -> Self {
+        LogValue::Uint(v.into())
+    }
+}
+
+impl From<u64> for LogValue {
+    fn from(v: u64) -> Self {
+        LogValue::Uint(v)
+    }
+}
+
+impl From<usize> for LogValue {
+    fn from(v: usize) -> Self {
+        LogValue::Uint(v as u64)
+    }
+}
+
+/// Go's `slog.Any(key, err)` for an `error` that may be nil: its message, or `<nil>`.
+pub fn error_value<E: fmt::Display + ?Sized>(err: Option<&E>) -> LogValue {
+    match err {
+        Some(e) => LogValue::String(e.to_string()),
+        None => LogValue::String("<nil>".to_owned()),
+    }
+}
+
+/// Go's `slog.Any(key, v)` for a nil-able pointer to a `LogValuer`: its value,
+/// or `<nil>`.
+pub fn optional_value<T: LogValuer>(v: Option<&T>) -> LogValue {
+    match v {
+        Some(v) => v.log_value(),
+        None => LogValue::String("<nil>".to_owned()),
     }
 }
 
@@ -248,6 +460,33 @@ mod tests {
             Attr::new("m", LogValue::Map([("k".to_owned(), LogValue::Uint(2))].into())),
         ]);
         assert_eq!("[a=-1 l=[x true] m=map[k:2]]", v.to_string());
+    }
+
+    /// Records below the level are dropped before their attributes are built,
+    /// so debug records on hot paths cost a level check.
+    #[test]
+    fn disabled_records_build_no_attributes() {
+        use std::sync::atomic::AtomicUsize;
+        static WRITTEN: AtomicUsize = AtomicUsize::new(0);
+        // Other tests of this binary log through the same (global) sink.
+        fn sink(r: &Record<'_>) {
+            let attrs: Vec<String> = r.context.iter().chain(r.attrs).map(Attr::to_string).collect();
+            if r.msg.starts_with("logger-test ") && attrs == ["context=node", "sid=s1", "k=2"] {
+                WRITTEN.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        set_sink(sink);
+        set_min_level(Some(Level::Info));
+        let log = Logger::default().with("context", "node").with("sid", "s1");
+
+        let mut built = 0;
+        crate::log_debug!(log, "logger-test skipped", "k" => { built += 1; 2 });
+        assert_eq!(0, built);
+        assert_eq!(0, WRITTEN.load(Ordering::SeqCst));
+
+        crate::log_info!(log, "logger-test written", "k" => { built += 1; 2 });
+        assert_eq!(1, built);
+        assert_eq!(1, WRITTEN.load(Ordering::SeqCst));
     }
 
     #[test]

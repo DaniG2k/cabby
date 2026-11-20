@@ -40,6 +40,14 @@ pub fn sign_hs256(claims: &Value, secret: &str) -> String {
     format!("{signing_input}.{}", b64url(&sig))
 }
 
+/// A token with the given header and claims JSON, HS256-signed whatever the
+/// header says (for malformed and unexpected-algorithm cases).
+pub fn sign_raw(header: &str, claims: &str, secret: &str) -> String {
+    let signing_input = format!("{}.{}", b64url(header.as_bytes()), b64url(claims.as_bytes()));
+    let sig = hmac_sha256(secret.as_bytes(), signing_input.as_bytes());
+    format!("{signing_input}.{}", b64url(&sig))
+}
+
 /// An `alg: none` token with an empty signature (golang-jwt `SigningMethodNone`).
 pub fn unsigned(claims: &Value) -> String {
     format!("{}.", segments("none", claims))

@@ -87,12 +87,8 @@ impl Breaker {
         self.state = state;
         self.new_generation(now);
         match state {
-            CbState::Open => {
-                crate::metrics::log(cabby_core::logger::Level::Warn, "circuit breaker is open", &cb_attrs())
-            }
-            CbState::Closed => {
-                crate::metrics::log(cabby_core::logger::Level::Info, "circuit breaker is closed", &cb_attrs())
-            }
+            CbState::Open => cb_logger().log(cabby_core::logger::Level::Warn, "circuit breaker is open", &[]),
+            CbState::Closed => cb_logger().log(cabby_core::logger::Level::Info, "circuit breaker is closed", &[]),
             CbState::HalfOpen => {}
         }
     }
@@ -151,9 +147,10 @@ impl Breaker {
     }
 }
 
-fn cb_attrs() -> Vec<cabby_core::logger::Attr> {
-    use cabby_core::logger::{Attr, LogValue};
-    vec![Attr::new("context", LogValue::String("cb".into())), Attr::new("name", LogValue::String("httrpc".into()))]
+/// Upstream `slog.With("context", "cb", "name", name)`: the default logger,
+/// so without the runner's `nodeid`.
+fn cb_logger() -> cabby_core::logger::Logger {
+    cabby_core::logger::Logger::root().with("context", "cb").with("name", "httrpc")
 }
 
 /// Reports a request's outcome to the breaker on drop (failure unless marked

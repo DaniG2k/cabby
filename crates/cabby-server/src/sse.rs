@@ -785,7 +785,12 @@ impl Handler {
                     return None;
                 }
                 Ok(None) => {
-                    log(Level::Error, "failed to subscribe", &sid, &[]);
+                    log(
+                        Level::Error,
+                        "failed to subscribe",
+                        &sid,
+                        &[Attr::new("error", LogValue::String("<nil>".into()))],
+                    );
                     status(400);
                     return None;
                 }
