@@ -2,7 +2,9 @@ package main
 
 // Bridge ops for upstream package `node`. Real Go nodes, sessions, brokers,
 // disconnect queues and subscription states are kept behind integer handles
-// and driven through their exported API only. Objects are wired the way
+// and driven through their exported API, plus two unexported fields that
+// upstream's tests (package node) use directly and the bridge reads by
+// reflection: node.hub and session.closeCtx. Objects are wired the way
 // upstream's test helpers (node/node_mocks_test.go, setupIntegrationNode) wire
 // them, and testify mocks (mocks.Controller, mocks.Broker) are programmed from
 // JSON expectations with canned Run callbacks. The test scaffolding upstream
@@ -15,14 +17,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/BurntSushi/toml"
 	"github.com/anycable/anycable-go/broker"
 	"github.com/anycable/anycable-go/common"
+	"github.com/anycable/anycable-go/hub"
 	"github.com/anycable/anycable-go/metrics"
 	"github.com/anycable/anycable-go/mocks"
 	natsconfig "github.com/anycable/anycable-go/nats"
@@ -441,34 +446,23 @@ func (d *blockingDisconnector) Enqueue(*node.Session) error {
 	return nil
 }
 
-// ctxProbe records whether the context of a controller call is done.
-type ctxProbe struct {
-	mocks.MockController
-	err error
-}
-
-func (c *ctxProbe) Subscribe(ctx context.Context, sid string, env *common.SessionEnv, id string, channel string) (*common.CommandResult, error) {
-	c.err = ctx.Err()
-	return nil, nil
-}
-
-// streamsController answers every command with a success that subscribes the
-// given stream and declares no Disconnect interest (no transmissions).
-type streamsController struct {
-	mocks.MockController
-	streams []string
-}
-
-func (c *streamsController) result() (*common.CommandResult, error) {
-	return &common.CommandResult{Status: common.SUCCESS, Streams: c.streams, DisconnectInterest: -1}, nil
-}
-
-func (c *streamsController) Subscribe(context.Context, string, *common.SessionEnv, string, string) (*common.CommandResult, error) {
-	return c.result()
-}
-
-func (c *streamsController) Perform(context.Context, string, *common.SessionEnv, string, string, string) (*common.CommandResult, error) {
-	return c.result()
+// unexportedField points to the unexported field `name` of the struct `obj`
+// points to, which must have type T. Upstream's node tests live in package
+// node and use such fields directly (node.hub, session.closeCtx); the bridge
+// reads the same memory instead of reimplementing what the call does.
+func unexportedField[T any](obj interface{}, name string) (*T, error) {
+	v := reflect.ValueOf(obj)
+	if v.Kind() != reflect.Ptr || v.Elem().Kind() != reflect.Struct {
+		return nil, fmt.Errorf("%T is not a pointer to a struct", obj)
+	}
+	f := v.Elem().FieldByName(name)
+	if !f.IsValid() {
+		return nil, fmt.Errorf("%T has no field %q", obj, name)
+	}
+	if want := reflect.TypeOf((*T)(nil)).Elem(); f.Type() != want {
+		return nil, fmt.Errorf("field %q of %T is %s, not %s", name, obj, f.Type(), want)
+	}
+	return (*T)(unsafe.Pointer(f.UnsafeAddr())), nil
 }
 
 // --------------------------------------------------------------------- calls
@@ -907,51 +901,23 @@ func init() {
 		case "Disconnect":
 			return errReply(n.Disconnect(s.s)), nil
 		case "HubSubscribe":
-			// No exported call subscribes a session in the hub directly: run the
-			// node's own command flow with a controller answering
-			// `Streams: [stream]` (no transmissions, no Disconnect interest),
-			// through a legacy broker (its Subscribe returns the stream name), so
-			// the node's broker is not called, as with upstream's hub-only call.
-			subs, err := subscriptionsOf(s.s)
+			// Upstream's tests (package node) call node.hub.SubscribeSession
+			// directly; the hub is an unexported field, read by reflection, and
+			// the call is the upstream one.
+			h, err := unexportedField[*hub.Hub](n, "hub")
 			if err != nil {
 				return nil, err
 			}
-			prev := o.controller
-			node.WithController(&streamsController{streams: []string{c.Stream}})(n)
-			n.SetBroker(broker.NewLegacyBroker(pubsub.NewLegacySubscriber(n)))
-			if _, ok := subs[c.Identifier]; ok {
-				_, err = n.Perform(s.s, &common.Message{Identifier: c.Identifier, Data: ""})
-			} else {
-				_, err = n.Subscribe(s.s, &common.Message{Identifier: c.Identifier})
-			}
-			n.SetBroker(o.broker)
-			node.WithController(prev)(n)
-			if err != nil {
-				return errReply(err), nil
-			}
-			// Upstream only touches the hub: put the recorded streams back
-			// (a channel the command added stays, with no streams).
-			after, err := subscriptionsOf(s.s)
-			if err != nil {
-				return nil, err
-			}
-			for ch := range after {
-				if streams, ok := subs[ch]; ok {
-					after[ch] = streams
-				} else {
-					after[ch] = []string{}
-				}
-			}
-			return errReply(restoreSubscriptions(s.s, after)), nil
+			(*h).SubscribeSession(s.s, c.Stream, c.Identifier)
+			return errReply(nil), nil
 		case "CloseContextErr":
-			// session.closeCtx is unexported; it is the context of every controller
-			// call, so a side-effect-free Subscribe on a probe controller reads it.
-			prev := o.controller
-			probe := &ctxProbe{}
-			node.WithController(probe)(n)
-			defer node.WithController(prev)(n)
-			_, _ = n.Subscribe(s.s, &common.Message{Identifier: "__cabby_close_ctx_probe"})
-			return probe.err != nil, nil
+			// Upstream asserts session.closeCtx.Err() (unexported, read by
+			// reflection).
+			ctx, err := unexportedField[context.Context](s.s, "closeCtx")
+			if err != nil {
+				return nil, err
+			}
+			return (*ctx).Err() != nil, nil
 		}
 
 		msg, err := c.message()

@@ -1078,6 +1078,59 @@ mod tests {
         assert_eq!(1, broker.add("s", "c"));
     }
 
+    /// Polls `done` until it holds or `limit` passes.
+    fn eventually(limit: Duration, what: &str, done: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + limit;
+        while !done() {
+            assert!(std::time::Instant::now() < deadline, "{what} within {limit:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// The expiration loop `start` runs (upstream `expireLoop`, one pass a
+    /// second) expires history, cached sessions and presence on its own, and
+    /// stops with `shutdown`. The other tests call `expire` directly.
+    #[test]
+    fn memory_expiry_loop_runs_until_shutdown() {
+        let clock = TestClock::new();
+        let mut config = Config::new();
+        config.history_ttl = 1;
+        config.sessions_ttl = 1;
+        config.presence_ttl = 1;
+        let broker = Memory::new(None, None, &config, clock.clone());
+        broker.start().unwrap();
+
+        broker.add("s", "a");
+        struct State;
+        impl Cacheable for State {
+            fn to_cache_entry(&self) -> Result<Vec<u8>, BrokerError> {
+                Ok(b"state".to_vec())
+            }
+        }
+        broker.commit_session("sid", &State).unwrap();
+        broker.presence_add("s", "sid", "pid", Value::Null).unwrap();
+        assert_eq!(1, broker.history_since("s", 0).unwrap().unwrap_or_default().len());
+        assert!(broker.restore_session("sid").unwrap().is_some());
+
+        clock.advance(Duration::from_secs(5));
+        let limit = EXPIRE_INTERVAL * 3;
+        eventually(limit, "history expires", || broker.history_since("s", 0).unwrap() == Some(vec![]));
+        eventually(limit, "the cached session expires", || broker.restore_session("sid").unwrap().is_none());
+        eventually(limit, "presence expires", || broker.presence_info("s", None).unwrap().total == 0);
+        // The stream itself is dropped ten history TTLs after its last message.
+        clock.advance(Duration::from_secs(11));
+        eventually(limit, "the stream expires", || broker.history_since("s", 0).unwrap().is_none());
+
+        broker.shutdown().unwrap();
+        // Give the loop time to observe the stop, then make everything stale:
+        // nothing expires any more.
+        std::thread::sleep(Duration::from_millis(100));
+        broker.add("t", "b");
+        clock.advance(Duration::from_secs(60));
+        std::thread::sleep(EXPIRE_INTERVAL * 2 + Duration::from_millis(200));
+        assert_eq!(1, broker.history_since("t", 0).unwrap().unwrap_or_default().len());
+    }
+
     #[test]
     fn memory_history_from_reports_offsets_out_of_range() {
         let mut config = Config::new();

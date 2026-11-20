@@ -7,7 +7,10 @@
 //! - [`ffi`]: raw declarations of the C shim (`shim/cabby_mruby.c`). The shim is
 //!   the only code that calls mruby. It wraps every call that can raise in a
 //!   jump buffer of its own, so an mruby exception (a `longjmp`) never crosses a
-//!   Rust frame, and it checks value types before mruby dereferences them.
+//!   Rust frame, and pops the call frames a raise leaves behind; it keeps the
+//!   values handed to a call rooted for the call's duration, checks value types
+//!   before mruby dereferences them, and never lets a proc without an
+//!   environment reach Ruby code.
 //! - the safe API ([`Vm`], [`Val`], [`Parser`], [`Context`]): handles that keep
 //!   the shim's preconditions. A value is only passed to C after checking that
 //!   it belongs to the same open VM and is a live object of its recorded type
@@ -16,9 +19,10 @@
 //!   a panic is re-raised in Rust once control is back in Rust.
 //!
 //! `cabby_server::mrb` builds the go-mruby-compatible API on top of the safe
-//! layer without any `unsafe`. Scripts are trusted operator input: mruby 1.2.0
-//! has known memory-safety bugs in the interpreter itself, which no binding can
-//! fix (docs/mruby.md).
+//! layer without any `unsafe`. `tests/probes.rs` holds the memory-safety
+//! regression tests; `cargo xtask asan` runs them under AddressSanitizer.
+//! Scripts are trusted operator input: mruby 1.2.0 has known memory-safety
+//! bugs in the interpreter itself, which no binding can fix (docs/mruby.md).
 
 mod safe;
 

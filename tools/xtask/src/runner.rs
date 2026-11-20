@@ -5,10 +5,19 @@
 //! and reconciles with `compat/test-map.json`:
 //!
 //! * fail, crash, timeout, ignore, or an unmapped test => error;
+//! * a test binary that exits abnormally (a signal, an abort, or a failure
+//!   exit without libtest's summary), or reports fewer results than the tests
+//!   it started => error;
+//! * a mapped case whose tests did not all run => `MISSING` error (without a
+//!   filter), and the number of tests run must match the manifest;
 //! * a recorded `pass` that no longer passes => regression error;
 //! * a `pending` case that now passes => error until promoted with `--record`;
-//! * against Go, every translated case must pass (or carry a documented
-//!   reference status such as `upstream_failure`).
+//! * against Go, every case must keep its recorded reference status (`pass`,
+//!   `not_observable`, `upstream_failure`); a change is an error until
+//!   recorded with `--record`.
+//!
+//! `--record` only updates cases whose tests all ran in that invocation, so a
+//! filtered run never promotes a case from a partial result.
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
@@ -65,7 +74,12 @@ fn test_binaries() -> Result<Vec<(String, String)>> {
     Ok(bins)
 }
 
-fn run_binary(exe: &str, backend: Backend, sut_bin: &str, filter: Option<&str>) -> Result<(String, bool)> {
+fn run_binary(
+    exe: &str,
+    backend: Backend,
+    sut_bin: &str,
+    filter: Option<&str>,
+) -> Result<(String, std::process::ExitStatus)> {
     let mut cmd = Command::new(exe);
     cmd.env("CABBY_BACKEND", backend.as_str()).env("SUT_BIN", sut_bin);
     // Cabby's embedded NATS (`--embed_nats`) runs an external `nats-server`
@@ -108,7 +122,33 @@ fn run_binary(exe: &str, backend: Backend, sut_bin: &str, filter: Option<&str>) 
     };
     let mut out = t1.join().unwrap_or_default();
     out.push_str(&t2.join().unwrap_or_default());
-    Ok((out, status.success()))
+    Ok((out, status))
+}
+
+/// libtest's exit status for a run in which some tests failed.
+const LIBTEST_FAILED: i32 = 101;
+
+/// Why a test binary's run cannot be trusted, if it can't: it must print
+/// libtest's summary and exit successfully, or with libtest's failure status
+/// (failing and pending tests). A signal, an abort, a `process::exit` from a
+/// test or any other exit means the binary died mid-run, whatever results it
+/// printed before.
+fn abnormal_exit(status: std::process::ExitStatus, output: &str) -> Option<String> {
+    let summary = |verdict: &str| output.lines().any(|l| l.starts_with(&format!("test result: {verdict}.")));
+    if status.success() && summary("ok") {
+        return None;
+    }
+    if status.code() == Some(LIBTEST_FAILED) && summary("FAILED") {
+        return None;
+    }
+    let printed = summary("ok") || summary("FAILED");
+    Some(format!("exited with {status}{}", if printed { "" } else { " before libtest's summary" }))
+}
+
+/// The number of tests libtest said it would run (`running N tests`; one line
+/// per test harness in the binary).
+fn started(output: &str) -> usize {
+    output.lines().filter_map(|l| l.strip_prefix("running ")?.split_whitespace().next()?.parse::<usize>().ok()).sum()
 }
 
 /// Parses libtest's human output into per-test outcomes.
@@ -219,10 +259,18 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
     let issue_tests: std::collections::HashSet<String> =
         manifest::load()?.rust_only.iter().filter(|r| r.relation == "issue").map(|r| r.rust_case.clone()).collect();
     for (name, exe) in test_binaries()? {
-        let (out, _ok) = run_binary(&exe, backend, &sut_bin, filter)?;
+        let (out, status) = run_binary(&exe, backend, &sut_bin, filter)?;
         let parsed = parse(&out);
-        if parsed.is_empty() && !out.contains("running 0 tests") {
+        if let Some(why) = abnormal_exit(status, &out) {
+            let lines: Vec<&str> = out.lines().collect();
+            let tail = lines[lines.len().saturating_sub(40)..].join("\n");
+            errors.push(format!("CRASH {name}: the test binary {why}; last output:\n{tail}"));
+        } else if parsed.is_empty() && !out.contains("running 0 tests") {
             errors.push(format!("{name}: could not parse test output (crash?):\n{out}"));
+        }
+        let expected = started(&out);
+        if parsed.len() < expected {
+            errors.push(format!("INCOMPLETE {name}: {expected} tests started, {} reported a result", parsed.len()));
         }
         for (t, o) in parsed {
             if o == Outcome::Fail && backend == Backend::Go && issue_tests.contains(&format!("{name}::{t}")) {
@@ -260,6 +308,13 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
             errors.push(format!("UNMAPPED {t}: run `cargo xtask inventory` (missing annotation?)"));
         }
     }
+    if filter.is_none() && results.len() != mapped.len() {
+        errors.push(format!(
+            "COUNT: {} Rust tests ran, the manifest maps {} (see MISSING/UNMAPPED)",
+            results.len(),
+            mapped.len()
+        ));
+    }
 
     let mut promoted = 0;
     let mut tally: BTreeMap<&'static str, usize> = BTreeMap::new();
@@ -269,31 +324,39 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
                      rust_status: &mut String,
                      errors: &mut Vec<String>| {
         let outs: Vec<Outcome> = rust_cases.iter().filter_map(|r| results.get(r).copied()).collect();
+        let missing: Vec<&String> = rust_cases.iter().filter(|r| !results.contains_key(*r)).collect();
+        if filter.is_none() && !missing.is_empty() {
+            errors.push(format!("MISSING {label}: mapped Rust cases did not run: {missing:?}"));
+        }
         if outs.is_empty() {
             return;
         }
-        if filter.is_none() && outs.len() != rust_cases.len() {
-            errors.push(format!("MISSING {label}: mapped Rust cases did not run: {rust_cases:?}"));
-        }
+        // Only a case whose tests all ran may change status in the manifest.
+        let complete = missing.is_empty();
         let o = combine(&outs);
         *tally.entry(status_str(o)).or_default() += 1;
         match backend {
             Backend::Go => {
-                if o == Outcome::Pass {
-                    if ref_status != "pass" {
-                        promoted += 1;
-                    }
-                    if record {
-                        *ref_status = "pass".into();
-                    }
-                } else if o == Outcome::Fail && !matches!(ref_status.as_str(), "upstream_failure" | "not_observable") {
-                    // already reported as FAIL above
-                } else if o == Outcome::Pending {
+                if o == Outcome::Pending {
                     errors.push(format!("PENDING-ON-GO {label}: the Go reference cannot be pending"));
-                } else if o == Outcome::NotObservable && record {
-                    *ref_status = "not_observable".into();
-                } else if o == Outcome::UpstreamFailure && record {
-                    *ref_status = "upstream_failure".into();
+                    return;
+                }
+                let now = status_str(o);
+                if o == Outcome::Pass && ref_status != "pass" {
+                    promoted += 1;
+                }
+                match ref_status.as_str() {
+                    // A failure is already reported as FAIL above.
+                    _ if o == Outcome::Fail => {}
+                    recorded if recorded == now => {}
+                    "pass" => errors.push(format!("REGRESSION-ON-GO {label}: recorded pass, now {now}")),
+                    recorded @ ("not_observable" | "upstream_failure") if !record => errors.push(format!(
+                        "CHANGED-ON-GO {label}: recorded {recorded}, now {now}; review and record with --record"
+                    )),
+                    _ => {}
+                }
+                if record && complete && o != Outcome::Fail {
+                    *ref_status = now.into();
                 }
             }
             Backend::Rust => match (rust_status.as_str(), o) {
@@ -301,13 +364,13 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
                 ("pass", _) => errors.push(format!("REGRESSION {label}: recorded pass, now {}", status_str(o))),
                 (_, Outcome::Pass) => {
                     promoted += 1;
-                    if record {
+                    if record && complete {
                         *rust_status = "pass".into();
-                    } else {
+                    } else if !record {
                         errors.push(format!("UNREVIEWED-PASS {label}: passes now; review and promote with --record"));
                     }
                 }
-                (_, Outcome::Pending) => *rust_status = "pending".into(),
+                (_, Outcome::Pending) if complete => *rust_status = "pending".into(),
                 _ => {}
             },
         }
@@ -411,6 +474,30 @@ test result: FAILED. 1 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out
     fn not_observable_go_arms_are_recognized() {
         let out = "test b::hidden ... FAILED\n\nfailures:\n\n---- b::hidden stdout ----\n\nthread 'b::hidden' panicked at x.rs:1:1:\nnot implemented: not_observable: unexported state\n\nfailures:\n    b::hidden\n";
         assert_eq!(parse(out)["b::hidden"], Outcome::NotObservable);
+    }
+
+    #[test]
+    fn a_binary_must_exit_cleanly_or_with_libtests_failure_summary() {
+        use std::os::unix::process::ExitStatusExt;
+        let ok = std::process::ExitStatus::from_raw(0);
+        let failed = std::process::ExitStatus::from_raw(LIBTEST_FAILED << 8);
+        let segv = std::process::ExitStatus::from_raw(11);
+        let abort = std::process::ExitStatus::from_raw(134 << 8);
+        assert_eq!(abnormal_exit(ok, "test result: ok."), None);
+        // Failing or pending tests: libtest exits 101 after its summary.
+        assert_eq!(abnormal_exit(failed, OUTPUT), None);
+        // A crash after some results, a panic outside a test, an abort.
+        assert!(abnormal_exit(segv, "running 2 tests\ntest a ... ok\n").is_some());
+        assert!(abnormal_exit(failed, "running 2 tests\ntest a ... ok\n").is_some());
+        assert!(abnormal_exit(abort, OUTPUT).is_some());
+        // A test that calls `process::exit(0)`: success, but no summary.
+        assert!(abnormal_exit(ok, "running 2 tests\ntest a ... ok\n").is_some());
+    }
+
+    #[test]
+    fn counts_started_tests() {
+        assert_eq!(started(OUTPUT), 4);
+        assert_eq!(started("running 1 test\ntest a ... ok\n\nrunning 0 tests\n"), 1);
     }
 
     #[test]
