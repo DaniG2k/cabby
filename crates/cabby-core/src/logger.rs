@@ -28,6 +28,14 @@ pub use values::{
     compact_values, compact_values_bytes,
 };
 
+/// Go `fmt.Sprintf("%+v", v)` (slog's text rendering of a value without a
+/// `LogValue` method).
+pub fn plus_v(v: &AnyValue) -> String {
+    let mut out = String::new();
+    gofmt::write_plus_v(&mut out, v);
+    out
+}
+
 /// Values longer than this are truncated by the compact wrappers (upstream `maxValueLength`).
 pub const MAX_VALUE_LENGTH: usize = 100;
 
