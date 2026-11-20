@@ -16,7 +16,6 @@ mod streamer;
 pub(crate) mod subscription;
 mod url;
 
-pub(crate) use streamer::LogContext;
 pub use streamer::{StreamHandler, Streamer, StreamerOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
