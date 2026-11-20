@@ -1,6 +1,7 @@
 //! The node itself (upstream `node/node.go` and `node/controller.go`) and its
 //! time abstraction.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, RwLock, Weak};
 use std::time::{Duration, Instant};
 
@@ -280,6 +281,9 @@ pub struct Node {
     disconnector: RwLock<Option<Arc<dyn Disconnector>>>,
     lifecycle: Mutex<Lifecycle>,
     lifecycle_changed: Condvar,
+    /// `$pusher` is routed to the Pusher controller: subscriptions to it are
+    /// refused for sessions outside the Pusher endpoint.
+    pusher_channel_reserved: AtomicBool,
 }
 
 impl std::fmt::Debug for Node {
@@ -320,6 +324,7 @@ impl Node {
             disconnector: RwLock::new(None),
             lifecycle: Mutex::new(Lifecycle::default()),
             lifecycle_changed: Condvar::new(),
+            pusher_channel_reserved: AtomicBool::new(false),
         });
 
         if registered {
@@ -783,9 +788,23 @@ impl Node {
         }
 
         let env = s.get_env();
-        let Outcome { result, error } = with_close_context(s.close_context(), || {
-            self.controller().subscribe(&s.get_id(), Some(&env), &env.identifiers, id)
-        });
+        let Outcome { result, error } = if self.refuses_pusher_channel(s, id) {
+            // The `$pusher` channel only accepts subscriptions from the Pusher endpoint.
+            log_debug!(s.logger(), "the Pusher channel is only available at the Pusher endpoint",
+                "identifier" => filtered_identifier(id).log_value());
+            Outcome {
+                result: Some(CommandResult {
+                    status: Status::Failure,
+                    transmissions: vec![rejection_message(id)],
+                    ..Default::default()
+                }),
+                error: None,
+            }
+        } else {
+            with_close_context(s.close_context(), || {
+                self.controller().subscribe(&s.get_id(), Some(&env), &env.identifiers, id)
+            })
+        };
 
         if s.is_closed() {
             log_debug!(s.logger(), "skip subscribe result: closed");
@@ -840,6 +859,26 @@ impl Node {
         }
 
         Ok(result)
+    }
+
+    /// Reserves `$pusher` for the Pusher endpoint: once called (when
+    /// Pusher compatibility is mounted), sessions that do not go through the
+    /// Pusher executor get a rejection when they subscribe to it.
+    pub fn reserve_pusher_channel(&self) {
+        self.pusher_channel_reserved.store(true, Ordering::Release);
+    }
+
+    /// Whether subscribing `s` to `identifier` must be refused: the identifier's
+    /// channel (decoded as the channels router does) is `$pusher`, it is
+    /// reserved, and `s` is not a Pusher session.
+    fn refuses_pusher_channel(&self, s: &Session, identifier: &str) -> bool {
+        if !self.pusher_channel_reserved.load(Ordering::Acquire) || s.is_pusher() {
+            return false;
+        }
+        matches!(
+            cabby_core::gojson::decode_string_fields(identifier, "struct { Channel string }", &["channel"]),
+            Ok([channel]) if channel == crate::pusher::CHANNEL_NAME
+        )
     }
 
     pub fn unsubscribe(&self, s: &Arc<Session>, msg: &Message) -> Result<Option<CommandResult>, NodeError> {

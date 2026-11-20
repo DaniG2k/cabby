@@ -21,6 +21,9 @@ use super::{Ticker, Timer};
 
 type Callback = Box<dyn FnOnce() + Send>;
 
+/// Where timers with unrepresentable deadlines go.
+const FAR_FUTURE: Duration = Duration::from_secs(30 * 365 * 24 * 60 * 60);
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -85,7 +88,9 @@ impl Wheel {
     }
 
     fn add(self: &Arc<Self>, delay: Duration, f: Callback) -> SystemTimer {
-        let at = Instant::now() + delay;
+        // A delay past what `Instant` can represent fires "never" (in 30 years).
+        let now = Instant::now();
+        let at = now.checked_add(delay).or_else(|| now.checked_add(FAR_FUTURE)).unwrap_or(now);
         let mut state = lock(&self.state);
         state.next_id += 1;
         let id = state.next_id;
