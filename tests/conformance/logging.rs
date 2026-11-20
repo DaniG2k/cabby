@@ -92,10 +92,10 @@ fn normalize(line: &str, sids: &[String], ports: &[u16], epoch: Option<&str>) ->
         s = s.replace(epoch, "EPOCH");
     }
     // D-050: connection errors are the transport library's texts.
-    if s.starts_with("DBG WebSocket close error ") || s.starts_with("DBG WebSocket closed ") {
-        if let Some(i) = s.find(" error=") {
-            s.truncate(i);
-        }
+    if (s.starts_with("DBG WebSocket close error ") || s.starts_with("DBG WebSocket closed "))
+        && let Some(i) = s.find(" error=")
+    {
+        s.truncate(i);
     }
     // The WebSocket and API servers share the main port: which of them starts
     // the listener (and which finds it started) is a race in Go too.
@@ -266,6 +266,130 @@ fn broadcast_and_presence_lines_match_go_at_debug_level() {
     let shutdown_race = ["DBG WebSocket close error ", "DBG WebSocket session completed "];
     lines.retain(|l| !(shutdown_race.iter().any(|p| l.starts_with(p)) && l.contains("sid=SID2")));
     assert_lines(&lines, BROADCASTS_DEBUG, &output);
+}
+
+/// An HTTP RPC application that accepts connections and subscriptions but
+/// answers performs and disconnects with a 500.
+fn failing_rpc() -> cabby_testkit::http_stub::HttpStub {
+    use cabby_testkit::http_stub::{HttpStub, Response};
+    HttpStub::start(|req| {
+        let body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+        let ok = |v: Value| Response { status: 200, body: v.to_string().into_bytes() };
+        if req.path.ends_with("/connect") {
+            return ok(json!({"status": 1, "identifiers": "u1", "transmissions": ["{\"type\":\"welcome\"}"]}));
+        }
+        if req.path.ends_with("/command") && body["command"] == "subscribe" {
+            let confirm = json!({"type": "confirm_subscription", "identifier": body["identifier"]}).to_string();
+            return ok(json!({"status": 1, "streams": ["chat"], "transmissions": [confirm]}));
+        }
+        Response { status: 500, body: b"boom".to_vec() }
+    })
+}
+
+/// regression-for: node/node_test.go#TestPerform/Error_during_perform
+/// note: Review finding H7: a failing RPC call must log Go's default-level lines: `failed to handle incoming message` with the decorated RPC error for the perform, and `controller disconnect failed` for the Disconnect call (the 500 answers come from a stub application).
+#[test]
+fn failing_rpc_calls_are_logged_like_go() {
+    let rpc = failing_rpc();
+    let rpc_host = format!("--rpc_host={}/_anycable", rpc.url());
+    let sut = Sut::start(&[&rpc_host, "--broadcast_adapter=http", "--disconnect_mode=always"]);
+    let mut c = CableClient::connect(&format!("ws://{}/cable", sut.addr()), Options::default()).expect("connect");
+    receive_type(&mut c, "welcome");
+    let id = json!({"channel": "ChatChannel"}).to_string();
+    c.send(&json!({"command": "subscribe", "identifier": id}));
+    receive_type(&mut c, "confirm_subscription");
+    c.send(&json!({"command": "message", "identifier": id, "data": "{\"action\":\"speak\"}"}));
+    wait_for_log(&sut, "failed to handle incoming message");
+    drop(c);
+    wait_for_log(&sut, "controller disconnect failed");
+
+    let output = stop(sut);
+    let mask_sid = |l: &String| {
+        l.split(' ').map(|t| if t.starts_with("sid=") { "sid=X" } else { t }).collect::<Vec<_>>().join(" ")
+    };
+    let lines: Vec<String> = normalized(&output, &[], &[], None).iter().map(mask_sid).collect();
+    for expected in [
+        r#"WRN failed to handle incoming message context=node sid=X data="{\"command\":\"message\",\"data\":\"{\\\"action\\\":\\\"speak\\\"}\",\"identifier\":\"{\\\"channel\\\":\\\"ChatChannel\\\"}\"}" error="perform failed for {\"channel\":\"ChatChannel\"}, cause: rpc error: code = Unknown desc = boom""#,
+        r#"ERR controller disconnect failed context=node sid=X error="rpc error: code = Unknown desc = boom""#,
+    ] {
+        assert!(
+            lines.iter().any(|l| l == expected),
+            "missing {expected}\nnormalised:\n{}\nSUT output:\n{output}",
+            lines.join("\n")
+        );
+    }
+}
+
+/// Reads one RESP command (an array of bulk strings) from `r`.
+fn read_resp_command(r: &mut impl std::io::BufRead) -> Option<Vec<String>> {
+    let mut line = String::new();
+    let mut read_line = |line: &mut String| {
+        line.clear();
+        r.read_line(line).ok().filter(|n| *n > 0).map(|_| line.trim_end().to_owned())
+    };
+    let header = read_line(&mut line)?;
+    let n: usize = header.strip_prefix('*')?.parse().ok()?;
+    let mut args = Vec::with_capacity(n);
+    for _ in 0..n {
+        let _len = read_line(&mut line)?;
+        args.push(read_line(&mut line)?);
+    }
+    Some(args)
+}
+
+/// A Redis stand-in that answers every command with `+OK` (subscriptions with
+/// their confirmation) but rejects `PUBLISH` like a read-only replica.
+fn read_only_redis() -> u16 {
+    use std::io::{BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    std::thread::spawn(move || {
+        for conn in listener.incoming() {
+            let Ok(conn) = conn else { continue };
+            std::thread::spawn(move || {
+                let mut w = conn.try_clone().expect("clone");
+                let mut r = BufReader::new(conn);
+                while let Some(args) = read_resp_command(&mut r) {
+                    let cmd = args.first().map(|c| c.to_ascii_uppercase()).unwrap_or_default();
+                    let reply = match cmd.as_str() {
+                        "PUBLISH" => "-READONLY You can't write against a read only replica.\r\n".to_owned(),
+                        "SUBSCRIBE" | "UNSUBSCRIBE" => {
+                            let ch = args.get(1).cloned().unwrap_or_default();
+                            let kind = cmd.to_ascii_lowercase();
+                            format!("*3\r\n${}\r\n{kind}\r\n${}\r\n{ch}\r\n:1\r\n", kind.len(), ch.len())
+                        }
+                        "PING" => "+PONG\r\n".to_owned(),
+                        _ => "+OK\r\n".to_owned(),
+                    };
+                    if w.write_all(reply.as_bytes()).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    port
+}
+
+/// regression-for: pubsub/redis_test.go#TestRedisCommon/Broadcast
+/// note: Deviation D-052: when Redis rejects a broadcast's PUBLISH (here a stand-in answering like a read-only replica), Cabby logs `ERR failed to publish` with `context=pubsub` and Redis' error; Go ignores the error of rueidis' `Do` and logs nothing.
+#[test]
+fn deviation_d052_rejected_redis_publications_are_logged() {
+    let port = read_only_redis();
+    let url = format!("--redis_url=redis://127.0.0.1:{port}");
+    let sut = Sut::start(&["--public", "--broadcast_adapter=http", "--pubsub=redis", &url]);
+    broadcast(&sut, &json!({"stream": "s1", "data": "\"x\""}));
+    match cabby_testkit::backend() {
+        cabby_testkit::Backend::Rust => {
+            wait_for_log_line(&sut, &["ERR failed to publish ", "context=pubsub", "read only replica"]);
+        }
+        cabby_testkit::Backend::Go => {
+            // A second broadcast after the first: Go has had time to handle it.
+            broadcast(&sut, &json!({"stream": "s1", "data": "\"y\""}));
+            let output = stop(sut);
+            assert!(!output.contains("failed to publish"), "SUT output:\n{output}");
+        }
+    }
 }
 
 const LOGPROBE_DEFAULT: &[&str] = &[
