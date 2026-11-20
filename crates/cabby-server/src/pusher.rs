@@ -1144,8 +1144,11 @@ impl RestApi {
         out: &mut http::HeaderMap,
     ) -> Result<Authorized, u16> {
         if let Some(hosts) = &self.cors_hosts {
-            let origin = req_headers.get(http::header::ORIGIN).and_then(|v| v.to_str().ok()).unwrap_or_default();
-            server::write_cors_headers(out, origin, hosts);
+            let origin = req_headers
+                .get(http::header::ORIGIN)
+                .map(|v| String::from_utf8_lossy(v.as_bytes()))
+                .unwrap_or_default();
+            server::write_cors_headers(out, &origin, hosts);
 
             if method == http::Method::OPTIONS {
                 return Err(200);
@@ -1361,7 +1364,11 @@ impl RestApi {
                     Authorized::Post { .. } => Some(match server::read_body(body, Some(self.body_limit())).await {
                         Ok(bytes) => Ok(bytes.to_vec()),
                         Err(server::BodyError::TooLarge(_)) => Err(413),
-                        Err(server::BodyError::Read(_)) => Err(422),
+                        Err(server::BodyError::Read(_)) => {
+                            // Go closes a connection whose request body failed.
+                            headers.insert(http::header::CONNECTION, http::HeaderValue::from_static("close"));
+                            Err(422)
+                        }
                     }),
                     Authorized::Get => None,
                 };

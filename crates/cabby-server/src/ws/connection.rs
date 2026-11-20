@@ -545,7 +545,7 @@ struct Work {
 /// A connection over an established WebSocket stream: the handle, and the io
 /// loop to run (on the current task) until the connection ends.
 pub(crate) fn connect<S>(
-    stream: WebSocketStream<S>,
+    stream: WebSocketStream<GorillaFrames<S>>,
     subprotocol: String,
 ) -> (WsConnection, impl std::future::Future<Output = ()> + Send)
 where
@@ -561,7 +561,7 @@ pub(crate) fn close_without_waiting(conn: &WsConnection, code: i32, reason: &str
     conn.request_close(code, reason);
 }
 
-async fn run<S>(shared: Arc<Shared>, mut ws: WebSocketStream<S>)
+async fn run<S>(shared: Arc<Shared>, mut ws: WebSocketStream<GorillaFrames<S>>)
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -639,12 +639,19 @@ where
 /// Handles one read result; `Some(error)` ends the connection.
 async fn handle_inbound<S>(
     shared: &Arc<Shared>,
-    ws: &mut WebSocketStream<S>,
+    ws: &mut WebSocketStream<GorillaFrames<S>>,
     msg: Option<Result<Message, WsError>>,
 ) -> Option<String>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    if matches!(msg, Some(Err(_)))
+        && let Some(message) = ws.get_ref().protocol_error.clone()
+    {
+        // gorilla `handleProtocolError`: 1002 with the error text.
+        write_raw_close(ws, CLOSE_PROTOCOL_ERROR, &message).await;
+        return Some(format!("websocket: {message}"));
+    }
     let deliver = |payload: Bytes| {
         let mut state = shared.lock();
         if let Some(handler) = state.inbound_handler.clone() {
@@ -671,12 +678,19 @@ where
             }
         }
         Some(Ok(Message::Close(frame))) => {
-            // tungstenite queued the close reply; flush it before closing.
-            let _ = tokio::time::timeout(CLOSE_DEADLINE, ws.flush()).await;
-            return Some(match frame {
-                Some(f) => close_error_text(u16::from(f.code), &f.reason),
-                None => close_error_text(1005, ""),
+            // gorilla's default close handler echoes the code without the
+            // reason (tungstenite's queued reply, which echoes both, is not sent).
+            let (code, text) = ws.get_ref().close.clone().unwrap_or_else(|| match frame {
+                Some(f) => (u16::from(f.code), f.reason.to_string()),
+                None => (1005, String::new()),
             });
+            write_raw_close(ws, i32::from(code), "").await;
+            return Some(close_error_text(code, &text));
+        }
+        Some(Err(WsError::Protocol(ProtocolError::InvalidCloseSequence))) => {
+            // A 1-byte close payload: gorilla reads it as "no status".
+            write_raw_close(ws, CLOSE_NO_STATUS_RECEIVED, "").await;
+            return Some(close_error_text(1005, ""));
         }
         Some(Ok(Message::Frame(_))) => {}
         None | Some(Err(WsError::ConnectionClosed | WsError::AlreadyClosed)) => {
@@ -703,6 +717,262 @@ where
         Some(Err(e)) => return Some(e.to_string()),
     }
     None
+}
+
+/// Writes a close frame directly to the socket, as gorilla's `WriteControl`
+/// (`FormatCloseMessage`: an empty payload for 1005, the payload cut to 125
+/// bytes), bypassing tungstenite's reply. Writes are always flushed before the
+/// io loop reads, so nothing else is pending in tungstenite.
+async fn write_raw_close<S>(ws: &mut WebSocketStream<GorillaFrames<S>>, code: i32, text: &str)
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    use tokio::io::AsyncWriteExt;
+
+    let mut payload = Vec::with_capacity(2 + text.len());
+    if code != CLOSE_NO_STATUS_RECEIVED {
+        payload.extend_from_slice(&u16::try_from(code).unwrap_or(1011).to_be_bytes());
+        payload.extend_from_slice(text.as_bytes());
+        payload.truncate(125);
+    }
+    let mut frame = vec![0x88, payload.len() as u8];
+    frame.extend_from_slice(&payload);
+    let io = &mut ws.get_mut().io;
+    let _ = tokio::time::timeout(CLOSE_DEADLINE, async {
+        io.write_all(&frame).await?;
+        io.flush().await
+    })
+    .await;
+}
+
+/// The frame checks gorilla/websocket makes while reading (`advanceFrame`),
+/// applied to the bytes tungstenite reads, so protocol errors are reported
+/// (and answered with a 1002 close frame) with gorilla's texts: `RSV1 set`,
+/// `bad opcode 3`, `len > 125 for control`, `FIN not set on control`, `data
+/// before FIN`, `continuation after FIN`, `bad MASK` (joined by `, ` when a
+/// header has several), `bad close code N`, `invalid utf8 payload in close
+/// frame`. It also keeps the code and text of a received close frame as gorilla
+/// reads them.
+pub(crate) struct GorillaFrames<S> {
+    io: S,
+    /// The current frame header (at most 2 + 8 + 4 bytes) while it is read.
+    header: [u8; 14],
+    have: usize,
+    /// Header bytes needed; 0 while reading a payload.
+    need: usize,
+    remaining: u64,
+    opcode: u8,
+    mask: [u8; 4],
+    /// The (unmasked) close payload read so far.
+    close_payload: Vec<u8>,
+    /// gorilla `readFinal`: the last data frame ended a message.
+    read_final: bool,
+    /// A protocol error found (reads fail from then on).
+    protocol_error: Option<String>,
+    /// The last close frame received: code (1005 without one) and text.
+    close: Option<(u16, String)>,
+}
+
+impl<S> GorillaFrames<S> {
+    pub(crate) fn new(io: S) -> Self {
+        Self {
+            io,
+            header: [0; 14],
+            have: 0,
+            need: 2,
+            remaining: 0,
+            opcode: 0,
+            mask: [0; 4],
+            close_payload: Vec::new(),
+            read_final: true,
+            protocol_error: None,
+            close: None,
+        }
+    }
+
+    /// gorilla's checks of a frame's first two bytes.
+    fn check_start(&mut self) -> Result<(), String> {
+        let (b0, b1) = (self.header[0], self.header[1]);
+        let opcode = b0 & 0x0f;
+        let fin = b0 & 0x80 != 0;
+        let mut errors = Vec::new();
+        for (bit, name) in [(0x40, "RSV1 set"), (0x20, "RSV2 set"), (0x10, "RSV3 set")] {
+            if b0 & bit != 0 {
+                errors.push(name.to_owned());
+            }
+        }
+        match opcode {
+            8..=10 => {
+                if b1 & 0x7f > 125 {
+                    errors.push("len > 125 for control".to_owned());
+                }
+                if !fin {
+                    errors.push("FIN not set on control".to_owned());
+                }
+            }
+            1 | 2 => {
+                if !self.read_final {
+                    errors.push("data before FIN".to_owned());
+                }
+                self.read_final = fin;
+            }
+            0 => {
+                if self.read_final {
+                    errors.push("continuation after FIN".to_owned());
+                }
+                self.read_final = fin;
+            }
+            _ => errors.push(format!("bad opcode {opcode}")),
+        }
+        if b1 & 0x80 == 0 {
+            errors.push("bad MASK".to_owned());
+        }
+        if errors.is_empty() { Ok(()) } else { Err(errors.join(", ")) }
+    }
+
+    /// gorilla's checks of a complete close frame payload.
+    fn check_close(&mut self) -> Result<(), String> {
+        let payload = std::mem::take(&mut self.close_payload);
+        if payload.len() < 2 {
+            self.close = Some((1005, String::new()));
+            return Ok(());
+        }
+        let code = u16::from_be_bytes([payload[0], payload[1]]);
+        let valid = matches!(code, 1000..=1003 | 1007..=1013 | 3000..=4999);
+        if !valid {
+            return Err(format!("bad close code {code}"));
+        }
+        let Ok(text) = std::str::from_utf8(&payload[2..]) else {
+            return Err("invalid utf8 payload in close frame".to_owned());
+        };
+        self.close = Some((code, text.to_owned()));
+        Ok(())
+    }
+
+    /// Scans bytes read from the socket; on a protocol error, how many of
+    /// them precede the offending frame.
+    fn scan(&mut self, data: &[u8]) -> Result<(), (usize, String)> {
+        let mut i = 0;
+        // Where the current frame starts in `data` (0 if it started earlier).
+        let mut frame_start = 0;
+        while i < data.len() {
+            if self.need > 0 {
+                if self.have == 0 {
+                    frame_start = i;
+                }
+                let n = (self.need - self.have).min(data.len() - i);
+                self.header[self.have..self.have + n].copy_from_slice(&data[i..i + n]);
+                self.have += n;
+                i += n;
+                if self.have < self.need {
+                    continue;
+                }
+                if self.need == 2 {
+                    self.check_start().map_err(|e| (frame_start, e))?;
+                    self.opcode = self.header[0] & 0x0f;
+                    let ext = match self.header[1] & 0x7f {
+                        126 => 2,
+                        127 => 8,
+                        _ => 0,
+                    };
+                    self.need = 2 + ext + 4;
+                    if self.have < self.need {
+                        continue;
+                    }
+                }
+                let len = match self.header[1] & 0x7f {
+                    126 => u64::from(u16::from_be_bytes([self.header[2], self.header[3]])),
+                    127 => u64::from_be_bytes(self.header[2..10].try_into().unwrap_or([0; 8])),
+                    n => u64::from(n),
+                };
+                self.mask.copy_from_slice(&self.header[self.need - 4..self.need]);
+                self.remaining = len;
+                self.need = 0;
+                self.have = 0;
+                self.close_payload.clear();
+            } else {
+                let n = usize::try_from(self.remaining).unwrap_or(usize::MAX).min(data.len() - i);
+                if self.opcode == 8 {
+                    for &b in &data[i..i + n] {
+                        let k = self.mask[self.close_payload.len() % 4];
+                        self.close_payload.push(b ^ k);
+                    }
+                }
+                self.remaining -= n as u64;
+                i += n;
+            }
+            if self.need == 0 && self.remaining == 0 {
+                if self.opcode == 8 {
+                    self.check_close().map_err(|e| (frame_start, e))?;
+                }
+                self.need = 2;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for GorillaFrames<S> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        use std::task::Poll;
+        let this = &mut *self;
+        if let Some(e) = &this.protocol_error {
+            return Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e.clone())));
+        }
+        let before = buf.filled().len();
+        match std::pin::Pin::new(&mut this.io).poll_read(cx, buf) {
+            Poll::Ready(Ok(())) => {}
+            other => return other,
+        }
+        if let Err((keep, e)) = this.scan(&buf.filled()[before..]) {
+            buf.set_filled(before + keep);
+            this.protocol_error = Some(e.clone());
+            if keep == 0 {
+                return Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)));
+            }
+        }
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for GorillaFrames<S> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.io).poll_write(cx, buf)
+    }
+
+    fn poll_write_vectored(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.io).poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.io.is_write_vectored()
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.io).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.io).poll_shutdown(cx)
+    }
 }
 
 /// The close frame for `code` (none for 1005, which cannot be sent); the reason is

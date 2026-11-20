@@ -10,7 +10,14 @@
 //!   hyper `http1` connection with upgrades enabled. Nothing else is allocated per
 //!   connection: no per-connection buffers outside hyper's own (released when a
 //!   WebSocket upgrade takes the socket over), no per-connection timers except the
-//!   5s header read timeout (upstream `ReadHeaderTimeout`).
+//!   5s header read timeout. The timeouts are Go's `http.Server` ones as upstream
+//!   sets them (`ReadHeaderTimeout: 5s`, no idle, read or write timeout): the
+//!   header timeout covers the first request's head from the accept, and each
+//!   later request's head from its first bytes ([`HeaderTimeout`]), so an idle
+//!   keep-alive connection stays open.
+//! * **Header limits.** net/http's: the request line and headers may take up to
+//!   1 MiB + 4 KiB (`DefaultMaxHeaderBytes` plus its slack); hyper also needs a
+//!   header count limit (see `MAX_HEADERS`).
 //! * **Routing.** Exact paths, plus `prefix/*` patterns (chi's wildcard). The route
 //!   table is copy-on-write behind an `ArcSwap`: registering takes a lock,
 //!   dispatching a request is a lock-free load. Unknown paths get Go's
@@ -34,7 +41,7 @@ use std::future::Future;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -61,6 +68,14 @@ use super::SslConfig;
 
 /// Upstream `ReadHeaderTimeout`; also bounds TLS handshakes.
 const READ_HEADER_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// net/http reads at most `DefaultMaxHeaderBytes` (1 MiB) plus 4096 bytes of
+/// slack for a request line and its headers.
+const MAX_HEADER_BYTES: usize = (1 << 20) + 4096;
+
+/// hyper also limits the number of header fields (net/http does not); this
+/// many fit in the byte limit only when they are a few bytes each.
+const MAX_HEADERS: usize = 1024;
 
 /// A boxed error carried by response bodies.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -579,14 +594,38 @@ where
 {
     let _active = ActiveGuard::new(&inner.active);
     let shutdown = inner.shutdown.clone();
+    let state = Arc::new(ConnState::default());
+    let io = HeaderTimeout::new(io, Arc::clone(&state));
     let service = service_fn(move |mut req: Request| {
+        state.phase.store(PHASE_REQUEST, Ordering::Release);
         req.extensions_mut().insert(info);
-        let response = inner.dispatch(req);
-        async move { Ok::<_, Infallible>(response.await) }
+        let bodyless = hyper::body::Body::is_end_stream(req.body());
+        req.extensions_mut().insert(ClientClosed(state.next_request(bodyless)));
+        let http10_keep_alive = (req.version() == http::Version::HTTP_10)
+            .then(|| has_token(req.headers().get(http::header::CONNECTION), "keep-alive"));
+        let response = match go_request_check(&req) {
+            Some(resp) => Box::pin(std::future::ready(resp)),
+            None => inner.dispatch(req),
+        };
+        let conn_state = Arc::clone(&state);
+        async move {
+            let mut response = response.await;
+            if response.status() == http::StatusCode::SWITCHING_PROTOCOLS {
+                // The socket is taken over (WebSocket): no more HTTP heads.
+                conn_state.phase.store(PHASE_UPGRADED, Ordering::Release);
+                return Ok::<_, Infallible>(response);
+            }
+            let chunked = go_framing(&mut response, http10_keep_alive);
+            Ok(response.map(|body| ResponseBody { inner: body, conn: conn_state, chunked }.boxed()))
+        }
     });
     let conn = http1::Builder::new()
         .timer(TokioTimer::new())
-        .header_read_timeout(READ_HEADER_TIMEOUT)
+        // Go's timeout semantics are implemented by `HeaderTimeout`.
+        .header_read_timeout(None)
+        .max_header_size(MAX_HEADER_BYTES)
+        .max_buf_size(MAX_HEADER_BYTES + 8192)
+        .max_headers(MAX_HEADERS)
         .title_case_headers(true)
         .serve_connection(TokioIo::new(io), service)
         .with_upgrades();
@@ -596,6 +635,352 @@ where
         () = shutdown.cancelled() => conn.as_mut().graceful_shutdown(),
     }
     let _ = conn.await;
+}
+
+// --- Header read timeout ------------------------------------------------------
+
+/// Reading a request head (the header timeout runs).
+const PHASE_HEAD: u8 = 0;
+/// Serving a request: from its parsed head until its response body is done.
+const PHASE_REQUEST: u8 = 1;
+/// Between requests on a keep-alive connection: no timeout.
+const PHASE_IDLE: u8 = 2;
+/// Upgraded (WebSocket): no timeout.
+const PHASE_UPGRADED: u8 = 3;
+
+/// What a connection's reader shares with its requests.
+struct ConnState {
+    phase: AtomicU8,
+    /// Cancelled when the client closes its side or the connection fails
+    /// while the current request is served (Go cancels the request context
+    /// when its background read sees EOF).
+    closed: Mutex<CancellationToken>,
+    /// The current request has no body left to read, so an EOF while it is
+    /// served is a half-close: hidden from hyper until the response is done.
+    hide_eof: AtomicBool,
+    /// The reader waiting for the response to finish after a hidden EOF.
+    reader: Mutex<Option<std::task::Waker>>,
+}
+
+impl Default for ConnState {
+    fn default() -> Self {
+        Self {
+            phase: AtomicU8::new(PHASE_HEAD),
+            closed: Mutex::new(CancellationToken::new()),
+            hide_eof: AtomicBool::new(false),
+            reader: Mutex::new(None),
+        }
+    }
+}
+
+impl ConnState {
+    fn next_request(&self, bodyless: bool) -> CancellationToken {
+        self.hide_eof.store(bodyless, Ordering::Release);
+        let token = CancellationToken::new();
+        *self.closed.lock().unwrap_or_else(|e| e.into_inner()) = token.clone();
+        token
+    }
+
+    /// The response is done: the connection is between requests.
+    fn response_done(&self) {
+        let _ = self.phase.compare_exchange(PHASE_REQUEST, PHASE_IDLE, Ordering::AcqRel, Ordering::Acquire);
+        if let Some(waker) = self.reader.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            waker.wake();
+        }
+    }
+
+    fn client_closed(&self) {
+        self.closed.lock().unwrap_or_else(|e| e.into_inner()).cancel();
+    }
+}
+
+/// Cancelled when the client closes its side of the connection (or the
+/// connection fails) during the request: a request extension (see
+/// [`client_closed`]).
+#[derive(Debug, Clone)]
+pub struct ClientClosed(pub CancellationToken);
+
+/// The token cancelled when the client of `req` goes away (Go
+/// `r.Context().Done()`), if the request came from an [`HttpServer`].
+pub fn client_closed<B>(req: &http::Request<B>) -> Option<CancellationToken> {
+    req.extensions().get::<ClientClosed>().map(|c| c.0.clone())
+}
+
+/// Go `http.Server` with `ReadHeaderTimeout` and no idle or read timeout: the
+/// first request's head must arrive within the timeout from the accept; between
+/// requests the connection may stay idle indefinitely, and the timeout for the
+/// next head starts once its first 4 bytes are received (Go `bufr.Peek(4)`).
+/// When it expires, reading fails and the connection is closed without a
+/// response, as in Go. (hyper's own `header_read_timeout` also runs while a
+/// keep-alive connection waits for the next request.)
+struct HeaderTimeout<I> {
+    io: I,
+    conn: Arc<ConnState>,
+    sleep: Pin<Box<tokio::time::Sleep>>,
+    /// The sleep's deadline belongs to the current head.
+    armed: bool,
+    /// Bytes received while idle.
+    idle_bytes: usize,
+    /// The client closed its side while a request was served (see
+    /// [`ConnState::hide_eof`]): reads wait for the response, then see EOF.
+    eof: bool,
+}
+
+impl<I> HeaderTimeout<I> {
+    fn new(io: I, conn: Arc<ConnState>) -> Self {
+        let deadline = tokio::time::Instant::now() + READ_HEADER_TIMEOUT;
+        Self { io, conn, sleep: Box::pin(tokio::time::sleep_until(deadline)), armed: true, idle_bytes: 0, eof: false }
+    }
+
+    fn arm(&mut self) {
+        self.sleep.as_mut().reset(tokio::time::Instant::now() + READ_HEADER_TIMEOUT);
+        self.armed = true;
+    }
+}
+
+fn header_timeout_error() -> io::Error {
+    io::Error::new(io::ErrorKind::TimedOut, "read header timeout")
+}
+
+impl<I: AsyncRead + Unpin> AsyncRead for HeaderTimeout<I> {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        let phase = this.conn.phase.load(Ordering::Acquire);
+        if this.eof {
+            // A half-close: hyper (which would end the connection on an EOF
+            // in the middle of a request) sees it once the response is done,
+            // as Go writes the response after its handler saw the client go.
+            if phase == PHASE_REQUEST {
+                *this.conn.reader.lock().unwrap_or_else(|e| e.into_inner()) = Some(cx.waker().clone());
+                if this.conn.phase.load(Ordering::Acquire) == PHASE_REQUEST {
+                    return Poll::Pending;
+                }
+            }
+            return Poll::Ready(Ok(()));
+        }
+        if phase == PHASE_HEAD {
+            if !this.armed {
+                this.arm();
+            }
+            if tokio::time::Instant::now() >= this.sleep.deadline() {
+                return Poll::Ready(Err(header_timeout_error()));
+            }
+        } else {
+            this.armed = false;
+        }
+        if phase != PHASE_IDLE {
+            this.idle_bytes = 0;
+        }
+        let before = buf.filled().len();
+        let r = Pin::new(&mut this.io).poll_read(cx, buf);
+        let eof = matches!(r, Poll::Ready(Ok(()))) && buf.remaining() > 0 && buf.filled().len() == before;
+        if eof || matches!(r, Poll::Ready(Err(_))) {
+            this.conn.client_closed();
+        }
+        if eof && phase == PHASE_REQUEST && this.conn.hide_eof.load(Ordering::Acquire) {
+            this.eof = true;
+            *this.conn.reader.lock().unwrap_or_else(|e| e.into_inner()) = Some(cx.waker().clone());
+            if this.conn.phase.load(Ordering::Acquire) == PHASE_REQUEST {
+                return Poll::Pending;
+            }
+        }
+        match (phase, &r) {
+            (PHASE_IDLE, Poll::Ready(Ok(()))) => {
+                this.idle_bytes += buf.filled().len() - before;
+                if this.idle_bytes >= 4
+                    && this
+                        .conn
+                        .phase
+                        .compare_exchange(PHASE_IDLE, PHASE_HEAD, Ordering::AcqRel, Ordering::Acquire)
+                        .is_ok()
+                {
+                    this.idle_bytes = 0;
+                    this.arm();
+                }
+            }
+            (PHASE_HEAD, Poll::Pending) if this.sleep.as_mut().poll(cx).is_ready() => {
+                return Poll::Ready(Err(header_timeout_error()));
+            }
+            _ => {}
+        }
+        r
+    }
+}
+
+impl<I: AsyncWrite + Unpin> AsyncWrite for HeaderTimeout<I> {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.io).poll_write(cx, buf)
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.io).poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.io.is_write_vectored()
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.io).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.io).poll_shutdown(cx)
+    }
+}
+
+// --- Response framing ----------------------------------------------------------
+
+/// Go buffers this many bytes of a response body (`bufferBeforeChunkingSize`):
+/// a handler that writes no more and returns gets a `Content-Length`; once
+/// more is written, the response is chunked (unless the handler set a length).
+pub const BUFFER_BEFORE_CHUNKING: usize = 2048;
+
+/// Go's `http.StatusText` where it differs from the `http` crate's canonical
+/// reason phrases.
+fn go_reason_phrase(status: http::StatusCode) -> Option<&'static str> {
+    match status.as_u16() {
+        203 => Some("Non-Authoritative Information"),
+        413 => Some("Request Entity Too Large"),
+        414 => Some("Request URI Too Long"),
+        416 => Some("Requested Range Not Satisfiable"),
+        _ => None,
+    }
+}
+
+/// Applies what Go's `net/http` does to every response head: its reason
+/// phrases, the headers it suppresses for statuses without a body
+/// (`suppressedHeaders`), and `Connection: close` after a 413 (a body over a
+/// `MaxBytesReader` limit closes the connection). Returns whether the body
+/// must be chunked: more than [`BUFFER_BEFORE_CHUNKING`] bytes and no
+/// `Content-Length` set by the handler.
+fn go_framing(response: &mut Response, http10_keep_alive: Option<bool>) -> bool {
+    use hyper::body::Body as _;
+    let status = response.status();
+    if let Some(wants_keep_alive) = http10_keep_alive {
+        // An HTTP/1.0 response is kept alive only when the client asked for it
+        // and the length is known; otherwise Go drops the handler's
+        // `Connection` header (unless it says `close`).
+        let has_length = response.headers().contains_key(http::header::CONTENT_LENGTH)
+            || response.body().size_hint().exact().is_some_and(|n| n <= BUFFER_BEFORE_CHUNKING as u64);
+        let connection = response.headers().get(http::header::CONNECTION);
+        let keep = wants_keep_alive && has_length && connection.is_some_and(|c| c.as_bytes() == b"keep-alive");
+        if !keep && !has_token(connection, "close") {
+            response.headers_mut().remove(http::header::CONNECTION);
+        }
+    }
+    if let Some(reason) = go_reason_phrase(status) {
+        response.extensions_mut().insert(hyper::ext::ReasonPhrase::from_static(reason.as_bytes()));
+    }
+    let headers = response.headers_mut();
+    if status == http::StatusCode::NOT_MODIFIED {
+        headers.remove(http::header::CONTENT_TYPE);
+    }
+    if status == http::StatusCode::NOT_MODIFIED || status == http::StatusCode::NO_CONTENT || status.is_informational() {
+        headers.remove(http::header::CONTENT_LENGTH);
+        headers.remove(http::header::TRANSFER_ENCODING);
+        return false;
+    }
+    if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+        headers.insert(http::header::CONNECTION, http::HeaderValue::from_static("close"));
+    }
+    !headers.contains_key(http::header::CONTENT_LENGTH)
+        && response.body().size_hint().exact().is_some_and(|n| n > BUFFER_BEFORE_CHUNKING as u64)
+}
+
+/// Whether a comma-separated header value lists `token` (case-insensitive).
+fn has_token(value: Option<&http::HeaderValue>, token: &str) -> bool {
+    value.is_some_and(|v| {
+        v.as_bytes().split(|b| *b == b',').any(|t| t.trim_ascii().eq_ignore_ascii_case(token.as_bytes()))
+    })
+}
+
+/// Go `net/http` answers some requests before any handler sees them:
+/// `OPTIONS *` (200, `Content-Length: 0`), an HTTP/1.1 request without a
+/// `Host` header or with several, and a request path with an invalid
+/// percent escape (`url.ParseRequestURI` fails), with a plain 400 and
+/// `Connection: close`.
+fn go_request_check(req: &Request) -> Option<Response> {
+    if req.method() == http::Method::OPTIONS && req.uri() == "*" {
+        let mut resp = status_response(200);
+        resp.headers_mut().insert(http::header::CONTENT_LENGTH, http::HeaderValue::from_static("0"));
+        return Some(resp);
+    }
+    let hosts = req.headers().get_all(http::header::HOST).iter().count();
+    if req.version() == http::Version::HTTP_11 && req.method() != http::Method::CONNECT && hosts == 0 {
+        return Some(go_bad_request(Some("missing required Host header")));
+    }
+    if hosts > 1 {
+        return Some(go_bad_request(Some("too many Host headers")));
+    }
+    let path = req.uri().path().as_bytes();
+    let bad_escape = path.iter().enumerate().any(|(i, &b)| {
+        b == b'%'
+            && !(path.get(i + 1).is_some_and(u8::is_ascii_hexdigit)
+                && path.get(i + 2).is_some_and(u8::is_ascii_hexdigit))
+    });
+    if bad_escape {
+        return Some(go_bad_request(None));
+    }
+    None
+}
+
+/// Go's response to a malformed request: `400 Bad Request[: reason]` as the
+/// status line and the body, `Connection: close`.
+fn go_bad_request(reason: Option<&'static str>) -> Response {
+    let text = reason.map_or_else(|| "400 Bad Request".to_owned(), |r| format!("400 Bad Request: {r}"));
+    let mut resp = http::Response::new(full(text));
+    *resp.status_mut() = http::StatusCode::BAD_REQUEST;
+    if let Some(reason) = reason {
+        let phrase = format!("Bad Request: {reason}");
+        if let Ok(phrase) = hyper::ext::ReasonPhrase::try_from(phrase) {
+            resp.extensions_mut().insert(phrase);
+        }
+    }
+    let headers = resp.headers_mut();
+    headers.insert(http::header::CONTENT_TYPE, http::HeaderValue::from_static("text/plain; charset=utf-8"));
+    headers.insert(http::header::CONNECTION, http::HeaderValue::from_static("close"));
+    resp
+}
+
+/// A response body that marks the connection idle once hyper is done with
+/// it (the response is complete, so the next bytes start a new request).
+struct ResponseBody {
+    inner: Body,
+    conn: Arc<ConnState>,
+    /// Hide the exact size so hyper chunks the body, as Go does (see
+    /// [`go_framing`]).
+    chunked: bool,
+}
+
+impl Drop for ResponseBody {
+    fn drop(&mut self) {
+        self.conn.response_done();
+    }
+}
+
+impl hyper::body::Body for ResponseBody {
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<hyper::body::Frame<Bytes>, BoxError>>> {
+        Pin::new(&mut self.inner).poll_frame(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        if self.chunked { hyper::body::SizeHint::default() } else { self.inner.size_hint() }
+    }
 }
 
 /// A socket holding a `max_conn` slot until it is dropped (also after a

@@ -189,7 +189,7 @@ impl HttpBroadcaster {
     /// [`HttpBroadcaster::handle`] with the response headers.
     pub fn handle_full(&self, request: &HttpRequest) -> HttpResponse {
         let inner = &self.inner;
-        match inner.check(&request.method, |name| request.header(name)) {
+        match inner.check(&request.method, |name| request.header(name).as_bytes()) {
             Err(resp) => resp,
             Ok(headers) => {
                 let max = inner.max_body_size();
@@ -210,7 +210,8 @@ impl HttpBroadcaster {
             let inner = Arc::clone(&inner);
             async move {
                 let (parts, body) = req.into_parts();
-                let header = |name: &str| parts.headers.get(name).and_then(|v| v.to_str().ok()).unwrap_or("");
+                // Go compares header values as raw bytes (non-ASCII keys work).
+                let header = |name: &str| parts.headers.get(name).map_or(&b""[..], http::HeaderValue::as_bytes);
                 let resp = match inner.check(parts.method.as_str(), header) {
                     Err(resp) => resp,
                     Ok(headers) => match http_server::read_body(body, inner.max_body_size()).await {
@@ -225,6 +226,9 @@ impl HttpBroadcaster {
                         }
                         Err(http_server::BodyError::Read(_)) => {
                             log(Level::Error, "failed to read request body", &[]);
+                            // Go closes a connection whose request body failed.
+                            let mut headers = headers;
+                            headers.insert(http::header::CONNECTION, http::HeaderValue::from_static("close"));
                             HttpResponse::status(422, headers)
                         }
                     },
@@ -245,11 +249,11 @@ impl HttpInner {
 
     /// CORS, preflight, method and authorization checks: `Ok(headers)` to go on
     /// with the body, or the final response.
-    fn check<'a>(&self, method: &str, header: impl Fn(&str) -> &'a str) -> Result<http::HeaderMap, HttpResponse> {
+    fn check<'a>(&self, method: &str, header: impl Fn(&str) -> &'a [u8]) -> Result<http::HeaderMap, HttpResponse> {
         let prepared = self.prepared.read().unwrap_or_else(|e| e.into_inner());
         let mut headers = http::HeaderMap::new();
         if let Some(hosts) = &prepared.cors_hosts {
-            http_server::write_cors_headers(&mut headers, header("Origin"), hosts);
+            http_server::write_cors_headers(&mut headers, &String::from_utf8_lossy(header("Origin")), hosts);
             if method == "OPTIONS" {
                 return Err(HttpResponse::status(200, headers));
             }
@@ -259,7 +263,7 @@ impl HttpInner {
             return Err(HttpResponse::status(422, headers));
         }
         if !prepared.auth_header.is_empty()
-            && !constant_time_eq(header("Authorization").as_bytes(), prepared.auth_header.as_bytes())
+            && !constant_time_eq(header("Authorization"), prepared.auth_header.as_bytes())
         {
             return Err(HttpResponse::status(401, headers));
         }
@@ -654,6 +658,28 @@ mod tests {
         let preflight = request(addr, &format!("OPTIONS /_broadcast HTTP/1.1\r\nHost: {addr}"), b"");
         assert_eq!(200, preflight.status);
         assert_eq!(Some("POST, OPTIONS"), preflight.header("access-control-allow-methods"));
+        assert_eq!(1, recorder.0.lock().unwrap().len());
+        server.shutdown();
+    }
+
+    /// M6 (independent review): Go compares the `Authorization` header as raw
+    /// bytes, so a correct non-ASCII key is accepted (Go 201). Before, a
+    /// non-ASCII value was dropped and the request answered 401.
+    #[test]
+    fn accepts_a_non_ascii_key() {
+        let recorder = Arc::new(Recorder::default());
+        let mut config = HttpConfig::new();
+        config.secret = "pässwörd".into();
+        let broadcaster = HttpBroadcaster::new(Arc::clone(&recorder) as Arc<dyn Handler>, &config);
+        broadcaster.prepare().unwrap();
+        let server = HttpServer::new("127.0.0.1", "0", None, 0).unwrap();
+        server.setup_handler(DEFAULT_HTTP_PATH, broadcaster.http_handler());
+        let addr = start(&server);
+        let post = |auth: &str| {
+            request(addr, &format!("POST /_broadcast HTTP/1.1\r\nHost: {addr}\r\nAuthorization: {auth}"), b"{}")
+        };
+        assert_eq!(201, post("Bearer pässwörd").status);
+        assert_eq!(401, post("Bearer pässwörX").status);
         assert_eq!(1, recorder.0.lock().unwrap().len());
         server.shutdown();
     }
