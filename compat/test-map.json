@@ -23,7 +23,7 @@
       "pass": 923
     },
     "rust_only": {
-      "cases": 62
+      "cases": 67
     },
     "translation": {
       "reviewed": 923
@@ -26279,6 +26279,51 @@
       "relation": "external",
       "links": [
         "26a1a703:api/publish_test.go#TestPublishHandler/Rejects_non-POST_requests"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::brokers::nats_broker_without_jetstream_exits_with_the_error",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Epoch"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::brokers::nats_publishing_holds_broadcasts_back_while_nats_stalls",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pubsub/nats_test.go#TestNATSCommon/Broadcast"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::brokers::redis_cluster_node_given_as_a_single_url_is_probed",
+      "relation": "regression",
+      "links": [
+        "26a1a703:redis/config_test.go#TestBasic"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::brokers::redis_cluster_publishes_every_broadcast",
+      "relation": "regression",
+      "links": [
+        "26a1a703:redis/config_test.go#TestCluster"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::brokers::redis_publishing_holds_broadcasts_back_while_redis_stalls",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pubsub/redis_test.go#TestRedisCommon/Broadcast"
       ],
       "reference_status": "pass",
       "rust_status": "pass"
