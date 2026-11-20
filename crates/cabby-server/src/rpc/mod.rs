@@ -349,7 +349,8 @@ impl Controller {
         let mut capacity = config.concurrency;
         if capacity <= 0 {
             capacity = DEFAULT_RPC_CONCURRENCY;
-            log(Level::Warn, "RPC concurrency must be positive, reverted to the default value", &[]);
+            // Upstream logs through the runner's logger here, without `context=rpc`.
+            crate::metrics::log(Level::Warn, "RPC concurrency must be positive, reverted to the default value", &[]);
         }
         let barrier = FixedSizeBarrier::new(capacity)?;
 

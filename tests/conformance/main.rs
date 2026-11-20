@@ -24,6 +24,7 @@ mod client_messages;
 mod health;
 mod issues;
 mod logging;
+mod logging_server;
 mod origin;
 mod pusher;
 mod rpc_sessions;

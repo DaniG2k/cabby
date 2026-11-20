@@ -309,7 +309,7 @@ impl HttpClient {
         let stream = ClientStream::connect(&o.host, o.port, self.tls.as_ref()).await.map_err(|e| {
             let text = e.to_string();
             let tls = text.starts_with("tls:");
-            let cause = if tls { text } else { format!("dial tcp {}:{}: {text}", o.host, o.port) };
+            let cause = if tls { text } else { format!("dial tcp {}:{}: {}", o.host, o.port, go_dial_error(&e)) };
             self.error(path, &cause, tls)
         })?;
         let (sender, conn) = http1::Builder::new()
@@ -321,5 +321,37 @@ impl HttpClient {
             let _ = conn.await;
         });
         Ok(sender)
+    }
+}
+
+/// Go's text of a failed TCP connect (`connect: connection refused`): the
+/// syscall name and the lowercase errno string, without Rust's `(os error N)`.
+pub(crate) fn go_dial_error(e: &std::io::Error) -> String {
+    use std::io::ErrorKind;
+    let text = e.to_string();
+    let connect_errno = matches!(
+        e.kind(),
+        ErrorKind::ConnectionRefused | ErrorKind::HostUnreachable | ErrorKind::NetworkUnreachable | ErrorKind::TimedOut
+    );
+    match (connect_errno, e.raw_os_error(), text.find(" (os error ")) {
+        (true, Some(_), Some(at)) => {
+            let mut chars = text[..at].chars();
+            let first = chars.next().map(|c| c.to_ascii_lowercase()).into_iter();
+            format!("connect: {}", first.chain(chars).collect::<String>())
+        }
+        _ => text,
+    }
+}
+
+#[cfg(test)]
+mod dial_error_tests {
+    #[test]
+    fn refused_connects_read_like_go() {
+        if cfg!(target_os = "linux") {
+            let e = std::io::Error::from_raw_os_error(111);
+            assert_eq!("connect: connection refused", super::go_dial_error(&e));
+        }
+        let other = std::io::Error::other("lookup failed");
+        assert_eq!("lookup failed", super::go_dial_error(&other));
     }
 }
