@@ -8,7 +8,8 @@ use hyper_util::rt::TokioIo;
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::protocol::{Role, WebSocketConfig};
 
-use cabby_core::logger::{Attr, Level, LogValue};
+use cabby_core::logger::{Level, LogValue, Logger};
+use cabby_core::{log_debug, log_error};
 
 use super::connection::{self, CLOSE_ABNORMAL_CLOSURE, WsConnection};
 use super::{Config, OriginCheck, check_origin};
@@ -29,14 +30,9 @@ pub type SessionHandler = Arc<dyn Fn(WsConnection, RequestInfo, SessionCallback)
 /// Headers extractor shared with the upgrade tasks.
 pub type SharedHeadersExtractor = Arc<dyn HeadersExtractor + Send + Sync>;
 
-fn log(level: Level, msg: &str, attrs: &[Attr]) {
-    let mut all = Vec::with_capacity(attrs.len() + 1);
-    all.push(Attr::new("context", LogValue::String("ws".into())));
-    all.extend_from_slice(attrs);
-    crate::metrics::log(level, msg, &all);
-}
-
 struct Inner {
+    /// Upstream `l.With("context", "ws")`.
+    log: Logger,
     subprotocols: Vec<String>,
     extractor: Option<SharedHeadersExtractor>,
     origins: OriginCheck,
@@ -60,10 +56,12 @@ pub fn websocket_handler(
     session_handler: SessionHandler,
 ) -> WebsocketHandler {
     if config.enable_compression {
-        log(Level::Warn, "WebSocket compression is not supported; connections are not compressed", &[]);
+        let log = Logger::default().with("context", "ws");
+        log.log(Level::Warn, "WebSocket compression is not supported; connections are not compressed", &[]);
     }
     WebsocketHandler {
         inner: Arc::new(Inner {
+            log: Logger::default().with("context", "ws"),
             subprotocols,
             extractor,
             origins: check_origin(&config.allowed_origins),
@@ -118,45 +116,58 @@ fn select_subprotocol<'a>(server: &'a [String], client_header: &str) -> Option<&
 }
 
 impl Inner {
-    /// Validates the handshake in gorilla's order: `Ok((accept key, subprotocol))`, or the error status.
+    /// Validates the handshake in gorilla's order: `Ok((accept key, subprotocol))`,
+    /// or the error status (logged with gorilla's `HandshakeError` text).
     fn handshake(&self, req: &Request) -> Result<(String, String), u16> {
+        self.check_handshake(req).map_err(|(status, error)| {
+            log_debug!(self.log, "WebSocket connection upgrade failed", "error" => error);
+            status
+        })
+    }
+
+    fn check_handshake(&self, req: &Request) -> Result<(String, String), (u16, &'static str)> {
         use http::header::{
             CONNECTION, ORIGIN, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION, UPGRADE,
         };
 
         let headers = req.headers();
-        if !token_list_contains(headers, CONNECTION, "upgrade") || !token_list_contains(headers, UPGRADE, "websocket") {
-            log(
-                Level::Debug,
-                "WebSocket connection upgrade failed",
-                &[Attr::new(
-                    "error",
-                    LogValue::String("websocket: the client is not using the websocket protocol".into()),
-                )],
-            );
-            return Err(400);
+        if !token_list_contains(headers, CONNECTION, "upgrade") {
+            return Err((
+                400,
+                concat!(
+                    "websocket: the client is not using the websocket protocol: ",
+                    "'upgrade' token not found in 'Connection' header"
+                ),
+            ));
+        }
+        if !token_list_contains(headers, UPGRADE, "websocket") {
+            return Err((
+                400,
+                concat!(
+                    "websocket: the client is not using the websocket protocol: ",
+                    "'websocket' token not found in 'Upgrade' header"
+                ),
+            ));
         }
         if req.method() != http::Method::GET {
-            return Err(405);
+            return Err((
+                405,
+                concat!("websocket: the client is not using the websocket protocol: ", "request method is not GET"),
+            ));
         }
         if !token_list_contains(headers, SEC_WEBSOCKET_VERSION, "13") {
-            return Err(400);
+            return Err((400, "websocket: unsupported version: 13 not found in 'Sec-Websocket-Version' header"));
         }
         let origin = headers.get(ORIGIN).map(|o| o.to_str().unwrap_or(""));
         if !self.origins.allows(origin) {
-            log(
-                Level::Debug,
-                "WebSocket connection upgrade failed",
-                &[Attr::new(
-                    "error",
-                    LogValue::String("websocket: request origin not allowed by Upgrader.CheckOrigin".into()),
-                )],
-            );
-            return Err(403);
+            return Err((403, "websocket: request origin not allowed by Upgrader.CheckOrigin"));
         }
         let key = headers.get(SEC_WEBSOCKET_KEY).and_then(|k| k.to_str().ok()).unwrap_or("");
         if !valid_challenge_key(key) {
-            return Err(400);
+            return Err((
+                400,
+                "websocket: not a websocket handshake: 'Sec-WebSocket-Key' header must be Base64 encoded value of 16-byte in length",
+            ));
         }
         let client_protocols = headers.get(SEC_WEBSOCKET_PROTOCOL).and_then(|p| p.to_str().ok()).unwrap_or("");
         let subprotocol = select_subprotocol(&self.subprotocols, client_protocols).unwrap_or("").to_owned();
@@ -174,11 +185,7 @@ impl Inner {
         let upgraded = match on_upgrade.await {
             Ok(upgraded) => upgraded,
             Err(e) => {
-                log(
-                    Level::Debug,
-                    "WebSocket connection upgrade failed",
-                    &[Attr::new("error", LogValue::String(e.to_string()))],
-                );
+                log_debug!(self.log, "WebSocket connection upgrade failed", "error" => e.to_string());
                 return;
             }
         };
@@ -189,39 +196,23 @@ impl Inner {
         match RequestInfo::new(&request, extractor) {
             Err(e) => connection::close_without_waiting(&conn, CLOSE_ABNORMAL_CLOSURE, &e.0),
             Ok(info) => {
+                // Upstream `l.With("sid", info.UID)`: the handler's logger, not `context=ws`.
+                let session_log = Logger::default().with("sid", info.uid.as_str());
                 let client_protocols = request.header("Sec-Websocket-Protocol");
                 if conn.subprotocol().is_empty() && !client_protocols.is_empty() {
-                    log(
-                        Level::Debug,
-                        "no subprotocol negotiated",
-                        &[
-                            Attr::new("sid", LogValue::String(info.uid.clone())),
-                            Attr::new("client", LogValue::String(client_protocols.to_owned())),
-                        ],
-                    );
+                    log_debug!(session_log, "no subprotocol negotiated",
+                        "client" => client_protocols,
+                        "server" => LogValue::List(self.subprotocols.iter().map(LogValue::from).collect()));
                 }
                 let handler = Arc::clone(&self.session_handler);
                 crate::node::execute(Box::new(move || {
-                    let sid = info.uid.clone();
-                    log(
-                        Level::Debug,
-                        "WebSocket session established",
-                        &[Attr::new("sid", LogValue::String(sid.clone()))],
-                    );
-                    let completed_sid = sid.clone();
+                    log_debug!(session_log, "WebSocket session established");
+                    let completed_log = session_log.clone();
                     let callback: SessionCallback = Box::new(move || {
-                        log(
-                            Level::Debug,
-                            "WebSocket session completed",
-                            &[Attr::new("sid", LogValue::String(completed_sid))],
-                        );
+                        log_debug!(completed_log, "WebSocket session completed");
                     });
                     if let Err(e) = handler(conn, info, callback) {
-                        log(
-                            Level::Error,
-                            "WebSocket session failed",
-                            &[Attr::new("sid", LogValue::String(sid)), Attr::new("error", LogValue::String(e))],
-                        );
+                        log_error!(session_log, "WebSocket session failed", "error" => e);
                     }
                 }));
             }
