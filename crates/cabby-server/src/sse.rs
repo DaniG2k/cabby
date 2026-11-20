@@ -420,8 +420,11 @@ fn param(req: &Request, key: &str) -> String {
     query_param(target, key)
 }
 
-fn header<'a>(req: &'a Request, name: &str) -> &'a str {
-    req.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or("")
+/// Go `r.Header.Get(name)`: the value's bytes as they arrived. Values that are
+/// not ASCII (an `EventSource` sends the last event id of a non-ASCII stream as
+/// UTF-8) are kept; invalid UTF-8 is converted lossily.
+fn header<'a>(req: &'a Request, name: &str) -> std::borrow::Cow<'a, str> {
+    req.headers().get(name).map_or(std::borrow::Cow::Borrowed(""), |v| String::from_utf8_lossy(v.as_bytes()))
 }
 
 /// `map[string]string{...}` as Go's `utils.ToJSON` writes it (sorted keys).
@@ -700,7 +703,7 @@ impl Handler {
         let method = req.method();
         {
             let mut w = lock_writer(w);
-            write_cors_headers(w.headers_mut(), header(req, "Origin"), &self.allowed_hosts);
+            write_cors_headers(w.headers_mut(), &header(req, "Origin"), &self.allowed_hosts);
 
             // Respond to preflight requests.
             if method == http::Method::OPTIONS {
@@ -855,7 +858,7 @@ struct Endpoint(Arc<Handler>);
 impl server::Handler for Endpoint {
     fn call(&self, req: server::Request) -> ResponseFuture {
         let handler = self.0.clone();
-        let (writer, client_gone, response) = server::channel_response();
+        let (writer, client_gone, response) = server::channel_response_for(&req);
         let limit = DEFAULT_MAX_BODY_SIZE as u64;
         let task = async move {
             let conn = server::conn_info(&req);
@@ -1069,5 +1072,17 @@ mod tests {
 
         let req = get("/", &[]);
         assert!(subscribe_command_from_get_request(&req).unwrap().is_none());
+    }
+
+    /// M6 (independent review): an `EventSource` sends the last event id of a
+    /// non-ASCII stream as raw UTF-8; Go reads header values as bytes, so the
+    /// history position is kept. Before, such a value was ignored.
+    #[test]
+    fn last_event_id_of_a_non_ascii_stream() {
+        let mut req = get("/?stream=caf%C3%A9", &[]);
+        req.headers_mut().insert("last-event-id", http::HeaderValue::from_bytes("1/EPOCH/café".as_bytes()).unwrap());
+        let cmd = subscribe_command_from_get_request(&req).unwrap().unwrap();
+        let pos = &cmd.history.streams["café"];
+        assert_eq!((1, "EPOCH"), (pos.offset, pos.epoch.as_str()));
     }
 }

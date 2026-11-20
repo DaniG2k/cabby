@@ -228,8 +228,9 @@ fn url_scheme(raw: &str) -> Option<&str> {
 /// are skipped.
 fn parse_query(target: &str) -> HashMap<String, String> {
     let mut params = HashMap::new();
-    let without_fragment = target.split('#').next().unwrap_or("");
-    let Some((_, query)) = without_fragment.split_once('?') else {
+    // A request target has no fragment: Go (`url.ParseRequestURI`) keeps a `#`
+    // in the query.
+    let Some((_, query)) = target.split_once('?') else {
         return params;
     };
     for pair in query.split('&') {
@@ -247,8 +248,7 @@ fn parse_query(target: &str) -> HashMap<String, String> {
 /// The first value of a query parameter of a request target, `""` when missing
 /// (Go `r.URL.Query().Get(key)`; decoding as in [`RequestInfo::param`]).
 pub fn query_param(target: &str, key: &str) -> String {
-    let without_fragment = target.split('#').next().unwrap_or("");
-    let Some((_, query)) = without_fragment.split_once('?') else {
+    let Some((_, query)) = target.split_once('?') else {
         return String::new();
     };
     for pair in query.split('&') {
@@ -276,7 +276,10 @@ fn query_unescape(s: &str) -> Option<String> {
     while i < bytes.len() {
         match bytes[i] {
             b'%' => {
-                let hex = std::str::from_utf8(bytes.get(i + 1..i + 3)?).ok()?;
+                // Two hex digits (`from_str_radix` alone would accept a sign, e.g. `%+f`).
+                let hex = std::str::from_utf8(bytes.get(i + 1..i + 3)?)
+                    .ok()
+                    .filter(|h| h.bytes().all(|c| c.is_ascii_hexdigit()))?;
                 out.push(u8::from_str_radix(hex, 16).ok()?);
                 i += 3;
             }
@@ -350,6 +353,19 @@ pub fn write_cors_headers(headers: &mut http::HeaderMap, origin: &str, origins: 
 mod tests {
     use super::*;
 
+    /// Low (HTTP framing): Go's `url.QueryUnescape` needs two hex digits after
+    /// `%`; a pair with an invalid escape such as `%+f` is skipped. Before,
+    /// `%+f` decoded to `\x0f` (Rust's integer parsing accepts a sign).
+    #[test]
+    fn query_escapes_need_two_hex_digits() {
+        assert_eq!("", query_param("/events?stream=%+f", "stream"));
+        assert_eq!("", query_param("/events?stream=%-1", "stream"));
+        assert_eq!("b", query_param("/events?stream=%+f&stream=b", "stream"));
+        assert_eq!("a b\u{f}", query_param("/events?stream=a+b%0F", "stream"));
+        // Request targets have no fragment (Go keeps `#` in the query).
+        assert_eq!("a#frag", query_param("/events?stream=a#frag", "stream"));
+    }
+
     #[test]
     fn splits_host_port_like_go() {
         assert_eq!(Some("192.0.2.1"), split_host_port("192.0.2.1:1234"));
@@ -362,7 +378,8 @@ mod tests {
     #[test]
     fn parses_queries_like_go() {
         let q = parse_query("/cable?a=1&b=x+y&c=%41&bad=%zz&semi=1;2&a=2#frag");
-        assert_eq!(Some("2"), q.get("a").map(String::as_str));
+        // No fragment in a request target: Go keeps `#` in the query.
+        assert_eq!(Some("2#frag"), q.get("a").map(String::as_str));
         assert_eq!(Some("x y"), q.get("b").map(String::as_str));
         assert_eq!(Some("A"), q.get("c").map(String::as_str));
         assert!(!q.contains_key("bad"));
@@ -372,7 +389,7 @@ mod tests {
     #[test]
     fn query_param_takes_the_first_value() {
         assert_eq!("1", query_param("/x?a=1&a=2", "a"));
-        assert_eq!("x y", query_param("/x?b=x+y#a=3", "b"));
+        assert_eq!("x y#a=3", query_param("/x?b=x+y#a=3", "b"));
         assert_eq!("", query_param("/x?bad=%zz", "bad"));
         assert_eq!("", query_param("/x", "a"));
     }
