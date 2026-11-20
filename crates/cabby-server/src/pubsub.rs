@@ -9,9 +9,11 @@ use std::sync::mpsc::Sender;
 
 use cabby_core::common::{PubSubMessage, RemoteCommandMessage, StreamMessage, pub_sub_message_from_json};
 use cabby_core::gojson;
+use cabby_core::logger::{LogValuer, Logger, compact_value_bytes};
 use cabby_core::nats::client::{Connection, Incoming};
-use cabby_core::pubsub::{Handler, PubSubError, Subscriber};
+use cabby_core::pubsub::{Handler, PubSubError, Published, Subscriber};
 use cabby_core::toml_config::{self, TomlSection};
+use cabby_core::{log_debug, log_error, log_info, log_warn};
 
 use crate::nats::NatsConfig as NatsClientConfig;
 use crate::redis::RedisConfig as RedisClientConfig;
@@ -95,6 +97,7 @@ pub struct RedisSubscriber {
     spec: crate::redis::connect::ConnectSpec,
     subscriptions: Arc<redis_sub::Subscriptions>,
     publisher: std::sync::Mutex<Option<Arc<crate::redis::publisher::Publisher>>>,
+    log: Logger,
 }
 
 use crate::redis::subscription as redis_sub;
@@ -102,27 +105,42 @@ use crate::redis::subscription as redis_sub;
 /// Delivers pub/sub messages to the node (upstream `OnMessage` hook).
 struct NodeSink {
     node: Arc<dyn Handler>,
+    log: Logger,
 }
 
 impl redis_sub::Sink for NodeSink {
     fn message(&self, channel: &str, payload: &[u8]) {
-        match cabby_core::common::pub_sub_message_from_json(payload) {
-            Ok(cabby_core::common::PubSubMessage::Stream(msg)) => self.node.broadcast(&msg),
-            Ok(cabby_core::common::PubSubMessage::RemoteCommand(cmd)) => self.node.execute_remote_command(&cmd),
-            // Upstream handles stream messages and remote commands only.
-            Ok(cabby_core::common::PubSubMessage::Batch(_)) => {}
-            Err(e) => crate::redis::log(
-                cabby_core::logger::Level::Warn,
-                "pubsub",
-                "failed to parse pubsub message",
-                &[
-                    ("channel", channel.to_owned()),
-                    ("data", String::from_utf8_lossy(payload).into_owned()),
-                    ("error", e.to_string()),
-                ],
-            ),
+        handle_message(self.node.as_ref(), &self.log, channel, payload, false);
+    }
+}
+
+/// Upstream `OnMessage` (Redis) / `handleMessage` (NATS): stream messages and
+/// remote commands go to the node; NATS warns about anything else (batches),
+/// Redis ignores it.
+fn handle_message(node: &dyn Handler, log: &Logger, channel: &str, payload: &[u8], warn_unknown: bool) {
+    match pub_sub_message_from_json(payload) {
+        Ok(PubSubMessage::Stream(msg)) => {
+            log_debug!(log, "received broadcast message", "channel" => channel);
+            node.broadcast(&msg);
+        }
+        Ok(PubSubMessage::RemoteCommand(cmd)) => {
+            log_debug!(log, "received remote command", "channel" => channel);
+            node.execute_remote_command(&cmd);
+        }
+        Ok(PubSubMessage::Batch(_)) => {
+            if warn_unknown {
+                log_warn!(log, "received unknown message", "channel" => channel, "data" => compact_value_bytes(payload).log_value());
+            }
+        }
+        Err(e) => {
+            log_warn!(log, "failed to parse pubsub message", "data" => compact_value_bytes(payload).log_value(), "error" => e.to_string());
         }
     }
+}
+
+/// Upstream `Publish`'s debug record (`log.With("channel", stream)`).
+fn log_publish(log: &Logger, channel: &str, msg: Published<'_>) {
+    log_debug!(log, "publish message", "channel" => channel, "data" => msg.log_value());
 }
 
 impl RedisSubscriber {
@@ -130,15 +148,16 @@ impl RedisSubscriber {
         let mut redis = crate::redis::or_defaults(config.redis.as_ref());
         redis.to_client_options().map_err(|e| PubSubError(e.0))?;
         let spec = redis.connect_spec().map_err(|e| PubSubError(e.0))?;
+        let log = Logger::default().with("context", "pubsub");
         let subscriptions = redis_sub::Subscriptions::new(redis_sub::Settings {
-            context: "pubsub",
+            log: log.clone(),
             primary: config.channel.clone(),
             max_reconnect_attempts: redis.max_reconnect_attempts,
             connected_msg: "connected",
             reconnected_msg: "reconnected",
             exhausted_error: "failed to reconnect to Redis: attempts exceeded",
+            subscribe_failed: "failed to resubscribe",
             lost: &[(cabby_core::logger::Level::Error, "Redis pub/sub disconnected")],
-            attrs: Vec::new(),
         });
         Ok(Self {
             node,
@@ -147,10 +166,12 @@ impl RedisSubscriber {
             spec,
             subscriptions,
             publisher: std::sync::Mutex::new(None),
+            log,
         })
     }
 
-    fn publish(&self, channel: &str, payload: Vec<u8>) {
+    fn publish(&self, channel: &str, msg: Published<'_>, payload: Vec<u8>) {
+        log_publish(&self.log, channel, msg);
         // Publishing may wait for room in the queue: not under the lock.
         let publisher = self.publisher.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if let Some(p) = publisher {
@@ -161,12 +182,7 @@ impl RedisSubscriber {
 
 impl Subscriber for RedisSubscriber {
     fn start(&self, done: Sender<PubSubError>) -> Result<(), PubSubError> {
-        crate::redis::log(
-            cabby_core::logger::Level::Info,
-            "pubsub",
-            &crate::redis::pubsub_start_message("Starting Redis pub/sub", &self.redis),
-            &[],
-        );
+        log_info!(self.log, &crate::redis::pubsub_start_message("Starting Redis pub/sub", &self.redis));
 
         // Add internal channel to subscriptions
         self.subscriptions.subscribe(&self.channel);
@@ -177,7 +193,7 @@ impl Subscriber for RedisSubscriber {
         }
         drop(publisher);
 
-        let sink = Arc::new(NodeSink { node: Arc::clone(&self.node) });
+        let sink = Arc::new(NodeSink { node: Arc::clone(&self.node), log: self.log.clone() });
         self.subscriptions.start(
             self.spec.clone(),
             sink,
@@ -192,26 +208,29 @@ impl Subscriber for RedisSubscriber {
         let Some(publisher) = self.publisher.lock().unwrap_or_else(|e| e.into_inner()).take() else {
             return Ok(());
         };
-        crate::redis::log(cabby_core::logger::Level::Debug, "pubsub", "shutting down Redis pub/sub", &[]);
+        log_debug!(self.log, "shutting down Redis pub/sub");
         publisher.shutdown();
         self.subscriptions.shutdown(std::time::Duration::from_secs(2));
         Ok(())
     }
 
     fn broadcast(&self, msg: &StreamMessage) {
-        self.publish(&msg.stream, cabby_core::gojson::to_vec(msg));
+        self.publish(&msg.stream, Published::Stream(msg), cabby_core::gojson::to_vec(msg));
     }
 
     fn broadcast_command(&self, cmd: &RemoteCommandMessage) {
-        self.publish(&self.channel, cabby_core::gojson::to_vec(cmd));
+        self.publish(&self.channel, Published::Command(cmd), cabby_core::gojson::to_vec(cmd));
     }
 
     fn subscribe(&self, stream: &str) {
+        log_debug!(self.log, "subscribing", "channel" => stream);
         self.subscriptions.subscribe(stream);
     }
 
     fn unsubscribe(&self, stream: &str) {
-        self.subscriptions.unsubscribe(stream);
+        if self.subscriptions.unsubscribe(stream) {
+            log_debug!(self.log, "unsubscribing", "channel" => stream);
+        }
     }
 
     fn is_multi_node(&self) -> bool {
@@ -248,39 +267,31 @@ pub struct NatsSubscriber {
     node: Arc<dyn Handler>,
     config: NatsConfig,
     conn: std::sync::Mutex<Option<Arc<Connection>>>,
+    log: Logger,
 }
 
 impl NatsSubscriber {
     /// Upstream `NewNATSSubscriber(node, config)`.
     pub fn new(node: Arc<dyn Handler>, config: &NatsConfig) -> Result<Self, PubSubError> {
-        Ok(Self { node, config: config.clone(), conn: std::sync::Mutex::new(None) })
+        Ok(Self {
+            node,
+            config: config.clone(),
+            conn: std::sync::Mutex::new(None),
+            log: Logger::default().with("context", "pubsub"),
+        })
     }
 
     fn conn(&self) -> Option<Arc<Connection>> {
         self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
-    fn publish(&self, subject: &str, payload: Vec<u8>) {
+    fn publish(&self, subject: &str, msg: Published<'_>, payload: Vec<u8>) {
+        log_publish(&self.log, subject, msg);
         if let Some(c) = self.conn()
             && let Err(e) = c.publish(subject, payload)
         {
-            crate::redis::log(
-                cabby_core::logger::Level::Error,
-                "pubsub",
-                "failed to publish message",
-                &[("error", e.0)],
-            );
+            log_error!(self.log, "failed to publish message", "error" => e.0);
         }
-    }
-}
-
-/// Upstream `handleMessage`: stream messages and remote commands go to the
-/// node; anything else (including batches) is ignored.
-fn handle_nats_message(node: &dyn Handler, msg: &Incoming) {
-    match pub_sub_message_from_json(&msg.payload) {
-        Ok(PubSubMessage::Stream(m)) => node.broadcast(&m),
-        Ok(PubSubMessage::RemoteCommand(c)) => node.execute_remote_command(&c),
-        Ok(PubSubMessage::Batch(_)) | Err(_) => {}
     }
 }
 
@@ -288,8 +299,12 @@ impl Subscriber for NatsSubscriber {
     fn start(&self, _done: Sender<PubSubError>) -> Result<(), PubSubError> {
         let nats = self.config.nats.clone().ok_or_else(|| PubSubError("NATS configuration is missing".into()))?;
         let node = self.node.clone();
-        let conn = Connection::open(&nats, "cabby-nats-pubsub", move |msg| handle_nats_message(node.as_ref(), &msg))
-            .map_err(|e| PubSubError(e.0))?;
+        let log = self.log.clone();
+        let conn = Connection::open(&nats, "cabby-nats-pubsub", self.log.clone(), move |msg: Incoming| {
+            handle_message(node.as_ref(), &log, &msg.subject, &msg.payload, true)
+        })
+        .map_err(|e| PubSubError(e.0))?;
+        log_info!(self.log, &format!("Starting NATS pub/sub: {}", nats.filtered_servers()));
         conn.subscribe(&self.config.channel);
         *self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(conn));
         Ok(())
@@ -304,11 +319,11 @@ impl Subscriber for NatsSubscriber {
     }
 
     fn broadcast(&self, msg: &StreamMessage) {
-        self.publish(&msg.stream, gojson::to_vec(msg));
+        self.publish(&msg.stream, Published::Stream(msg), gojson::to_vec(msg));
     }
 
     fn broadcast_command(&self, cmd: &RemoteCommandMessage) {
-        self.publish(&self.config.channel, gojson::to_vec(cmd));
+        self.publish(&self.config.channel, Published::Command(cmd), gojson::to_vec(cmd));
     }
 
     fn subscribe(&self, stream: &str) {

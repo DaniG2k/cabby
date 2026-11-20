@@ -30,15 +30,18 @@
 //! No lock is held across an `.await` or a blocking wait.
 
 use std::future::Future;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use async_nats::{Client, ConnectOptions, ServerAddr};
 use tokio::runtime::{Handle, Runtime, RuntimeFlavor};
 
 use super::{NatsConfig, NatsError};
+use crate::logger::{LogValuer, Logger, filtered_url};
 use crate::utils::backpressure;
+use crate::{log_error, log_info, log_warn};
 
 /// The process-wide runtime that runs NATS I/O.
 pub fn runtime() -> &'static Runtime {
@@ -95,16 +98,70 @@ pub fn server_addrs(servers: &str) -> Result<Vec<ServerAddr>, NatsError> {
 /// client is returned at once and connects (and reconnects) in the background.
 ///
 /// See [`max_reconnects`] for the reconnect limit.
-pub async fn connect(config: &NatsConfig) -> Result<Client, NatsError> {
+///
+/// Connection changes are logged to `log` as upstream's handlers do
+/// (`DisconnectErrHandler`: `connection failed`, `ReconnectHandler`:
+/// `connection restored`).
+pub async fn connect(config: &NatsConfig, log: Logger) -> Result<Client, NatsError> {
     let addrs = server_addrs(&config.servers)?;
+    let client_slot: Arc<OnceLock<Client>> = Arc::new(OnceLock::new());
+    let events = ConnectionEvents { log, servers: config.servers.clone(), client: Arc::clone(&client_slot) };
+    let disconnected = Arc::new(AtomicBool::new(false));
     let mut options = ConnectOptions::new()
         .retry_on_initial_connect()
         .max_reconnects(max_reconnects(config.max_reconnect_attempts))
-        .reconnect_delay_callback(|attempts| if attempts <= 1 { Duration::ZERO } else { RECONNECT_WAIT });
+        .reconnect_delay_callback(|attempts| if attempts <= 1 { Duration::ZERO } else { RECONNECT_WAIT })
+        .event_callback(move |event| {
+            events.on_event(&event, &disconnected);
+            std::future::ready(())
+        });
     if config.dont_randomize_servers {
         options = options.retain_servers_order();
     }
-    options.connect(addrs).await.map_err(|e| NatsError(e.to_string()))
+    let client = options.connect(addrs).await.map_err(|e| NatsError(e.to_string()))?;
+    let _ = client_slot.set(client.clone());
+    Ok(client)
+}
+
+/// Logs connection changes (upstream's nats.go handlers).
+struct ConnectionEvents {
+    log: Logger,
+    servers: String,
+    client: Arc<OnceLock<Client>>,
+}
+
+impl ConnectionEvents {
+    fn on_event(&self, event: &async_nats::Event, disconnected: &AtomicBool) {
+        match event {
+            async_nats::Event::Disconnected => {
+                disconnected.store(true, Ordering::SeqCst);
+                // async-nats does not say why the connection was lost (Go logs
+                // the read error, e.g. `EOF`).
+                log_warn!(self.log, "connection failed", "error" => "disconnected");
+            }
+            // The first connection is not a reconnect (Go calls `ConnectedCB` then).
+            async_nats::Event::Connected if disconnected.swap(false, Ordering::SeqCst) => {
+                log_info!(self.log, "connection restored", "url" => filtered_url(&self.connected_url()).log_value());
+            }
+            _ => {}
+        }
+    }
+
+    /// Go `nc.ConnectedUrl()`: the configured URL of the server connected to.
+    fn connected_url(&self) -> String {
+        let configured: Vec<&str> = self.servers.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+        let normalize = |s: &str| if s.contains("://") { s.to_owned() } else { format!("nats://{s}") };
+        if configured.len() == 1 {
+            return normalize(configured[0]);
+        }
+        match self.client.get() {
+            Some(c) => {
+                let info = c.server_info();
+                format!("nats://{}:{}", info.host, info.port)
+            }
+            None => configured.first().map(|s| normalize(s)).unwrap_or_default(),
+        }
+    }
 }
 
 /// The async-nats reconnect limit for Go's `MaxReconnects(n)`: negative is
@@ -213,14 +270,16 @@ impl Connection {
     pub fn open(
         config: &NatsConfig,
         name: &str,
+        log: Logger,
         on_message: impl FnMut(Incoming) + Send + 'static,
     ) -> Result<Self, NatsError> {
         let config = config.clone();
-        let client = block_on(async move { connect(&config).await })?;
+        let conn_log = log.clone();
+        let client = block_on(async move { connect(&config, conn_log).await })?;
         let dispatcher = Dispatcher::spawn(name, on_message);
         let (publications, publications_rx) = tokio::sync::mpsc::channel(PUBLISH_QUEUE_CAPACITY);
         let (control, control_rx) = tokio::sync::mpsc::unbounded_channel();
-        runtime().spawn(run_connection(client, control_rx, publications_rx, dispatcher));
+        runtime().spawn(run_connection(client, control_rx, publications_rx, dispatcher, log));
         Ok(Self { publications, control })
     }
 
@@ -274,6 +333,7 @@ async fn run_connection(
     mut control: tokio::sync::mpsc::UnboundedReceiver<Control>,
     mut publications: tokio::sync::mpsc::Receiver<(String, Vec<u8>)>,
     dispatcher: Dispatcher<Incoming>,
+    log: Logger,
 ) {
     let mut subscriptions: std::collections::HashMap<String, SubscriptionTask> = std::collections::HashMap::new();
     loop {
@@ -283,8 +343,12 @@ async fn run_connection(
                 None => return,
                 Some(Control::Subscribe(subject, reply)) => {
                     let result = subscribe(&client, &mut subscriptions, &subject, &dispatcher).await;
-                    if let Some(r) = reply {
-                        let _ = r.send(result);
+                    match (reply, result) {
+                        (Some(r), result) => {
+                            let _ = r.send(result);
+                        }
+                        (None, Err(e)) => log_error!(log, "failed to subscribe", "stream" => subject, "error" => e.0),
+                        (None, Ok(())) => {}
                     }
                 }
                 Some(Control::Unsubscribe(subject)) => {
