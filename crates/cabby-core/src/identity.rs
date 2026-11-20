@@ -415,6 +415,9 @@ fn decode_segment(seg: &str) -> Result<Vec<u8>, String> {
 /// A JSON object segment (Go `json` decoding into a map: `null` is an empty
 /// map); a value of another kind fails with `encoding/json`'s type error.
 fn decode_object(bytes: &[u8], go_type: &str) -> Result<Map<String, Value>, String> {
+    if let Some(e) = crate::gojson::syntax::syntax_error(bytes) {
+        return Err(e);
+    }
     let kind = match serde_json::from_slice::<Value>(bytes).map_err(|e| e.to_string())? {
         Value::Object(map) => return Ok(map),
         Value::Null => return Ok(Map::new()),
@@ -611,12 +614,10 @@ mod tests {
         assert!(url_raw_query("ws://x/\ncable").is_err());
     }
 
-    /// Pins the logging deviation for malformed JWT segments: golang-jwt's
-    /// prefix and Go's type errors are kept, but a JSON syntax error carries
-    /// serde_json's text (Go: `encoding/json`'s, e.g. `invalid character 'x'
-    /// looking for beginning of value`).
+    /// Malformed JWT segments are rejected with golang-jwt's prefix and Go's
+    /// `encoding/json` type and syntax error texts.
     #[test]
-    fn jwt_json_syntax_error_detail_is_serde_text() {
+    fn jwt_json_errors_read_like_go() {
         let now = SystemTime::now();
         let token =
             |header: &[u8]| format!("{}.e30.c2ln", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header));
@@ -630,7 +631,10 @@ mod tests {
         let Err(JwtError::Invalid(syntax)) = verify_hmac_jwt(&token(b"x"), b"s", now) else {
             panic!("a malformed header is rejected");
         };
-        assert_eq!("token is malformed: could not JSON decode header: expected value at line 1 column 1", syntax);
+        assert_eq!(
+            "token is malformed: could not JSON decode header: invalid character 'x' looking for beginning of value",
+            syntax
+        );
     }
 
     #[test]

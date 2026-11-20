@@ -261,8 +261,10 @@ fn broadcast_and_presence_lines_match_go_at_debug_level() {
     let (output, sids, ports, epoch) = broadcasts_and_presence();
     let mut lines = normalized(&output, &sids, &ports, Some(&epoch));
     // The session still connected at shutdown: whether its reader logs the
-    // closed connection before the process exits is a race in Go.
-    lines.retain(|l| !(l.starts_with("DBG WebSocket close error ") && l.contains("sid=SID2")));
+    // closed connection (and the handler the session's end) before the process
+    // exits is a race in Go.
+    let shutdown_race = ["DBG WebSocket close error ", "DBG WebSocket session completed "];
+    lines.retain(|l| !(shutdown_race.iter().any(|p| l.starts_with(p)) && l.contains("sid=SID2")));
     assert_lines(&lines, BROADCASTS_DEBUG, &output);
 }
 
