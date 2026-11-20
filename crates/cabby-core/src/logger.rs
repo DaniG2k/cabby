@@ -217,6 +217,25 @@ pub fn filtered_map(val: Option<&BTreeMap<String, String>>) -> FilteredMap {
     LogFilter::global().filtered_map(val)
 }
 
+/// Where records written by core components go (upstream's default `slog`
+/// logger). The process logger installs itself with [`set_sink`]; until then
+/// records are dropped.
+pub type Sink = fn(Level, &str, &[Attr]);
+
+static SINK: OnceLock<Sink> = OnceLock::new();
+
+/// Installs the process logger (the first call wins).
+pub fn set_sink(sink: Sink) {
+    let _ = SINK.set(sink);
+}
+
+/// Writes a record to the process logger.
+pub fn log(level: Level, msg: &str, attrs: &[Attr]) {
+    if let Some(sink) = SINK.get() {
+        sink(level, msg, attrs);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

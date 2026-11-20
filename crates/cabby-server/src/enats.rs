@@ -13,6 +13,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
+use cabby_core::logger::{Attr, Level, LogValue};
 use cabby_core::toml_config::string_list;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,11 +217,47 @@ pub fn server_binary() -> PathBuf {
 
 struct Running {
     child: Child,
-    output: Arc<Mutex<Vec<u8>>>,
+    output: Arc<Mutex<OutputTail>>,
     conf_path: PathBuf,
     host: String,
     port: u16,
 }
+
+/// The most server output kept (for start-up and exit errors).
+const OUTPUT_LIMIT: usize = 64 * 1024;
+/// How much of the kept output an unexpected exit logs.
+const EXIT_OUTPUT_LIMIT: usize = 4 * 1024;
+/// How often the running server is checked.
+const WATCH_INTERVAL: Duration = Duration::from_millis(200);
+
+/// The last [`OUTPUT_LIMIT`] bytes of the server's output.
+#[derive(Default)]
+struct OutputTail {
+    buf: std::collections::VecDeque<u8>,
+}
+
+impl OutputTail {
+    fn push_line(&mut self, line: &[u8]) {
+        self.buf.extend(line);
+        self.buf.push_back(b'\n');
+        let excess = self.buf.len().saturating_sub(OUTPUT_LIMIT);
+        self.buf.drain(..excess);
+    }
+
+    /// The last `limit` bytes, from a line start when possible.
+    fn text(&self, limit: usize) -> String {
+        let skip = self.buf.len().saturating_sub(limit);
+        let mut bytes: Vec<u8> = self.buf.iter().skip(skip).copied().collect();
+        if skip > 0
+            && let Some(nl) = bytes.iter().position(|b| *b == b'\n')
+        {
+            bytes.drain(..=nl);
+        }
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+}
+
+type ExitHandler = Box<dyn Fn(EnatsError) + Send + Sync>;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -231,13 +268,26 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 pub struct Service {
     config: Config,
     name: Mutex<String>,
-    running: Mutex<Option<Running>>,
+    running: Arc<Mutex<Option<Running>>>,
+    on_exit: Arc<Mutex<Option<ExitHandler>>>,
 }
 
 impl Service {
     /// Upstream `NewService(config)`.
     pub fn new(config: &Config) -> Self {
-        Self { config: config.clone(), name: Mutex::new(String::new()), running: Mutex::new(None) }
+        Self {
+            config: config.clone(),
+            name: Mutex::new(String::new()),
+            running: Arc::default(),
+            on_exit: Arc::default(),
+        }
+    }
+
+    /// Called (once) if the server process exits on its own after it started;
+    /// upstream's in-process server cannot outlive the AnyCable process, so the
+    /// runner stops with this error.
+    pub fn on_exit(&self, handler: impl Fn(EnatsError) + Send + Sync + 'static) {
+        *lock(&self.on_exit) = Some(Box::new(handler));
     }
 
     /// The server name: the configured one, or the service address with `:`
@@ -357,7 +407,7 @@ impl Service {
 
         // Drain the output continuously; it is echoed to stderr in debug mode
         // (upstream routes server logs to its logger only when debugging).
-        let output = Arc::new(Mutex::new(Vec::new()));
+        let output = Arc::new(Mutex::new(OutputTail::default()));
         let echo = self.config.debug || self.config.trace;
         let streams: [Box<dyn Read + Send>; 2] = [
             Box::new(child.stdout.take().expect("piped stdout")),
@@ -370,15 +420,48 @@ impl Service {
                     if echo {
                         let _ = writeln!(std::io::stderr(), "{line}");
                     }
-                    let mut buf = lock(&sink);
-                    buf.extend_from_slice(line.as_bytes());
-                    buf.push(b'\n');
+                    lock(&sink).push_line(line.as_bytes());
                 }
             });
         }
 
         *lock(&self.running) = Some(Running { child, output, conf_path, host, port });
-        self.wait_ready()
+        self.wait_ready()?;
+        self.watch();
+        Ok(())
+    }
+
+    /// Supervises the started server: if it exits before [`Service::shutdown`],
+    /// the exit is logged and reported to the [`Service::on_exit`] handler.
+    fn watch(&self) {
+        let (running, on_exit) = (Arc::clone(&self.running), Arc::clone(&self.on_exit));
+        let spawned = std::thread::Builder::new().name("cabby-enats-watch".into()).spawn(move || {
+            loop {
+                std::thread::sleep(WATCH_INTERVAL);
+                let mut guard = lock(&running);
+                let Some(r) = guard.as_mut() else { return };
+                let Ok(Some(status)) = r.child.try_wait() else { continue };
+                let Some(r) = guard.take() else { return };
+                drop(guard);
+                let _ = std::fs::remove_file(&r.conf_path);
+                let output = lock(&r.output).text(EXIT_OUTPUT_LIMIT);
+                let err = EnatsError(format!("embedded NATS server exited unexpectedly: {status}"));
+                crate::metrics::log(
+                    Level::Error,
+                    "embedded NATS server exited unexpectedly",
+                    &[
+                        Attr::new("context", LogValue::String("enats".into())),
+                        Attr::new("status", LogValue::String(status.to_string())),
+                        Attr::new("output", LogValue::String(output)),
+                    ],
+                );
+                if let Some(handler) = lock(&on_exit).as_ref() {
+                    handler(err);
+                }
+                return;
+            }
+        });
+        drop(spawned);
     }
 
     /// Waits until the server accepts connections (upstream `WaitReady`).
@@ -391,7 +474,7 @@ impl Service {
                     return Err(EnatsError("NATS server is not started".into()));
                 };
                 if let Ok(Some(status)) = r.child.try_wait() {
-                    let out = String::from_utf8_lossy(&lock(&r.output)).into_owned();
+                    let out = lock(&r.output).text(OUTPUT_LIMIT);
                     return Err(EnatsError(format!("failed to start NATS server: exited with {status}\n{out}")));
                 }
                 let addr = (r.host.as_str(), r.port).to_socket_addrs().ok().and_then(|mut a| a.next());
@@ -587,5 +670,45 @@ mod tests {
         service.shutdown().expect("shutdown");
         assert!(TcpStream::connect(("127.0.0.1", port)).is_err());
         let _ = std::fs::remove_dir_all(store);
+    }
+
+    #[test]
+    fn keeps_only_the_tail_of_the_server_output() {
+        let mut tail = OutputTail::default();
+        let line = vec![b'x'; 1000];
+        for _ in 0..1000 {
+            tail.push_line(&line);
+        }
+        tail.push_line(b"last line");
+        assert!(tail.buf.len() <= OUTPUT_LIMIT);
+        assert_eq!("last line\n", tail.text(100), "the tail starts at a line boundary");
+    }
+
+    /// A server that dies after starting is reported (upstream's in-process
+    /// server cannot die and leave AnyCable running; the runner exits with the
+    /// error). Pins D-044.
+    #[test]
+    fn deviation_d044_unexpected_server_exit_is_reported() {
+        let built = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-services/nats-server");
+        if std::env::var_os("CABBY_NATS_SERVER").is_none() && !built.is_file() {
+            return;
+        }
+        let bin = std::env::var_os("CABBY_NATS_SERVER").map_or(built, PathBuf::from);
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let config = Config { service_addr: format!("nats://127.0.0.1:{port}"), ..Config::new() };
+        let service = Service::new(&config);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        service.on_exit(move |e| {
+            let _ = lock(&tx).send(e);
+        });
+        service.start_with(&bin).expect("start");
+        let pid = lock(&service.running).as_ref().expect("running").child.id();
+        let killed = Command::new("kill").arg("-9").arg(pid.to_string()).status().expect("kill");
+        assert!(killed.success());
+        let err = rx.recv_timeout(Duration::from_secs(5)).expect("the exit is reported");
+        assert!(err.0.starts_with("embedded NATS server exited unexpectedly: "), "{err}");
+        assert!(lock(&service.running).is_none());
+        service.shutdown().expect("shutdown after the exit is a no-op");
     }
 }

@@ -17,10 +17,11 @@
 //!   it works from plain threads and from any Tokio runtime; on a
 //!   multi-threaded Tokio worker it goes through `block_in_place` so other
 //!   tasks of the caller's runtime keep running.
-//! * Fire-and-forget operations whose order matters (pub/sub publish,
-//!   subscribe, unsubscribe) are sent to a per-client actor task over an
-//!   unbounded channel: the sync call returns at once and the actor applies
-//!   them in call order, as Go's buffered connection does.
+//! * Pub/sub publications are sent to a per-client actor task over a bounded
+//!   channel: the call returns once the publication is queued and waits while
+//!   the queue is full, as Go's `Publish` blocks on a stalled connection.
+//!   Subscribe and unsubscribe go to the same actor over a separate channel
+//!   that it serves first, so they never wait behind queued publications.
 //! * Incoming messages that reach node code (pub/sub handlers, broadcast
 //!   handlers) are delivered from a dedicated dispatcher thread per client,
 //!   never from a runtime worker, so a slow handler cannot stall NATS I/O and
@@ -37,6 +38,7 @@ use async_nats::{Client, ConnectOptions, ServerAddr};
 use tokio::runtime::{Handle, Runtime, RuntimeFlavor};
 
 use super::{NatsConfig, NatsError};
+use crate::utils::backpressure;
 
 /// The process-wide runtime that runs NATS I/O.
 pub fn runtime() -> &'static Runtime {
@@ -171,8 +173,8 @@ pub struct Incoming {
     pub payload: Vec<u8>,
 }
 
-enum Command {
-    Publish(String, Vec<u8>),
+/// Subscription changes and closing, applied before any queued publication.
+enum Control {
     Subscribe(String, Option<mpsc::SyncSender<Result<(), NatsError>>>),
     Unsubscribe(String),
     Close(mpsc::SyncSender<()>),
@@ -181,15 +183,28 @@ enum Command {
 /// How long closing waits for the connection to drain.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Publications that may wait for the connection before publishers are held
+/// back (Go buffers about as much in the connection's writer and socket).
+pub const PUBLISH_QUEUE_CAPACITY: usize = 1024;
+
+/// The longest a publisher waits for room in the queue before the
+/// publication fails (Go nats.go `DefaultFlusherTimeout`, the write deadline
+/// of a stalled connection).
+pub const PUBLISH_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// A core NATS connection for pub/sub with a synchronous API (Go `*nats.Conn`
 /// as used by the pub/sub subscriber and the legacy broadcaster).
 ///
-/// Publish, subscribe and unsubscribe return at once and are applied in call
-/// order by an actor task (Go buffers them on the connection the same way);
-/// incoming messages of all subscriptions go to one handler, called from a
-/// dedicated thread in arrival order.
+/// Publications go through a bounded queue in call order: a publisher that
+/// finds it full waits (up to [`PUBLISH_TIMEOUT`]), as Go's `Publish` blocks
+/// on a stalled connection. Subscribe and unsubscribe return at once and are
+/// applied in call order by the same actor task, ahead of queued
+/// publications, so a publication backlog never delays them. Incoming
+/// messages of all subscriptions go to one handler, called from a dedicated
+/// thread in arrival order.
 pub struct Connection {
-    commands: tokio::sync::mpsc::UnboundedSender<Command>,
+    publications: tokio::sync::mpsc::Sender<(String, Vec<u8>)>,
+    control: tokio::sync::mpsc::UnboundedSender<Control>,
 }
 
 impl Connection {
@@ -203,40 +218,47 @@ impl Connection {
         let config = config.clone();
         let client = block_on(async move { connect(&config).await })?;
         let dispatcher = Dispatcher::spawn(name, on_message);
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        runtime().spawn(run_connection(client, rx, dispatcher));
-        Ok(Self { commands: tx })
+        let (publications, publications_rx) = tokio::sync::mpsc::channel(PUBLISH_QUEUE_CAPACITY);
+        let (control, control_rx) = tokio::sync::mpsc::unbounded_channel();
+        runtime().spawn(run_connection(client, control_rx, publications_rx, dispatcher));
+        Ok(Self { publications, control })
     }
 
-    pub fn publish(&self, subject: &str, payload: Vec<u8>) {
-        let _ = self.commands.send(Command::Publish(subject.to_owned(), payload));
+    /// Queues a publication, waiting while the queue is full (up to
+    /// [`PUBLISH_TIMEOUT`], after which it fails like Go's write deadline).
+    pub fn publish(&self, subject: &str, payload: Vec<u8>) -> Result<(), NatsError> {
+        backpressure::send_blocking(&self.publications, (subject.to_owned(), payload), runtime(), Some(PUBLISH_TIMEOUT))
+            .map_err(|e| match e {
+                backpressure::SendError::Closed => NatsError("nats: connection closed".into()),
+                backpressure::SendError::TimedOut => NatsError("nats: timeout".into()),
+            })
     }
 
     /// Subscribes to `subject` (no-op when already subscribed).
     pub fn subscribe(&self, subject: &str) {
-        let _ = self.commands.send(Command::Subscribe(subject.to_owned(), None));
+        let _ = self.control.send(Control::Subscribe(subject.to_owned(), None));
     }
 
     /// Subscribes and waits for the subscription to be registered with the
     /// client, reporting failures.
     pub fn subscribe_sync(&self, subject: &str) -> Result<(), NatsError> {
         let (tx, rx) = mpsc::sync_channel(1);
-        self.commands
-            .send(Command::Subscribe(subject.to_owned(), Some(tx)))
+        self.control
+            .send(Control::Subscribe(subject.to_owned(), Some(tx)))
             .map_err(|_| NatsError("nats: connection closed".into()))?;
         blocking(move || rx.recv()).unwrap_or_else(|_| Err(NatsError("nats: connection closed".into())))
     }
 
     pub fn unsubscribe(&self, subject: &str) {
-        let _ = self.commands.send(Command::Unsubscribe(subject.to_owned()));
+        let _ = self.control.send(Control::Unsubscribe(subject.to_owned()));
     }
 
     /// Drops all subscriptions and closes the connection, waiting (bounded) for
-    /// pending publications to be flushed.
+    /// queued publications to be flushed.
     pub fn close(&self) {
         let (tx, rx) = mpsc::sync_channel(1);
-        if self.commands.send(Command::Close(tx)).is_ok() {
-            let _ = blocking(move || rx.recv_timeout(DRAIN_TIMEOUT + Duration::from_secs(1)));
+        if self.control.send(Control::Close(tx)).is_ok() {
+            let _ = blocking(move || rx.recv_timeout(DRAIN_TIMEOUT * 2 + Duration::from_secs(1)));
         }
     }
 }
@@ -249,73 +271,87 @@ struct SubscriptionTask {
 
 async fn run_connection(
     client: async_nats::Client,
-    mut commands: tokio::sync::mpsc::UnboundedReceiver<Command>,
+    mut control: tokio::sync::mpsc::UnboundedReceiver<Control>,
+    mut publications: tokio::sync::mpsc::Receiver<(String, Vec<u8>)>,
     dispatcher: Dispatcher<Incoming>,
 ) {
-    use tokio_stream::StreamExt;
-
     let mut subscriptions: std::collections::HashMap<String, SubscriptionTask> = std::collections::HashMap::new();
-    while let Some(cmd) = commands.recv().await {
-        match cmd {
-            Command::Publish(subject, payload) => {
-                let _ = client.publish(subject, payload.into()).await;
-            }
-            Command::Subscribe(subject, reply) => {
-                if subscriptions.contains_key(&subject) {
+    loop {
+        tokio::select! {
+            biased;
+            cmd = control.recv() => match cmd {
+                None => return,
+                Some(Control::Subscribe(subject, reply)) => {
+                    let result = subscribe(&client, &mut subscriptions, &subject, &dispatcher).await;
                     if let Some(r) = reply {
-                        let _ = r.send(Ok(()));
+                        let _ = r.send(result);
                     }
-                    continue;
                 }
-                match client.subscribe(subject.clone()).await {
-                    Ok(mut sub) => {
-                        let (stop_tx, mut stop_rx) =
-                            tokio::sync::oneshot::channel::<tokio::sync::oneshot::Sender<()>>();
-                        let d = dispatcher.clone();
-                        tokio::spawn(async move {
-                            loop {
-                                tokio::select! {
-                                    msg = sub.next() => match msg {
-                                        Some(m) => d.send(Incoming { subject: m.subject.to_string(), payload: m.payload.to_vec() }),
-                                        None => return,
-                                    },
-                                    ack = &mut stop_rx => {
-                                        let _ = sub.unsubscribe().await;
-                                        if let Ok(ack) = ack {
-                                            let _ = ack.send(());
-                                        }
-                                        return;
-                                    }
-                                }
-                            }
-                        });
-                        subscriptions.insert(subject, SubscriptionTask { stop: stop_tx });
-                        if let Some(r) = reply {
-                            let _ = r.send(Ok(()));
+                Some(Control::Unsubscribe(subject)) => {
+                    if let Some(task) = subscriptions.remove(&subject) {
+                        stop_subscription(task).await;
+                    }
+                }
+                Some(Control::Close(done)) => {
+                    for (_, task) in subscriptions.drain() {
+                        stop_subscription(task).await;
+                    }
+                    // Publications queued before closing still go out (Go
+                    // flushes the connection's buffer when closing).
+                    let _ = tokio::time::timeout(DRAIN_TIMEOUT, async {
+                        while let Ok((subject, payload)) = publications.try_recv() {
+                            let _ = client.publish(subject, payload.into()).await;
                         }
-                    }
-                    Err(e) => {
-                        if let Some(r) = reply {
-                            let _ = r.send(Err(NatsError(e.to_string())));
-                        }
-                    }
+                    })
+                    .await;
+                    let _ = tokio::time::timeout(DRAIN_TIMEOUT, client.drain()).await;
+                    let _ = done.send(());
+                    return;
                 }
-            }
-            Command::Unsubscribe(subject) => {
-                if let Some(task) = subscriptions.remove(&subject) {
-                    stop_subscription(task).await;
+            },
+            p = publications.recv() => match p {
+                None => return,
+                Some((subject, payload)) => {
+                    let _ = client.publish(subject, payload.into()).await;
                 }
-            }
-            Command::Close(done) => {
-                for (_, task) in subscriptions.drain() {
-                    stop_subscription(task).await;
-                }
-                let _ = tokio::time::timeout(DRAIN_TIMEOUT, client.drain()).await;
-                let _ = done.send(());
-                return;
-            }
+            },
         }
     }
+}
+
+async fn subscribe(
+    client: &async_nats::Client,
+    subscriptions: &mut std::collections::HashMap<String, SubscriptionTask>,
+    subject: &str,
+    dispatcher: &Dispatcher<Incoming>,
+) -> Result<(), NatsError> {
+    use tokio_stream::StreamExt;
+
+    if subscriptions.contains_key(subject) {
+        return Ok(());
+    }
+    let mut sub = client.subscribe(subject.to_owned()).await.map_err(|e| NatsError(e.to_string()))?;
+    let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<tokio::sync::oneshot::Sender<()>>();
+    let d = dispatcher.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                msg = sub.next() => match msg {
+                    Some(m) => d.send(Incoming { subject: m.subject.to_string(), payload: m.payload.to_vec() }),
+                    None => return,
+                },
+                ack = &mut stop_rx => {
+                    let _ = sub.unsubscribe().await;
+                    if let Ok(ack) = ack {
+                        let _ = ack.send(());
+                    }
+                    return;
+                }
+            }
+        }
+    });
+    subscriptions.insert(subject.to_owned(), SubscriptionTask { stop: stop_tx });
+    Ok(())
 }
 
 /// Stops a reader task and waits until its UNSUB is queued, so that later

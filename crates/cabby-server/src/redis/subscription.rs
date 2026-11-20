@@ -66,6 +66,10 @@ pub(crate) struct Settings {
     pub reconnected_msg: &'static str,
     /// Reported to `on_fatal` when reconnect attempts are exhausted.
     pub exhausted_error: &'static str,
+    /// Logged (with the error) when the connection is lost.
+    pub lost: &'static [(Level, &'static str)],
+    /// Attributes of every log record besides `context` (upstream logger fields).
+    pub attrs: Vec<(&'static str, String)>,
 }
 
 /// A handle to a subscription engine.
@@ -131,7 +135,15 @@ impl Subscriptions {
     }
 
     fn log(&self, level: Level, msg: &str, channel: Option<&str>) {
-        let attrs: Vec<(&str, String)> = channel.map(|c| ("channel", c.to_owned())).into_iter().collect();
+        let mut attrs = self.settings.attrs.clone();
+        attrs.extend(channel.map(|c| ("channel", c.to_owned())));
+        super::log(level, self.settings.context, msg, &attrs);
+    }
+
+    /// A record with an `error` attribute (upstream `log.Error(msg, "error", err)`).
+    fn log_error(&self, level: Level, msg: &str, err: impl std::fmt::Display) {
+        let mut attrs = self.settings.attrs.clone();
+        attrs.push(("error", err.to_string()));
         super::log(level, self.settings.context, msg, &attrs);
     }
 }
@@ -170,7 +182,7 @@ impl Engine {
             };
             match conn {
                 Err(e) => {
-                    self.shared.log(Level::Error, &format!("failed to connect to Redis: {e}"), None);
+                    self.shared.log_error(Level::Error, "failed to connect to Redis", e);
                 }
                 Ok(conn) => {
                     self.shared.log(Level::Debug, "initialized pub/sub client", None);
@@ -178,7 +190,9 @@ impl Engine {
                     match session.run(&mut self).await {
                         End::Stop => break,
                         End::Lost(reason) => {
-                            self.shared.log(Level::Error, &format!("Redis pub/sub disconnected: {reason}"), None);
+                            for (level, msg) in self.shared.settings.lost {
+                                self.shared.log_error(*level, msg, &reason);
+                            }
                         }
                     }
                 }
@@ -221,6 +235,8 @@ struct Session {
     /// Channels Redis dropped on its own, re-subscribed at `dropped_at`.
     dropped: HashSet<String>,
     dropped_at: Option<tokio::time::Instant>,
+    /// The primary channel's confirmation was logged on this connection.
+    announced: bool,
 }
 
 fn interval(period: Duration) -> Interval {
@@ -253,6 +269,7 @@ impl Session {
             mismatch: false,
             dropped: HashSet::new(),
             dropped_at: None,
+            announced: false,
         }
     }
 
@@ -324,7 +341,11 @@ impl Session {
             PushKind::Subscribe => {
                 let Some(channel) = push.data.first().and_then(text) else { return Ok(()) };
                 shared.log(Level::Debug, "subscribe", Some(&channel));
-                if channel == shared.settings.primary {
+                // Upstream subscribes once per connection and logs each
+                // confirmation of the primary channel; the periodic
+                // reconciliation re-subscribes it, so only the first one counts.
+                if channel == shared.settings.primary && !self.announced {
+                    self.announced = true;
                     let msg = if engine.attempt > 0 {
                         shared.settings.reconnected_msg
                     } else {
@@ -432,7 +453,7 @@ impl Session {
                 if is_fatal(&e) {
                     return Err(End::Lost(e.to_string()));
                 }
-                engine.shared.log(Level::Error, &format!("failed to resubscribe: {e}"), None);
+                engine.shared.log_error(Level::Error, "failed to resubscribe", e);
             }
         }
         Ok(())
@@ -448,7 +469,7 @@ impl Session {
                 if is_fatal(&e) {
                     return Err(End::Lost(e.to_string()));
                 }
-                engine.shared.log(Level::Error, &format!("failed to unsubscribe: {e}"), None);
+                engine.shared.log_error(Level::Error, "failed to unsubscribe", e);
             }
         }
         Ok(())

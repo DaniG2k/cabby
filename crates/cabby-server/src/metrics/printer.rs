@@ -54,7 +54,11 @@ struct Logger {
 
 fn logger() -> &'static RwLock<Logger> {
     static LOGGER: OnceLock<RwLock<Logger>> = OnceLock::new();
-    LOGGER.get_or_init(|| RwLock::new(Logger { format: None, min: Level::Info, base: Vec::new(), discard: false }))
+    LOGGER.get_or_init(|| {
+        // Core components (cabby-core) log through this logger too.
+        cabby_core::logger::set_sink(log);
+        RwLock::new(Logger { format: None, min: Level::Info, base: Vec::new(), discard: false })
+    })
 }
 
 fn rank(level: Level) -> u8 {
