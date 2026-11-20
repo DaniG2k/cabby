@@ -51,7 +51,9 @@ use cabby_core::common::{
     SERVER_RESTART_REASON, SLOW_CLIENT_REASON, SessionEnv, StringMap,
 };
 use cabby_core::encoders::{EncodedMessageJson, Encoder, FrameType, Json, SentFrame};
+use cabby_core::logger::{LogValue, LogValuer, Logger, compact_value, compact_value_bytes};
 use cabby_core::utils::{Item, PushResult, Queue};
+use cabby_core::{log_debug, log_error, log_warn};
 use serde::Serialize;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
@@ -221,6 +223,8 @@ struct Settings {
     resume_interval: Duration,
     prev_sid: String,
     inactive: bool,
+    /// The session's logger (upstream `Session.Log`: the node's with `sid`).
+    log: Logger,
 }
 
 /// Lifecycle state (upstream `mu`).
@@ -416,6 +420,7 @@ impl Session {
                 resume_interval: Duration::ZERO,
                 prev_sid: String::new(),
                 inactive: false,
+                log: Logger::default(),
             }),
             env: Mutex::new(env),
             subscriptions: SubscriptionState::new(),
@@ -463,6 +468,7 @@ impl Session {
             s.ping_precision.clone_from(&config.ping_timestamp_precision);
             s.native_ping = config.enable_native_ping;
             s.uid = uid.to_owned();
+            s.log = node.logger().with("sid", uid);
         }
         session.apply(opts);
 
@@ -484,6 +490,18 @@ impl Session {
 
     fn metrics(&self) -> Arc<dyn Instrumenter> {
         self.settings().metrics.clone()
+    }
+
+    /// The session's logger (upstream `Session.Log`): the node's logger with
+    /// `sid` for sessions built by [`Session::new`].
+    pub fn logger(&self) -> Logger {
+        self.settings().log.clone()
+    }
+
+    /// Replaces the session's logger (upstream assigns `Session.Log`, e.g.
+    /// `session.Log = session.Log.With("ds", path)`).
+    pub fn set_logger(&self, log: Logger) {
+        write(&self.settings).log = log;
     }
 
     fn encoder(&self) -> Arc<dyn Encoder + Send + Sync> {
@@ -671,6 +689,8 @@ impl Session {
             if let Err(e) = res {
                 self.writer.store(WRITER_DONE, Ordering::SeqCst);
                 if e.is_timeout() {
+                    log_debug!(self.logger(), "write timed out",
+                        "error" => e.to_string(), "msg" => compact_value_bytes(&frame.payload).log_value());
                     metrics.counter_increment(METRICS_WRITE_TIMEOUT);
                 }
                 metrics.counter_increment(METRICS_FAILED_SENT);
@@ -815,6 +835,8 @@ impl Session {
             return;
         }
 
+        self.logger().log(cabby_core::logger::Level::Warn, "disconnecting idle session", &[]);
+
         self.send(&DisconnectMessage::new(cabby_core::common::IDLE_TIMEOUT_REASON, false));
         self.disconnect("Idle Timeout", CLOSE_NORMAL_CLOSURE);
     }
@@ -837,7 +859,10 @@ impl Session {
                 Ok(())
             }
             Ok(frame) => self.write_frame_with_deadline(&Arc::new(frame), deadline),
-            Err(e) => Err(ConnectionError(e.0)),
+            Err(e) => {
+                log_error!(self.logger(), "failed to encode ping message", "error" => e.0.clone());
+                Err(ConnectionError(e.0))
+            }
         };
 
         if native {
@@ -891,12 +916,14 @@ impl Session {
         if !self.is_connected() {
             return;
         }
+        self.logger().log(cabby_core::logger::Level::Warn, "disconnecting session due to no pongs", &[]);
         self.send(&DisconnectMessage::new(NO_PONG_REASON, true));
         self.disconnect("No Pong", CLOSE_NORMAL_CLOSURE);
     }
 
     /// Answers a client ping (upstream `handleClientPing`).
     pub(super) fn handle_client_ping(&self) {
+        log_debug!(self.logger(), "ping received");
         self.send(&Reply { kind: PONG_TYPE.to_owned(), ..Default::default() });
     }
 
@@ -1036,15 +1063,12 @@ impl Session {
                     }
                     match session.conn.read() {
                         Err(e) => {
-                            if e.is_close() {
-                                session.disconnect_now("Read closed", CLOSE_NORMAL_CLOSURE);
-                            } else {
-                                session.disconnect_now("Read failed", CLOSE_ABNORMAL_CLOSURE);
-                            }
+                            session.read_ended(&e);
                             return;
                         }
                         Ok(message) => {
-                            if session.read_message(&message).is_err() {
+                            if let Err(e) = session.read_message(&message) {
+                                log_debug!(session.logger(), "WebSocket read failed", "error" => e.0);
                                 return;
                             }
                         }
@@ -1055,13 +1079,25 @@ impl Session {
         Ok(())
     }
 
+    /// The connection's read failed or it was closed (upstream `Serve` on a
+    /// failed `Read`).
+    fn read_ended(self: &Arc<Self>, e: &ConnectionError) {
+        if e.is_close() {
+            log_debug!(self.logger(), "WebSocket closed", "error" => e.to_string());
+            self.disconnect_now("Read closed", CLOSE_NORMAL_CLOSURE);
+        } else {
+            log_debug!(self.logger(), "WebSocket close error", "error" => e.to_string());
+            self.disconnect_now("Read failed", CLOSE_ABNORMAL_CLOSURE);
+        }
+    }
+
     /// The push-model counterpart of [`Session::serve`]: instead of a reader
     /// thread blocking on [`Connection::read`], the transport hands every client
     /// message (and the end of the connection) to the returned reader, which
     /// executes them in order on the node's command pool. `callback` runs when
     /// reading ends, as with `serve`.
     pub fn reader(self: &Arc<Self>, callback: Box<dyn FnOnce() + Send>) -> SessionReader {
-        SessionReader {
+        let reader = SessionReader {
             inner: Arc::new(ReaderInner {
                 session: self.clone(),
                 state: Mutex::new(ReaderState {
@@ -1072,7 +1108,14 @@ impl Session {
                     parked: None,
                 }),
             }),
+        };
+        // Upstream's reader checks whether the session closed before its first
+        // read: a session closed already (a rejected connection) reads nothing,
+        // and the callback runs at once.
+        if self.is_closed() {
+            reader.inner.finish(None);
         }
+        reader
     }
 
     /// Decodes and executes one client message (upstream `ReadMessage`).
@@ -1098,7 +1141,7 @@ impl Session {
             }
         };
 
-        self.execute_decoded(message.len(), &command, false);
+        self.execute_decoded(message, &command, false);
         Ok(())
     }
 
@@ -1108,7 +1151,7 @@ impl Session {
             self.metrics().counter_increment(METRICS_FAILED_COMMAND_RECEIVED);
             NodeError(e.0)
         })?;
-        self.execute_decoded(message.len(), &command, false);
+        self.execute_decoded(message, &command, false);
         Ok(())
     }
 
@@ -1120,38 +1163,48 @@ impl Session {
         };
         match self.executor() {
             Some(executor) if executor.is_inline(&command) => {
-                self.execute_decoded(message.len(), &command, true);
+                self.execute_decoded(message, &command, true);
                 true
             }
             _ => false,
         }
     }
 
-    fn execute_decoded(self: &Arc<Self>, len: usize, command: &Message, count_data: bool) {
+    fn execute_decoded(self: &Arc<Self>, message: &[u8], command: &Message, count_data: bool) {
         let metrics = self.metrics();
         if count_data {
-            metrics.counter_add(METRICS_DATA_RECEIVED, len as u64);
+            metrics.counter_add(METRICS_DATA_RECEIVED, message.len() as u64);
         }
         metrics.counter_increment(METRICS_RECEIVED_MSG);
 
         if let Some(executor) = self.executor()
-            && executor.handle_command(self, command).is_err()
+            && let Err(e) = executor.handle_command(self, command)
         {
             metrics.counter_increment(METRICS_FAILED_COMMAND_RECEIVED);
+            log_warn!(self.logger(), "failed to handle incoming message",
+                "data" => compact_value_bytes(message).log_value(), "error" => e.0);
         }
     }
 
     /// Encodes and queues a message (upstream `Send`).
     pub fn send(&self, msg: &dyn EncodedMessageJson) {
-        if let Ok(frame) = self.encoder().encode(msg) {
-            self.push_frame(Arc::new(frame));
+        match self.encoder().encode(msg) {
+            Ok(frame) => self.push_frame(Arc::new(frame)),
+            Err(e) => {
+                log_warn!(self.logger(), "failed to encode message",
+                    "data" => encoded_log_value(msg), "type" => msg.get_type(), "error" => e.0);
+            }
         }
     }
 
     /// Queues a raw transmission from an RPC result (upstream `SendJSONTransmission`).
     pub fn send_json_transmission(&self, msg: &str) {
-        if let Ok(frame) = self.encoder().encode_transmission(msg) {
-            self.push_frame(Arc::new(frame));
+        match self.encoder().encode_transmission(msg) {
+            Ok(frame) => self.push_frame(Arc::new(frame)),
+            Err(e) => {
+                log_warn!(self.logger(), "failed to encode transmission",
+                    "data" => compact_value(msg).log_value(), "error" => e.0);
+            }
         }
     }
 
@@ -1169,6 +1222,7 @@ impl Session {
             PushResult::Closed => {}
             PushResult::Overflow => {
                 self.max_pending_size.store(0, Ordering::Release);
+                log_debug!(self.logger(), "slow client detected, disconnecting", "max" => max_pending);
                 self.metrics().counter_increment(METRICS_DISCONNECTED_SLOW_CLIENTS);
                 self.me()
                     .disconnect_with_message(&DisconnectMessage::new(SLOW_CLIENT_REASON, true), SLOW_CLIENT_REASON);
@@ -1476,18 +1530,15 @@ impl ReaderInner {
                         self.finish(Some(permit));
                         continue;
                     }
-                    if session.read_message(&msg).is_err() {
+                    if let Err(e) = session.read_message(&msg) {
+                        log_debug!(session.logger(), "WebSocket read failed", "error" => e.0);
                         self.finish(Some(permit));
                         continue;
                     }
                     drop(permit);
                 }
                 ReadEvent::End(err) => {
-                    if err.is_close() {
-                        session.disconnect_now("Read closed", CLOSE_NORMAL_CLOSURE);
-                    } else {
-                        session.disconnect_now("Read failed", CLOSE_ABNORMAL_CLOSURE);
-                    }
+                    session.read_ended(&err);
                     self.finish(None);
                 }
             }
@@ -1514,6 +1565,18 @@ impl ReaderInner {
 /// ping or pong (the only inline commands; other frames skip the extra decode).
 fn may_be_inline(msg: &[u8]) -> bool {
     msg.len() <= 256 && msg.windows(4).any(|w| w == b"ping" || w == b"pong")
+}
+
+/// The `data` of upstream's "failed to encode message" (`slog.Any("data", msg)`:
+/// the message's `LogValue`).
+fn encoded_log_value(msg: &dyn EncodedMessageJson) -> LogValue {
+    if let Some(reply) = msg.as_reply() {
+        return reply.log_value();
+    }
+    if let Some(disconnect) = msg.as_disconnect() {
+        return disconnect.log_value();
+    }
+    compact_value_bytes(&cabby_core::gojson::to_vec(&msg.to_json_value())).log_value()
 }
 
 /// A uniformly distributed duration in `[0, span)` (`ZERO` for an empty span).

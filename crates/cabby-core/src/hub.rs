@@ -46,7 +46,9 @@ use std::sync::{
     Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak,
 };
 
-use crate::common::{self, DisconnectMessage, RemoteDisconnectMessage, Reply, StreamMessage};
+use crate::common::{self, DisconnectMessage, RemoteDisconnectMessage, Reply, StreamMessage, filtered_identifier};
+use crate::logger::{LogValuer, Logger};
+use crate::{log_debug, log_error, log_warn};
 /// The messages a hub hands to sessions (upstream `encoders.EncodedMessage`, which
 /// the hub always passes as an `encoders.CachedEncodedMessage`). Its `to_json` is
 /// the `encoders.JSON` payload.
@@ -323,11 +325,17 @@ fn gate_loop<S: ?Sized + HubSession>(shared: Arc<GateShared<S>>, queue: Receiver
 pub struct Gate<S: ?Sized = dyn HubSession> {
     shared: Arc<GateShared<S>>,
     queue: Arc<GateSender>,
+    log: Logger,
 }
 
 impl<S: ?Sized + HubSession + 'static> Gate<S> {
-    /// Upstream `hub.NewGate(ctx, logger)`: starts the broadcast loop.
+    /// Upstream `hub.NewGate(ctx, slog.Default())`: starts the broadcast loop.
     pub fn new(ctx: &GateContext) -> Self {
+        Self::with_logger(ctx, Logger::default())
+    }
+
+    /// Upstream `hub.NewGate(ctx, logger)`: starts the broadcast loop.
+    pub fn with_logger(ctx: &GateContext, log: Logger) -> Self {
         let shared = Arc::new(GateShared { streams: RwLock::new(HashMap::new()) });
         let (tx, rx) = mpsc::sync_channel(BROADCAST_QUEUE_SIZE);
         let queue = Arc::new(tx);
@@ -340,7 +348,7 @@ impl<S: ?Sized + HubSession + 'static> Gate<S> {
             .spawn(move || gate_loop(loop_shared, rx, loop_ctx))
             .expect("failed to spawn a hub gate thread");
 
-        Self { shared, queue }
+        Self { shared, queue, log }
     }
 }
 
@@ -348,7 +356,9 @@ impl<S: ?Sized + HubSession> Gate<S> {
     /// Queues `msg` for the stream's subscribers; a stream without subscribers is
     /// skipped. Blocks while the queue is full.
     pub fn broadcast(&self, msg: StreamMessage) {
+        log_debug!(self.log, "schedule broadcast", "stream" => &msg.stream, "message" => msg.log_value());
         if !read(&self.shared.streams).contains_key(&msg.stream) {
+            log_debug!(self.log, "no sessions", "stream" => &msg.stream);
             return;
         }
         // Fails only when the loop has ended (context cancelled): drop the message.
@@ -446,6 +456,8 @@ struct Lifecycle {
 
 struct HubInner<S: ?Sized> {
     gates: Box<[Gate<S>]>,
+    /// Upstream `l.With("component", "hub")`.
+    log: Logger,
     ctx: GateContext,
     state: RwLock<HubState<S>>,
     pool: GoPool,
@@ -494,11 +506,20 @@ impl<S: ?Sized + HubSession + 'static> Hub<S> {
     /// Upstream `hub.NewHub(poolSize, logger)`. Starts the gates; `pool_size` 0 is
     /// treated as 1 (upstream would divide by zero on the first broadcast).
     pub fn new(pool_size: usize) -> Self {
+        Self::with_logger(pool_size, &Logger::default())
+    }
+
+    /// Upstream `hub.NewHub(poolSize, logger)` with the caller's logger (the
+    /// node passes its own): the hub logs with `component=hub`, gates also with
+    /// `gate=<index>`.
+    pub fn with_logger(pool_size: usize, log: &Logger) -> Self {
         let ctx = GateContext::new();
-        let gates = (0..pool_size.max(1)).map(|_| Gate::new(&ctx)).collect();
+        let log = log.with("component", "hub");
+        let gates = (0..pool_size.max(1)).map(|i| Gate::with_logger(&ctx, log.with("gate", i))).collect();
         Self {
             inner: Arc::new(HubInner {
                 gates,
+                log,
                 ctx,
                 state: RwLock::new(HubState { sessions: HashMap::new(), identifiers: HashMap::new() }),
                 // Created eagerly, as upstream: it is listed by `utils::all_pools()`
@@ -515,6 +536,8 @@ impl<S: ?Sized + HubSession + 'static> Hub<S> {
     /// remote-commands pool.
     pub fn remote_disconnect(&self, msg: RemoteDisconnectMessage) {
         if !read(&self.inner.state).identifiers.contains_key(&msg.identifier) {
+            log_debug!(self.inner.log, "cannot disconnect session",
+                "identifier" => &msg.identifier, "reason" => "not found");
             return;
         }
         let inner = Arc::clone(&self.inner);
@@ -587,10 +610,12 @@ impl<S: ?Sized + HubSession> Hub<S> {
         let replaced = {
             let mut state = write(&self.inner.state);
             let replaced = state.sessions.insert(uid.clone(), info);
-            state.identifiers.entry(identifiers).or_default().insert(uid);
+            state.identifiers.entry(identifiers.clone()).or_default().insert(uid.clone());
             replaced
         };
         drop(replaced);
+
+        log_debug!(self.inner.log, "registered", "sid" => uid, "ids" => identifiers);
     }
 
     /// Unsubscribes the session from all its streams and unregisters it.
@@ -600,8 +625,11 @@ impl<S: ?Sized + HubSession> Hub<S> {
 
         let info = {
             let mut state = write(&self.inner.state);
-            // Upstream logs "session hasn't been registered" (warn).
-            let Some(info) = state.sessions.remove(&uid) else { return };
+            let Some(info) = state.sessions.remove(&uid) else {
+                drop(state);
+                log_warn!(self.inner.log, "session hasn't been registered", "sid" => uid);
+                return;
+            };
             if let Some(sids) = state.identifiers.get_mut(&identifiers) {
                 sids.remove(&uid);
                 if sids.is_empty() {
@@ -619,6 +647,8 @@ impl<S: ?Sized + HubSession> Hub<S> {
         for (stream, identifier) in &streams {
             self.inner.gate(stream).unsubscribe(session, stream, identifier);
         }
+
+        log_debug!(self.inner.log, "unregistered", "sid" => uid);
     }
 
     /// Upstream unexported `unsubscribeSessionFromAllChannels`: removes the gate
@@ -633,38 +663,57 @@ impl<S: ?Sized + HubSession> Hub<S> {
 
     /// Removes every stream subscribed under the channel `identifier`.
     pub fn unsubscribe_session_from_channel(&self, session: &Arc<S>, identifier: &str) {
-        let Some(info) = self.inner.info(&session.get_id()) else { return };
-        let mut streams = lock(&info.streams);
-        streams.list.retain(|(stream, id)| {
-            if id != identifier {
-                return true;
-            }
-            self.inner.gate(stream).unsubscribe(session, stream, id);
-            false
-        });
+        let sid = session.get_id();
+        if let Some(info) = self.inner.info(&sid) {
+            let mut streams = lock(&info.streams);
+            streams.list.retain(|(stream, id)| {
+                if id != identifier {
+                    return true;
+                }
+                self.inner.gate(stream).unsubscribe(session, stream, id);
+                false
+            });
+        }
+
+        log_debug!(self.inner.log, "unsubscribed", "sid" => sid, "identifier" => filtered_identifier(identifier).log_value());
     }
 
     /// Subscribes a registered session to `stream` under the channel `identifier`.
     /// Unregistered sessions are ignored (upstream logs an error).
     pub fn subscribe_session(&self, session: &Arc<S>, stream: &str, identifier: &str) {
         let sid = session.get_id();
-        let Some(info) = self.inner.info(&sid) else { return };
-        let mut streams = lock(&info.streams);
-        if streams.removed {
+        let registered = self.inner.info(&sid).is_some_and(|info| {
+            let mut streams = lock(&info.streams);
+            if streams.removed {
+                return false;
+            }
+            self.inner.gate(stream).subscribe_as(session, &sid, stream, identifier);
+            streams.list.push((stream.to_owned(), identifier.to_owned()));
+            true
+        });
+
+        if !registered {
+            log_error!(self.inner.log, "attempted to subscribe a session without registration", "sid" => sid);
             return;
         }
-        self.inner.gate(stream).subscribe_as(session, &sid, stream, identifier);
-        streams.list.push((stream.to_owned(), identifier.to_owned()));
+
+        log_debug!(self.inner.log, "subscribed",
+            "sid" => sid, "identifier" => filtered_identifier(identifier).log_value(), "stream" => stream);
     }
 
     pub fn unsubscribe_session(&self, session: &Arc<S>, stream: &str, identifier: &str) {
         self.inner.gate(stream).unsubscribe(session, stream, identifier);
 
-        let Some(info) = self.inner.info(&session.get_id()) else { return };
-        let mut streams = lock(&info.streams);
-        if let Some(pos) = streams.list.iter().position(|(s, id)| s == stream && id == identifier) {
-            streams.list.remove(pos);
+        let sid = session.get_id();
+        if let Some(info) = self.inner.info(&sid) {
+            let mut streams = lock(&info.streams);
+            if let Some(pos) = streams.list.iter().position(|(s, id)| s == stream && id == identifier) {
+                streams.list.remove(pos);
+            }
         }
+
+        log_debug!(self.inner.log, "unsubscribed",
+            "sid" => sid, "identifier" => filtered_identifier(identifier).log_value(), "stream" => stream);
     }
 
     /// A session registered with the connection `identifier`, if any.

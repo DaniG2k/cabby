@@ -511,6 +511,126 @@ impl LogValuer for StreamMessage {
     }
 }
 
+fn json_any(v: &Option<serde_json::Value>) -> logger::AnyValue {
+    logger::AnyValue::Json(v.clone().unwrap_or(serde_json::Value::Null))
+}
+
+/// Go `%+v` of a `HistoryRequest` value (`{Since:0 Streams:map[]}`; map keys sorted).
+fn history_plus_v(h: &HistoryRequest) -> String {
+    let mut streams: Vec<_> = h.streams.iter().collect();
+    streams.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    let streams: Vec<String> =
+        streams.iter().map(|(k, p)| format!("{k}:{{Epoch:{} Offset:{}}}", p.epoch, p.offset)).collect();
+    format!("{{Since:{} Streams:map[{}]}}", h.since, streams.join(" "))
+}
+
+impl LogValuer for Message {
+    fn log_value(&self) -> LogValue {
+        let data = match &self.data {
+            Some(MessageData::Json(v)) => logger::compact_any(logger::AnyValue::Json(v.clone())).log_value(),
+            Some(MessageData::Typed(_)) => LogValue::String("<typed>".to_owned()),
+            None => logger::compact_any(logger::AnyValue::Json(serde_json::Value::Null)).log_value(),
+        };
+        LogValue::Group(vec![
+            Attr::new("command", LogValue::String(self.command.clone())),
+            Attr::new("identifier", filtered_identifier(&self.identifier).log_value()),
+            Attr::new("data", data),
+            Attr::new("history", LogValue::String(history_plus_v(&self.history))),
+        ])
+    }
+}
+
+impl LogValuer for Reply {
+    fn log_value(&self) -> LogValue {
+        let mut attrs = Vec::new();
+        if !self.kind.is_empty() {
+            attrs.push(Attr::new("type", LogValue::String(self.kind.clone())));
+        }
+        if !self.identifier.is_empty() {
+            attrs.push(Attr::new("identifier", filtered_identifier(&self.identifier).log_value()));
+        }
+        if self.message.is_some() {
+            attrs.push(Attr::new("message", logger::compact_any(json_any(&self.message)).log_value()));
+        }
+        if !self.reason.is_empty() {
+            attrs.push(Attr::new("reason", LogValue::String(self.reason.clone())));
+            attrs.push(Attr::new("reconnect", LogValue::Bool(self.reconnect)));
+        }
+        if !self.stream_id.is_empty() {
+            attrs.push(Attr::new("stream_id", LogValue::String(self.stream_id.clone())));
+            attrs.push(Attr::new("epoch", LogValue::String(self.epoch.clone())));
+            attrs.push(Attr::new("offset", LogValue::Uint(self.offset)));
+        }
+        if !self.sid.is_empty() {
+            attrs.push(Attr::new("sid", LogValue::String(self.sid.clone())));
+            attrs.push(Attr::new("restored", LogValue::Bool(self.restored)));
+            attrs.push(Attr::new(
+                "restored_ids",
+                LogValue::List(self.restored_ids.iter().map(|s| LogValue::String(s.clone())).collect()),
+            ));
+        }
+        LogValue::Group(attrs)
+    }
+}
+
+impl LogValuer for DisconnectMessage {
+    fn log_value(&self) -> LogValue {
+        LogValue::Group(vec![
+            Attr::new("type", LogValue::String(self.kind.clone())),
+            Attr::new("reason", LogValue::String(self.reason.clone())),
+            Attr::new("reconnect", LogValue::Bool(self.reconnect)),
+        ])
+    }
+}
+
+impl LogValuer for PingMessage {
+    fn log_value(&self) -> LogValue {
+        LogValue::Group(vec![
+            Attr::new("type", LogValue::String(self.kind.clone())),
+            Attr::new(
+                "message",
+                match &self.message {
+                    // An integer timestamp (Go int64), not a decoded float64.
+                    Some(serde_json::Value::Number(n)) => LogValue::String(n.to_string()),
+                    other => LogValue::String(logger::plus_v(&json_any(other))),
+                },
+            ),
+        ])
+    }
+}
+
+impl LogValuer for RemoteCommandMessage {
+    /// Upstream renders the raw payload (`json.RawMessage`) with `%+v`: its bytes.
+    fn log_value(&self) -> LogValue {
+        let bytes: Vec<String> = self.payload.bytes().map(|b| b.to_string()).collect();
+        LogValue::Group(vec![
+            Attr::new("command", LogValue::String(self.command.clone())),
+            Attr::new("payload", LogValue::String(format!("[{}]", bytes.join(" ")))),
+        ])
+    }
+}
+
+impl LogValuer for RemoteDisconnectMessage {
+    fn log_value(&self) -> LogValue {
+        LogValue::Group(vec![
+            Attr::new("ids", LogValue::String(self.identifier.clone())),
+            Attr::new("reconnect", LogValue::Bool(self.reconnect)),
+        ])
+    }
+}
+
+impl LogValuer for PresenceEvent {
+    /// Upstream has no `LogValue` here: `%+v` of the pointer.
+    fn log_value(&self) -> LogValue {
+        let v = logger::AnyValue::Struct(vec![
+            ("Type".to_owned(), logger::AnyValue::Json(serde_json::Value::String(self.kind.clone()))),
+            ("Info".to_owned(), json_any(&self.info)),
+            ("ID".to_owned(), logger::AnyValue::Json(serde_json::Value::String(self.id.clone()))),
+        ]);
+        LogValue::String(format!("&{}", logger::plus_v(&v)))
+    }
+}
+
 // --- added for pusher/sse ---
 // `EncodedMessage` below is the data enum of the upstream implementors; it
 // implements the `encoders::EncodedMessage` / `EncodedMessageJson` traits. The hub
