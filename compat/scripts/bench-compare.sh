@@ -52,7 +52,7 @@ run() { # run <workload-name> <scenario> <args...>
       local f="${OUT}/${name}.${sut}.${i}.txt"
       echo ">> ${name} ${sut} run ${i}" >&2
       taskset -c "${BENCH_CPUS}" "${BENCH}" "${scenario}" --sut "${WRAP}/${sut}/${sut}" \
-        --non-interactive "$@" >"${f}" 2>"${f%.txt}.stderr" || echo "exit=$?" >>"${f}"
+        --non-interactive "$@" >"${f}" || echo "exit=$?" >>"${f}"
       sleep 2
     done
   done

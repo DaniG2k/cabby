@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340" width="720" height="340" role="img" aria-labelledby="t d">
+<title id="t">Server memory (RSS)</title><desc id="d">Peak resident memory; lower is better. 1,000 idle clients: AnyCable (Go) 55 MB, Cabby (Rust) 22 MB; 10,000 idle clients: AnyCable (Go) 290 MB, Cabby (Rust) 100 MB; 5,000-client room, 100k msg/s: AnyCable (Go) 176 MB, Cabby (Rust) 58 MB</desc>
+<style>
+  .surface { fill: #fcfcfb; } .s0 { fill: #2a78d6; } .s1 { fill: #eb6834; }
+  .t1 { fill: #0b0b0b; } .t2 { fill: #52514e; } .grid { stroke: #e4e3df; } .axis { stroke: #b9b8b2; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #1a1a19; } .s0 { fill: #3987e5; } .s1 { fill: #d95926; }
+    .t1 { fill: #f0efec; } .t2 { fill: #c3c2b7; } .grid { stroke: #383835; } .axis { stroke: #5e5d58; }
+  }
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+</style>
+<rect class="surface" width="720" height="340" rx="8"/>
+<text class="t1" x="64" y="30" font-size="16" font-weight="600">Server memory (RSS)</text>
+<text class="t2" x="64" y="50" font-size="12">Peak resident memory; lower is better</text>
+<rect class="s0" x="64" y="64" width="12" height="12" rx="3"/>
+<text class="t2" x="82" y="74" font-size="12">AnyCable (Go)</text>
+<rect class="s1" x="210" y="64" width="12" height="12" rx="3"/>
+<text class="t2" x="228" y="74" font-size="12">Cabby (Rust)</text>
+<line class="axis" x1="64" x2="696" y1="292.0" y2="292.0" stroke-width="1"/>
+<text class="t2" x="56" y="296.0" font-size="11" text-anchor="end">0</text>
+<line class="grid" x1="64" x2="696" y1="242.0" y2="242.0" stroke-width="1"/>
+<text class="t2" x="56" y="246.0" font-size="11" text-anchor="end">100</text>
+<line class="grid" x1="64" x2="696" y1="192.0" y2="192.0" stroke-width="1"/>
+<text class="t2" x="56" y="196.0" font-size="11" text-anchor="end">200</text>
+<line class="grid" x1="64" x2="696" y1="142.0" y2="142.0" stroke-width="1"/>
+<text class="t2" x="56" y="146.0" font-size="11" text-anchor="end">300</text>
+<line class="grid" x1="64" x2="696" y1="92.0" y2="92.0" stroke-width="1"/>
+<text class="t2" x="56" y="96.0" font-size="11" text-anchor="end">400</text>
+<text class="t2" x="14" y="192" font-size="11" transform="rotate(-90 14 192)" text-anchor="middle">MB</text>
+<path class="s0" d="M112.3,292.0 V268.4 Q112.3,264.4 116.3,264.4 H164.3 Q168.3,264.4 168.3,268.4 V292.0 Z"/>
+<text class="t1" x="140.3" y="258.4" font-size="11" text-anchor="middle">55</text>
+<path class="s1" d="M170.3,292.0 V284.9 Q170.3,280.9 174.3,280.9 H222.3 Q226.3,280.9 226.3,284.9 V292.0 Z"/>
+<text class="t1" x="198.3" y="274.9" font-size="11" text-anchor="middle">22</text>
+<text class="t2" x="169.3" y="312" font-size="12" text-anchor="middle">1,000 idle clients</text>
+<path class="s0" d="M323.0,292.0 V150.8 Q323.0,146.8 327.0,146.8 H375.0 Q379.0,146.8 379.0,150.8 V292.0 Z"/>
+<text class="t1" x="351.0" y="140.8" font-size="11" text-anchor="middle">290</text>
+<path class="s1" d="M381.0,292.0 V246.2 Q381.0,242.2 385.0,242.2 H433.0 Q437.0,242.2 437.0,246.2 V292.0 Z"/>
+<text class="t1" x="409.0" y="236.2" font-size="11" text-anchor="middle">100</text>
+<text class="t2" x="380.0" y="312" font-size="12" text-anchor="middle">10,000 idle clients</text>
+<path class="s0" d="M533.7,292.0 V208.2 Q533.7,204.2 537.7,204.2 H585.7 Q589.7,204.2 589.7,208.2 V292.0 Z"/>
+<text class="t1" x="561.7" y="198.2" font-size="11" text-anchor="middle">176</text>
+<path class="s1" d="M591.7,292.0 V267.0 Q591.7,263.0 595.7,263.0 H643.7 Q647.7,263.0 647.7,267.0 V292.0 Z"/>
+<text class="t1" x="619.7" y="257.0" font-size="11" text-anchor="middle">58</text>
+<text class="t2" x="590.7" y="312" font-size="12" text-anchor="middle">5,000-client room, 100k msg/s</text>
+</svg>

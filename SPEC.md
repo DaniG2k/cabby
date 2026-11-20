@@ -1,6 +1,6 @@
 # Cabby: tests-first AnyCable Rust port specification
 
-Status: M0–M6 complete: all 923 translated upstream cases pass against Cabby (AnyT conformance, SSE, Pusher, durable streams, Redis/NATS, mruby, Benchi harness; AnyCable #275 fix adopted). M7 in progress: Go vs Rust benchmarks, independent review, release.
+Status: M0–M6 complete: all 923 translated upstream cases pass against Cabby. M7: Go vs Rust benchmarks published in the README (docs/benchmarks); remaining: independent review, manual testing guide, release.
 Prepared: 2026-11-17. Progress: `cargo xtask report`; baseline evidence: `compat/baseline/README.md`.
 Project name: **Cabby**. Directory and planned binary: `cabby` (an independent AnyCable-compatible implementation).
 
