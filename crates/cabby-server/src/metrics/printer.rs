@@ -55,19 +55,26 @@ struct Logger {
 fn logger() -> &'static RwLock<Logger> {
     static LOGGER: OnceLock<RwLock<Logger>> = OnceLock::new();
     LOGGER.get_or_init(|| {
-        // Core components (cabby-core) log through this logger too.
-        cabby_core::logger::set_sink(log);
+        // Every component (cabby-core's included) logs through this logger.
+        cabby_core::logger::set_sink(write_record);
+        cabby_core::logger::set_min_level(Some(Level::Info));
         RwLock::new(Logger { format: None, min: Level::Info, base: Vec::new(), discard: false })
     })
 }
 
+/// Installs the process logger (slog's default until [`init_logger`]), so
+/// records written before any other logging call are not dropped.
+pub fn install_logger() {
+    let _ = logger();
+}
+
 fn rank(level: Level) -> u8 {
-    match level {
-        Level::Debug => 0,
-        Level::Info => 1,
-        Level::Warn => 2,
-        Level::Error => 3,
-    }
+    level.rank()
+}
+
+/// Mirrors the configuration into cabby-core's level gate.
+fn sync_level(l: &Logger) {
+    cabby_core::logger::set_min_level(if l.discard { None } else { Some(l.min) });
 }
 
 /// Upstream `logger.InitLogger(format, level)`: records at `level` and above
@@ -96,6 +103,7 @@ pub fn init_logger(format: &str, level: &str) -> Result<(), MetricsError> {
     l.format = Some(format);
     l.min = min;
     l.discard = false;
+    sync_level(&l);
     Ok(())
 }
 
@@ -107,28 +115,39 @@ pub fn set_log_attrs(attrs: Vec<Attr>) {
 
 /// Drops every record from now on (upstream `slog.New(slog.DiscardHandler)`).
 pub fn discard_logs() {
-    logger().write().unwrap_or_else(|e| e.into_inner()).discard = true;
+    let mut l = logger().write().unwrap_or_else(|e| e.into_inner());
+    l.discard = true;
+    sync_level(&l);
 }
 
 /// Whether records at `level` are written.
 pub fn log_enabled(level: Level) -> bool {
-    let l = logger().read().unwrap_or_else(|e| e.into_inner());
-    !l.discard && rank(level) >= rank(l.min)
+    let _ = logger();
+    cabby_core::logger::enabled(level)
 }
 
 /// Writes one record to the process log.
 pub(crate) fn log(level: Level, msg: &str, attrs: &[Attr]) {
+    let _ = logger();
+    cabby_core::logger::log(level, msg, attrs);
+}
+
+/// The sink of cabby-core's logger: the process-wide attributes (unless the
+/// record opts out), the logger's context, then the record's attributes.
+fn write_record(r: &cabby_core::logger::Record<'_>) {
     let l = logger().read().unwrap_or_else(|e| e.into_inner());
-    if l.discard || rank(level) < rank(l.min) {
+    if l.discard || rank(r.level) < rank(l.min) {
         return;
     }
+    let base: &[Attr] = if r.with_base { &l.base } else { &[] };
     let all: Vec<Attr>;
-    let attrs = if l.base.is_empty() {
-        attrs
+    let attrs = if base.is_empty() && r.context.is_empty() {
+        r.attrs
     } else {
-        all = l.base.iter().chain(attrs).cloned().collect();
+        all = base.iter().chain(r.context).chain(r.attrs).cloned().collect();
         &all
     };
+    let (level, msg) = (r.level, r.msg);
     match l.format {
         None => eprint!("{}", format_text(level, msg, attrs)),
         Some(LogFormat::Json) => write_stdout(&format_json(level, msg, attrs)),
@@ -162,10 +181,10 @@ fn format_tint_at(t: &LocalTime, level: Level, msg: &str, attrs: &[Attr]) -> Str
         Level::Error => "ERR",
     });
     out.push(' ');
-    if !msg.is_empty() {
-        out.push_str(msg);
-        out.push(' ');
-    }
+    // tint writes the message and a space even when the message is empty (the
+    // metrics snapshot line reads `INF  nodeid=...`).
+    out.push_str(msg);
+    out.push(' ');
     for a in attrs {
         tint_attr(&mut out, "", a);
     }
@@ -204,7 +223,8 @@ fn tint_string(out: &mut String, s: &str) {
 
 impl IntervalWriter for BasePrinter {
     fn run(&self, interval: u64) -> Result<(), MetricsError> {
-        let mut attrs = vec![Attr::new("context", LogValue::String("metrics".into()))];
+        // Upstream gives printers the runner's logger (no `context=metrics`).
+        let mut attrs = Vec::with_capacity(2);
         attrs.push(Attr::new("interval", LogValue::Uint(interval)));
         if let Some(filter) = &self.filter {
             let mut fields: Vec<&str> = filter.iter().map(String::as_str).collect();
@@ -218,9 +238,7 @@ impl IntervalWriter for BasePrinter {
     fn stop(&self) {}
 
     fn write(&self, metrics: &Metrics) -> Result<(), MetricsError> {
-        let mut attrs = vec![Attr::new("context", LogValue::String("metrics".into()))];
-        attrs.extend(self.snapshot_attrs(metrics));
-        log(Level::Info, "", &attrs);
+        log(Level::Info, "", &self.snapshot_attrs(metrics));
         Ok(())
     }
 }
@@ -244,7 +262,7 @@ mod logger_tests {
         let (time, rest) = line.split_at(23);
         assert_eq!(b' ', time.as_bytes()[10]);
         assert_eq!(" INF Starting AnyCable nodeid=abc x=\"a b\" n=2\n", rest);
-        assert_eq!(" WRN k=v\n", &format_tint(Level::Warn, "", &[Attr::new("k", LogValue::String("v".into()))])[23..]);
+        assert_eq!(" WRN  k=v\n", &format_tint(Level::Warn, "", &[Attr::new("k", LogValue::String("v".into()))])[23..]);
     }
 
     /// tint prints the time in the local zone (Go's `time.Local`).

@@ -7,6 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use cabby_core::broker::{Broker, PresenceInfoOptions};
+use cabby_core::logger::Logger;
+use cabby_core::{log_debug, log_error};
 
 /// Upstream `defaultAPIPath`.
 pub const DEFAULT_API_PATH: &str = "/api";
@@ -217,6 +219,8 @@ pub struct Server {
     cors_hosts: Option<Vec<String>>,
     started: AtomicBool,
     closed: AtomicBool,
+    /// Upstream `l.With("context", "api")`.
+    log: Logger,
 }
 
 impl Server {
@@ -244,6 +248,7 @@ impl Server {
             cors_hosts,
             started: AtomicBool::new(false),
             closed: AtomicBool::new(false),
+            log: api_logger(),
         })
     }
 
@@ -314,6 +319,7 @@ impl Server {
             }
         }
         if req.method != "POST" {
+            log_debug!(self.log, "invalid request method", "method" => &req.method);
             resp.status = 422;
             return Check::Done(resp);
         }
@@ -325,18 +331,22 @@ impl Server {
     }
 
     /// Upstream `PublishHandler` after reading the body: `resp` is the one
-    /// [`Server::check`] returned in [`Check::ReadBody`].
+    /// [`Server::check`] returned in [`Check::ReadBody`]. A failed read is logged
+    /// by the caller, which has the error.
     pub fn finish_publish(&self, mut resp: HttpResponse, body: PublishBody<'_>) -> HttpResponse {
         resp.status = match body {
-            PublishBody::TooLarge => 413,
+            PublishBody::TooLarge => {
+                log_debug!(self.log, "request body is too large", "limit" => self.conf.max_body_size);
+                413
+            }
             PublishBody::Failed => 422,
-            PublishBody::Read(body) => {
-                if self.handler.handle_broadcast(body).is_ok() {
-                    201
-                } else {
+            PublishBody::Read(body) => match self.handler.handle_broadcast(body) {
+                Ok(()) => 201,
+                Err(e) => {
+                    log_error!(self.log, "failed to handle broadcast", "error" => e.message);
                     501
                 }
-            }
+            },
         };
         resp
     }
@@ -344,19 +354,26 @@ impl Server {
     /// Upstream `PresenceHandler`: `GET <path>/presence/<stream>/users`.
     fn presence(&self, req: &HttpRequest, path: &str) -> HttpResponse {
         if req.method != "GET" {
+            log_debug!(self.log, "invalid request method", "method" => &req.method);
             return HttpResponse::with_status(422);
         }
         if !self.authenticator.authenticate(req) {
             return HttpResponse::with_status(401);
         }
-        let Some(stream) = presence_users_stream(&percent_decode(path)) else {
+        let decoded = percent_decode(path);
+        let Some(stream) = presence_users_stream(&decoded) else {
+            log_debug!(self.log, "invalid path for get users", "path" => decoded);
             return HttpResponse::with_status(404);
         };
         if !self.broker.supports_presence() {
             return HttpResponse::with_status(501);
         }
         match self.broker.presence_info(&stream, Some(&PresenceInfoOptions::new())) {
-            Err(_) => HttpResponse::with_status(400),
+            Err(e) => {
+                // Upstream's key is misspelled.
+                log_debug!(self.log, "failed to get presence info", "strean" => stream, "err" => e.message);
+                HttpResponse::with_status(400)
+            }
             Ok(info) => {
                 let mut resp = HttpResponse::with_status(200);
                 resp.set_header("Content-Type", "application/json");
@@ -398,6 +415,11 @@ fn not_found() -> HttpResponse {
         ],
         body: b"404 page not found\n".to_vec(),
     }
+}
+
+/// The API server's logger (upstream `l.With("context", "api")`).
+pub fn api_logger() -> Logger {
+    Logger::default().with("context", "api")
 }
 
 /// Upstream `server.WriteCORSHeaders`.

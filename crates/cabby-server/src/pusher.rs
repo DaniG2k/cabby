@@ -264,6 +264,28 @@ pub struct PusherClientEvent {
     pub data: Option<serde_json::Value>,
 }
 
+/// How the node's `incoming message` record shows Pusher payloads (Go `%+v` of
+/// the struct pointer, e.g. `&{Channel:chat Auth: ChannelData:}`).
+fn typed_data_log_text(v: &(dyn std::any::Any + Send + Sync)) -> Option<String> {
+    use cabby_core::logger::{AnyValue, plus_v};
+    let s = |v: &str| AnyValue::Json(Value::String(v.to_owned()));
+    let fields = if let Some(d) = v.downcast_ref::<PusherSubscriptionData>() {
+        vec![
+            ("Channel".to_owned(), s(&d.channel)),
+            ("Auth".to_owned(), s(&d.auth)),
+            ("ChannelData".to_owned(), s(&d.channel_data)),
+        ]
+    } else {
+        let e = v.downcast_ref::<PusherClientEvent>()?;
+        vec![
+            ("Event".to_owned(), s(&e.event)),
+            ("Channel".to_owned(), s(&e.channel)),
+            ("Data".to_owned(), AnyValue::Json(e.data.clone().unwrap_or(Value::Null))),
+        ]
+    };
+    Some(format!("&{}", plus_v(&AnyValue::Struct(fields))))
+}
+
 impl PusherClientEvent {
     /// `utils.ToJSON(event)` as a JSON value (what the node whispers).
     fn to_json_value(&self) -> Value {
@@ -567,6 +589,9 @@ impl Encoder {
     /// (subscribe and unsubscribe) or `PusherClientEvent` (client events).
     pub fn decode_message(&self, raw: &[u8]) -> Result<Message, EncodeError> {
         const TY: &str = "pusher.PusherMessage";
+
+        static LOG_FORMATTER: std::sync::Once = std::sync::Once::new();
+        LOG_FORMATTER.call_once(|| cabby_core::common::register_typed_data_formatter(typed_data_log_text));
 
         let value = parse_json(raw)?;
         let empty = Map::new();
@@ -874,7 +899,10 @@ impl NodeExecutor for Executor {
                 Message { command: msg.command.clone(), identifier: msg.identifier.clone(), ..Default::default() };
 
             if let Err(err) = self.verify_private_channel(session, msg) {
-                log(Level::Debug, "pusher authorization failed", &[Attr::new("err", LogValue::String(err))]);
+                // Upstream logs through the session logger (`context=node sid=...`).
+                let session_log =
+                    cabby_core::logger::Logger::default().with("context", "node").with("sid", session.get_id());
+                cabby_core::log_debug!(session_log, "pusher authorization failed", "err" => err);
                 subscribe.identifier = channel_to_identifier("");
             }
 

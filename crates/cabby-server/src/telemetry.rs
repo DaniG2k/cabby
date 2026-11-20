@@ -336,10 +336,19 @@ impl std::fmt::Debug for Tracker {
     }
 }
 
-fn debug(inner: &Inner, msg: &str) {
+/// Upstream's tracker has a logger of its own: slog's text handler on stdout,
+/// at debug level with `ANYCABLE_TELEMETRY_DEBUG=1` (otherwise its debug
+/// records are dropped), independent of the process logger.
+fn debug(inner: &Inner, msg: &str, attrs: &[cabby_core::logger::Attr]) {
     if inner.debug {
-        crate::metrics::log(cabby_core::logger::Level::Info, msg, &[]);
+        use std::io::Write as _;
+        let line = cabby_core::logger::format_text(cabby_core::logger::Level::Debug, msg, attrs);
+        let _ = std::io::stdout().lock().write_all(line.as_bytes());
     }
+}
+
+fn attr(key: &str, value: impl Into<cabby_core::logger::LogValue>) -> cabby_core::logger::Attr {
+    cabby_core::logger::Attr::new(key, value.into())
 }
 
 impl Inner {
@@ -386,7 +395,7 @@ impl Inner {
 
     /// Upstream `Send`: posts one event (1s timeout); failures are only logged.
     async fn send(&self, event: &str, mut props: BTreeMap<String, Value>) {
-        debug(self, &format!("send telemetry event: {event}"));
+        debug(self, "send telemetry event", &[attr("event", event)]);
         // Avoid storing the IP address.
         props.insert("$ip".into(), Value::Null);
         props.insert("distinct_id".into(), Value::from(self.id.clone()));
@@ -403,10 +412,12 @@ impl Inner {
             headers.push((AUTHORIZATION, token));
         }
         match tokio::time::timeout(SEND_TIMEOUT, client.post("", &headers, payload)).await {
-            Err(_) => debug(self, "timed out to send telemetry data"),
-            Ok(Err(e)) => debug(self, &format!("failed to perform telemetry request: {}", e.message)),
-            Ok(Ok(res)) if res.status == 401 => debug(self, "telemetry authenticated failed"),
-            Ok(Ok(res)) if res.status != 200 => debug(self, &format!("telemetry request failed: {}", res.status)),
+            Err(_) => debug(self, "timed out to send telemetry data", &[]),
+            Ok(Err(e)) => debug(self, "failed to perform telemetry request", &[attr("err", e.message)]),
+            Ok(Ok(res)) if res.status == 401 => debug(self, "telemetry authenticated failed", &[]),
+            Ok(Ok(res)) if res.status != 200 => {
+                debug(self, "telemetry request failed", &[attr("status", u64::from(res.status))]);
+            }
             Ok(Ok(_)) => {}
         }
     }

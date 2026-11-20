@@ -4,7 +4,9 @@
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use cabby_core::logger::Logger;
 use cabby_core::utils::{Item, Queue};
+use cabby_core::{log_debug, log_info};
 
 use super::{DisconnectQueueConfig, METRICS_DISCONNECT_DISCARDED, Node, NodeError, Session};
 use crate::rpc::Context;
@@ -66,6 +68,18 @@ impl Disconnector for InlineDisconnector {
     }
 }
 
+/// Go's `time.Duration.String()` for the whole-millisecond periods of the queue.
+fn go_duration(d: Duration) -> String {
+    let millis = d.as_millis();
+    if millis >= 1000 && millis.is_multiple_of(1000) {
+        format!("{}s", millis / 1000)
+    } else if millis >= 1000 {
+        format!("{}s", d.as_secs_f64())
+    } else {
+        format!("{millis}ms")
+    }
+}
+
 /// Whether `ctx` is cancelled or past its deadline (Go `ctx.Err() != nil`).
 pub(super) fn context_done(ctx: &Context) -> bool {
     ctx.cancel.is_cancelled() || ctx.deadline.is_some_and(|d| tokio::time::Instant::now() >= d)
@@ -84,6 +98,8 @@ pub struct DisconnectQueue {
     queue: Queue<Arc<Session>>,
     limit: usize,
     stopped: Mutex<bool>,
+    /// Upstream `l.With("context", "disconnector")`.
+    log: Logger,
 }
 
 impl DisconnectQueue {
@@ -98,6 +114,9 @@ impl DisconnectQueue {
         let workers = config.workers_num.max(1) as usize;
         let capacity = (config.max_backlog / 8).max(512) as usize;
 
+        let log = Logger::default().with("context", "disconnector");
+        log_debug!(log, "calls rate", "rate" => go_duration(rate), "workers" => workers);
+
         Self {
             node,
             rate,
@@ -105,6 +124,7 @@ impl DisconnectQueue {
             queue: Queue::new(capacity),
             limit: config.max_backlog.max(0) as usize,
             stopped: Mutex::new(false),
+            log,
         }
     }
 
@@ -164,14 +184,32 @@ impl Disconnector for DisconnectQueue {
         };
 
         let left = sessions.len();
-        for (actual, session) in sessions.iter().enumerate() {
-            if context_done(ctx) {
-                return Err(NodeError(format!("had no time to invoke Disconnect calls: ~{}", left - actual)));
-            }
-            let _ = self.node.disconnect_now(session);
+        if left == 0 {
+            return Ok(());
         }
 
-        Ok(())
+        match ctx.deadline {
+            Some(deadline) => {
+                let time_left = deadline.saturating_duration_since(tokio::time::Instant::now());
+                log_info!(self.log, "invoking remaining disconnects",
+                    "interval" => cabby_core::logger::LogValue::String(time_left.as_secs_f64().to_string()),
+                    "num" => left);
+            }
+            None => log_info!(self.log, "invoking remaining disconnects", "num" => left),
+        }
+
+        let mut actual = 0;
+        let res = loop {
+            let Some(session) = sessions.get(actual) else { break Ok(()) };
+            if context_done(ctx) {
+                break Err(NodeError(format!("had no time to invoke Disconnect calls: ~{}", left - actual)));
+            }
+            let _ = self.node.disconnect_now(session);
+            actual += 1;
+        };
+
+        log_info!(self.log, "disconnected sessions", "num" => actual);
+        res
     }
 
     /// Fails (and counts `disconnect_queue_discarded_total`) when the backlog
