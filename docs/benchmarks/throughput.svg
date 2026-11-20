@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340" width="720" height="340" role="img" aria-labelledby="t d">
+<title id="t">Messages delivered per second</title><desc id="d">What each server delivered of the offered load (50k, 100k, 150k, 100k msg/s); higher is better. 50k msg/s: Action Cable (Ruby) 26.6 thousand msg/s, AnyCable (Go) 50.0 thousand msg/s, Cabby (Rust) 50.0 thousand msg/s; 100k msg/s: Action Cable (Ruby) 26.2 thousand msg/s, AnyCable (Go) 100.0 thousand msg/s, Cabby (Rust) 100.0 thousand msg/s; 150k msg/s: Action Cable (Ruby) 23.7 thousand msg/s, AnyCable (Go) 149.9 thousand msg/s, Cabby (Rust) 149.9 thousand msg/s; 5,000-client room, 100k msg/s: Action Cable (Ruby) 21.0 thousand msg/s, AnyCable (Go) 99.8 thousand msg/s, Cabby (Rust) 99.8 thousand msg/s</desc>
+<style>
+  .surface { fill: #fcfcfb; } .actioncable { fill: #1baf7a; } .anycable-go { fill: #2a78d6; } .cabby { fill: #eb6834; }
+  .t1 { fill: #0b0b0b; } .t2 { fill: #52514e; } .grid { stroke: #e4e3df; } .axis { stroke: #b9b8b2; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #1a1a19; } .actioncable { fill: #199e70; } .anycable-go { fill: #3987e5; } .cabby { fill: #d95926; }
+    .t1 { fill: #f0efec; } .t2 { fill: #c3c2b7; } .grid { stroke: #383835; } .axis { stroke: #5e5d58; }
+  }
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+</style>
+<rect class="surface" width="720" height="340" rx="8"/>
+<text class="t1" x="64" y="30" font-size="16" font-weight="600">Messages delivered per second</text>
+<text class="t2" x="64" y="50" font-size="12">What each server delivered of the offered load (50k, 100k, 150k, 100k msg/s); higher is better</text>
+<rect class="actioncable" x="64" y="64" width="12" height="12" rx="3"/>
+<text class="t2" x="82" y="74" font-size="12">Action Cable (Ruby)</text>
+<rect class="anycable-go" x="258" y="64" width="12" height="12" rx="3"/>
+<text class="t2" x="276" y="74" font-size="12">AnyCable (Go)</text>
+<rect class="cabby" x="404" y="64" width="12" height="12" rx="3"/>
+<text class="t2" x="422" y="74" font-size="12">Cabby (Rust)</text>
+<line class="axis" x1="64" x2="696" y1="292.0" y2="292.0" stroke-width="1"/>
+<text class="t2" x="56" y="296.0" font-size="11" text-anchor="end">0</text>
+<line class="grid" x1="64" x2="696" y1="242.0" y2="242.0" stroke-width="1"/>
+<text class="t2" x="56" y="246.0" font-size="11" text-anchor="end">50</text>
+<line class="grid" x1="64" x2="696" y1="192.0" y2="192.0" stroke-width="1"/>
+<text class="t2" x="56" y="196.0" font-size="11" text-anchor="end">100</text>
+<line class="grid" x1="64" x2="696" y1="142.0" y2="142.0" stroke-width="1"/>
+<text class="t2" x="56" y="146.0" font-size="11" text-anchor="end">150</text>
+<line class="grid" x1="64" x2="696" y1="92.0" y2="92.0" stroke-width="1"/>
+<text class="t2" x="56" y="96.0" font-size="11" text-anchor="end">200</text>
+<text class="t2" x="14" y="192" font-size="11" transform="rotate(-90 14 192)" text-anchor="middle">thousand msg/s</text>
+<path class="actioncable" d="M93.6,292.0 V269.4 Q93.6,265.4 97.6,265.4 H121.2 Q125.2,265.4 125.2,269.4 V292.0 Z"/>
+<text class="t1" x="109.4" y="259.4" font-size="11" text-anchor="middle">26.6</text>
+<path class="anycable-go" d="M127.2,292.0 V246.0 Q127.2,242.0 131.2,242.0 H154.8 Q158.8,242.0 158.8,246.0 V292.0 Z"/>
+<text class="t1" x="143.0" y="236.0" font-size="11" text-anchor="middle">50.0</text>
+<path class="cabby" d="M160.8,292.0 V246.0 Q160.8,242.0 164.8,242.0 H188.4 Q192.4,242.0 192.4,246.0 V292.0 Z"/>
+<text class="t1" x="176.6" y="236.0" font-size="11" text-anchor="middle">50.0</text>
+<text class="t2" x="143.0" y="312" font-size="12" text-anchor="middle">50k msg/s</text>
+<path class="actioncable" d="M251.6,292.0 V269.8 Q251.6,265.8 255.6,265.8 H279.2 Q283.2,265.8 283.2,269.8 V292.0 Z"/>
+<text class="t1" x="267.4" y="259.8" font-size="11" text-anchor="middle">26.2</text>
+<path class="anycable-go" d="M285.2,292.0 V196.0 Q285.2,192.0 289.2,192.0 H312.8 Q316.8,192.0 316.8,196.0 V292.0 Z"/>
+<text class="t1" x="301.0" y="186.0" font-size="11" text-anchor="middle">100.0</text>
+<path class="cabby" d="M318.8,292.0 V196.0 Q318.8,192.0 322.8,192.0 H346.4 Q350.4,192.0 350.4,196.0 V292.0 Z"/>
+<text class="t1" x="334.6" y="186.0" font-size="11" text-anchor="middle">100.0</text>
+<text class="t2" x="301.0" y="312" font-size="12" text-anchor="middle">100k msg/s</text>
+<path class="actioncable" d="M409.6,292.0 V272.3 Q409.6,268.3 413.6,268.3 H437.2 Q441.2,268.3 441.2,272.3 V292.0 Z"/>
+<text class="t1" x="425.4" y="262.3" font-size="11" text-anchor="middle">23.7</text>
+<path class="anycable-go" d="M443.2,292.0 V146.1 Q443.2,142.1 447.2,142.1 H470.8 Q474.8,142.1 474.8,146.1 V292.0 Z"/>
+<text class="t1" x="459.0" y="136.1" font-size="11" text-anchor="middle">149.9</text>
+<path class="cabby" d="M476.8,292.0 V146.1 Q476.8,142.1 480.8,142.1 H504.4 Q508.4,142.1 508.4,146.1 V292.0 Z"/>
+<text class="t1" x="492.6" y="136.1" font-size="11" text-anchor="middle">149.9</text>
+<text class="t2" x="459.0" y="312" font-size="12" text-anchor="middle">150k msg/s</text>
+<path class="actioncable" d="M567.6,292.0 V275.0 Q567.6,271.0 571.6,271.0 H595.2 Q599.2,271.0 599.2,275.0 V292.0 Z"/>
+<text class="t1" x="583.4" y="265.0" font-size="11" text-anchor="middle">21.0</text>
+<path class="anycable-go" d="M601.2,292.0 V196.2 Q601.2,192.2 605.2,192.2 H628.8 Q632.8,192.2 632.8,196.2 V292.0 Z"/>
+<text class="t1" x="617.0" y="186.2" font-size="11" text-anchor="middle">99.8</text>
+<path class="cabby" d="M634.8,292.0 V196.2 Q634.8,192.2 638.8,192.2 H662.4 Q666.4,192.2 666.4,196.2 V292.0 Z"/>
+<text class="t1" x="650.6" y="186.2" font-size="11" text-anchor="middle">99.8</text>
+<text class="t2" x="617.0" y="312" font-size="12" text-anchor="middle">5,000-client room, 100k msg/s</text>
+</svg>

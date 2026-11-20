@@ -46,6 +46,17 @@ def med(workload, sut, key):
     return statistics.median(vals) if vals else FAILED if failed else None
 
 
+def med_raw(workload, sut, key):
+    """The median of `key` over every run with a summary and an unsaturated generator, whether the
+    server kept up or not (for throughput, where falling behind is the point)."""
+    vals = []
+    for f in results.glob(f"{workload}.{sut}.*.txt"):
+        kv = dict(line.split("=", 1) for line in f.read_text().splitlines() if "=" in line)
+        if kv.get("generator_saturated") == "false" and key in kv:
+            vals.append(float(kv[key]))
+    return statistics.median(vals) if vals else None
+
+
 ALL_SERIES = [("actioncable", "Action Cable (Ruby)"), ("anycable-go", "AnyCable (Go)"), ("cabby", "Cabby (Rust)")]
 SERIES = [(k, n) for k, n in ALL_SERIES if any(results.glob(f"*.{k}.*.txt"))] or ALL_SERIES[1:]
 # Categorical slots aqua, blue, orange; each server keeps its colour whichever servers are shown.
@@ -140,4 +151,10 @@ chart(out_dir / "latency.svg", "Broadcast delivery latency, p99", "Publish to cl
       [g for _, g in fan], [[med(w, s, "latency_p99_ms") for w, _ in fan] for s in suts], "ms", digits=2)
 chart(out_dir / "cpu.svg", "Server CPU at the same delivered rate", "Average cores used while delivering the load; lower is better",
       [g for _, g in fan], [[med(w, s, "server_cpu_cores") for w, _ in fan] for s in suts], "cores", digits=2)
+tput = fan + [("room-5k", "5,000-client room, 100k msg/s")]
+chart(out_dir / "throughput.svg", "Messages delivered per second",
+      "What each server delivered of the offered load (50k, 100k, 150k, 100k msg/s); higher is better",
+      [g for _, g in tput],
+      [[(lambda v: None if v is None else v / 1000)(med_raw(w, s, "throughput_msgs_per_sec")) for w, _ in tput] for s in suts],
+      "thousand msg/s", digits=1)
 print("charts written to", out_dir)
