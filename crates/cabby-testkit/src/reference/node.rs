@@ -1220,13 +1220,9 @@ impl TestNode {
         }
     }
 
-    /// `node.hub.SubscribeSession(session, stream, identifier)`. No exported Go
-    /// call does only this: the Go arm runs the node's own command flow
-    /// (`Subscribe`, or `Perform` when the session already has the channel)
-    /// with a controller answering `Streams: [stream]`, no transmissions and no
-    /// Disconnect interest. Besides the hub subscription this calls the broker's
-    /// `Subscribe(stream)` and records the channel/stream in the session's
-    /// subscriptions.
+    /// `node.hub.SubscribeSession(session, stream, identifier)`. Go: the same
+    /// call on the node's hub, an unexported field the bridge reads by
+    /// reflection.
     pub fn hub_subscribe_session(&self, s: &TestSession, stream: &str, identifier: &str) {
         match &self.imp {
             NodeImp::Rust(r) => r.node.hub().subscribe_session(s.rust_session(), stream, identifier),
@@ -1875,9 +1871,8 @@ impl TestSession {
         }
     }
 
-    /// `session.closeCtx.Err() != nil` (unexported). Go: the context is the one
-    /// every controller call receives; a probe controller reads it from a
-    /// side-effect-free `node.Subscribe` on the closed session.
+    /// `session.closeCtx.Err() != nil`. Go: the unexported field is read by
+    /// reflection.
     pub fn close_context_cancelled(&self, node: &TestNode) -> bool {
         match &self.imp {
             SessionImp::Rust { session, .. } => session.close_context().is_cancelled(),

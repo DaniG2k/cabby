@@ -62,14 +62,18 @@ crates/cabby-mruby-sys/        the only crate with `unsafe` (it does not inherit
                                (mrbc bytecode, little-endian)
   SHA256SUMS                   of every vendored file
   shim/cabby_mruby.c           the gomruby.h equivalents: every raising call behind its own
-                               jump buffer, type checks before mruby dereferences a value,
-                               the trampoline for Rust methods
+                               jump buffer (rooting its values, unwinding on a raise), type
+                               checks before mruby dereferences a value, the trampoline for
+                               Rust methods
   shim/gc_live.c               compiles mruby's gc.c plus a liveness test that needs its
                                private layout (built instead of src/gc.c)
+  shim/vm_live.c               compiles mruby's vm.c plus frame unwinding and nested runs
+                               that need its private helpers (built instead of src/vm.c)
   build.rs                     cc::Build over that file list, -std=gnu99 -O3 (upstream's
                                flags); only with feature `vendored` on Linux/macOS
   src/ffi.rs                   raw declarations of the shim (stubs when not compiled in)
   src/safe.rs                  safe handles: Vm, Val, Raised, Parser, Context
+  tests/probes.rs              memory-safety regression tests (`cargo xtask asan`)
 crates/cabby-server/src/mrb/   go-mruby's API and behavior on the safe handles;
                                `forbid(unsafe_code)` stays in force
 compat/scripts/vendor-mruby.sh refreshes the vendored tree from the reference build
@@ -97,25 +101,79 @@ go-mruby hands raw pointers to mruby and trusts the caller. Cabby's safe API mus
 let safe Rust cause undefined behavior, so `cabby-mruby-sys` keeps these invariants:
 
 - **No longjmp across Rust.** Rust calls only shim functions. Each one that can raise
-  sets its own jump buffer, so a raise ends in C and leaves the exception in `mrb->exc`;
-  Rust then collects and clears it (`Raised`). Rust methods run from the C trampoline
-  through a dispatch callback that returns before anything raises.
-- **No unwinding into C.** Rust methods run under `catch_unwind`. A panic becomes a
-  `RuntimeError` inside the VM and is re-raised in Rust as soon as the VM call returns.
+  sets its own jump buffer (`CABBY_CALL`), so a raise ends in C and leaves the exception
+  in `mrb->exc`; Rust then collects and clears it (`Raised`). Rust methods run from the
+  C trampoline through a dispatch callback that returns before anything raises. Shim
+  code that runs outside a jump buffer and could only raise on out-of-memory runs with
+  none set, so mruby aborts instead of jumping into Rust frames.
+- **A raise leaves the call stack as it found it.** `mrb_funcall` only pops its call
+  frames on a raise when no jump buffer is set; under the shim's it left them behind,
+  and later calls read their stale procs and stack slots (a crash after a few thousand
+  raising calls). A protected call restores the context and pops every frame pushed
+  since it started (`cabby_unwind_ci`, built from mruby's own `cipop` in
+  `shim/vm_live.c`).
 - **No freed memory.** A closed VM nulls its state and every later operation panics.
   A value is passed to C only after `cabby_value_live` confirms it is an immediate or a
   live object of its recorded type in one of the VM's live heap pages (values are
   arena-protected exactly as in go-mruby, so they can be collected; TestMrbFullGC relies
   on that). A slot reused by a new object of the same type passes the check: that is
   memory-safe, merely a different object.
+- **Values stay alive during a call.** A live value need not be rooted (the caller may
+  have restored the arena), and the first allocation inside the call could collect it.
+  Every protected call pushes its values on the arena before anything allocates and
+  removes exactly those entries afterwards, keeping whatever the call itself left
+  there (so the arena contents seen by go-mruby code are unchanged).
+- **The arena below a Rust method is its caller's.** C code that calls a Rust method
+  (`Array#join` calling `to_s`) may keep unrooted objects in the arena; inside a Rust
+  method, `arena_restore` stops at the index the method was entered with.
+- **Procs without an environment can only be run.** `Parser::generate_code` returns a
+  proc with no environment, and mruby reads `proc->env` without checking when a proc is
+  yielded to, called or used as a block. Such a proc is refused (`TypeError`) wherever
+  Ruby code could see it (receiver, argument, block, yield target, stored value); `run`
+  and `context_run` accept it.
+- **Backtraces read live frames only.** mruby rebuilds an exception's backtrace from the
+  call frames still in memory when it is read; by then they have been popped and their
+  procs (and ireps) may be collected. The shim's version of `mrb_exc_backtrace` uses a
+  frame only when its proc is a live Proc, and is otherwise identical.
+- **Run never clobbers a frame.** At the top level `run`/`context_run` use the root
+  frame, as go-mruby, with the stack keep limited to the root frame's registers (only
+  those slots are GC roots; a larger keep read collected objects). Inside a Rust method
+  they run on a call frame of their own (`cabby_run_nested`) instead of overwriting the
+  method's (and its arguments).
+- **No context switch across C.** `Fiber#resume`/`#transfer` called directly from C
+  (`Val::call`, or a block defined in C) switched contexts while the C caller popped
+  frames of the old one. The shim wraps both and raises mruby's own
+  `FiberError: can't cross C function boundary` in that case; from Ruby code fibers work
+  as usual. `Fiber.yield` from a proc run inside a Rust method is refused the same way.
+- **No unwinding into C.** Rust methods run under `catch_unwind`. A panic becomes a
+  `RuntimeError` inside the VM and is re-raised in Rust as soon as the VM call returns.
 - **Checked types.** The shim checks types where mruby casts without checking (procs for
-  `Run`/`Yield`/blocks, arrays, hashes, classes), limits `mrb_gc_arena_restore` and the
-  `mrb_context_run` stack keep to initialized slots, and only accepts exception objects as
-  errors of Rust methods.
+  `Run`/`Yield`/blocks, arrays, hashes, classes), refuses `generate_code` without a
+  parse tree, limits `mrb_gc_arena_restore` to initialized slots, and only accepts
+  exception objects as errors of Rust methods.
 
 Where go-mruby would read freed memory, crash or abort, Cabby returns an error or panics
 (deviation D-032). What no binding can fix are memory-safety bugs inside mruby 1.2.0
-itself, which is why scripts must be trusted operator input.
+itself (reachable from Ruby code alone, e.g. a script reading an exception's backtrace
+long after the raise), which is why scripts must be trusted operator input.
+
+#### Checking memory safety
+
+`crates/cabby-mruby-sys/tests/probes.rs` holds one regression test per crash the
+November 2026 review found from safe Rust (`docs/review/repro/mruby/`), plus the metrics
+printer's calls with a formatter that raises on every call. Their assertions catch most
+of the bugs on their own; under AddressSanitizer any read of freed memory fails the run:
+
+```sh
+cargo xtask asan   # x86_64 Linux: cabby-mruby-sys tests, C and Rust instrumented
+```
+
+The command compiles mruby and the shim with `-fsanitize=address` (the system C
+compiler) and the Rust code with `-Zsanitizer=address` into `target/asan`. The pinned
+stable toolchain accepts the flag with `RUSTC_BOOTSTRAP=1`, and its x86_64 Linux
+standard library ships the sanitizer runtime, so no nightly toolchain is needed. Leak
+detection is off (mruby 1.2 does not free everything at exit). CI runs it in the
+`mruby-asan` job.
 
 ### Binding semantics the implementation must keep
 

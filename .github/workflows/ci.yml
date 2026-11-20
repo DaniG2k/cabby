@@ -24,14 +24,31 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test -p xtask -p cabby-core
+      # Every crate's unit tests, including the cabby-server deviation pins,
+      # and the mruby binding's memory-safety regression tests.
+      - run: cargo test --workspace --lib --bins
+      - run: cargo test -p cabby-mruby-sys --tests
       - run: cargo xtask check-inputs
       - run: cargo xtask reference-checkout
       - name: Start Redis and NATS (pinned images)
         run: compat/scripts/services.sh start | sed 's/^export //; s/ /\n/g' >> "$GITHUB_ENV"
-      # Green while cases are pending; fails on any regression, crash, ignore,
-      # unmapped test or unreviewed pass (SPEC.md §5).
+      # Green while cases are pending; fails on any regression, crash or
+      # abnormal exit of a test binary, missing or unmapped test, ignore, or
+      # unreviewed pass (SPEC.md §5).
       - run: cargo xtask test --backend rust
+
+  mruby-asan:
+    name: mruby binding under AddressSanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      # cabby-mruby-sys tests (tests/probes.rs) with the C compiled by gcc
+      # -fsanitize=address and the Rust by -Zsanitizer=address (docs/mruby.md).
+      - run: cargo xtask asan
 
   go-reference:
     name: Translated tests against Go, inventory integrity
@@ -46,10 +63,13 @@ jobs:
       - name: Toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - run: cargo xtask reference-checkout
+      # libmruby 1.2.0 for the `mrb` tag, built in the pinned ruby:2.7 image (Docker).
       - run: cargo xtask reference-mruby
       - run: cargo xtask reference-build
       - name: Start Redis and NATS (pinned images)
         run: compat/scripts/services.sh start | sed 's/^export //; s/ /\n/g' >> "$GITHUB_ENV"
+      # Every case must keep the reference status recorded in the manifest
+      # (pass, not_observable, upstream_failure): any change fails the step.
       - run: cargo xtask test --backend go
       - name: Manifest is up to date
         run: |

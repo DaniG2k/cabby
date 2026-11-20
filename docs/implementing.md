@@ -52,3 +52,11 @@ cargo xtask test --backend go              # unchanged: still passes
 
 When a case starts passing, the runner reports `UNREVIEWED-PASS` until you record it. The
 orchestrator records it on main after merging, so you don't commit `compat/test-map.json`.
+`--record` only updates cases whose tests all ran in that invocation, so recording a filtered
+run never promotes a case from part of its tests.
+
+The runner also fails the run when a test binary dies (a signal, an abort, or an exit
+without libtest's summary: `CRASH`), when a binary reports fewer results than the tests it
+started (`INCOMPLETE`), when a mapped test did not run (`MISSING`), and when the number of
+tests run differs from the manifest (`COUNT`). Against Go, every case must keep its recorded
+reference status (`REGRESSION-ON-GO`, `CHANGED-ON-GO` until recorded).
