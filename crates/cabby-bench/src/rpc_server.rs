@@ -4,6 +4,15 @@
 //! server under test. It accepts every connection (identifier `{"id":<bench_sid>}`),
 //! confirms every subscription (streaming from `bench:<identifier>`) and acknowledges
 //! every disconnect, each after a jittered delay.
+//!
+//! Two Cabby additions, both chosen by the client so it knows what to expect (the
+//! soak scenario, [`crate::scenarios::soak`]):
+//!
+//! * a connection whose URL carries `bench_reject=1` is rejected like a failed Rails
+//!   authentication (`status: FAILURE` with the `disconnect` / `unauthorized`
+//!   transmission);
+//! * a channel identifier with a `stream` field (`{"channel":"..","stream":"s"}`)
+//!   streams from that stream (`stream_from "s"`) instead of `bench:<identifier>`.
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -251,6 +260,12 @@ impl Shared {
     /// Uses the client's session id (the `bench_sid` URL parameter) as the
     /// connection identifier; without it, makes one up.
     fn connect(&self, body: &[u8]) -> String {
+        if connect_param(body, "bench_reject").as_deref() == Some("1") {
+            return format!(
+                r#"{{"status":2,"transmissions":[{}]}}"#,
+                gojson::string(r#"{"type":"disconnect","reason":"unauthorized","reconnect":false}"#)
+            );
+        }
         let mut id = session_id(RpcMethod::Connect, body);
         if id.is_empty() {
             id = format!("rpc-{}", self.next_id.fetch_add(1, Ordering::SeqCst) + 1);
@@ -283,9 +298,10 @@ fn command(body: &[u8]) -> Result<String, String> {
         "subscribe" => {
             // Go marshals the map with sorted keys.
             let confirm = format!(r#"{{"identifier":{},"type":"confirm_subscription"}}"#, gojson::string(&identifier));
+            let stream = identifier_stream(&identifier).unwrap_or_else(|| format!("bench:{identifier}"));
             format!(
                 r#"{{"status":1,"streams":[{}],"transmissions":[{}]}}"#,
-                gojson::string(&format!("bench:{identifier}")),
+                gojson::string(&stream),
                 gojson::string(&confirm)
             )
         }
@@ -294,23 +310,37 @@ fn command(body: &[u8]) -> Result<String, String> {
     })
 }
 
+/// The `stream` field of a channel identifier (JSON object text), if any.
+fn identifier_stream(identifier: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Id {
+        #[serde(default)]
+        stream: Option<String>,
+    }
+    serde_json::from_str::<Id>(identifier).ok()?.stream.filter(|s| !s.is_empty())
+}
+
+/// Query parameter `key` of the connection URL in a Connect request body.
+fn connect_param(body: &[u8], key: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Env {
+        #[serde(default)]
+        url: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct Req {
+        #[serde(default)]
+        env: Option<Env>,
+    }
+    let req = serde_json::from_slice::<Req>(body).ok()?;
+    query_param(&req.env?.url?, key)
+}
+
 /// The session id of an RPC request body: the `bench_sid` URL parameter for Connect,
 /// the `id` connection identifier otherwise (empty when absent).
 pub fn session_id(m: RpcMethod, body: &[u8]) -> String {
     if m == RpcMethod::Connect {
-        #[derive(Deserialize)]
-        struct Env {
-            #[serde(default)]
-            url: Option<String>,
-        }
-        #[derive(Deserialize)]
-        struct Req {
-            #[serde(default)]
-            env: Option<Env>,
-        }
-        let Ok(req) = serde_json::from_slice::<Req>(body) else { return String::new() };
-        let Some(url) = req.env.and_then(|e| e.url) else { return String::new() };
-        return query_param(&url, "bench_sid").unwrap_or_default();
+        return connect_param(body, "bench_sid").unwrap_or_default();
     }
     #[derive(Deserialize)]
     struct Req {
@@ -375,5 +405,17 @@ mod tests {
             r#"{"status":1,"streams":["bench:x"],"transmissions":["{\"identifier\":\"x\",\"type\":\"confirm_subscription\"}"]}"#,
             out
         );
+    }
+
+    #[test]
+    fn identifier_streams_and_rejections() {
+        let out = command(br#"{"command":"subscribe","identifier":"{\"channel\":\"C\",\"stream\":\"s-1\"}"}"#)
+            .expect("command");
+        assert!(out.contains(r#""streams":["s-1"]"#), "{out}");
+        let rpc = RpcServer::new(RpcServerConfig::default());
+        let rejected = rpc.shared.connect(br#"{"env":{"url":"ws://h/cable?bench_sid=1&bench_reject=1"}}"#);
+        assert!(rejected.starts_with(r#"{"status":2,"#) && rejected.contains("unauthorized"), "{rejected}");
+        let accepted = rpc.shared.connect(br#"{"env":{"url":"ws://h/cable?bench_sid=1"}}"#);
+        assert!(accepted.starts_with(r#"{"status":1,"#), "{accepted}");
     }
 }
