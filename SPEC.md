@@ -300,7 +300,7 @@ The next coding deliverable is the test workspace, manifest, and baseline eviden
 
 ### Owner requests to complete at the end
 
-- [ ] Pusher-protocol benchmark: Cabby and AnyCable Pusher modes vs Soketi and Laravel Reverb, through a Pusher client mode in the harness.
+- [x] Pusher-protocol benchmark: Cabby and AnyCable Pusher modes vs Soketi and Laravel Reverb, through a Pusher client mode in the harness.
 - [ ] Soak test for AnyCable issue 265 (memory over hours of churn), Cabby vs AnyCable.
 
 - [x] Independent review of the whole project with Fable 5.2 (not anchored on the implementer's summary).
