@@ -1,0 +1,55 @@
+import hmac, hashlib, time, urllib.parse
+SECRET = b"psecret"
+def signed(method, path, body=b"", ts=None, key="key1", ver="1.0", extra="", tamper=None, md5=None, sign_path=None, order=None):
+    ts = str(int(time.time())) if ts is None else ts
+    if isinstance(body, str): body = body.encode()
+    bm = hashlib.md5(body).hexdigest() if md5 is None else md5
+    sp = sign_path or path
+    if method == "POST":
+        sts = "POST\n%s\nauth_key=%s&auth_timestamp=%s&auth_version=%s&body_md5=%s" % (sp, key, ts, ver, bm)
+    else:
+        sts = "GET\n%s\nauth_key=%s&auth_timestamp=%s&auth_version=%s" % (sp, key, ts, ver)
+    sig = hmac.new(SECRET, sts.encode(), hashlib.sha256).hexdigest()
+    if tamper: sig = tamper(sig)
+    q = "auth_key=%s&auth_timestamp=%s&auth_version=%s&auth_signature=%s" % (urllib.parse.quote(key), urllib.parse.quote(ts), ver, sig)
+    if method == "POST": q += "&body_md5=" + bm
+    return req(method, path + "?" + q + extra, body=body)
+ev = '{"name":"ev","channel":"ch","data":"{\\"a\\":1}"}'
+cmp("pusher events ok", signed("POST", "/apps/app1/events", ev))
+cmp("pusher events channels", signed("POST", "/apps/app1/events", '{"name":"ev","channels":["a","b"],"data":"x","socket_id":"1.2"}'))
+cmp("pusher events no sig", req("POST", "/apps/app1/events", body=ev))
+cmp("pusher events bad sig", signed("POST", "/apps/app1/events", ev, tamper=lambda s: "0"*64))
+cmp("pusher events upper sig", signed("POST", "/apps/app1/events", ev, tamper=lambda s: s.upper()))
+cmp("pusher events old ts", signed("POST", "/apps/app1/events", ev, ts=str(int(time.time())-601)))
+cmp("pusher events ts 599", signed("POST", "/apps/app1/events", ev, ts=str(int(time.time())-598)))
+cmp("pusher events future ts", signed("POST", "/apps/app1/events", ev, ts=str(int(time.time())+700)))
+cmp("pusher events +ts", signed("POST", "/apps/app1/events", ev, ts="+"+str(int(time.time()))))
+cmp("pusher events ts huge", signed("POST", "/apps/app1/events", ev, ts="-9223372036854775808"))
+cmp("pusher events ts junk", signed("POST", "/apps/app1/events", ev, ts="abc"))
+cmp("pusher events md5 mismatch", signed("POST", "/apps/app1/events", ev, md5="d41d8cd98f00b204e9800998ecf8427e"))
+cmp("pusher events md5 upper", signed("POST", "/apps/app1/events", ev, md5=__import__('hashlib').md5(ev.encode()).hexdigest().upper()))
+cmp("pusher events null body", signed("POST", "/apps/app1/events", "null"))
+cmp("pusher events bad json", signed("POST", "/apps/app1/events", "{"))
+cmp("pusher events array", signed("POST", "/apps/app1/events", "[]"))
+cmp("pusher events empty", signed("POST", "/apps/app1/events", ""))
+cmp("pusher events num name", signed("POST", "/apps/app1/events", '{"name":1}'))
+cmp("pusher events wrong key", signed("POST", "/apps/app1/events", ev, key="other"))
+cmp("pusher events other path", signed("POST", "/apps/app1/whatever", ev))
+cmp("pusher events dup param", signed("POST", "/apps/app1/events", ev, extra="&auth_key=zzz"))
+cmp("pusher events big", signed("POST", "/apps/app1/events", b'{"name":"e","channel":"c","data":"' + b'x'*1048576 + b'"}'), total=4)
+cmp("pusher events big unsigned", req("POST", "/apps/app1/events", body=b'x'*2000000), total=4)
+cmp("pusher PUT", signed("PUT", "/apps/app1/events", ev))
+cmp("pusher OPTIONS", req("OPTIONS", "/apps/app1/events", {"Origin": "http://x.com"}))
+cmp("pusher wrong app", signed("POST", "/apps/app2/events", ev))
+cmp("pusher apps root", signed("GET", "/apps/app1"))
+cmp("pusher apps slash", signed("GET", "/apps/app1/"))
+cmp("pusher users", signed("GET", "/apps/app1/channels/presence-a/users"))
+cmp("pusher users nonpresence", signed("GET", "/apps/app1/channels/a/users"))
+cmp("pusher users badpath", signed("GET", "/apps/app1/channels/presence-a/users/"))
+cmp("pusher users unsigned", req("GET", "/apps/app1/channels/presence-a/users"))
+cmp("pusher users enc path signed raw", signed("GET", "/apps/app1/channels/presence-a%20b/users"))
+cmp("pusher users enc path signed decoded", signed("GET", "/apps/app1/channels/presence-a%20b/users", sign_path="/apps/app1/channels/presence-a b/users"))
+cmp("pusher channels info", signed("GET", "/apps/app1/channels/presence-a"))
+cmp("pusher ws path GET (no upgrade)", req("GET", "/app/key1"))
+cmp("pusher ws wrong key", req("GET", "/app/zzz"))
+cmp("cable GET (no upgrade)", req("GET", "/cable"))

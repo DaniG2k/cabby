@@ -1,0 +1,46 @@
+round 0 iter 251: class was swept INSIDE define_method (write to freed method table)
+=================================================================
+==3762504==ERROR: AddressSanitizer: heap-use-after-free on address 0x747c35de6c58 at pc 0x5dc53664c00a bp 0x7fffb5805ef0 sp 0x7fffb5805ee0
+READ of size 4 at 0x747c35de6c58 thread T0
+    #0 0x5dc53664c009 in kh_put_mt /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/class.c:18
+    #1 0x5dc53664d1af in mrb_define_method_raw /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/class.c:340
+    #2 0x5dc53664d2ea in mrb_define_method_id /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/class.c:355
+    #3 0x5dc5366375f2 in cabby_define_method /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/cabby_mruby.c:317
+    #4 0x5dc53662d93c in _RNvMs1_NtCs6wZQItVtNxU_15cabby_mruby_sys4safeNtB5_2Vm13define_method src/safe.rs:455
+    #5 0x5dc53662aca2 in _RNvCscrDJE4XoVDr_9ffi_probe13define_method src/main.rs:71
+    #6 0x5dc53662b06f in _RNvCscrDJE4XoVDr_9ffi_probe4main src/main.rs:9
+    #7 0x5dc536628be2 in _RNvYFEuINtNtNtCs8uuN1nrGffB_4core3ops8function6FnOnceuE9call_onceCscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/core/src/ops/function.rs:250
+    #8 0x5dc53662882d in _RINvNtNtCsh0g7Hz38UNf_3std3sys9backtrace28___rust_begin_short_backtraceFEuuECscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/sys/backtrace.rs:166
+    #9 0x5dc536628ff8 in _RNCINvNtCsh0g7Hz38UNf_3std2rt10lang_startuE0CscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/rt.rs:206
+    #10 0x5dc536767ee7 in _RNvXs0_NtNtNtCs8uuN1nrGffB_4core3ops8function5implsRDINtB7_2FnuEp6OutputlNtNtNtBb_5panic11unwind_safe13RefUnwindSafeNtNtBb_6marker4SyncEL_INtB7_6FnOnceuE9call_onceCsh0g7Hz38UNf_3std library/core/src/ops/function.rs:287
+    #11 0x5dc536767ee7 in _RINvNvNtCsh0g7Hz38UNf_3std9panicking12catch_unwind7do_callRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtB13_5panic11unwind_safe13RefUnwindSafeNtNtB13_6marker4SyncEL_lEB6_ library/std/src/panicking.rs:573
+    #12 0x5dc536767ee7 in _RINvNtCsh0g7Hz38UNf_3std9panicking12catch_unwindlRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtBU_5panic11unwind_safe13RefUnwindSafeNtNtBU_6marker4SyncEL_EB4_ library/std/src/panicking.rs:541
+    #13 0x5dc536767ee7 in _RINvNtCsh0g7Hz38UNf_3std5panic12catch_unwindRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtBP_5panic11unwind_safe13RefUnwindSafeNtNtBP_6marker4SyncEL_lEB4_ library/std/src/panic.rs:359
+    #14 0x5dc536767ee7 in _RNCNvNtCsh0g7Hz38UNf_3std2rt19lang_start_internal0B5_ library/std/src/rt.rs:175
+    #15 0x5dc536767ee7 in _RINvNvNtCsh0g7Hz38UNf_3std9panicking12catch_unwind7do_callNCNvNtB6_2rt19lang_start_internal0iEB6_ library/std/src/panicking.rs:573
+    #16 0x5dc536767ee7 in _RINvNtCsh0g7Hz38UNf_3std9panicking12catch_unwindiNCNvNtB4_2rt19lang_start_internal0EB4_ library/std/src/panicking.rs:541
+    #17 0x5dc536767ee7 in _RINvNtCsh0g7Hz38UNf_3std5panic12catch_unwindNCNvNtB4_2rt19lang_start_internal0iEB4_ library/std/src/panic.rs:359
+    #18 0x5dc536767ee7 in _RNvNtCsh0g7Hz38UNf_3std2rt19lang_start_internal library/std/src/rt.rs:171
+    #19 0x5dc536628fe0 in _RINvNtCsh0g7Hz38UNf_3std2rt10lang_startuECscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/rt.rs:205
+    #20 0x5dc53662cacd in main (${SCRATCH}/ffi-probe/target-asan/debug/ffi-probe+0x30acd) (BuildId: 0c2c2a59715dd62032d95fc0ee01a764c8c18a8f)
+    #21 0x783c36a2a640 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:59
+    #22 0x783c36a2a757 in __libc_start_main_impl ../csu/libc-start.c:372
+    #23 0x5dc536628634 in _start (${SCRATCH}/ffi-probe/target-asan/debug/ffi-probe+0x2c634) (BuildId: 0c2c2a59715dd62032d95fc0ee01a764c8c18a8f)
+
+0x747c35de6c58 is located 8 bytes inside of 40-byte region [0x747c35de6c50,0x747c35de6c78)
+freed by thread T0 here:
+    #0 0x783c36f2a3df in free ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:51
+    #1 0x5dc536679870 in mrb_default_allocf /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/state.c:56
+    #2 0x5dc5366ad62b in obj_free /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/../mruby/src/gc.c:707
+    #3 0x5dc5366ad62b in incremental_sweep_phase /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/../mruby/src/gc.c:960
+    #4 0x5dc5366ad62b in incremental_gc /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/../mruby/src/gc.c:1021
+    #5 0x5dc5366af185 in incremental_gc_until /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/../mruby/src/gc.c:1037
+    #6 0x5dc5366af185 in mrb_incremental_gc /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/../mruby/src/gc.c:1088
+    #7 0x5dc5366b013b in mrb_obj_alloc /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/../mruby/src/gc.c:483
+    #8 0x5dc536675a7e in mrb_proc_new_cfunc /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/proc.c:80
+    #9 0x5dc53664d2c1 in mrb_define_method_id /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/class.c:353
+    #10 0x5dc5366375f2 in cabby_define_method /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/cabby_mruby.c:317
+    #11 0x5dc53662d93c in _RNvMs1_NtCs6wZQItVtNxU_15cabby_mruby_sys4safeNtB5_2Vm13define_method src/safe.rs:455
+    #12 0x5dc536628fe0 in _RINvNtCsh0g7Hz38UNf_3std2rt10lang_startuECscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/rt.rs:205
+    #13 0x783c36a2a757 in __libc_start_main_impl ../csu/libc-start.c:372
+    #14 0x5dc536628634 in _start (/tmp/claude-1000/-home-daniele-Documents-apps-cabby/58b582f5-4942-4a

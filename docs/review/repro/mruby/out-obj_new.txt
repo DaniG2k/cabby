@@ -1,0 +1,4 @@
+round 941: arg swept INSIDE obj_new; @a now has type tag 16 (1 = MRB_TT_FREE)
+round 1234: arg swept INSIDE obj_new; @a now has type tag 16 (1 = MRB_TT_FREE)
+round 1380: arg swept INSIDE obj_new; @a now has type tag 16 (1 = MRB_TT_FREE)
+hits=3

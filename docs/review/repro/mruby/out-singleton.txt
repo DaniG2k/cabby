@@ -1,0 +1,4 @@
+round 1707: object swept INSIDE singleton_class
+round 7572: object swept INSIDE singleton_class
+round 10512: object swept INSIDE singleton_class
+hits=3

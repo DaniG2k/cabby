@@ -1,0 +1,39 @@
+run in method: ok=true
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==3765244==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x61401e2e59e3 bp 0x7ffec55f7f30 sp 0x7ffec55f7720 T0)
+==3765244==The signal is caused by a READ memory access.
+==3765244==Hint: address points to the zero page.
+    #0 0x61401e2e59e3 in mrb_context_run /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/vm.c:1143
+    #1 0x61401e36569b in load_exec /src/vendorlib/go-mruby/mruby-build/mruby/mrbgems/mruby-compiler/core/parse.y:5631
+    #2 0x61401e36569b in mrb_load_nstring_cxt /src/vendorlib/go-mruby/mruby-build/mruby/mrbgems/mruby-compiler/core/parse.y:5653
+    #3 0x61401e28007f in cabby_load_string /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/cabby_mruby.c:382
+    #4 0x61401e27429c in _RNvMs1_NtCs6wZQItVtNxU_15cabby_mruby_sys4safeNtB5_2Vm11load_string src/safe.rs:530
+    #5 0x61401e27309b in _RNvCscrDJE4XoVDr_9ffi_probe9fiber_run src/main.rs:264
+    #6 0x61401e271be3 in _RNvCscrDJE4XoVDr_9ffi_probe4main src/main.rs:19
+    #7 0x61401e26ce12 in _RNvYFEuINtNtNtCs8uuN1nrGffB_4core3ops8function6FnOnceuE9call_onceCscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/core/src/ops/function.rs:250
+    #8 0x61401e26c955 in _RINvNtNtCsh0g7Hz38UNf_3std3sys9backtrace28___rust_begin_short_backtraceFEuuECscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/sys/backtrace.rs:166
+    #9 0x61401e26d2d8 in _RNCINvNtCsh0g7Hz38UNf_3std2rt10lang_startuE0CscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/rt.rs:206
+    #10 0x61401e3b0627 in _RNvXs0_NtNtNtCs8uuN1nrGffB_4core3ops8function5implsRDINtB7_2FnuEp6OutputlNtNtNtBb_5panic11unwind_safe13RefUnwindSafeNtNtBb_6marker4SyncEL_INtB7_6FnOnceuE9call_onceCsh0g7Hz38UNf_3std library/core/src/ops/function.rs:287
+    #11 0x61401e3b0627 in _RINvNvNtCsh0g7Hz38UNf_3std9panicking12catch_unwind7do_callRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtB13_5panic11unwind_safe13RefUnwindSafeNtNtB13_6marker4SyncEL_lEB6_ library/std/src/panicking.rs:573
+    #12 0x61401e3b0627 in _RINvNtCsh0g7Hz38UNf_3std9panicking12catch_unwindlRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtBU_5panic11unwind_safe13RefUnwindSafeNtNtBU_6marker4SyncEL_EB4_ library/std/src/panicking.rs:541
+    #13 0x61401e3b0627 in _RINvNtCsh0g7Hz38UNf_3std5panic12catch_unwindRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtBP_5panic11unwind_safe13RefUnwindSafeNtNtBP_6marker4SyncEL_lEB4_ library/std/src/panic.rs:359
+    #14 0x61401e3b0627 in _RNCNvNtCsh0g7Hz38UNf_3std2rt19lang_start_internal0B5_ library/std/src/rt.rs:175
+    #15 0x61401e3b0627 in _RINvNvNtCsh0g7Hz38UNf_3std9panicking12catch_unwind7do_callNCNvNtB6_2rt19lang_start_internal0iEB6_ library/std/src/panicking.rs:573
+    #16 0x61401e3b0627 in _RINvNtCsh0g7Hz38UNf_3std9panicking12catch_unwindiNCNvNtB4_2rt19lang_start_internal0EB4_ library/std/src/panicking.rs:541
+    #17 0x61401e3b0627 in _RINvNtCsh0g7Hz38UNf_3std5panic12catch_unwindNCNvNtB4_2rt19lang_start_internal0iEB4_ library/std/src/panic.rs:359
+    #18 0x61401e3b0627 in _RNvNtCsh0g7Hz38UNf_3std2rt19lang_start_internal library/std/src/rt.rs:171
+    #19 0x61401e26d2c0 in _RINvNtCsh0g7Hz38UNf_3std2rt10lang_startuECscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/rt.rs:205
+    #20 0x61401e273bfd in main (${SCRATCH}/ffi-probe/target-asan/debug/ffi-probe+0x34bfd) (BuildId: 3d213de02e9b701d3c39584948b60d81abf4f0ee)
+    #21 0x7be8d4e2a640 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:59
+    #22 0x7be8d4e2a757 in __libc_start_main_impl ../csu/libc-start.c:372
+    #23 0x61401e26c634 in _start (${SCRATCH}/ffi-probe/target-asan/debug/ffi-probe+0x2d634) (BuildId: 3d213de02e9b701d3c39584948b60d81abf4f0ee)
+
+==3765244==Register values:
+rax = 0x0000000000000003  rbx = 0x0000000000000000  rcx = 0x00000f371a83c156  rdx = 0x0000000000000000  
+rdi = 0x00007918d41e0040  rsi = 0x00007ad8d41e5140  rbp = 0x00007ffec55f7f30  rsp = 0x00007ffec55f7720  
+ r8 = 0x00007848d41e0e60   r9 = 0x00007ad8d41e5140  r10 = 0x0000000000000449  r11 = 0x00007be8d57da498  
+r12 = 0x00007868d41e0020  r13 = 0x00007918d41e0040  r14 = 0x0000000000000000  r15 = 0x00007868d41e0040  
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/vm.c:1143 in mrb_context_run
+==3765244==ABORTING

@@ -1,0 +1,47 @@
+iter 0
+=================================================================
+==3766532==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x7243104174ee at pc 0x60df1aae2d4e bp 0x7ffc99dd30f0 sp 0x7ffc99dd30e0
+READ of size 2 at 0x7243104174ee thread T0
+    #0 0x60df1aae2d4d in mrb_debug_get_line /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/debug.c:71
+    #1 0x60df1aad2994 in output_backtrace /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/backtrace.c:122
+    #2 0x60df1aad2994 in exc_output_backtrace /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/backtrace.c:157
+    #3 0x60df1aad2994 in mrb_exc_backtrace /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/backtrace.c:199
+    #4 0x60df1aabddeb in cabby_exc_backtrace /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/cabby_mruby.c:161
+    #5 0x60df1aab441b in _RNvMs1_NtCs6wZQItVtNxU_15cabby_mruby_sys4safeNtB5_2Vm11take_raised src/safe.rs:239
+    #6 0x60df1aab54a3 in _RNvMs1_NtCs6wZQItVtNxU_15cabby_mruby_sys4safeNtB5_2Vm6finish src/safe.rs:211
+    #7 0x60df1aab42ad in _RNvMs1_NtCs6wZQItVtNxU_15cabby_mruby_sys4safeNtB5_2Vm11load_string src/safe.rs:531
+    #8 0x60df1aab2e23 in _RNvCscrDJE4XoVDr_9ffi_probe9bt_stress src/main.rs:246
+    #9 0x60df1aab1bb5 in _RNvCscrDJE4XoVDr_9ffi_probe4main src/main.rs:18
+    #10 0x60df1aaace12 in _RNvYFEuINtNtNtCs8uuN1nrGffB_4core3ops8function6FnOnceuE9call_onceCscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/core/src/ops/function.rs:250
+    #11 0x60df1aaac955 in _RINvNtNtCsh0g7Hz38UNf_3std3sys9backtrace28___rust_begin_short_backtraceFEuuECscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/sys/backtrace.rs:166
+    #12 0x60df1aaad2d8 in _RNCINvNtCsh0g7Hz38UNf_3std2rt10lang_startuE0CscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/rt.rs:206
+    #13 0x60df1abf0627 in _RNvXs0_NtNtNtCs8uuN1nrGffB_4core3ops8function5implsRDINtB7_2FnuEp6OutputlNtNtNtBb_5panic11unwind_safe13RefUnwindSafeNtNtBb_6marker4SyncEL_INtB7_6FnOnceuE9call_onceCsh0g7Hz38UNf_3std library/core/src/ops/function.rs:287
+    #14 0x60df1abf0627 in _RINvNvNtCsh0g7Hz38UNf_3std9panicking12catch_unwind7do_callRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtB13_5panic11unwind_safe13RefUnwindSafeNtNtB13_6marker4SyncEL_lEB6_ library/std/src/panicking.rs:573
+    #15 0x60df1abf0627 in _RINvNtCsh0g7Hz38UNf_3std9panicking12catch_unwindlRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtBU_5panic11unwind_safe13RefUnwindSafeNtNtBU_6marker4SyncEL_EB4_ library/std/src/panicking.rs:541
+    #16 0x60df1abf0627 in _RINvNtCsh0g7Hz38UNf_3std5panic12catch_unwindRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtBP_5panic11unwind_safe13RefUnwindSafeNtNtBP_6marker4SyncEL_lEB4_ library/std/src/panic.rs:359
+    #17 0x60df1abf0627 in _RNCNvNtCsh0g7Hz38UNf_3std2rt19lang_start_internal0B5_ library/std/src/rt.rs:175
+    #18 0x60df1abf0627 in _RINvNvNtCsh0g7Hz38UNf_3std9panicking12catch_unwind7do_callNCNvNtB6_2rt19lang_start_internal0iEB6_ library/std/src/panicking.rs:573
+    #19 0x60df1abf0627 in _RINvNtCsh0g7Hz38UNf_3std9panicking12catch_unwindiNCNvNtB4_2rt19lang_start_internal0EB4_ library/std/src/panicking.rs:541
+    #20 0x60df1abf0627 in _RINvNtCsh0g7Hz38UNf_3std5panic12catch_unwindNCNvNtB4_2rt19lang_start_internal0iEB4_ library/std/src/panic.rs:359
+    #21 0x60df1abf0627 in _RNvNtCsh0g7Hz38UNf_3std2rt19lang_start_internal library/std/src/rt.rs:171
+    #22 0x60df1aaad2c0 in _RINvNtCsh0g7Hz38UNf_3std2rt10lang_startuECscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/rt.rs:205
+    #23 0x60df1aab3bfd in main (${SCRATCH}/ffi-probe/target-asan/debug/ffi-probe+0x34bfd) (BuildId: 3d213de02e9b701d3c39584948b60d81abf4f0ee)
+    #24 0x73531102a640 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:59
+    #25 0x73531102a757 in __libc_start_main_impl ../csu/libc-start.c:372
+    #26 0x60df1aaac634 in _start (${SCRATCH}/ffi-probe/target-asan/debug/ffi-probe+0x2d634) (BuildId: 3d213de02e9b701d3c39584948b60d81abf4f0ee)
+
+0x7243104174ee is located 4286 bytes after 49200-byte region [0x72431040a400,0x724310416430)
+allocated by thread T0 here:
+    #0 0x73531152a6af in realloc ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:81
+    #1 0x60df1ab380bf in mrb_realloc_simple /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/../mruby/src/gc.c:201
+    #2 0x60df1ab3818b in mrb_realloc /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/../mruby/src/gc.c:215
+    #3 0x60df1ab38299 in mrb_calloc /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/../mruby/src/gc.c:253
+    #4 0x60df1ab38299 in mrb_calloc /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/../mruby/src/gc.c:245
+    #5 0x60df1ab389e9 in add_heap /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/../mruby/src/gc.c:323
+    #6 0x60df1ab389e9 in mrb_obj_alloc /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/../mruby/src/gc.c:486
+    #7 0x60df1aafdd7a in mrb_proc_new /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/proc.c:22
+    #8 0x60df1aafdeb6 in mrb_closure_new /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/proc.c:69
+    #9 0x60df1ab28c2a in mrb_context_run /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/vm.c:2207
+    #10 0x60df1aba569b in load_exec /src/vendorlib/go-mruby/mruby-build/mruby/mrbgems/mruby-compiler/core/parse.y:5631
+    #11 0x60df1aba569b in mrb_load_nstring_cxt /src/vendorlib/go-mruby/mruby-build/mruby/mrbgems/mruby-compiler/core/parse.y:5653
+    #12 0x60df1aac007f in cabby_load_string /home/daniele/Documents/apps/cabby/crates/cabby-mruby

@@ -1,0 +1,39 @@
+run inside method ok=true
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==3762537==ERROR: AddressSanitizer: SEGV on unknown address 0x000041414159 (pc 0x5f75c3dd056e bp 0x7ffd462a8e60 sp 0x7ffd462a8c60 T0)
+==3762537==The signal is caused by a READ memory access.
+    #0 0x5f75c3dd056e in mrb_get_args /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/class.c:479
+    #1 0x5f75c3dbc096 in cabby_get_args /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/cabby_mruby.c:461
+    #2 0x5f75c3db16cc in _RNvMs1_NtCs6wZQItVtNxU_15cabby_mruby_sys4safeNtB5_2Vm8get_args src/safe.rs:506
+    #3 0x5f75c3dad044 in _RNCNvCscrDJE4XoVDr_9ffi_probe9run_splat0B3_ src/main.rs:165
+    #4 0x5f75c3dbe11f in _RNCNvNtCs6wZQItVtNxU_15cabby_mruby_sys4safe8dispatchs_0B5_ src/safe.rs:856
+    #5 0x5f75c3db6d60 in _RNvYNCNvNtCs6wZQItVtNxU_15cabby_mruby_sys4safe8dispatchs_0INtNtNtCs8uuN1nrGffB_4core3ops8function6FnOnceuE9call_onceB8_ /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/core/src/ops/function.rs:250
+    #6 0x5f75c3ea13df in _RNvXsl_NtNtCs8uuN1nrGffB_4core5panic11unwind_safeINtB5_16AssertUnwindSafeNCNvNtCs6wZQItVtNxU_15cabby_mruby_sys4safe8dispatchs_0EINtNtNtB9_3ops8function6FnOnceuE9call_onceB1f_ /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/core/src/panic/unwind_safe.rs:275
+    #7 0x5f75c3dc1292 in _RINvNvNtCsh0g7Hz38UNf_3std9panicking12catch_unwind7do_callINtNtNtCs8uuN1nrGffB_4core5panic11unwind_safe16AssertUnwindSafeNCNvNtCs6wZQItVtNxU_15cabby_mruby_sys4safe8dispatchs_0EINtNtB11_6result6ResultINtNtB11_6option6OptionNtB1Z_3ValEB3y_EEB21_ /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/panicking.rs:573
+    #8 0x5f75c3db843a in __rust_try (${SCRATCH}/ffi-probe/target-asan/debug/ffi-probe+0x3943a) (BuildId: 0c2c2a59715dd62032d95fc0ee01a764c8c18a8f)
+    #9 0x5f75c3db839c in _RINvNtCsh0g7Hz38UNf_3std9panicking12catch_unwindINtNtCs8uuN1nrGffB_4core6result6ResultINtNtBP_6option6OptionNtNtCs6wZQItVtNxU_15cabby_mruby_sys4safe3ValEB1I_EINtNtNtBP_5panic11unwind_safe16AssertUnwindSafeNCNvB1K_8dispatchs_0EEB1M_ /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/panicking.rs:541
+    #10 0x5f75c3db839c in _RINvNtCsh0g7Hz38UNf_3std5panic12catch_unwindINtNtNtCs8uuN1nrGffB_4core5panic11unwind_safe16AssertUnwindSafeNCNvNtCs6wZQItVtNxU_15cabby_mruby_sys4safe8dispatchs_0EINtNtBN_6result6ResultINtNtBN_6option6OptionNtB1L_3ValEB3i_EEB1N_ /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/panic.rs:359
+    #11 0x5f75c3db2f4c in _RNvNtCs6wZQItVtNxU_15cabby_mruby_sys4safe8dispatch src/safe.rs:856
+    #12 0x5f75c3db86b3 in cabby_trampoline /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/cabby_mruby.c:291
+    #13 0x5f75c3e20012 in mrb_context_run /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/vm.c:1126
+    #14 0x5f75c3e9ff5b in load_exec /src/vendorlib/go-mruby/mruby-build/mruby/mrbgems/mruby-compiler/core/parse.y:5631
+    #15 0x5f75c3e9ff5b in mrb_load_nstring_cxt /src/vendorlib/go-mruby/mruby-build/mruby/mrbgems/mruby-compiler/core/parse.y:5653
+    #16 0x5f75c3dbb2af in cabby_load_string /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/cabby_mruby.c:382
+    #17 0x5f75c3daffdc in _RNvMs1_NtCs6wZQItVtNxU_15cabby_mruby_sys4safeNtB5_2Vm11load_string src/safe.rs:530
+    #18 0x5f75c3daf36f in _RNvCscrDJE4XoVDr_9ffi_probe9run_splat src/main.rs:170
+    #19 0x5f75c3dae0d9 in _RNvCscrDJE4XoVDr_9ffi_probe4main src/main.rs:11
+    #20 0x5f75c3dabbe2 in _RNvYFEuINtNtNtCs8uuN1nrGffB_4core3ops8function6FnOnceuE9call_onceCscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/core/src/ops/function.rs:250
+    #21 0x5f75c3dab82d in _RINvNtNtCsh0g7Hz38UNf_3std3sys9backtrace28___rust_begin_short_backtraceFEuuECscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/sys/backtrace.rs:166
+    #22 0x5f75c3dabff8 in _RNCINvNtCsh0g7Hz38UNf_3std2rt10lang_startuE0CscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/rt.rs:206
+    #23 0x5f75c3eeaee7 in _RNvXs0_NtNtNtCs8uuN1nrGffB_4core3ops8function5implsRDINtB7_2FnuEp6OutputlNtNtNtBb_5panic11unwind_safe13RefUnwindSafeNtNtBb_6marker4SyncEL_INtB7_6FnOnceuE9call_onceCsh0g7Hz38UNf_3std library/core/src/ops/function.rs:287
+    #24 0x5f75c3eeaee7 in _RINvNvNtCsh0g7Hz38UNf_3std9panicking12catch_unwind7do_callRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtB13_5panic11unwind_safe13RefUnwindSafeNtNtB13_6marker4SyncEL_lEB6_ library/std/src/panicking.rs:573
+    #25 0x5f75c3eeaee7 in _RINvNtCsh0g7Hz38UNf_3std9panicking12catch_unwindlRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtBU_5panic11unwind_safe13RefUnwindSafeNtNtBU_6marker4SyncEL_EB4_ library/std/src/panicking.rs:541
+    #26 0x5f75c3eeaee7 in _RINvNtCsh0g7Hz38UNf_3std5panic12catch_unwindRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtBP_5panic11unwind_safe13RefUnwindSafeNtNtBP_6marker4SyncEL_lEB4_ library/std/src/panic.rs:359
+    #27 0x5f75c3eeaee7 in _RNCNvNtCsh0g7Hz38UNf_3std2rt19lang_start_internal0B5_ library/std/src/rt.rs:175
+    #28 0x5f75c3eeaee7 in _RINvNvNtCsh0g7Hz38UNf_3std9panicking12catch_unwind7do_callNCNvNtB6_2rt19lang_start_internal0iEB6_ library/std/src/panicking.rs:573
+    #29 0x5f75c3eeaee7 in _RINvNtCsh0g7Hz38UNf_3std9panicking12catch_unwindiNCNvNtB4_2rt19lang_start_internal0EB4_ library/std/src/panicking.rs:541
+    #30 0x5f75c3eeaee7 in _RINvNtCsh0g7Hz38UNf_3std5panic12catch_unwindNCNvNtB4_2rt19lang_start_internal0iEB4_ library/std/src/panic.rs:359
+    #31 0x5f75c3eeaee7 in _RNvNtCsh0g7Hz38UNf_3std2rt19lang_start_internal library/std/src/rt.rs:171
+    #32 0x5f75c3dabfe0 in _RINvNtCsh0g7Hz38UNf_3std2rt10lang_startuECscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/rt.rs:205
+    #33 0x5f75c3dafacd in main (/tmp/cla

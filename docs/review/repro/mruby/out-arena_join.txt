@@ -1,0 +1,41 @@
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==3762517==ERROR: AddressSanitizer: SEGV on unknown address 0x000158d852ca (pc 0x58c420336107 bp 0x7ffe21077c20 sp 0x7ffe21077ba0 T0)
+==3762517==The signal is caused by a READ memory access.
+    #0 0x58c420336107 in mrb_ary_pop /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/array.c:436
+    #1 0x58c42033b1b5 in join_ary /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/array.c:1005
+    #2 0x58c42033f03c in mrb_ary_join /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/array.c:1014
+    #3 0x58c42033f175 in mrb_ary_join_m /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/array.c:1034
+    #4 0x58c420394012 in mrb_context_run /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/vm.c:1126
+    #5 0x58c420413f5b in load_exec /src/vendorlib/go-mruby/mruby-build/mruby/mrbgems/mruby-compiler/core/parse.y:5631
+    #6 0x58c420413f5b in mrb_load_nstring_cxt /src/vendorlib/go-mruby/mruby-build/mruby/mrbgems/mruby-compiler/core/parse.y:5653
+    #7 0x58c42032f2af in cabby_load_string /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/shim/cabby_mruby.c:382
+    #8 0x58c420323fdc in _RNvMs1_NtCs6wZQItVtNxU_15cabby_mruby_sys4safeNtB5_2Vm11load_string src/safe.rs:530
+    #9 0x58c4203213fc in _RNvCscrDJE4XoVDr_9ffi_probe10arena_join src/main.rs:147
+    #10 0x58c4203220a4 in _RNvCscrDJE4XoVDr_9ffi_probe4main src/main.rs:10
+    #11 0x58c42031fbe2 in _RNvYFEuINtNtNtCs8uuN1nrGffB_4core3ops8function6FnOnceuE9call_onceCscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/core/src/ops/function.rs:250
+    #12 0x58c42031f82d in _RINvNtNtCsh0g7Hz38UNf_3std3sys9backtrace28___rust_begin_short_backtraceFEuuECscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/sys/backtrace.rs:166
+    #13 0x58c42031fff8 in _RNCINvNtCsh0g7Hz38UNf_3std2rt10lang_startuE0CscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/rt.rs:206
+    #14 0x58c42045eee7 in _RNvXs0_NtNtNtCs8uuN1nrGffB_4core3ops8function5implsRDINtB7_2FnuEp6OutputlNtNtNtBb_5panic11unwind_safe13RefUnwindSafeNtNtBb_6marker4SyncEL_INtB7_6FnOnceuE9call_onceCsh0g7Hz38UNf_3std library/core/src/ops/function.rs:287
+    #15 0x58c42045eee7 in _RINvNvNtCsh0g7Hz38UNf_3std9panicking12catch_unwind7do_callRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtB13_5panic11unwind_safe13RefUnwindSafeNtNtB13_6marker4SyncEL_lEB6_ library/std/src/panicking.rs:573
+    #16 0x58c42045eee7 in _RINvNtCsh0g7Hz38UNf_3std9panicking12catch_unwindlRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtBU_5panic11unwind_safe13RefUnwindSafeNtNtBU_6marker4SyncEL_EB4_ library/std/src/panicking.rs:541
+    #17 0x58c42045eee7 in _RINvNtCsh0g7Hz38UNf_3std5panic12catch_unwindRDINtNtNtCs8uuN1nrGffB_4core3ops8function2FnuEp6OutputlNtNtNtBP_5panic11unwind_safe13RefUnwindSafeNtNtBP_6marker4SyncEL_lEB4_ library/std/src/panic.rs:359
+    #18 0x58c42045eee7 in _RNCNvNtCsh0g7Hz38UNf_3std2rt19lang_start_internal0B5_ library/std/src/rt.rs:175
+    #19 0x58c42045eee7 in _RINvNvNtCsh0g7Hz38UNf_3std9panicking12catch_unwind7do_callNCNvNtB6_2rt19lang_start_internal0iEB6_ library/std/src/panicking.rs:573
+    #20 0x58c42045eee7 in _RINvNtCsh0g7Hz38UNf_3std9panicking12catch_unwindiNCNvNtB4_2rt19lang_start_internal0EB4_ library/std/src/panicking.rs:541
+    #21 0x58c42045eee7 in _RINvNtCsh0g7Hz38UNf_3std5panic12catch_unwindNCNvNtB4_2rt19lang_start_internal0iEB4_ library/std/src/panic.rs:359
+    #22 0x58c42045eee7 in _RNvNtCsh0g7Hz38UNf_3std2rt19lang_start_internal library/std/src/rt.rs:171
+    #23 0x58c42031ffe0 in _RINvNtCsh0g7Hz38UNf_3std2rt10lang_startuECscrDJE4XoVDr_9ffi_probe /rustc/0ef1bc386059596dada8fb65b50425aab2ea637a/library/std/src/rt.rs:205
+    #24 0x58c420323acd in main (${SCRATCH}/ffi-probe/target-asan/debug/ffi-probe+0x30acd) (BuildId: 0c2c2a59715dd62032d95fc0ee01a764c8c18a8f)
+    #25 0x7e400ae2a640 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:59
+    #26 0x7e400ae2a757 in __libc_start_main_impl ../csu/libc-start.c:372
+    #27 0x58c42031f634 in _start (${SCRATCH}/ffi-probe/target-asan/debug/ffi-probe+0x2c634) (BuildId: 0c2c2a59715dd62032d95fc0ee01a764c8c18a8f)
+
+==3762517==Register values:
+rax = 0x00000000d8d8d2ca  rbx = 0x00007a4008df61a0  rcx = 0x00007a4008d01780  rdx = 0x00007d300a1e38b0  
+rdi = 0x00000006c6c69650  rsi = 0x00000f48011a02f0  rbp = 0x00007ffe21077c20  rsp = 0x00007ffe21077ba0  
+ r8 = 0x00000fa60143c71b   r9 = 0x000000000000000e  r10 = 0x00007ffe21077bc0  r11 = 0x0000000000000000  
+r12 = 0x00007d300a1e3910  r13 = 0x00007b700a1e0040  r14 = 0x00007d300a1e3928  r15 = 0x00007d300a1e38b0  
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys/mruby/src/array.c:436 in mrb_ary_pop
+==3762517==ABORTING

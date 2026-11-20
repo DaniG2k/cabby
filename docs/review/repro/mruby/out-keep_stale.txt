@@ -1,0 +1,3 @@
+keep after A = 9
+keep after B = 1
+stale local h read back as: Ok("[\"String\", 52, \"filler-2996-yyyyyyyyyyyyyyyyyy\"]")

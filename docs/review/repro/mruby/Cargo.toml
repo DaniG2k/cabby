@@ -1,0 +1,12 @@
+[package]
+name = "ffi-probe"
+version = "0.0.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+cabby-mruby-sys = { path = "/home/daniele/Documents/apps/cabby/crates/cabby-mruby-sys" }
+
+[profile.dev]
+debug = 1

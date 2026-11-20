@@ -1,0 +1,5 @@
+resume1 = Ok(440301680)
+resume2 = Err("can't cross C function boundary")
+resume3 = Err("can't cross C function boundary")
+after = Ok(2)
+in method = Err("can't cross C function boundary")
