@@ -1,0 +1,7 @@
+# Action Cable as the third server in Cabby's benchmark (see README.md).
+# Only the parts of Rails that Action Cable needs: railties (Rails::Application) and actioncable.
+source "https://rubygems.org"
+
+gem "railties", "8.1.4.1"
+gem "actioncable", "8.1.4.1"
+gem "puma", "8.1.2"
