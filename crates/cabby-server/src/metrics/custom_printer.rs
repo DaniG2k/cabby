@@ -140,3 +140,59 @@ impl IntervalWriter for RubyPrinter {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A formatter that raises on every call keeps the printer's VM usable:
+    /// each print fails cleanly. Before the mruby binding unwound and checked
+    /// what a raise leaves behind, such a formatter crashed the process after
+    /// about 1,400 to 4,200 prints (review finding M4).
+    #[test]
+    fn a_formatter_that_always_raises_survives_10000_prints() {
+        if !mrb::supported() {
+            return;
+        }
+        let path = std::env::temp_dir().join(format!("cabby-raising-formatter-{}.rb", std::process::id()));
+        std::fs::write(
+            &path,
+            "module MetricsFormatter\n  def self.call(data)\n    data.each { |k, v| raise \"bad #{k}\" }\n  end\nend\n",
+        )
+        .expect("script written");
+        let engine = mrb::Engine::new();
+        let module = load(&engine, &path.to_string_lossy()).expect("formatter loads");
+        let _ = std::fs::remove_file(&path);
+
+        let names = [
+            "clients_num",
+            "clients_uniq_num",
+            "client_msg_total",
+            "failed_client_msg_total",
+            "broadcast_msg_total",
+            "failed_broadcast_msg_total",
+            "broadcast_streams_num",
+            "rpc_call_total",
+            "rpc_error_total",
+            "rpc_retries_total",
+            "rpc_pending_num",
+            "failed_auths_total",
+            "goroutines_num",
+            "disconnect_queue_size",
+            "server_msg_total",
+            "failed_server_msg_total",
+            "data_sent_total",
+            "data_rcvd_total",
+            "mem_sys_bytes",
+        ];
+        for i in 0..10_000_u64 {
+            let snapshot: HashMap<String, u64> = names.iter().map(|n| ((*n).to_owned(), i)).collect();
+            print(&engine, &module, snapshot);
+        }
+        assert_eq!(engine.eval("1 + 41").expect("the VM is still usable").fixnum(), 42);
+        let data = engine.eval("{'k' => 1}").expect("hash");
+        let e = module.call("call", &[mrb::Value::Mrb(data)]).expect_err("raises");
+        assert_eq!(e.message, "bad k");
+        assert!(e.file.ends_with(".rb") && e.line == 3, "{}:{}", e.file, e.line);
+    }
+}

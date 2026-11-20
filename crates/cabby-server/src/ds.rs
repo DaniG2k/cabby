@@ -809,7 +809,13 @@ pub fn handler(
     extractor: Option<SharedHeadersExtractor>,
     config: &Config,
 ) -> Result<impl server::Handler, DsError> {
-    Ok(Endpoint(Arc::new(ds_handler(node, broker, streams, metrics, shutdown, extractor, config)?)))
+    Ok(endpoint(Arc::new(ds_handler(node, broker, streams, metrics, shutdown, extractor, config)?)))
+}
+
+/// A built endpoint as a server handler: what [`handler`] mounts (tests serve
+/// a handler they also inspect through the server this way).
+pub fn endpoint(handler: Arc<Handler>) -> impl server::Handler {
+    Endpoint(handler)
 }
 
 /// The session of a request: disconnected from the node when dropped (upstream

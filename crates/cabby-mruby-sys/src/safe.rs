@@ -12,6 +12,15 @@
 //!   values that outlive the call;
 //! - **no unwinding into C**: Rust methods run under `catch_unwind` in
 //!   [`dispatch`]; C never unwinds into Rust because the shim catches raises.
+//!
+//! The shim adds what a liveness check before the call cannot give (see the
+//! "protected calls" comment in `shim/cabby_mruby.c`): values stay rooted
+//! while the call runs, a raise pops the call frames it leaves behind, procs
+//! without an environment never reach Ruby code, backtraces read only call
+//! frames whose procs are still alive, `run` inside a Rust method gets a call
+//! frame of its own, stack keeps cover rooted slots only, and `Fiber#resume`
+//! called from C is refused. Here, `arena_restore` inside a Rust method stops
+//! at the arena index the method was entered with.
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -40,8 +49,10 @@ struct VmInner {
     panic: RefCell<Option<Box<dyn Any + Send>>>,
     /// Number of Rust methods running on this VM.
     depth: Cell<u32>,
-    /// The largest stack keep that is known to cover initialized stack slots.
-    max_keep: Cell<u32>,
+    /// The arena index when the innermost running Rust method was entered:
+    /// `arena_restore` never goes below it, because the C code that called
+    /// the method may keep unrooted objects in the arena below that point.
+    arena_floor: Cell<i32>,
 }
 
 impl Drop for VmInner {
@@ -161,7 +172,7 @@ impl Vm {
             methods: RefCell::default(),
             panic: RefCell::default(),
             depth: Cell::new(0),
-            max_keep: Cell::new(0),
+            arena_floor: Cell::new(0),
         });
         // SAFETY: `state` is open; `ud` stores a pointer to the VmInner that
         // owns it, which outlives the state (Drop closes the state first).
@@ -276,7 +287,11 @@ impl Vm {
     }
 
     /// `mrb_gc_arena_restore`; an index above the current one is ignored.
+    /// Inside a Rust method, an index below the arena index at the method's
+    /// entry restores to that index instead: the C caller of the method may
+    /// rely on objects it left in the arena.
     pub fn arena_restore(&self, idx: i32) {
+        let idx = idx.max(self.inner.arena_floor.get());
         // SAFETY: open state; the shim ignores indexes above the current one.
         let ok = unsafe { ffi::cabby_arena_restore(self.state(), idx) };
         self.quiet((ok, ()));
@@ -531,7 +546,8 @@ impl Vm {
         self.finish(ok).map(|()| self.wrap(out))
     }
 
-    /// `mrb_run(proc, self)`.
+    /// `mrb_run(proc, self)`. Inside a Rust method the proc runs on a call
+    /// frame of its own (`mrb_run` would reuse the method's frame).
     pub fn run(&self, proc_: &Val, self_: &Val) -> Result<Val, Raised> {
         let mut out = mrb_value::zeroed();
         // SAFETY: open state; both values checked (the shim checks that `proc_`
@@ -543,26 +559,24 @@ impl Vm {
     /// `mrb_context_run(proc, self, keep)`, returning the proc's local count
     /// (the keep for the next run) with the result.
     ///
-    /// Only stack slots that an earlier run initialized may be kept: `keep` is
-    /// limited to the largest count this method returned, and to 0 inside a
-    /// Rust method.
+    /// Only stack slots that the collector still roots may be kept: the shim
+    /// limits `keep` to the root frame's register count (slots above it may
+    /// hold collected objects). Inside a Rust method the proc runs on a call
+    /// frame of its own and `keep` is ignored.
     pub fn context_run(&self, proc_: &Val, self_: &Val, keep: u32) -> Result<(u32, Val), Raised> {
-        let top = self.inner.depth.get() == 0;
-        let keep = if top { keep.min(self.inner.max_keep.get()) } else { 0 };
         let mut nlocals: u32 = 0;
         let mut out = mrb_value::zeroed();
-        // SAFETY: open state; both values checked; `keep` covers initialized
-        // stack slots only (see above); locals as out-parameters.
+        // SAFETY: open state; both values checked; the shim limits `keep` to
+        // rooted stack slots; locals as out-parameters.
         let ok = unsafe {
             ffi::cabby_context_run(self.state(), proc_.checked(self), self_.checked(self), keep, &mut nlocals, &mut out)
         };
-        if top && ok != 0 {
-            self.inner.max_keep.set(self.inner.max_keep.get().max(nlocals));
-        }
         self.finish(ok).map(|()| (nlocals, self.wrap(out)))
     }
 
     /// `mrb_yield_argv(block, args)` (result kept in the arena, as go-mruby).
+    /// The block must be a proc with an environment (a block or `proc {}` from
+    /// Ruby code); anything else raises (`ArgumentError`/`TypeError`).
     pub fn yield_block(&self, block: &Val, args: &[Val]) -> Result<Val, Raised> {
         let argv: Vec<mrb_value> = args.iter().map(|a| a.checked_copy(self)).collect();
         let mut out = mrb_value::zeroed();
@@ -669,7 +683,10 @@ impl Val {
         self.vm.finish(ok).map(|()| s)
     }
 
-    /// Calls `name` with `args` and an optional block (a proc or nil).
+    /// Calls `name` with `args` and an optional block (a proc with an
+    /// environment, or nil). A proc without an environment (from
+    /// [`Parser::generate_code`]) as receiver, argument or block raises
+    /// `TypeError`: it can only be run.
     pub fn call(&self, name: &str, args: &[Val], block: Option<&Val>) -> Result<Val, Raised> {
         let vm = &self.vm;
         let c = cstring(name);
@@ -852,9 +869,12 @@ unsafe extern "C" fn dispatch(
     // SAFETY: `self_` points to the receiver, a valid value of this VM.
     let this = vm.wrap(unsafe { *self_ });
 
+    // SAFETY: running state.
+    let floor = vm.inner.arena_floor.replace(unsafe { ffi::cabby_arena_save(mrb) });
     vm.inner.depth.set(vm.inner.depth.get() + 1);
     let outcome = catch_unwind(AssertUnwindSafe(|| f(&vm, &this)));
     vm.inner.depth.set(vm.inner.depth.get() - 1);
+    vm.inner.arena_floor.set(floor);
 
     let usable = |v: &Val| v.vm.same(&vm) && v.live();
     match outcome {
@@ -939,7 +959,9 @@ impl Parser {
     }
 
     /// `mrb_generate_code`: the proc of the last parse, nil when there is none
-    /// (no parse, a parse with errors, or a code generation failure).
+    /// (no parse, a parse with errors, or a code generation failure). The proc
+    /// has no environment, so it can only be run ([`Vm::run`],
+    /// [`Vm::context_run`]); other uses raise `TypeError`.
     pub fn generate_code(&mut self) -> Val {
         let mut out = mrb_value::zeroed();
         // SAFETY: open state; live parser of this VM; local out-parameter.
