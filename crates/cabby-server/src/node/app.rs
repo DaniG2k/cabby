@@ -1526,6 +1526,17 @@ mod tests {
         }
     }
 
+    /// Deviation D-051: the batch broadcast debug record lists the messages (Go
+    /// prints the addresses of the decoded elements, `&[0xc000… 0xc000…]`).
+    #[test]
+    fn deviation_d051_batch_broadcast_record_lists_the_messages() {
+        let batch = vec![
+            StreamMessage { stream: "a".into(), data: "1".into(), ..Default::default() },
+            StreamMessage { stream: "b".into(), data: "\"x\"".into(), ..Default::default() },
+        ];
+        assert_eq!("[[stream=a data=1] [stream=b data=\"x\"]]", batch_log_value(&batch).to_string());
+    }
+
     #[test]
     fn null_controller_rejects() {
         let c = NullController;

@@ -462,6 +462,33 @@ mod tests {
         assert_eq!("[a=-1 l=[x true] m=map[k:2]]", v.to_string());
     }
 
+    /// Records below the level are dropped before their attributes are built,
+    /// so debug records on hot paths cost a level check.
+    #[test]
+    fn disabled_records_build_no_attributes() {
+        use std::sync::atomic::AtomicUsize;
+        static WRITTEN: AtomicUsize = AtomicUsize::new(0);
+        fn sink(r: &Record<'_>) {
+            assert_eq!(
+                ["context=node", "sid=s1", "k=2"],
+                [&r.context[0], &r.context[1], &r.attrs[0]].map(|a| a.to_string())
+            );
+            WRITTEN.fetch_add(1, Ordering::SeqCst);
+        }
+        set_sink(sink);
+        set_min_level(Some(Level::Info));
+        let log = Logger::default().with("context", "node").with("sid", "s1");
+
+        let mut built = 0;
+        crate::log_debug!(log, "skipped", "k" => { built += 1; 1 });
+        assert_eq!(0, built);
+        assert_eq!(0, WRITTEN.load(Ordering::SeqCst));
+
+        crate::log_info!(log, "written", "k" => { built += 1; 2 });
+        assert_eq!(1, built);
+        assert_eq!(1, WRITTEN.load(Ordering::SeqCst));
+    }
+
     #[test]
     fn masks_by_length() {
         let f = LogFilter { enabled: true };
