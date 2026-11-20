@@ -524,11 +524,31 @@ fn history_plus_v(h: &HistoryRequest) -> String {
     format!("{{Since:{} Streams:map[{}]}}", h.since, streams.join(" "))
 }
 
+/// Renders typed message data for logs (Go `%+v` of the payload pointer), or
+/// `None` for payloads of other types.
+pub type TypedDataFormatter = fn(&(dyn std::any::Any + Send + Sync)) -> Option<String>;
+
+static TYPED_DATA_FORMATTERS: std::sync::RwLock<Vec<TypedDataFormatter>> = std::sync::RwLock::new(Vec::new());
+
+/// Registers how a protocol's typed message data ([`MessageData::Typed`]) is
+/// shown in logs (upstream logs the struct pointer with `%+v`).
+pub fn register_typed_data_formatter(f: TypedDataFormatter) {
+    let mut all = TYPED_DATA_FORMATTERS.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !all.contains(&f) {
+        all.push(f);
+    }
+}
+
+fn typed_data_text(v: &(dyn std::any::Any + Send + Sync)) -> String {
+    let all = TYPED_DATA_FORMATTERS.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+    all.iter().find_map(|f| f(v)).unwrap_or_else(|| "<typed>".to_owned())
+}
+
 impl LogValuer for Message {
     fn log_value(&self) -> LogValue {
         let data = match &self.data {
             Some(MessageData::Json(v)) => logger::compact_any(logger::AnyValue::Json(v.clone())).log_value(),
-            Some(MessageData::Typed(_)) => LogValue::String("<typed>".to_owned()),
+            Some(MessageData::Typed(v)) => logger::compact_value(&typed_data_text(v.as_ref())).log_value(),
             None => logger::compact_any(logger::AnyValue::Json(serde_json::Value::Null)).log_value(),
         };
         LogValue::Group(vec![
