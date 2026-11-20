@@ -299,7 +299,7 @@ impl Runner {
         log_info(&format!(
             "Starting {} {}{} (pid: {}, open file limit: {}, gomaxprocs: {procs})",
             self.name,
-            crate::telemetry::version(),
+            version_label(),
             mruby_support(),
             std::process::id(),
             open_file_limit()
@@ -558,7 +558,7 @@ impl Runner {
         log_info(&format!(
             "Starting embedded {} {}{} (open file limit: {})",
             self.name,
-            crate::telemetry::version(),
+            version_label(),
             mruby_support(),
             open_file_limit()
         ));
@@ -866,6 +866,12 @@ fn default_rpc_controller() -> ControllerFactory {
 
 /// Upstream `initMRuby`: the mruby version suffix of the start line, e.g.
 /// ` (with mruby 1.2.0 (2015-11-17))`; empty without mruby support.
+/// Cabby's version and the AnyCable server version it is compatible with, e.g.
+/// `0.1.0 (AnyCable 1.6.21 compatible)` (upstream prints only its own version).
+fn version_label() -> String {
+    format!("{} (AnyCable {} compatible)", env!("CARGO_PKG_VERSION"), crate::telemetry::version())
+}
+
 fn mruby_support() -> String {
     if !crate::mrb::supported() {
         return String::new();
@@ -935,5 +941,14 @@ impl Embedded {
             shutdownable.shutdown()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Pins D-035.
+    #[test]
+    fn version_label_names_cabby_and_the_compatible_version() {
+        assert_eq!(super::version_label(), format!("{} (AnyCable 1.6.21 compatible)", env!("CARGO_PKG_VERSION")));
     }
 }

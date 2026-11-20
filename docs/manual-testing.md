@@ -31,7 +31,7 @@ target/release/cabby --public --broadcast_adapter=http --http_broadcast_port=808
 You should see, among others (times are in your local time zone):
 
 ```text
-INF Starting AnyCable 1.6.21 (with mruby 1.2.0 (2015-11-17)) (pid: …, open file limit: …, gomaxprocs: …)
+INF Starting Cabby 0.1.0 (AnyCable 1.6.21 compatible) (with mruby 1.2.0 (2015-11-17)) (pid: …, open file limit: …, gomaxprocs: …)
 WRN Server is running in the public mode
 INF Accept broadcast requests at http://localhost:8080/_broadcast (no authorization)
 INF Handle WebSocket connections at http://localhost:8080/cable
@@ -40,8 +40,9 @@ INF Handle SSE requests at http://localhost:8080/events
 INF Serve metrics at http://localhost:8080/metrics
 ```
 
-The start line says "AnyCable 1.6.21" on purpose: Cabby reports the version of the AnyCable
-server it is compatible with, so Rails-side tooling that checks it keeps working.
+The start line shows Cabby's version and the AnyCable server version it is compatible with.
+`open file limit` caps the number of connections: raise it with `ulimit -n 65536` in that
+terminal before starting Cabby if you want to test thousands of clients.
 
 ## 3. Check that it is alive (terminal B)
 
