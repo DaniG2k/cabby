@@ -23,7 +23,7 @@
       "pass": 923
     },
     "rust_only": {
-      "cases": 82
+      "cases": 84
     },
     "translation": {
       "reviewed": 923
@@ -26328,6 +26328,15 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "conformance::client_messages::deviation_d056_concurrent_deep_messages_are_capped",
+      "relation": "regression",
+      "links": [
+        "26a1a703:encoders/json_test.go#TestJSONEncoder/.Decode"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
       "rust_case": "conformance::client_messages::messages_nested_deeper_than_go_limit_stop_the_reader",
       "relation": "external",
       "links": [
@@ -26548,6 +26557,15 @@
       "relation": "external",
       "links": [
         "26a1a703:ws/handler_test.go#TestCheckOriginWildcards"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::ping_intervals::deviation_d054_ping_intervals_over_a_day_are_clamped",
+      "relation": "regression",
+      "links": [
+        "26a1a703:features/ping.testfile#scenario"
       ],
       "reference_status": "pass",
       "rust_status": "pass"

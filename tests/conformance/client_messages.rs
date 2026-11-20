@@ -99,7 +99,11 @@ fn deviation_d056_concurrent_deep_messages_are_capped() {
     for (i, c) in clients.iter_mut().enumerate() {
         let stream = format!("after-{i}");
         subscribe_public(c, &stream);
-        let ack = c.receive().unwrap_or_else(|e| panic!("session {i}: no reply after deep messages: {e}"));
+        // Generous: 72 messages 10,000 levels deep are decoded 4 at a time, which
+        // takes a while in debug builds on a loaded machine; the cap is what's tested.
+        let ack = c
+            .receive_within(Duration::from_secs(60))
+            .unwrap_or_else(|e| panic!("session {i}: no reply after deep messages: {e}"));
         assert_eq!(Some("confirm_subscription"), ack["type"].as_str(), "session {i}: {ack}");
     }
     done.store(true, std::sync::atomic::Ordering::SeqCst);
