@@ -110,7 +110,12 @@ fn deviation_d056_concurrent_deep_messages_are_capped() {
     let peak = sampler.join().expect("sampler");
 
     if cabby_testkit::backend() == cabby_testkit::Backend::Rust {
-        assert!(peak <= MAX_DEEP_THREADS, "{peak} deep-nesting threads at once");
+        // At most MAX_DEEP_THREADS decodes run at once: a slot is released only
+        // after `join` returns. `pthread_join` returns when the exiting thread has
+        // signalled its exit, slightly before the kernel drops its
+        // /proc/<pid>/task entry, so under load the sampler can see one finishing
+        // thread next to MAX_DEEP_THREADS new ones.
+        assert!(peak <= MAX_DEEP_THREADS + 1, "{peak} deep-nesting threads at once");
     }
 }
 
