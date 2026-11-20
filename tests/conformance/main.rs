@@ -19,10 +19,12 @@ macro_rules! anyt_tests {
 }
 
 mod api;
+mod client_messages;
 mod health;
 mod issues;
 mod origin;
 mod pusher;
+mod rpc_sessions;
 mod sse;
 mod threads;
 

@@ -1082,12 +1082,32 @@ impl Session {
 
         let command = match self.encoder().decode(message) {
             Ok(c) => c,
+            Err(e) if cabby_core::gojson::deep::hit_default_limit(&e.0) => {
+                // Nested deeper than serde_json's default limit, perhaps within
+                // Go's: decoded, handled and dropped on a thread whose stack fits it.
+                return cabby_core::gojson::deep::with_deep_nesting(|| self.read_deep_message(message)).unwrap_or_else(
+                    || {
+                        metrics.counter_increment(METRICS_FAILED_COMMAND_RECEIVED);
+                        Err(NodeError(e.0))
+                    },
+                );
+            }
             Err(e) => {
                 metrics.counter_increment(METRICS_FAILED_COMMAND_RECEIVED);
                 return Err(NodeError(e.0));
             }
         };
 
+        self.execute_decoded(message.len(), &command, false);
+        Ok(())
+    }
+
+    /// [`Session::read_message`] after its data was counted, on a deep-nesting thread.
+    fn read_deep_message(self: &Arc<Self>, message: &[u8]) -> Result<(), NodeError> {
+        let command = self.encoder().decode(message).map_err(|e| {
+            self.metrics().counter_increment(METRICS_FAILED_COMMAND_RECEIVED);
+            NodeError(e.0)
+        })?;
         self.execute_decoded(message.len(), &command, false);
         Ok(())
     }
@@ -1428,8 +1448,15 @@ impl SessionReader {
 }
 
 impl ReaderInner {
-    fn drain(&self) {
+    fn drain(self: Arc<Self>) {
         loop {
+            if super::tasks::should_yield() {
+                // Back from an RPC call with the command pool over its seat limit:
+                // the rest of this session's messages wait for a seat (in order,
+                // as the reader stays `running`).
+                super::tasks::execute(Box::new(move || self.drain()));
+                return;
+            }
             let event = {
                 let mut state = lock(&self.state);
                 match state.events.pop_front() {
