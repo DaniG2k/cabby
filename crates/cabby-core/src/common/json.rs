@@ -175,8 +175,9 @@ fn decode_error(e: serde_json::Error) -> DecodeError {
 }
 
 /// Runs `seed` over the whole input; trailing data is an error (as in Go).
+/// Nesting is limited as on the current thread (see [`gojson::deep`]).
 fn decode_with<'de, S: DeserializeSeed<'de>>(raw: &'de [u8], seed: S) -> Result<S::Value, DecodeError> {
-    let mut de = serde_json::Deserializer::from_slice(raw);
+    let mut de = gojson::deep::deserializer(raw).map_err(DecodeError)?;
     let value = seed.deserialize(&mut de).map_err(decode_error)?;
     de.end().map_err(decode_error)?;
     Ok(value)

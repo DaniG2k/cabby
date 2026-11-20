@@ -20,7 +20,7 @@ use crate::server::{
 pub type SessionCallback = Box<dyn FnOnce() + Send>;
 
 /// Sets up the session of an upgraded connection (upstream `sessionHandler`).
-/// It runs on the node's bounded command pool ([`crate::node::execute`]: the node
+/// It runs on the node's command pool ([`crate::node::execute`]: the node
 /// API is synchronous and authentication performs an RPC call) and should return
 /// once the session is serving, without waiting for it to end; an error is
 /// logged.

@@ -62,7 +62,7 @@ use tungstenite::protocol::frame::coding::{CloseCode, Data, OpCode};
 use tungstenite::{Message, Utf8Bytes};
 
 use super::{FrameType, SentFrame};
-use crate::node::{Connection, ConnectionError};
+use crate::node::{Connection, ConnectionError, SessionReader};
 
 /// Upstream `CloseNormalClosure`.
 pub const CLOSE_NORMAL_CLOSURE: i32 = 1000;
@@ -132,6 +132,18 @@ pub trait InboundHandler: Send + Sync {
     /// The connection ended (the read error, e.g. a close); called once, after
     /// the last message.
     fn on_end(&self, err: ConnectionError);
+}
+
+/// A session's push-model reader takes the connection's messages directly: the
+/// Action Cable and Pusher endpoints serve sessions without a reader thread.
+impl InboundHandler for SessionReader {
+    fn on_message(&self, msg: Bytes, permit: ReadPermit) {
+        self.message(msg, Box::new(permit));
+    }
+
+    fn on_end(&self, err: ConnectionError) {
+        self.end(err);
+    }
 }
 
 /// Permission for the io loop to read the next message (push mode): dropping
