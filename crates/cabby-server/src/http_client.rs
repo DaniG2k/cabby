@@ -2,12 +2,13 @@
 //!
 //! Behaves like the Go `http.Transport` the upstream services use: keep-alive
 //! connections are reused (LIFO) and kept idle up to `max_idle` and
-//! `idle_timeout`, a request that a reused connection could not send (the server
+//! `idle_timeout` (closed when it passes, also when no further request comes),
+//! a request that a reused connection could not send (the server
 //! closed it while idle) is retried once on a new connection, and an optional
 //! client-wide timeout (Go `Client.Timeout`) bounds the whole exchange. The pool
 //! lock is held only to push or pop, never across I/O.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -147,11 +148,18 @@ struct Idle {
     since: Instant,
 }
 
+/// The idle connections, and whether a task is closing expired ones.
+#[derive(Default)]
+struct Pool {
+    idle: Vec<Idle>,
+    reaping: bool,
+}
+
 /// Pooling client for one [`Origin`].
 pub(crate) struct HttpClient {
     origin: Origin,
     tls: Option<Arc<ClientConfig>>,
-    idle: Mutex<Vec<Idle>>,
+    pool: Arc<Mutex<Pool>>,
     max_idle: usize,
     idle_timeout: Duration,
     timeout: Option<Duration>,
@@ -171,7 +179,7 @@ impl HttpClient {
         idle_timeout: Duration,
         timeout: Option<Duration>,
     ) -> Self {
-        Self { origin, tls, idle: Mutex::new(Vec::new()), max_idle, idle_timeout, timeout }
+        Self { origin, tls, pool: Arc::default(), max_idle, idle_timeout, timeout }
     }
 
     pub(crate) fn origin(&self) -> &Origin {
@@ -180,7 +188,7 @@ impl HttpClient {
 
     /// Drops every idle connection (Go `CloseIdleConnections`).
     pub(crate) fn close_idle(&self) {
-        let idle = std::mem::take(&mut *self.idle.lock().unwrap_or_else(|e| e.into_inner()));
+        let idle = std::mem::take(&mut lock(&self.pool).idle);
         drop(idle);
     }
 
@@ -282,10 +290,9 @@ impl HttpClient {
     async fn checkout_idle(&self) -> Option<SendRequest<Full<Bytes>>> {
         loop {
             let idle = {
-                let mut pool = self.idle.lock().unwrap_or_else(|e| e.into_inner());
-                let now = Instant::now();
-                pool.retain(|i| now.duration_since(i.since) < self.idle_timeout && !i.sender.is_closed());
-                pool.pop()
+                let mut pool = lock(&self.pool);
+                expire(&mut pool.idle, self.idle_timeout);
+                pool.idle.pop()
             }?;
             let mut sender = idle.sender;
             if sender.ready().await.is_ok() {
@@ -298,9 +305,13 @@ impl HttpClient {
         if sender.is_closed() || self.max_idle == 0 {
             return;
         }
-        let mut pool = self.idle.lock().unwrap_or_else(|e| e.into_inner());
-        if pool.len() < self.max_idle {
-            pool.push(Idle { sender, since: Instant::now() });
+        let mut pool = lock(&self.pool);
+        if pool.idle.len() < self.max_idle {
+            pool.idle.push(Idle { sender, since: Instant::now() });
+            if !pool.reaping {
+                pool.reaping = true;
+                tokio::spawn(reap(Arc::downgrade(&self.pool), self.idle_timeout));
+            }
         }
     }
 
@@ -324,6 +335,38 @@ impl HttpClient {
     }
 }
 
+fn lock(pool: &Mutex<Pool>) -> MutexGuard<'_, Pool> {
+    pool.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Drops the connections idle for `timeout` or closed by the server.
+fn expire(idle: &mut Vec<Idle>, timeout: Duration) {
+    let now = Instant::now();
+    idle.retain(|i| now.duration_since(i.since) < timeout && !i.sender.is_closed());
+}
+
+/// Closes idle connections as they reach `timeout`, like Go's per-connection
+/// idle timer, so a pool that stops being used does not keep its connections
+/// open. Ends when the pool is empty (the next checkin starts it again) or the
+/// client is gone.
+async fn reap(pool: Weak<Mutex<Pool>>, timeout: Duration) {
+    loop {
+        let next = {
+            let Some(pool) = pool.upgrade() else { return };
+            let mut pool = lock(&pool);
+            expire(&mut pool.idle, timeout);
+            match pool.idle.iter().map(|i| i.since).min() {
+                Some(oldest) => oldest + timeout,
+                None => {
+                    pool.reaping = false;
+                    return;
+                }
+            }
+        };
+        tokio::time::sleep_until(next).await;
+    }
+}
+
 /// Go's text of a failed TCP connect (`connect: connection refused`): the
 /// syscall name and the lowercase errno string, without Rust's `(os error N)`.
 pub(crate) fn go_dial_error(e: &std::io::Error) -> String {
@@ -340,6 +383,58 @@ pub(crate) fn go_dial_error(e: &std::io::Error) -> String {
             format!("connect: {}", first.chain(chars).collect::<String>())
         }
         _ => text,
+    }
+}
+
+#[cfg(test)]
+mod idle_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// An idle keep-alive connection is closed once the idle timeout passes, with
+    /// no further request (Go's `IdleConnTimeout`); the pool is usable after.
+    #[tokio::test]
+    async fn idle_connections_close_without_further_requests() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (closed_tx, mut closed_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            loop {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let closed_tx = closed_tx.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 4096];
+                    let mut seen = Vec::new();
+                    loop {
+                        let n = sock.read(&mut buf).await.unwrap_or(0);
+                        if n == 0 {
+                            let _ = closed_tx.send(());
+                            return;
+                        }
+                        seen.extend_from_slice(&buf[..n]);
+                        while let Some(end) = seen.windows(4).position(|w| w == b"\r\n\r\n") {
+                            seen.drain(..end + 4);
+                            sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").await.unwrap();
+                        }
+                    }
+                });
+            }
+        });
+
+        let origin = Origin::parse(&format!("http://{addr}")).unwrap();
+        let client = HttpClient::new(origin, None, 2, Duration::from_millis(200), None);
+        let response = client.post("x", &[], Bytes::new()).await.unwrap();
+        assert_eq!((200, &b"ok"[..]), (response.status, &response.body[..]));
+        assert_eq!(1, lock(&client.pool).idle.len());
+
+        tokio::time::timeout(Duration::from_secs(5), closed_rx.recv()).await.expect("idle connection closed").unwrap();
+        assert!(lock(&client.pool).idle.is_empty());
+        assert!(!lock(&client.pool).reaping);
+
+        let response = client.post("x", &[], Bytes::new()).await.unwrap();
+        assert_eq!(200, response.status);
+        assert!(lock(&client.pool).reaping);
     }
 }
 
