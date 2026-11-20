@@ -302,7 +302,7 @@ The next coding deliverable is the test workspace, manifest, and baseline eviden
 
 - [x] Pusher-protocol benchmark: Cabby and AnyCable Pusher modes vs Soketi and Laravel Reverb, through a Pusher client mode in the harness.
 - [ ] Soak test for AnyCable #265 (memory over hours of churn), Cabby vs AnyCable.
-- [x] Security report to AnyCable maintainers: the owner decided not to send one (2026-11-21). Both issues are fixed in Cabby (D-054, D-055); keep their details out of the README.
+- [x] Security report to AnyCable maintainers: the `?pi=` crash was reported privately by the owner as GHSA-3r94-gr9m-jc7q (2026-11-21). The `$pusher` bypass is not reported yet. Both are fixed in Cabby (D-054, D-055); keep the details out of the README until AnyCable publishes.
 
 - [x] Independent review of the whole project with Fable 5.2 (not anchored on the implementer's summary).
 - [x] Fill the README's Go vs Rust comparison table with measured results from the external harness (`crates/cabby-bench`), including workloads where Rust is not faster.
