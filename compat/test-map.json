@@ -13242,8 +13242,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream] (the session also records the channel, without streams); node.broker is the legacy broker the bridge built.",
-        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built."
+        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession is the upstream call on node.hub (read by reflection); node.broker is the legacy broker the bridge built."
       ],
       "rust_cases": [
         "node::node_test::test_broadcasting::handle_broadcast",
@@ -13275,7 +13274,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built."
+        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession is the upstream call on node.hub (read by reflection); node.broker is the legacy broker the bridge built."
       ],
       "rust_cases": [
         "node::node_test::test_broadcasting::handle_broadcast"
@@ -13304,7 +13303,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built."
+        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession is the upstream call on node.hub (read by reflection); node.broker is the legacy broker the bridge built."
       ],
       "rust_cases": [
         "node::node_test::test_broadcasting::handle_broadcast_batch"
@@ -13333,7 +13332,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream] (the session also records the channel, without streams); node.broker is the legacy broker the bridge built."
+        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession is the upstream call on node.hub (read by reflection); node.broker is the legacy broker the bridge built."
       ],
       "rust_cases": [
         "node::node_test::test_broadcasting::handle_pub_sub"
@@ -13362,7 +13361,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession runs node.Subscribe with a controller answering Streams [stream]; node.broker is the legacy broker the bridge built."
+        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected), and hub.SubscribeSession is the upstream call on node.hub (read by reflection); node.broker is the legacy broker the bridge built."
       ],
       "rust_cases": [
         "node::node_test::test_broadcasting::handle_pub_sub_batch"
@@ -13513,7 +13512,7 @@
       "description": "",
       "notes": [
         "[src] blockingDisconnector is built in the facade (Go: in the bridge) and installed with the exported SetDisconnector; it counts Enqueue calls (upstream's second close would panic) and the case asserts one.",
-        "[src] on Go, session.closeCtx (unexported) is read as the context a probe controller receives from a side-effect-free node.Subscribe on the closed session; every controller call gets closeCtx."
+        "[src] on Go, session.closeCtx (unexported) is read by reflection and its Err() checked, as upstream."
       ],
       "rust_cases": [
         "node::node_test::test_disconnect_now_closes_before_enqueue"
@@ -13751,7 +13750,7 @@
       "description": "",
       "notes": [
         "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected) and subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).",
-        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [stop_stream] and then restores the recorded streams; hub.BroadcastMessage is node.Broadcast.",
+        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache); hub.SubscribeSession is the upstream call on node.hub (read by reflection); hub.BroadcastMessage is node.Broadcast.",
         "[src] replays the earlier subtests' performs on test_channel before the opening empty-channel-state assertion, which guards that they leave none."
       ],
       "rust_cases": [
@@ -13902,7 +13901,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [stop_stream] and then restores the recorded streams; hub.BroadcastMessage is node.Broadcast."
+        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel* re-apply a cache entry (RestoreFromCache); hub.SubscribeSession is the upstream call on node.hub (read by reflection); hub.BroadcastMessage is node.Broadcast."
       ],
       "rust_cases": [
         "node::node_test::test_perform::with_stopped_streams"
@@ -13935,7 +13934,7 @@
         "[src] on Go, the testify mocks are built in the bridge from the same expectations (Run callbacks: node.HandleJoin, node.Broadcast); node.controller = c is the exported option WithController(c) applied to the node; hub.AddSession is node.Authenticated (both backends mark the session connected).",
         "[src] on Go, the testify mocks are built in the bridge from the same expectations (Run callbacks: node.HandleJoin, node.Broadcast); node.controller = c is WithController(c) applied to the node; hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry (RestoreFromCache).",
         "[src] on Go, the testify mocks are built in the bridge from the same expectations; the forbidden PresenceAdd (upstream t.Error in Run) is recorded and asserted at the end; node.controller = c is WithController(c); hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry.",
-        "[src] on Go, the testify mocks are built in the bridge (Run callbacks: node.HandleLeave, node.Broadcast); node.controller = c is WithController(c); hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry; hub.SubscribeSession runs the node's Subscribe/Perform with a Streams-answering controller through a temporary legacy broker (the broker mock is not called) and restores the recorded streams; env.MergeChannelState is called on GetEnv()."
+        "[src] on Go, the testify mocks are built in the bridge (Run callbacks: node.HandleLeave, node.Broadcast); node.controller = c is WithController(c); hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry; hub.SubscribeSession is the upstream call on node.hub (read by reflection); env.MergeChannelState is called on GetEnv()."
       ],
       "rust_cases": [
         "node::node_test::test_presence::join_on_perform",
@@ -14025,7 +14024,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] on Go, the testify mocks are built in the bridge (Run callbacks: node.HandleLeave, node.Broadcast); node.controller = c is WithController(c); hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry; hub.SubscribeSession runs the node's Subscribe/Perform with a Streams-answering controller through a temporary legacy broker (the broker mock is not called) and restores the recorded streams; env.MergeChannelState is called on GetEnv()."
+        "[src] on Go, the testify mocks are built in the bridge (Run callbacks: node.HandleLeave, node.Broadcast); node.controller = c is WithController(c); hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry; hub.SubscribeSession is the upstream call on node.hub (read by reflection); env.MergeChannelState is called on GetEnv()."
       ],
       "rust_cases": [
         "node::node_test::test_presence::leave_on_unsubscribe"
@@ -14385,7 +14384,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [streamo] and then restores the recorded streams; hub.Broadcast is node.Broadcast.",
+        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry (RestoreFromCache); hub.SubscribeSession is the upstream call on node.hub (read by reflection); hub.Broadcast is node.Broadcast.",
         "[src] on Go, subscriptions.AddChannel re-applies a cache entry (RestoreFromCache)."
       ],
       "rust_cases": [
@@ -14445,7 +14444,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry (RestoreFromCache); hub.SubscribeSession runs node.Perform with a controller answering Streams [streamo] and then restores the recorded streams; hub.Broadcast is node.Broadcast."
+        "[src] on Go, hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel re-applies a cache entry (RestoreFromCache); hub.SubscribeSession is the upstream call on node.hub (read by reflection); hub.Broadcast is node.Broadcast."
       ],
       "rust_cases": [
         "node::node_test::test_unsubscribe::successful_unsubscribe"
@@ -14474,7 +14473,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] on Go, the testify mocks.Broker is built in the bridge; hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel* re-apply a cache entry; hub.SubscribeSession runs node.Perform with a Streams-answering controller through a temporary legacy broker (the mock is not called, as upstream's hub-only call) and restores the recorded streams."
+        "[src] on Go, the testify mocks.Broker is built in the bridge; hub.AddSession is node.Authenticated (both backends mark the session connected); subscriptions.AddChannel* re-apply a cache entry; hub.SubscribeSession is the upstream call on node.hub (read by reflection)."
       ],
       "rust_cases": [
         "node::node_test::test_unsubscribe_releases_broker_streams"
@@ -14504,9 +14503,9 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] on Go, subscribeSessionToStream uses node.Authenticated (hub.AddSession; both backends mark the session connected), RestoreFromCache (subscriptions), node.Perform with a Streams-answering controller (hub.SubscribeSession), and the node's legacy broker kept by the bridge (node.broker.Subscribe).",
+        "[src] on Go, subscribeSessionToStream uses node.Authenticated (hub.AddSession; both backends mark the session connected), RestoreFromCache (subscriptions), hub.SubscribeSession is the upstream call on node.hub (read by reflection), and the node's legacy broker kept by the bridge (node.broker.Subscribe).",
         "[src] configures the whisper stream first, as the preceding upstream subtest leaves it, so RemoveChannelState removes a real stream.",
-        "[src] on Go, subscribeSessionToStream uses node.Authenticated, RestoreFromCache, node.Perform with a Streams-answering controller, and the node's legacy broker kept by the bridge."
+        "[src] on Go, subscribeSessionToStream uses node.Authenticated, RestoreFromCache, hub.SubscribeSession is the upstream call on node.hub (read by reflection), and the node's legacy broker kept by the bridge."
       ],
       "rust_cases": [
         "node::node_test::test_whisper::when_whispering_stream_is_configured_for_sending_subscription",
@@ -14537,7 +14536,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] on Go, subscribeSessionToStream uses node.Authenticated (hub.AddSession; both backends mark the session connected), RestoreFromCache (subscriptions), node.Perform with a Streams-answering controller (hub.SubscribeSession), and the node's legacy broker kept by the bridge (node.broker.Subscribe)."
+        "[src] on Go, subscribeSessionToStream uses node.Authenticated (hub.AddSession; both backends mark the session connected), RestoreFromCache (subscriptions), hub.SubscribeSession is the upstream call on node.hub (read by reflection), and the node's legacy broker kept by the bridge (node.broker.Subscribe)."
       ],
       "rust_cases": [
         "node::node_test::test_whisper::when_whispering_stream_is_configured_for_sending_subscription"
@@ -14567,7 +14566,7 @@
       "description": "",
       "notes": [
         "[src] configures the whisper stream first, as the preceding upstream subtest leaves it, so RemoveChannelState removes a real stream.",
-        "[src] on Go, subscribeSessionToStream uses node.Authenticated, RestoreFromCache, node.Perform with a Streams-answering controller, and the node's legacy broker kept by the bridge."
+        "[src] on Go, subscribeSessionToStream uses node.Authenticated, RestoreFromCache, hub.SubscribeSession is the upstream call on node.hub (read by reflection), and the node's legacy broker kept by the bridge."
       ],
       "rust_cases": [
         "node::node_test::test_whisper::when_whispering_stream_is_not_configured"
@@ -14596,7 +14595,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] on Go, subscribeSessionToStream uses node.Authenticated, RestoreFromCache, node.Perform with a Streams-answering controller, and the node's legacy broker kept by the bridge."
+        "[src] on Go, subscribeSessionToStream uses node.Authenticated, RestoreFromCache, hub.SubscribeSession is the upstream call on node.hub (read by reflection), and the node's legacy broker kept by the bridge."
       ],
       "rust_cases": [
         "node::node_test::test_whisper::whispering_data_as_object"
