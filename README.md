@@ -142,12 +142,6 @@ Cabby is built tests-first: AnyCable's entire test corpus was translated to Rust
 against the Go server before any Cabby code was written; a feature counts as done when its
 translated tests pass against Cabby.
 
-```mermaid
-pie showData
-    title Upstream test cases (923) against Cabby
-    "Passing" : 923
-```
-
 | | Count |
 |---|---:|
 | Upstream cases (Go unit tests, Benchi, go-mruby, features, AnyT conformance) | 923 |
