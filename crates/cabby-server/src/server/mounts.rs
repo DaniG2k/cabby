@@ -49,7 +49,8 @@ pub fn api_handler(server: Arc<api::Server>, max_body_size: i64) -> impl Handler
                 api::Check::ReadBody(resp) => match read_body(body, limit).await {
                     Ok(body) => server.finish_publish(resp, api::PublishBody::Read(&body)),
                     Err(BodyError::TooLarge(_)) => server.finish_publish(resp, api::PublishBody::TooLarge),
-                    Err(BodyError::Read(_)) => {
+                    Err(BodyError::Read(e)) => {
+                        cabby_core::log_error!(api::api_logger(), "failed to read request body", "error" => e);
                         failed_read = true;
                         server.finish_publish(resp, api::PublishBody::Failed)
                     }
