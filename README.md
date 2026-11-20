@@ -10,12 +10,11 @@ same RPC contract with your Rails app, the same CLI flags, environment variables
 configuration file. Cabby is an independent implementation; it is not affiliated with the
 AnyCable project or Evil Martians.
 
-> **Status: feature-complete, hardening.** `cabby` passes all 923 translated upstream test cases,
-> including the full AnyT conformance suite end to end, with SSE, Pusher, durable streams, Redis,
-> NATS and mruby. An [independent review](docs/review/2026-11-fable-review.md) found the wire
-> protocol faithful to AnyCable but several failure and overload behaviors that differ (DNS
-> changes, stalled Redis/NATS, slow RPC, idle keep-alive connections, logging); fixes are in
-> progress. Until they land, don't use it in production.
+> **Status: feature-complete, reviewed, not yet production-proven.** `cabby` passes all 923
+> translated upstream test cases, including the full AnyT conformance suite end to end, with SSE,
+> Pusher, durable streams, Redis, NATS and mruby. An [independent review](docs/review/2026-11-fable-review.md)
+> found the wire protocol faithful to AnyCable; every failure and overload finding it raised is
+> fixed, with regression tests. It has not run in production yet: try it in staging first.
 
 ## Action Cable, AnyCable and Cabby
 
@@ -88,62 +87,80 @@ the Go server are recorded in [`compat/deviations.md`](compat/deviations.md), mo
 differences found by the review and not yet fixed are listed in
 [`docs/review/2026-11-fable-review.md`](docs/review/2026-11-fable-review.md).
 
-## Benchmarks: Go vs Rust
+## Benchmarks: Action Cable vs AnyCable vs Cabby
 
-Release builds of both servers, launched with identical AnyCable flags (`--norpc --noauth
---public_streams`, in-memory broker, HTTP broadcasts, about 20-byte payloads over loopback; the
-churn workload adds a 5 ms HTTP RPC) by Cabby's external load
-harness ([`crates/cabby-bench`](crates/cabby-bench)), measured on one machine (AMD Ryzen 5 PRO
-6650H, Linux 7.3). The server under test was pinned to 2 physical cores (4 CPUs); the load
-generator ran on the other 4 cores. Each value is the median of 3 runs. Every delivered message
-was reconciled by ID, and no run lost, duplicated or reordered a message.
+All three servers driven by the same external load harness ([`crates/cabby-bench`](crates/cabby-bench))
+on one machine (AMD Ryzen 5 PRO 6650H, Linux 7.3). The server under test was pinned to 2 physical
+cores (4 CPUs) and the load generator to the other 4 cores. Each workload got a warm-up run, then
+5 rounds with the servers in a shuffled order; values are medians. Every delivered message was
+reconciled by ID.
+
+- **AnyCable and Cabby**: release builds launched with identical flags (`--norpc --noauth
+  --public_streams`, in-memory broker, HTTP broadcasts, about 20-byte payloads over loopback; the
+  churn workload adds a 5 ms HTTP RPC).
+- **Action Cable**: Rails 8.1 (`actioncable` + `railties`) on Puma 8.1 in one process, production
+  mode, async adapter, Ruby 4.0 with YJIT, default worker pool; a `$pubsub` channel and a broadcast
+  endpoint calling `ActionCable.server.broadcast` ([`bench/actioncable`](bench/actioncable)). In the
+  churn workload it sleeps the same 5 ms in `connect`, `subscribed` and `disconnect` where AnyCable
+  makes RPC calls.
 
 <p align="center">
-  <img src="docs/benchmarks/memory.svg" width="720" alt="Peak server memory: 1,000 idle clients, Go 55 MB vs Cabby 22 MB; 10,000 idle clients, Go 290 MB vs Cabby 100 MB; 5,000-client room at 100k msg/s, Go 176 MB vs Cabby 58 MB." />
-  <img src="docs/benchmarks/latency.svg" width="720" alt="Broadcast delivery latency p99 with 1,000 clients: 50k msg/s, Go 0.81 ms vs Cabby 0.67 ms; 100k msg/s, Go 2.50 ms vs Cabby 1.46 ms; 150k msg/s, Go 9.35 ms vs Cabby 7.32 ms." />
-  <img src="docs/benchmarks/cpu.svg" width="720" alt="Server CPU at the same delivered rate: 50k msg/s, Go 1.22 vs Cabby 1.11 cores; 100k msg/s, Go 2.08 vs Cabby 1.87; 150k msg/s, Go 3.00 vs Cabby 2.81." />
+  <img src="docs/benchmarks/throughput.svg" width="720" alt="Messages delivered per second. At 50k offered: Action Cable 26.6k, AnyCable 50.0k, Cabby 50.0k. At 100k: 26.2k, 100.0k, 100.0k. At 150k: 23.7k, 149.9k, 149.9k. 5,000-client room at 100k: 21.0k, 99.8k, 99.8k." />
+  <img src="docs/benchmarks/memory.svg" width="720" alt="Peak server memory. 1,000 idle clients: Action Cable 120 MB, AnyCable 54 MB, Cabby 24 MB. 10,000 idle clients: 390, 288, 109 MB. 5,000-client room at 100k msg/s: Action Cable did not sustain the load, AnyCable 179 MB, Cabby 63 MB." />
+  <img src="docs/benchmarks/latency.svg" width="720" alt="Broadcast delivery latency p99 with 1,000 clients. 50k msg/s: AnyCable 0.86 ms, Cabby 0.67 ms. 100k: 2.77 and 1.78 ms. 150k: 11.93 and 7.69 ms. Action Cable did not sustain any of these loads." />
+  <img src="docs/benchmarks/cpu.svg" width="720" alt="Server CPU at the same delivered rate. 50k msg/s: AnyCable 1.20 cores, Cabby 1.06. 100k: 2.10 and 1.92. 150k: 2.95 and 2.79. Action Cable did not sustain these loads." />
 </p>
 
-| Workload | Metric | AnyCable (Go) | Cabby (Rust) |
-|---|---|---:|---:|
-| Idle connections | Memory with 1,000 / 10,000 clients | 55 / 290 MB | 22 / 100 MB |
-| | Memory per extra connection | 26.8 KB | **8.8 KB** |
-| Fan-out, 1,000 clients × 5 of 100 streams | Delivered at 50k / 100k / 150k msg/s | 100% / 100% / 100% | 100% / 100% / 100% |
-| | Latency p50 at 50k / 100k / 150k msg/s | 0.39 / 0.34 / 0.81 ms | 0.32 / 0.27 / 0.61 ms |
-| | Latency p99 at 50k / 100k / 150k msg/s | 0.81 / 2.50 / 9.35 ms | 0.67 / 1.46 / 7.32 ms |
-| | Server CPU at 50k / 100k / 150k msg/s | 1.22 / 2.08 / 3.00 cores | 1.11 / 1.87 / 2.81 cores |
-| | Server memory | 72 MB | 28 MB |
-| Large room, 5,000 clients on one stream, 100k msg/s | Latency p50 / p99 | 26.0 / 59.7 ms | 22.5 / 46.8 ms |
-| | Server CPU / memory | 3.20 cores / 176 MB | 3.17 cores / 58 MB |
-| Reconnect floods: 2,000 clients, 500 then 1,000 dropped at once, 5 ms RPC | Recovery after each wave | 0.81 s / 1.02 s | 0.81 s / 1.02 s |
-| | Connect → welcome p99 | 97 ms | 93 ms |
-| | Ping round trip p99 during the floods | 0.5 ms | 0.5 ms |
-| | Server memory | 101 MB | 38 MB |
-| OS threads | Idle / peak during a 10,000-client connect burst | 10 / 11 | 33 / 101 |
+| Workload | Metric | Action Cable (Ruby) | AnyCable (Go) | Cabby (Rust) |
+|---|---|---:|---:|---:|
+| Idle connections | Memory with 1,000 / 10,000 clients | 120 / 390 MB | 54 / 288 MB | **24 / 109 MB** |
+| | Memory per extra connection | 30.7 KB | 26.6 KB | **9.7 KB** |
+| Fan-out, 1,000 clients × 5 of 100 streams, 50k msg/s | Delivered | 53% of the rate, 17.6 s p99 behind | 100% | 100% |
+| | Latency p50 / p99 | 12.8 s / 17.6 s | 0.39 / 0.86 ms | 0.31 / 0.67 ms |
+| | Server CPU / memory | 1.00 core (saturated) / 454 MB | 1.20 cores / 72 MB | 1.06 cores / 30 MB |
+| Same, 100k msg/s | Delivered | 26% of the rate; 2.0 M messages lost | 100% | 100% |
+| | Latency p50 / p99 | 30.8 s / 45.5 s | 0.34 / 2.77 ms | 0.28 / 1.78 ms |
+| | Server CPU / memory | 1.00 core / 1,030 MB | 2.10 cores / 72 MB | 1.92 cores / 30 MB |
+| Same, 150k msg/s | Delivered | 16% of the rate; 7.4 M messages lost | 100% | 100% |
+| | Latency p50 / p99 | 33.9 s / 47.7 s | 0.86 / 11.93 ms | 0.70 / 7.69 ms |
+| | Server CPU / memory | 1.00 core / 1,550 MB | 2.95 cores / 72 MB | 2.79 cores / 30 MB |
+| Large room: 5,000 clients on one stream, 100k msg/s | Delivered | 21% of the rate; 3.8 M lost | 100% | 100% |
+| | Latency p50 / p99 | 30.8 s / 47.7 s | 27.3 / 65.8 ms | 24.8 / 51.6 ms |
+| | Server CPU / memory | 1.00 core / 1,129 MB | 3.27 cores / 179 MB | 3.24 cores / 63 MB |
+| Reconnect floods: 2,000 clients, 500 then 1,000 dropped at once, 5 ms app latency | Recovery after each wave | 2.8 s / 5.6 s | 0.81 s / 1.02 s | 0.81 s / 1.02 s |
+| | Connect → welcome p99 | 2,143 ms | 97 ms | 93 ms |
+| | Server memory | 177 MB | 101 MB | 58 MB |
+| | Peak OS threads | 22 | 10 | 412 |
+| Any workload | Missing / duplicate / out-of-order messages | up to millions / 0 / hundreds | 0 / 0 / 0 | 0 / 0 / 0 |
 
 What this shows:
 
-- **Memory is where Cabby wins clearly**: about a third of Go's per connection and overall.
-- **Latency and CPU are no worse.** Cabby's medians were lower (p99 latency by 17–42%, CPU by
-  1–10% at the same delivered rate), but the CPU differences are within run-to-run spread and the
-  low p99 values are near the load generator's own timing noise, so treat them as a tie. Neither server hit its throughput ceiling at 150k deliveries/s on
-  2 cores, so peak throughput is not compared here.
-- **Reconnect recovery is identical**: it is governed by the clients' backoff and the
+- **Action Cable can't keep up with any of these loads.** Ruby runs on one core (it was pegged at
+  1.00), and Action Cable decodes and re-encodes each message for every subscriber. It topped out
+  at 21–27k deliveries/s whatever was offered, fell tens of seconds behind, buffered up to 1.5 GB,
+  lost millions of messages once its publisher queue filled, and delivered some out of order.
+  That's the reason AnyCable exists, and it applies to Cabby equally.
+- **Cabby uses a third of AnyCable's memory** (9.7 KB vs 26.6 KB per connection; 30 MB vs 72 MB
+  under fan-out) and about a quarter of Action Cable's.
+- **Cabby's tail latency is lower** (p99 22–36% below AnyCable's at every load), with 1–12% less
+  CPU at the same delivered rate; the CPU difference is close to run-to-run spread, so call it
+  slightly better or equal.
+- **Reconnect recovery is identical to AnyCable's**: it is governed by the clients' backoff and the
   disconnect-queue rate, which both servers implement the same way.
-- **Go uses fewer OS threads.** Go multiplexes its goroutines onto about one thread per CPU.
-  Cabby has a fixed set of helper threads (hub shards, timers, adapters) plus a bounded
-  command pool that grows during connect bursts and shrinks after 30 s idle. Thread count
-  never scales with idle connections in either server. A session waiting for an RPC slot
-  or response holds a thread in Cabby (a goroutine in Go), so a slow RPC application adds
-  one thread per waiting session until its calls finish or time out (D-036).
-- **Not measured yet:** slow readers mixed with healthy clients, a slow or unavailable RPC with
-  queue saturation, and multi-node (Redis/NATS) broadcast.
+- **AnyCable uses far fewer OS threads.** Go runs its goroutines on about one thread per core. Cabby
+  has a fixed set of helper threads, and a session waiting on an RPC call holds a parked thread (so
+  that one slow RPC never delays other sessions): 412 during the reconnect flood. They are capped
+  at 8,192 and exit 30 s after the backlog clears. Thread count never grows with idle connections.
+- **Neither AnyCable nor Cabby hit their throughput ceiling** at 150k deliveries/s on 2 cores, so
+  peak throughput isn't compared. Not measured yet: slow readers, an unavailable RPC, multi-node
+  (Redis/NATS) broadcast, and Pusher-protocol servers.
 
-Reproduce: `cargo build --release -p cabby-server -p cabby-bench && cargo xtask reference-build
-&& compat/scripts/bench-compare.sh`, then `compat/scripts/bench-summary.py` and
-`compat/scripts/bench-charts.py`. Raw results for these numbers are in
-[`docs/benchmarks/results`](docs/benchmarks/results); methodology:
-[`SPEC.md` §10](SPEC.md#10-performance-evaluation).
+Reproduce: `cargo build --release -p cabby-server -p cabby-bench && cargo xtask reference-build &&
+compat/scripts/bench-compare.sh` (Action Cable needs its gems: see
+[`bench/actioncable`](bench/actioncable)), then `compat/scripts/bench-summary.py` and
+`compat/scripts/bench-charts.py`. Raw results: [`docs/benchmarks/results`](docs/benchmarks/results)
+(AnyCable and Cabby re-measured together on the final build; Action Cable from the same day's
+three-way run). Methodology: [`SPEC.md` §10](SPEC.md#10-performance-evaluation).
 
 ## Compatibility progress
 

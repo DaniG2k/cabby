@@ -1,0 +1,8 @@
+date=2026-11-20T14:41:07Z
+cpu=AMD Ryzen 5 PRO 6650H with Radeon Graphics
+kernel=7.3.0-10-generic
+server_cpus=0-3 bench_cpus=4-11 bench_threads=4 runs=5 warmup=1 order=shuffled seed=42
+suts=actioncable anycable-go cabby
+cabby=bdc19a8
+anycable-go="26a1a703a54b870e42f5660c3d0785db2c602764"
+actioncable=actioncable 8.1.4.1 (puma 8.1.2, ruby 4.0.9)
