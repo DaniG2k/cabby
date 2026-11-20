@@ -7,8 +7,10 @@
 # flags and execs Puma (see bench/actioncable/README.md). SUTS picks the servers (default all
 # three); Action Cable is skipped with a warning when its Ruby or gems are not installed.
 # The server under test is pinned to SERVER_CPUS and the generator to BENCH_CPUS (separate
-# physical cores), every configuration runs RUNS times, and each run's key=value summary is
-# kept under OUT. Runs that report generator_saturated=true are kept but excluded from the
+# physical cores). Each workload first gets one discarded warm-up run per server, then RUNS
+# rounds; within a round the servers run in a freshly shuffled order (seeded by SEED), so slow
+# drift of the machine does not favor whichever server runs first. Each run's key=value summary
+# is kept under OUT. Runs that report generator_saturated=true are kept but excluded from the
 # summary by compat/scripts/bench-summary.py.
 #
 # Usage: [SUTS="actioncable anycable-go cabby"] compat/scripts/bench-compare.sh [OUT]
@@ -17,7 +19,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="${1:-${ROOT}/docs/benchmarks/results}"
-RUNS="${RUNS:-3}"
+RUNS="${RUNS:-5}"
+SEED="${SEED:-42}"
+RANDOM="${SEED}"
 SERVER_CPUS="${SERVER_CPUS:-0-3}"
 BENCH_CPUS="${BENCH_CPUS:-4-11}"
 export CABBY_BENCH_THREADS="${CABBY_BENCH_THREADS:-4}"
@@ -55,27 +59,44 @@ for name in "${SUT_LIST[@]}"; do
   chmod +x "${WRAP}/${name}/${name}"
 done
 
-mkdir -p "${OUT}"
+mkdir -p "${OUT}/warmup"
 {
   echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "cpu=$(lscpu | sed -n 's/^Model name: *//p')"
   echo "kernel=$(uname -r)"
-  echo "server_cpus=${SERVER_CPUS} bench_cpus=${BENCH_CPUS} bench_threads=${CABBY_BENCH_THREADS} runs=${RUNS}"
+  echo "server_cpus=${SERVER_CPUS} bench_cpus=${BENCH_CPUS} bench_threads=${CABBY_BENCH_THREADS} runs=${RUNS} warmup=1 order=shuffled seed=${SEED}"
   echo "suts=${SUT_LIST[*]}"
   echo "cabby=$(git -C "${ROOT}" rev-parse --short HEAD)"
   echo "anycable-go=$(sed -n 's/^commit *= *//p' "${ROOT}/compat/upstream.lock" | head -1)"
   [[ -z "${AC_VERSION:-}" ]] || echo "actioncable=${AC_VERSION}"
 } >"${OUT}/environment.txt"
 
+shuffled_suts() { # prints SUT_LIST in a random order (Fisher-Yates on $RANDOM)
+  local a=("${SUT_LIST[@]}") i j t
+  for ((i = ${#a[@]} - 1; i > 0; i--)); do
+    j=$((RANDOM % (i + 1))); t="${a[i]}"; a[i]="${a[j]}"; a[j]="${t}"
+  done
+  echo "${a[@]}"
+}
+
+one() { # one <out-file> <sut> <scenario> <args...>
+  local f="$1" sut="$2" scenario="$3"; shift 3
+  taskset -c "${BENCH_CPUS}" "${BENCH}" "${scenario}" --sut "${WRAP}/${sut}/${sut}" \
+    --non-interactive "$@" >"${f}" || echo "exit=$?" >>"${f}"
+  sleep 2
+}
+
 run() { # run <workload-name> <scenario> <args...>
   local name="$1" scenario="$2"; shift 2
+  local sut i
   for sut in "${SUT_LIST[@]}"; do
-    for i in $(seq 1 "${RUNS}"); do
-      local f="${OUT}/${name}.${sut}.${i}.txt"
+    echo ">> ${name} ${sut} warm-up" >&2
+    one "${OUT}/warmup/${name}.${sut}.txt" "${sut}" "${scenario}" "$@"
+  done
+  for i in $(seq 1 "${RUNS}"); do
+    for sut in $(shuffled_suts); do
       echo ">> ${name} ${sut} run ${i}" >&2
-      taskset -c "${BENCH_CPUS}" "${BENCH}" "${scenario}" --sut "${WRAP}/${sut}/${sut}" \
-        --non-interactive "$@" >"${f}" || echo "exit=$?" >>"${f}"
-      sleep 2
+      one "${OUT}/${name}.${sut}.${i}.txt" "${sut}" "${scenario}" "$@"
     done
   done
 }
