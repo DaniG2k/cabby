@@ -267,6 +267,12 @@ impl Metrics {
         Self { values }
     }
 
+    /// Metric `name` (with or without the `anycable_go_` namespace); `None` when the
+    /// server does not report it.
+    pub fn value(&self, name: &str) -> Option<f64> {
+        self.values.get(&format!("anycable_go_{name}")).or_else(|| self.values.get(name)).copied()
+    }
+
     /// Metric `name` (with or without the `anycable_go_` namespace); 0 when unknown.
     pub fn get(&self, name: &str) -> u64 {
         let v = self.values.get(&format!("anycable_go_{name}")).or_else(|| self.values.get(name)).copied();

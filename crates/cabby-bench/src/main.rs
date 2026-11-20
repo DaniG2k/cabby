@@ -1,5 +1,6 @@
 //! `cabby-bench` executable: `cabby-bench <scenario> [flags]`, where scenario is
-//! `stress_publications` or `reconnect_floods` (upstream: one binary per scenario).
+//! `stress_publications`, `reconnect_floods` (upstream: one binary per scenario) or
+//! `soak` (Cabby's memory-stability run).
 //! Exit codes and the key=value stdout contract follow the upstream scenarios.
 
 fn main() {
@@ -16,8 +17,9 @@ fn main() {
             cabby_bench::scenarios::stress_publications::RunOpts::default(),
         ),
         "reconnect_floods" => cabby_bench::scenarios::reconnect_floods::run(&rest, &mut stdout, &mut stderr),
+        "soak" => cabby_bench::scenarios::soak::run(&rest, &mut stdout, &mut stderr),
         _ => {
-            eprintln!("usage: cabby-bench <stress_publications|reconnect_floods> [flags]  (-h: scenario flags)");
+            eprintln!("usage: cabby-bench <stress_publications|reconnect_floods|soak> [flags]  (-h: scenario flags)");
             2
         }
     };
