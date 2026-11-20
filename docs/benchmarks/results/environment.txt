@@ -1,6 +1,7 @@
-date=2026-11-19T12:56:23Z
+date=2026-11-20T16:44:27Z
 cpu=AMD Ryzen 5 PRO 6650H with Radeon Graphics
 kernel=7.3.0-10-generic
-server_cpus=0-3 bench_cpus=4-11 bench_threads=4 runs=3
-cabby=ee2e812
+server_cpus=0-3 bench_cpus=4-11 bench_threads=4 runs=5 warmup=1 order=shuffled seed=42
+suts=anycable-go cabby
+cabby=9e4e528
 anycable-go="26a1a703a54b870e42f5660c3d0785db2c602764"
