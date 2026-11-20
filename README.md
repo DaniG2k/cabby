@@ -152,8 +152,8 @@ What this shows:
   that one slow RPC never delays other sessions): 412 during the reconnect flood. They are capped
   at 8,192 and exit 30 s after the backlog clears. Thread count never grows with idle connections.
 - **Neither AnyCable nor Cabby hit their throughput ceiling** at 150k deliveries/s on 2 cores, so
-  peak throughput isn't compared. Not measured yet: slow readers, an unavailable RPC, multi-node
-  (Redis/NATS) broadcast, and Pusher-protocol servers.
+  peak throughput isn't compared. Not measured yet: slow readers, an unavailable RPC and
+  multi-node (Redis/NATS) broadcast. Pusher-protocol servers are compared in the next section.
 
 Reproduce: `cargo build --release -p cabby-server -p cabby-bench && cargo xtask reference-build &&
 compat/scripts/bench-compare.sh` (Action Cable needs its gems: see
@@ -161,6 +161,56 @@ compat/scripts/bench-compare.sh` (Action Cable needs its gems: see
 `compat/scripts/bench-charts.py`. Raw results: [`docs/benchmarks/results`](docs/benchmarks/results)
 (AnyCable and Cabby re-measured together on the final build; Action Cable from the same day's
 three-way run). Methodology: [`SPEC.md` §10](SPEC.md#10-performance-evaluation).
+
+## Benchmarks: Pusher-protocol servers
+
+Cabby and AnyCable also speak the Pusher protocol, so pusher-js and Laravel Echo clients can use
+them in place of Pusher. They are compared here with the two common self-hosted Pusher servers:
+**Soketi** 1.6.1 (Node.js 18 on uWebSockets) and **Laravel Reverb** 1.14 (PHP 8.4, ReactPHP with
+the `ev` event loop). Hosted Pusher is not included (a paid service on unknown hardware, and
+load-testing it would breach its terms).
+
+The method is the same as above (same machine and pinning, warm-up, 5 shuffled rounds, medians,
+every message reconciled by ID), with the harness speaking the pusher-js protocol 7 to
+`/app/<key>` and broadcasting through the signed Pusher REST API, one event per request.
+Production settings for every server; details in [`bench/pusher`](bench/pusher).
+
+<p align="center">
+  <img src="docs/benchmarks/pusher-throughput.svg" width="720" alt="Messages delivered per second over the Pusher protocol. At 50k offered: Soketi 50k, Reverb 45k, AnyCable 50k, Cabby 50k. At 100k: 67k, 45k, 100k, 100k. At 150k: 66k, 45k, 150k, 150k. 5,000-client room at 100k: 73k, 87k, 100k, 100k." />
+  <img src="docs/benchmarks/pusher-memory.svg" width="720" alt="Peak server memory over the Pusher protocol. 1,000 idle clients: Soketi 116 MB, Reverb 63, AnyCable 54, Cabby 24. 10,000 idle clients: 149, 233, 280, 103 MB. 5,000-client room: Soketi and Reverb did not sustain the load, AnyCable 180 MB, Cabby 61 MB." />
+  <img src="docs/benchmarks/pusher-latency.svg" width="720" alt="Delivery latency p99 over the Pusher protocol with 1,000 clients. 50k msg/s: Soketi 24.8 ms, Reverb did not sustain the load, AnyCable 0.90 ms, Cabby 0.74 ms. 100k and 150k: only AnyCable (2.90 and 15.22 ms) and Cabby (1.78 and 8.90 ms) sustained the load." />
+</p>
+
+| Workload | Metric | Soketi (Node.js) | Reverb (PHP) | AnyCable (Go) | Cabby (Rust) |
+|---|---|---:|---:|---:|---:|
+| Idle connections | Memory with 1,000 / 10,000 clients | 116 / 149 MB | 63 / 233 MB | 54 / 280 MB | **24 / 103 MB** |
+| | Memory per extra connection | **3.7 KB** | 19.3 KB | 25.8 KB | 9.0 KB |
+| Fan-out, 1,000 clients, 50k msg/s | Delivered / p99 latency | 100% / 24.8 ms | 90% of the rate / 84 ms | 100% / 0.90 ms | 100% / **0.74 ms** |
+| Same, 100k msg/s | Delivered / p99 latency | 67% of the rate / 60 ms | 45% / 84 ms | 100% / 2.90 ms | 100% / **1.78 ms** |
+| Same, 150k msg/s | Delivered / p99 latency | 44% / 60 ms | 30% / 88 ms | 100% / 15.2 ms | 100% / **8.9 ms** |
+| | Server CPU / memory | 1.01 cores / 120 MB | 1.00 core / 64 MB | 3.08 cores / 69 MB | 2.86 cores / 29 MB |
+| Large room: 5,000 clients, 100k msg/s | Delivered / p99 latency | 73% / 4.4 s | 87% / 2.8 s | 100% / 60 ms | 100% / **49 ms** |
+| Reconnect floods: 2,000 clients, 500 then 1,000 dropped | Recovery / welcome p99 | 0.82 s / 113 ms | 0.82 s / 60 ms | 0.82 s / 1.0 ms | 0.82 s / **0.9 ms** |
+| Any workload | Missing / duplicate / out-of-order | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+
+What this shows:
+
+- **Soketi and Reverb are single event loops**, so each tops out at about one core: Soketi at about
+  66–73k deliveries/s, Reverb at about 45k (87k in the large room, where one broadcast reaches many
+  clients). Beyond that they slow down the publishers (whose queues then drop publications) but
+  lose nothing they accepted. AnyCable and Cabby use all four cores and delivered everything.
+- **Cabby has the lowest latency** at every load and the lowest total memory up to 10,000 clients.
+- **Soketi has the smallest per-connection cost** (3.7 KB, thanks to uWebSockets) on top of a
+  larger fixed baseline (about 113 MB for the Node runtime). Past roughly 18,000 connections Soketi
+  would use less memory than Cabby; if you need very many mostly idle connections per process and
+  little throughput, that's Soketi's strength.
+- **Reconnect recovery is the same for all four**: it is governed by the clients' backoff.
+
+Reproduce: `bench/soketi/setup.sh && bench/reverb/setup.sh` (the latter builds PHP into
+`bench/reverb/.php`, about 10 minutes), then `compat/scripts/bench-compare-pusher.sh`,
+`compat/scripts/bench-summary.py docs/benchmarks/pusher-results` and
+`compat/scripts/bench-charts.py docs/benchmarks/pusher-results docs/benchmarks --protocol=pusher`.
+Raw results: [`docs/benchmarks/pusher-results`](docs/benchmarks/pusher-results).
 
 ## Compatibility progress
 
