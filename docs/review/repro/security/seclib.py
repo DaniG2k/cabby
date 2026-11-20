@@ -24,7 +24,7 @@ class Server:
         self.log = open(self.log_path, "wb")
         full_env = dict(os.environ, ANYCABLE_DISABLE_TELEMETRY="true")
         full_env.update(env or {})
-        cmd = [binary, f"--port={self.port}", "--host=127.0.0.1"] + args
+        cmd = [binary, f"--port={self.port}", "--host=127.0.0.1"] + ([] if any(a.startswith("--http_broadcast_port") for a in args) else [f"--http_broadcast_port={self.port}"]) + args
         self.cmd = cmd
         self.proc = subprocess.Popen(cmd, stdout=self.log, stderr=subprocess.STDOUT, env=full_env)
         deadline = time.time() + 15

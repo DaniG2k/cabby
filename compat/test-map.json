@@ -23,7 +23,7 @@
       "pass": 923
     },
     "rust_only": {
-      "cases": 82
+      "cases": 85
     },
     "translation": {
       "reviewed": 923
@@ -26328,6 +26328,15 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "conformance::client_messages::deviation_d056_concurrent_deep_messages_are_capped",
+      "relation": "regression",
+      "links": [
+        "26a1a703:encoders/json_test.go#TestJSONEncoder/.Decode"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
       "rust_case": "conformance::client_messages::messages_nested_deeper_than_go_limit_stop_the_reader",
       "relation": "external",
       "links": [
@@ -26553,6 +26562,16 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "conformance::pusher::deviation_d055_pusher_channel_is_refused_outside_the_pusher_endpoint",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/executor_test.go#TestHandleCommand/Subscribe_(presence)",
+        "26a1a703:pusher/executor_test.go#TestHandleCommand/Subscribe_(private_+_failure_bad_signature)"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
       "rust_case": "conformance::pusher::presence_subscription",
       "relation": "external",
       "links": [
@@ -26635,6 +26654,15 @@
       "relation": "external",
       "links": [
         "26a1a703:rpc/rpc_test.go#TestWaitTimeout/Subscribe_times_out_waiting_for_a_slot"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::security::deviation_d054_extreme_ping_intervals_keep_the_session_working",
+      "relation": "regression",
+      "links": [
+        "26a1a703:features/ping.testfile#scenario"
       ],
       "reference_status": "pass",
       "rust_status": "pass"
