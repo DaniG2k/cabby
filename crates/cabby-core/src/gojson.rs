@@ -12,6 +12,8 @@
 
 use std::io;
 
+pub mod deep;
+
 use serde::Serialize;
 use serde::de::{DeserializeSeed, Visitor};
 use serde_json::ser::Formatter;

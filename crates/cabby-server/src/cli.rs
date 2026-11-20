@@ -76,9 +76,10 @@ pub fn run(config: Config) -> Result<(), CliError> {
     result
 }
 
-/// Sizes the node's command pool: twice the RPC concurrency, so commands
-/// waiting for an RPC slot leave room for those that need none, and at least
-/// the default.
+/// Sizes the node's command pool: twice the RPC concurrency and at least the
+/// default. The seats bound commands doing work; a command blocked in an RPC
+/// call gives its seat up (see `node::tasks`), so the size does not limit how
+/// many sessions wait for the RPC application.
 fn set_command_pool_size(config: &Config) {
     let rpc = usize::try_from(config.rpc.concurrency).unwrap_or(0);
     crate::node::set_command_concurrency((rpc * 2).max(crate::node::DEFAULT_COMMAND_CONCURRENCY));
