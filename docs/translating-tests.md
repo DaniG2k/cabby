@@ -114,4 +114,7 @@ cargo fmt --all && cargo clippy --workspace --all-targets
 ```
 
 A translated case that fails against Go is a translation bug until proven otherwise. If Go
-really fails, record `reference_status: upstream_failure` with evidence in `notes`.
+really fails, record `reference_status: upstream_failure` with evidence in `notes`. The Go run
+enforces the recorded statuses: a case recorded `pass` that stops passing, or a
+`not_observable`/`upstream_failure` case whose outcome changes, fails the run until the
+change is reviewed and recorded with `--record`.

@@ -3,17 +3,20 @@
 //! [`MockHandler`] stands in for upstream's `mocks.Handler`: every
 //! `HandleBroadcast`/`HandlePubSub` call is recorded with its argument and
 //! returns `nil`. On the Go backend handler and broadcasters live in the bridge
-//! (`bridge/broadcast.go`).
+//! (`bridge/broadcast.go`). The Rust HTTP broadcaster's requests go through
+//! the handler production mounts (`HttpBroadcaster::http_handler`) on Cabby's
+//! HTTP server, over a loopback connection.
 
 use std::sync::mpsc::channel;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
 use cabby_core::broadcast::{self as rs, BroadcastError};
 use cabby_server::broadcast::{
-    HttpBroadcaster, HttpConfig, HttpRequest, LegacyNatsConfig, LegacyRedisBroadcaster, LegacyRedisConfig,
-    RedisBroadcaster, RedisConfig,
+    HttpBroadcaster, HttpConfig, LegacyNatsConfig, LegacyRedisBroadcaster, LegacyRedisConfig, RedisBroadcaster,
+    RedisConfig,
 };
+use cabby_server::server::HttpServer;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -125,8 +128,40 @@ impl Default for MockHandler {
     }
 }
 
+/// The Rust HTTP broadcaster and the loopback server its endpoint is mounted
+/// on (started by the first request).
+struct HttpFacade {
+    broadcaster: HttpBroadcaster,
+    path: String,
+    server: OnceLock<Arc<HttpServer>>,
+}
+
+impl HttpFacade {
+    /// Serves one request through the mounted endpoint, as a client of the
+    /// server (`HttpBroadcaster::start` mounts the same handler at the
+    /// configured path).
+    fn serve(&self, method: &str, headers: &[(&str, &str)], body: &str) -> u16 {
+        let server = self.server.get_or_init(|| {
+            let server = HttpServer::new("127.0.0.1", "0", None, 0).expect("HTTP server");
+            server.setup_handler(&self.path, self.broadcaster.http_handler());
+            server.start().expect("HTTP server starts");
+            server
+        });
+        let addr = server.local_addr().expect("bound address");
+        crate::raw_http::request(addr, method, &self.path, headers, Some(body.as_bytes())).expect("HTTP request").status
+    }
+}
+
+impl Drop for HttpFacade {
+    fn drop(&mut self) {
+        if let Some(server) = self.server.get() {
+            server.shutdown();
+        }
+    }
+}
+
 enum BroadcasterImpl {
-    Http(HttpBroadcaster),
+    Http(Box<HttpFacade>),
     Rust(Box<dyn rs::Broadcaster>),
     Go(i64),
 }
@@ -144,7 +179,13 @@ impl Broadcaster {
     /// Upstream `NewHTTPBroadcaster(handler, &config, ...)`.
     pub fn http(handler: &MockHandler, config: &HttpConfig) -> Self {
         match backend() {
-            Backend::Rust => Self { inner: BroadcasterImpl::Http(HttpBroadcaster::new(handler.rust(), config)) },
+            Backend::Rust => Self {
+                inner: BroadcasterImpl::Http(Box::new(HttpFacade {
+                    broadcaster: HttpBroadcaster::new(handler.rust(), config),
+                    path: if config.path.is_empty() { "/".to_owned() } else { config.path.clone() },
+                    server: OnceLock::new(),
+                })),
+            },
             Backend::Go => go_new("broadcast.NewHTTPBroadcaster", handler, json!(GoHttpConfig::from(config))),
         }
     }
@@ -173,7 +214,7 @@ impl Broadcaster {
 
     fn rust(&self) -> &dyn rs::Broadcaster {
         match &self.inner {
-            BroadcasterImpl::Http(b) => b,
+            BroadcasterImpl::Http(h) => &h.broadcaster,
             BroadcasterImpl::Rust(b) => b.as_ref(),
             BroadcasterImpl::Go(_) => unreachable!(),
         }
@@ -200,7 +241,7 @@ impl Broadcaster {
     /// HTTP broadcaster only: upstream `Prepare()`.
     pub fn prepare(&self) -> Result<(), String> {
         match &self.inner {
-            BroadcasterImpl::Http(b) => b.prepare().map_err(|e| e.0),
+            BroadcasterImpl::Http(h) => h.broadcaster.prepare().map_err(|e| e.0),
             BroadcasterImpl::Go(id) => go_unit("broadcast.HTTPPrepare", json!({"Broadcaster": id})),
             BroadcasterImpl::Rust(_) => panic!("prepare() is only defined for the HTTP broadcaster"),
         }
@@ -208,14 +249,10 @@ impl Broadcaster {
 
     /// HTTP broadcaster only: serves one request through `Handler` (upstream
     /// `httptest.NewRecorder()` + `http.HandlerFunc(b.Handler).ServeHTTP`) and
-    /// returns the status code.
+    /// returns the status code. Rust: a request to the mounted endpoint.
     pub fn serve(&self, method: &str, headers: &[(&str, &str)], body: &str) -> u16 {
         match &self.inner {
-            BroadcasterImpl::Http(b) => b.handle(&HttpRequest {
-                method: method.into(),
-                headers: headers.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect(),
-                body: body.as_bytes().to_vec(),
-            }),
+            BroadcasterImpl::Http(h) => h.serve(method, headers, body),
             BroadcasterImpl::Go(id) => bridge::call(
                 "broadcast.HTTPServe",
                 json!({"Broadcaster": id, "Method": method, "Headers": headers, "Body": body}),

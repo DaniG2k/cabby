@@ -3,7 +3,8 @@
 //! Pure functions dispatch to `cabby_server::ds` or the bridge. The handler tests
 //! run on a [`Harness`] (node + `mocks.Controller` + either the handler test's
 //! `mocks.Broker` or a memory broker) with [`Handler`]s served through a recorder
-//! (`httptest.NewRecorder`) or on a loopback HTTP server (`httptest.NewServer`).
+//! (`httptest.NewRecorder`) or on a loopback HTTP server (`httptest.NewServer`;
+//! for Rust, Cabby's own HTTP server with the handler mounted as in production).
 //! Against Go the harness and the handlers live in the bridge (`bridge/ds.go`);
 //! against Rust the doubles below stand in for the testify mocks.
 //!
@@ -12,8 +13,6 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{RecvTimeoutError, channel};
 use std::sync::{Arc, Mutex};
@@ -29,7 +28,7 @@ use cabby_core::streams::{StreamsController, SubscribeRequest};
 use cabby_server::ds as rs;
 use cabby_server::metrics::{Instrumenter, Metrics};
 use cabby_server::node::{self as node_rs, Connection as _, Node, NodeOption};
-use cabby_server::server::{DefaultHeadersExtractor, HttpRequest, ResponseWriter};
+use cabby_server::server::{DefaultHeadersExtractor, HttpRequest, HttpServer, ResponseWriter};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -1306,7 +1305,7 @@ impl Handler {
                     url: String,
                 }
                 let r: R = bridge::call("ds.Handler.Listen", json!({"Handler": id, "Pattern": "/ds/"}));
-                Server { url: r.url, go: Some(id), stop: None }
+                Server { url: r.url, go: Some(id), rust: None }
             }
             None => serve_rust(self.rust.clone().expect("Rust handler"), "/ds/"),
         }
@@ -1317,7 +1316,7 @@ impl Handler {
 pub struct Server {
     url: String,
     go: Option<i64>,
-    stop: Option<Arc<AtomicBool>>,
+    rust: Option<Arc<HttpServer>>,
 }
 
 impl Server {
@@ -1370,173 +1369,22 @@ impl Drop for Server {
         {
             bridge::call::<_, Value>("ds.Handler.Close", json!({"Handler": id}));
         }
-        if let Some(stop) = &self.stop {
-            stop.store(true, Ordering::SeqCst);
-            // Wake the accept loop.
-            let _ = TcpStream::connect(self.addr());
+        if let Some(server) = &self.rust {
+            server.shutdown();
         }
     }
 }
 
 // ------------------------------------------------------------------ loopback server for the Rust handler
 
-/// `httptest.NewServer(mux)` for the Rust handler: HTTP/1.1, one request per
-/// connection, chunked streaming responses; paths outside `prefix` get 404 (the
-/// mux). The request is "done" when the client closes its side.
+/// `httptest.NewServer(mux)` for the Rust handler: Cabby's own HTTP server
+/// (`cabby_server::server`) on an ephemeral loopback port, with the handler
+/// mounted at `<prefix>*` as the CLI mounts `ds::handler` (`ds::endpoint`);
+/// other paths get the server's 404, as the mux's.
 fn serve_rust(handler: Arc<rs::Handler>, prefix: &'static str) -> Server {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-    let url = format!("http://{}", listener.local_addr().expect("addr"));
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop2 = stop.clone();
-    std::thread::spawn(move || {
-        for conn in listener.incoming() {
-            if stop2.load(Ordering::SeqCst) {
-                return;
-            }
-            let Ok(conn) = conn else { continue };
-            let h = handler.clone();
-            std::thread::spawn(move || serve_connection(h, conn, prefix));
-        }
-    });
-    Server { url, go: None, stop: Some(stop) }
-}
-
-fn serve_connection(handler: Arc<rs::Handler>, conn: TcpStream, prefix: &str) {
-    let _ = conn.set_read_timeout(Some(crate::raw_http::IO_DEADLINE));
-    let mut reader = BufReader::new(conn.try_clone().expect("clone"));
-    let mut line = String::new();
-    if reader.read_line(&mut line).is_err() {
-        return;
-    }
-    let mut parts = line.split_whitespace();
-    let (Some(method), Some(target)) = (parts.next(), parts.next()) else { return };
-    let mut headers = Vec::new();
-    let mut host = String::new();
-    loop {
-        let mut h = String::new();
-        if reader.read_line(&mut h).is_err() {
-            return;
-        }
-        let h = h.trim_end_matches(['\r', '\n']);
-        if h.is_empty() {
-            break;
-        }
-        if let Some((k, v)) = h.split_once(':') {
-            if k.eq_ignore_ascii_case("host") {
-                host = v.trim().to_owned();
-            }
-            headers.push((k.trim().to_owned(), v.trim().to_owned()));
-        }
-    }
-    let req = HttpRequest {
-        method: method.to_owned(),
-        target: target.to_owned(),
-        host,
-        headers,
-        remote_addr: conn.peer_addr().map(|a| a.to_string()).unwrap_or_default(),
-        tls: false,
-    };
-    let mut w = TcpWriter::new(conn.try_clone().expect("clone"), method == "HEAD");
-    if !target.starts_with(prefix) {
-        w.write_header(404);
-        w.finish();
-        return;
-    }
-    // The client going away cancels the request (Go's request context).
-    let done = CancellationToken::new();
-    let watch = done.clone();
-    let _ = conn.set_read_timeout(None);
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 64];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {}
-            }
-        }
-        watch.cancel();
-    });
-    // The handler finishes the response before it returns.
-    handler.serve(&req, Box::new(w), &done);
-    let _ = conn.shutdown(Shutdown::Both);
-}
-
-/// Response writer over a socket: the head goes out with the first status line,
-/// write or flush; the body is chunked (none for HEAD, 204 and 304).
-struct TcpWriter {
-    conn: TcpStream,
-    headers: http::HeaderMap,
-    head_only: bool,
-    status: Option<u16>,
-    chunked: bool,
-    /// The response is complete: later writes are dropped.
-    finished: bool,
-}
-
-impl TcpWriter {
-    fn new(conn: TcpStream, head_only: bool) -> Self {
-        Self { conn, headers: http::HeaderMap::new(), head_only, status: None, chunked: false, finished: false }
-    }
-}
-
-impl ResponseWriter for TcpWriter {
-    fn finish(&mut self) {
-        if self.finished {
-            return;
-        }
-        if self.status.is_none() {
-            self.write_header(200);
-        }
-        self.finished = true;
-        if self.chunked {
-            let _ = self.conn.write_all(b"0\r\n\r\n");
-        }
-        let _ = self.conn.flush();
-    }
-
-    fn headers_mut(&mut self) -> &mut http::HeaderMap {
-        &mut self.headers
-    }
-
-    fn write_header(&mut self, status: u16) {
-        if self.status.is_some() {
-            return;
-        }
-        self.status = Some(status);
-        let reason = http::StatusCode::from_u16(status).ok().and_then(|s| s.canonical_reason()).unwrap_or("");
-        let mut head = format!("HTTP/1.1 {status} {reason}\r\n");
-        for (k, v) in &self.headers {
-            head.push_str(&format!("{}: {}\r\n", k.as_str(), v.to_str().unwrap_or_default()));
-        }
-        self.chunked = !self.head_only && status != 204 && status != 304;
-        if self.chunked {
-            head.push_str("Transfer-Encoding: chunked\r\n");
-        } else if !self.head_only {
-            head.push_str("Content-Length: 0\r\n");
-        }
-        head.push_str("Connection: close\r\n\r\n");
-        let _ = self.conn.write_all(head.as_bytes());
-    }
-
-    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        if self.status.is_none() {
-            self.write_header(200);
-        }
-        if self.finished {
-            return Err(std::io::Error::other("http: response already finished"));
-        }
-        if self.chunked && !data.is_empty() {
-            self.conn.write_all(format!("{:x}\r\n", data.len()).as_bytes())?;
-            self.conn.write_all(data)?;
-            self.conn.write_all(b"\r\n")?;
-        }
-        Ok(data.len())
-    }
-
-    fn flush(&mut self) {
-        if self.status.is_none() {
-            self.write_header(200);
-        }
-        let _ = self.conn.flush();
-    }
+    let server = HttpServer::new("127.0.0.1", "0", None, 0).expect("HTTP server");
+    server.setup_handler(&format!("{prefix}*"), rs::endpoint(handler));
+    server.start().expect("HTTP server starts");
+    let url = format!("http://{}", server.local_addr().expect("bound address"));
+    Server { url, go: None, rust: Some(server) }
 }
