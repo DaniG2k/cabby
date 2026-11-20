@@ -12,7 +12,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -24,12 +24,14 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tungstenite::Message as WsMessage;
+use tungstenite::protocol::CloseFrame;
+use tungstenite::protocol::frame::coding::CloseCode;
 
 use crate::BenchError;
 use crate::gojson;
 use crate::net::{self, Ws};
 use crate::pusher::{self, Wire};
-use crate::runtime::{block_on, rt};
+use crate::runtime::{block_on, now_ns, rt};
 
 /// `activity_timeout` assumed when `pusher:connection_established` has none.
 const PUSHER_ACTIVITY_DEFAULT: u64 = 30;
@@ -124,6 +126,9 @@ pub(crate) enum Sink {
     /// Counted and reconciled right in the reader (pool clients): no queue and no
     /// task hand-off per message.
     Record { recorder: Arc<crate::pool::Recorder>, stream: Arc<str> },
+    /// Handed to a callback in the reader, payload decoded as for [`Sink::Merged`]
+    /// (the soak scenario's per-subscription reconciliation).
+    Callback(Arc<dyn Fn(&str) + Send + Sync>),
 }
 
 impl Clone for Sink {
@@ -134,6 +139,7 @@ impl Clone for Sink {
             Sink::Record { recorder, stream } => {
                 Sink::Record { recorder: Arc::clone(recorder), stream: Arc::clone(stream) }
             }
+            Sink::Callback(f) => Sink::Callback(Arc::clone(f)),
         }
     }
 }
@@ -154,6 +160,7 @@ impl Sink {
                 let _ = tx.send(crate::client::Message { stream: stream.to_string(), data }).await;
             }
             Sink::Record { recorder, stream } => recorder.record(stream, &payload(ev.message)),
+            Sink::Callback(f) => f(&payload(ev.message)),
         }
     }
 }
@@ -209,6 +216,8 @@ pub(crate) struct Conn {
     reader: Mutex<Option<JoinHandle<()>>>,
     raw: std::net::TcpStream,
     wire: Wire,
+    /// When the reader stopped ([`now_ns`]), 0 while it runs.
+    ended_ns: AtomicU64,
 }
 
 fn read_error(e: impl std::fmt::Display) -> BenchError {
@@ -276,6 +285,7 @@ impl Conn {
             reader: Mutex::new(None),
             raw: dialed.raw,
             wire,
+            ended_ns: AtomicU64::new(0),
         });
         let reader = match activity {
             Some(a) => rt().spawn(Arc::clone(&conn).read_loop_pusher(stream, a)),
@@ -337,6 +347,10 @@ impl Conn {
 
     /// Connection lost or closed: close every queue and resolve every wait.
     fn close_routes(&self) {
+        self.ended_ns.store(now_ns().max(1), Ordering::SeqCst);
+        // Wakes [`Conn::ended`] waiters; the reader has stopped, so nothing else
+        // depends on the token any more.
+        self.cancel.cancel();
         let routes = self.routes.lock().unwrap_or_else(|e| e.into_inner()).take();
         for route in routes.into_iter().flat_map(HashMap::into_values) {
             route.flags.signal_done();
@@ -453,6 +467,46 @@ impl Conn {
 
     pub(crate) async fn send_command(&self, c: &Command) -> Result<(), BenchError> {
         self.send_text(c.encode()).await
+    }
+
+    /// When the reader stopped (connection lost or closed), on the harness's
+    /// monotonic clock; `None` while it runs.
+    pub(crate) fn ended_ns(&self) -> Option<u64> {
+        match self.ended_ns.load(Ordering::SeqCst) {
+            0 => None,
+            t => Some(t),
+        }
+    }
+
+    /// Completes once the reader has stopped or [`Conn::close`] was called.
+    pub(crate) async fn ended(&self) {
+        self.cancel.cancelled().await;
+    }
+
+    /// Closes the connection with a WebSocket close handshake: sends a normal-closure
+    /// frame and waits up to `timeout` for the server to answer and the reader to
+    /// stop, then closes the socket ([`Conn::close`]). Returns whether the reader
+    /// stopped in time (the server completed the handshake or closed).
+    pub(crate) async fn close_clean(&self, timeout: Duration) -> bool {
+        {
+            let mut writer = self.writer.lock().await;
+            if let Some(w) = writer.as_mut() {
+                let frame = CloseFrame { code: CloseCode::Normal, reason: "".into() };
+                let _ = tokio::time::timeout(timeout, w.send(WsMessage::Close(Some(frame)))).await;
+            }
+        }
+        let reader = self.reader.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let mut in_time = true;
+        if let Some(mut r) = reader
+            && tokio::time::timeout(timeout, &mut r).await.is_err()
+        {
+            in_time = false;
+            self.cancel.cancel();
+            net::abort(&self.raw);
+            let _ = r.await;
+        }
+        self.close().await;
+        in_time
     }
 
     /// Closes the socket (no close frame, as upstream's `ws.Close()`) and waits for
