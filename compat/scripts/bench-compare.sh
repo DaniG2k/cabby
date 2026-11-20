@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
-# Go vs Cabby benchmark comparison with the external load harness (crates/cabby-bench).
+# Action Cable vs AnyCable (Go) vs Cabby benchmark comparison with the external load harness
+# (crates/cabby-bench).
 #
-# Both servers are release builds launched by the harness with identical AnyCable flags.
+# The Go and Rust servers are release builds launched by the harness with identical AnyCable
+# flags; Action Cable is the Rails app in bench/actioncable, whose `sut` wrapper takes the same
+# flags and execs Puma (see bench/actioncable/README.md). SUTS picks the servers (default all
+# three); Action Cable is skipped with a warning when its Ruby or gems are not installed.
 # The server under test is pinned to SERVER_CPUS and the generator to BENCH_CPUS (separate
 # physical cores), every configuration runs RUNS times, and each run's key=value summary is
 # kept under OUT. Runs that report generator_saturated=true are kept but excluded from the
 # summary by compat/scripts/bench-summary.py.
 #
-# Usage: compat/scripts/bench-compare.sh [OUT]   (default: docs/benchmarks/results)
+# Usage: [SUTS="actioncable anycable-go cabby"] compat/scripts/bench-compare.sh [OUT]
+#        (default OUT: docs/benchmarks/results)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -19,17 +24,32 @@ export CABBY_BENCH_THREADS="${CABBY_BENCH_THREADS:-4}"
 
 BENCH="${ROOT}/target/release/cabby-bench"
 declare -A BIN=(
-  [cabby]="${ROOT}/target/release/cabby"
+  [actioncable]="${ROOT}/bench/actioncable/sut"
   [anycable-go]="${ROOT}/target/reference-bin/anycable-go"
+  [cabby]="${ROOT}/target/release/cabby"
 )
-for b in "${BENCH}" "${BIN[cabby]}" "${BIN[anycable-go]}"; do
-  [[ -x "${b}" ]] || { echo "missing ${b}: build release binaries first" >&2; exit 1; }
+[[ -x "${BENCH}" ]] || { echo "missing ${BENCH}: build release binaries first" >&2; exit 1; }
+read -r -a REQUESTED <<<"${SUTS:-actioncable anycable-go cabby}"
+SUT_LIST=()
+for sut in "${REQUESTED[@]}"; do
+  [[ -n "${BIN[${sut}]:-}" ]] || { echo "unknown server ${sut} (actioncable, anycable-go, cabby)" >&2; exit 1; }
+  if [[ "${sut}" == actioncable ]]; then
+    if ! AC_VERSION="$("${BIN[actioncable]}" --version 2>/dev/null)"; then
+      echo "skipping actioncable: Ruby or its gems are not installed (see bench/actioncable/README.md)" >&2
+      continue
+    fi
+  elif [[ ! -x "${BIN[${sut}]}" ]]; then
+    echo "missing ${BIN[${sut}]}: build release binaries first" >&2
+    exit 1
+  fi
+  SUT_LIST+=("${sut}")
 done
+((${#SUT_LIST[@]})) || { echo "no server to benchmark" >&2; exit 1; }
 
 # exec-wrappers keep the server's PID (the harness samples /proc/<pid>) while pinning it.
 WRAP="$(mktemp -d)"
 trap 'rm -rf "${WRAP}"' EXIT
-for name in cabby anycable-go; do
+for name in "${SUT_LIST[@]}"; do
   mkdir -p "${WRAP}/${name}"
   printf '#!/bin/sh\nexec taskset -c %s %s "$@"\n' "${SERVER_CPUS}" "${BIN[${name}]}" >"${WRAP}/${name}/${name}"
   chmod +x "${WRAP}/${name}/${name}"
@@ -41,13 +61,15 @@ mkdir -p "${OUT}"
   echo "cpu=$(lscpu | sed -n 's/^Model name: *//p')"
   echo "kernel=$(uname -r)"
   echo "server_cpus=${SERVER_CPUS} bench_cpus=${BENCH_CPUS} bench_threads=${CABBY_BENCH_THREADS} runs=${RUNS}"
+  echo "suts=${SUT_LIST[*]}"
   echo "cabby=$(git -C "${ROOT}" rev-parse --short HEAD)"
   echo "anycable-go=$(sed -n 's/^commit *= *//p' "${ROOT}/compat/upstream.lock" | head -1)"
+  [[ -z "${AC_VERSION:-}" ]] || echo "actioncable=${AC_VERSION}"
 } >"${OUT}/environment.txt"
 
 run() { # run <workload-name> <scenario> <args...>
   local name="$1" scenario="$2"; shift 2
-  for sut in anycable-go cabby; do
+  for sut in "${SUT_LIST[@]}"; do
     for i in $(seq 1 "${RUNS}"); do
       local f="${OUT}/${name}.${sut}.${i}.txt"
       echo ">> ${name} ${sut} run ${i}" >&2
@@ -67,6 +89,8 @@ run fanout-100k stress_publications -c 1000 -S 100 -s 5 -r 2000 -d 20s
 run fanout-150k stress_publications -c 1000 -S 100 -s 5 -r 3000 -d 20s
 # Large room: 5000 clients on one stream.
 CABBY_BENCH_THREADS=8 run room-5k stress_publications -c 5000 -S 1 -s 1 -r 20 -d 20s
-# Churn: reconnect floods against a 5 ms RPC (connect + subscribe + disconnect over RPC).
+# Churn: reconnect floods against a 5 ms RPC (connect + subscribe + disconnect over RPC). Action
+# Cable makes no RPC calls: it sleeps the same jittered 5 ms in its connect, subscribed and
+# disconnect callbacks (the harness exports the latency to the server process).
 run churn reconnect_floods -c 2000 -s 2 --waves 500,1000 --wave-interval 10s --rpc-latency 5ms
 echo "results in ${OUT}" >&2

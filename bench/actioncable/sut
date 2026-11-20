@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Action Cable as a cabby-bench server under test (`cabby-bench <scenario> --sut bench/actioncable/sut`).
+#
+# Accepts the AnyCable CLI flags the harness passes, keeps the ones Action Cable can honour
+# (host, ports, WebSocket and broadcast paths, log level), ignores the rest (broker, pub/sub,
+# RPC, metrics, tuning) and execs Puma, so the PID the harness started is the Ruby server.
+#
+# Ruby: $ACTIONCABLE_RUBY, else mise's install of the version in .ruby-version.
+# Gems: `bundle install` into vendor/bundle first (see README.md).
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ruby="${ACTIONCABLE_RUBY:-}"
+if [[ -z "${ruby}" ]]; then
+  ruby="$(mise where "ruby@$(cat "${here}/.ruby-version")")/bin/ruby"
+fi
+bundle="$(dirname "${ruby}")/bundle"
+export PATH="$(dirname "${ruby}"):${PATH}"
+export BUNDLE_GEMFILE="${here}/Gemfile" BUNDLE_PATH="${here}/vendor/bundle" BUNDLE_FROZEN=true
+
+host=127.0.0.1 port=8080 broadcast_port="" cable_path=/cable broadcast_path=/broadcast log_level=warn
+while (($#)); do
+  arg="$1"
+  shift
+  value=""
+  case "${arg}" in
+    --*=*) value="${arg#*=}" arg="${arg%%=*}" ;;
+    --host | --port | --path | --http_broadcast_port | --http_broadcast_path | --log_level)
+      value="${1:-}"
+      shift || true
+      ;;
+  esac
+  case "${arg}" in
+    --version)
+      exec "${ruby}" "${bundle}" exec ruby -e \
+        'require "action_cable/version"; require "puma/const"
+         puts "actioncable #{ActionCable.version} (puma #{Puma::Const::PUMA_VERSION}, ruby #{RUBY_VERSION})"'
+      ;;
+    --host) host="${value}" ;;
+    --port) port="${value}" ;;
+    --http_broadcast_port) broadcast_port="${value}" ;;
+    --path) cable_path="${value}" ;;
+    --http_broadcast_path) broadcast_path="${value}" ;;
+    --log_level)
+      case "${value}" in
+        debug | info | warn | error | fatal) log_level="${value}" ;;
+        *) log_level=warn ;;
+      esac
+      ;;
+    *) ;; # other AnyCable flags have no Action Cable counterpart
+  esac
+done
+
+export RAILS_ENV=production RAILS_LOG_LEVEL="${log_level}" HOST="${host}" \
+  PORTS="${port}${broadcast_port:+,${broadcast_port}}" CABLE_PATH="${cable_path}" BROADCAST_PATH="${broadcast_path}"
+cd "${here}"
+exec "${ruby}" "${bundle}" exec puma -C config/puma.rb
