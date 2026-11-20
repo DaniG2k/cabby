@@ -20,6 +20,7 @@ macro_rules! anyt_tests {
 
 mod api;
 mod client_messages;
+mod brokers;
 mod health;
 mod issues;
 mod origin;

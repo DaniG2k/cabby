@@ -156,6 +156,12 @@ pub(crate) enum Topology {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConnectSpec {
     pub topology: Topology,
+    /// How often an idle commands connection is checked with `PING` (rueidis
+    /// `Dialer.KeepAlive`); `None` disables the check.
+    pub keepalive: Option<Duration>,
+    /// How long replies on a commands connection may take (rueidis
+    /// `ConnWriteTimeout`).
+    pub write_timeout: Duration,
     pub username: String,
     pub password: String,
     pub db: i64,
@@ -355,31 +361,59 @@ impl ConnectSpec {
 
     /// A connection for regular commands. `response_timeout: None` waits for
     /// replies indefinitely.
+    ///
+    /// Several addresses are a cluster. A single address is probed with
+    /// `CLUSTER SLOTS` first, as rueidis `NewClient` does: a node of a Redis
+    /// Cluster gets a cluster connection (seeded with that node), anything
+    /// else a plain one.
     pub(crate) async fn commands(&self, response_timeout: Option<Duration>) -> RedisResult<Commands> {
         if let Topology::Cluster(addrs) = &self.topology {
-            install_crypto_provider();
-            let nodes: Vec<ConnectionInfo> =
-                addrs.iter().map(|a| self.connection_addr(a).into_connection_info()).collect::<RedisResult<_>>()?;
-            let mut builder = ClusterClientBuilder::new(nodes)
-                .connection_timeout(self.dial_timeout.unwrap_or(Duration::from_secs(5)))
-                .response_timeout(response_timeout.unwrap_or(Duration::from_secs(365 * 24 * 3600)));
-            if !self.username.is_empty() {
-                builder = builder.username(&self.username);
-            }
-            if !self.password.is_empty() {
-                builder = builder.password(&self.password);
-            }
-            if let Some(mode) = self.tls_mode() {
-                builder = builder.tls(mode);
-            }
-            if let Some(certs) = self.certificates() {
-                builder = builder.certs(certs);
-            }
-            let client = builder.build()?;
-            return Ok(Commands::Cluster(client.get_async_connection().await?));
+            return self.cluster_commands(addrs, response_timeout).await;
         }
         let config = self.connection_config(response_timeout);
-        Ok(Commands::Single(self.first_connection(ProtocolVersion::RESP2, &config).await?))
+        let mut conn = self.first_connection(ProtocolVersion::RESP2, &config).await?;
+        if let Topology::Single(addr @ Addr::Tcp(..)) = &self.topology
+            && is_cluster_node(&mut conn).await?
+        {
+            return self.cluster_commands(std::slice::from_ref(addr), response_timeout).await;
+        }
+        Ok(Commands::Single(conn))
+    }
+
+    async fn cluster_commands(&self, addrs: &[Addr], response_timeout: Option<Duration>) -> RedisResult<Commands> {
+        install_crypto_provider();
+        let nodes: Vec<ConnectionInfo> =
+            addrs.iter().map(|a| self.connection_addr(a).into_connection_info()).collect::<RedisResult<_>>()?;
+        let mut builder = ClusterClientBuilder::new(nodes)
+            .connection_timeout(self.dial_timeout.unwrap_or(Duration::from_secs(5)))
+            .response_timeout(response_timeout.unwrap_or(Duration::from_secs(365 * 24 * 3600)));
+        if !self.username.is_empty() {
+            builder = builder.username(&self.username);
+        }
+        if !self.password.is_empty() {
+            builder = builder.password(&self.password);
+        }
+        if let Some(mode) = self.tls_mode() {
+            builder = builder.tls(mode);
+        }
+        if let Some(certs) = self.certificates() {
+            builder = builder.certs(certs);
+        }
+        let client = builder.build()?;
+        Ok(Commands::Cluster(client.get_async_connection().await?))
+    }
+}
+
+/// rueidis' cluster probe: a node answering `CLUSTER SLOTS` with slots belongs
+/// to a Redis Cluster. Servers without cluster support answer with an error
+/// (`cluster support disabled`, an unknown or forbidden command), which means
+/// a standalone server; only a lost connection is an error.
+async fn is_cluster_node(conn: &mut MultiplexedConnection) -> RedisResult<bool> {
+    match redis::cmd("CLUSTER").arg("SLOTS").query_async::<Value>(conn).await {
+        Ok(Value::Array(slots)) => Ok(!slots.is_empty()),
+        Ok(_) => Ok(false),
+        Err(e) if e.is_io_error() || e.is_timeout() || e.is_connection_dropped() => Err(e),
+        Err(_) => Ok(false),
     }
 }
 

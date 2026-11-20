@@ -94,7 +94,7 @@ pub struct RedisSubscriber {
     redis: RedisClientConfig,
     spec: crate::redis::connect::ConnectSpec,
     subscriptions: Arc<redis_sub::Subscriptions>,
-    publisher: std::sync::Mutex<Option<crate::redis::publisher::Publisher>>,
+    publisher: std::sync::Mutex<Option<Arc<crate::redis::publisher::Publisher>>>,
 }
 
 use crate::redis::subscription as redis_sub;
@@ -137,6 +137,8 @@ impl RedisSubscriber {
             connected_msg: "connected",
             reconnected_msg: "reconnected",
             exhausted_error: "failed to reconnect to Redis: attempts exceeded",
+            lost: &[(cabby_core::logger::Level::Error, "Redis pub/sub disconnected")],
+            attrs: Vec::new(),
         });
         Ok(Self {
             node,
@@ -149,7 +151,9 @@ impl RedisSubscriber {
     }
 
     fn publish(&self, channel: &str, payload: Vec<u8>) {
-        if let Some(p) = self.publisher.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        // Publishing may wait for room in the queue: not under the lock.
+        let publisher = self.publisher.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(p) = publisher {
             p.publish(channel, payload);
         }
     }
@@ -169,7 +173,7 @@ impl Subscriber for RedisSubscriber {
 
         let mut publisher = self.publisher.lock().unwrap_or_else(|e| e.into_inner());
         if publisher.is_none() {
-            *publisher = Some(crate::redis::publisher::Publisher::start(self.spec.clone(), "pubsub"));
+            *publisher = Some(Arc::new(crate::redis::publisher::Publisher::start(self.spec.clone(), "pubsub")));
         }
         drop(publisher);
 
@@ -257,8 +261,15 @@ impl NatsSubscriber {
     }
 
     fn publish(&self, subject: &str, payload: Vec<u8>) {
-        if let Some(c) = self.conn() {
-            c.publish(subject, payload);
+        if let Some(c) = self.conn()
+            && let Err(e) = c.publish(subject, payload)
+        {
+            crate::redis::log(
+                cabby_core::logger::Level::Error,
+                "pubsub",
+                "failed to publish message",
+                &[("error", e.0)],
+            );
         }
     }
 }

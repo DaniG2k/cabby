@@ -1,6 +1,7 @@
 //! Utilities (upstream package `utils`): worker pool, message verifier,
 //! priority queue and the session send queue.
 
+pub mod backpressure;
 mod gopool;
 pub mod localtime;
 mod message_verifier;
