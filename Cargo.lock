@@ -324,10 +324,12 @@ name = "cabby-testkit"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-nats",
  "bytes",
  "cabby-bench",
  "cabby-core",
  "cabby-server",
+ "futures-util",
  "hex",
  "hmac",
  "http",

@@ -1046,6 +1046,9 @@ impl PusherEvent {
     }
 }
 
+/// Pusher's limit on events per `batch_events` request.
+pub const MAX_BATCH_EVENTS: usize = 10;
+
 /// Upstream `PusherBroadcast`.
 #[derive(Serialize)]
 struct PusherBroadcast<'a> {
@@ -1278,6 +1281,9 @@ impl RestApi {
                     return ApiResponse::status(401);
                 }
 
+                if request_path(uri).ends_with("/batch_events") {
+                    return self.handle_batch_events(&body);
+                }
                 self.handle_events(&body)
             }
             Authorized::Get => self.handle_get_users(&request_path(uri)),
@@ -1292,7 +1298,56 @@ impl RestApi {
                 return ApiResponse::status(422);
             }
         };
+        self.broadcast_event(&event);
 
+        // Go's server sniffs the content type of the `{}` body.
+        ApiResponse { status: 200, content_type: Some("text/plain; charset=utf-8"), body: b"{}".to_vec() }
+    }
+
+    /// Pusher's `POST /apps/<id>/batch_events`: `{"batch": [event, ...]}`, at most
+    /// [`MAX_BATCH_EVENTS`] events, each with its own `channel`, `name`, `data` and
+    /// optional `socket_id`. Upstream has no batch endpoint: it decodes the batch as a
+    /// single event without channels, broadcasts nothing and answers 200 (D-057).
+    fn handle_batch_events(&self, body: &[u8]) -> ApiResponse {
+        let events = match serde_json::from_slice::<Value>(body).ok().and_then(|v| match v {
+            Value::Object(mut obj) => match obj.remove("batch") {
+                Some(Value::Array(items)) => Some(items),
+                _ => None,
+            },
+            _ => None,
+        }) {
+            Some(items) => items,
+            None => {
+                log(Level::Error, "failed to parse Pusher batch", &[]);
+                return ApiResponse::status(422);
+            }
+        };
+        if events.len() > MAX_BATCH_EVENTS {
+            log(Level::Debug, "Pusher batch too large", &[Attr::new("size", LogValue::Int(events.len() as i64))]);
+            return ApiResponse {
+                status: 400,
+                content_type: Some("text/plain; charset=utf-8"),
+                body: format!("Batch too large ({} > {MAX_BATCH_EVENTS})", events.len()).into_bytes(),
+            };
+        }
+        let mut decoded = Vec::with_capacity(events.len());
+        for item in &events {
+            match PusherEvent::decode(&serde_json::to_vec(item).unwrap_or_default()) {
+                Ok(event) => decoded.push(event),
+                Err(_) => {
+                    log(Level::Error, "failed to parse Pusher event", &[]);
+                    return ApiResponse::status(422);
+                }
+            }
+        }
+        for event in &decoded {
+            self.broadcast_event(event);
+        }
+        ApiResponse { status: 200, content_type: Some("text/plain; charset=utf-8"), body: b"{}".to_vec() }
+    }
+
+    /// Broadcasts one decoded event to its channels (upstream `handleEvents` body).
+    fn broadcast_event(&self, event: &PusherEvent) {
         let channels = if event.channel.is_empty() { event.channels.clone() } else { vec![event.channel.clone()] };
 
         log(
@@ -1319,9 +1374,6 @@ impl RestApi {
             // Upstream ignores the result.
             let _ = self.handler.handle_broadcast(&gojson::to_vec(&msg));
         }
-
-        // Go's server sniffs the content type of the `{}` body.
-        ApiResponse { status: 200, content_type: Some("text/plain; charset=utf-8"), body: b"{}".to_vec() }
     }
 
     fn handle_get_users(&self, path: &str) -> ApiResponse {

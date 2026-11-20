@@ -727,16 +727,40 @@ impl Drop for NatsBroker {
 
 /// Upstream test helper `consumerSequence(js, stream, offset).read(n)`: stream
 /// sequence numbers of the next `n` messages of the broker's JetStream stream
-/// for `stream`, read from `offset`. This is NATS-side test tooling (a Go
-/// JetStream client in the bridge), independent of the backend under test; the
-/// stream name is the broker's wire contract (`_ac_<stream>`).
+/// for `stream`, read from `offset`. This is NATS-side test tooling, independent of
+/// the backend under test, so it is written with async-nats rather than through the
+/// Go bridge (Cabby's own tests then need no Go toolchain). As upstream: an
+/// ephemeral consumer with explicit acks, starting at `offset` when it is non-zero,
+/// and a 1 s wait per message. The stream name is the broker's wire contract
+/// (`_ac_<stream>`).
 pub fn consumer_sequence(servers: &str, stream: &str, offset: u64, n: usize) -> Result<Vec<u64>, String> {
-    let r: GoReply = bridge::call(
-        "broker.test.ConsumerSequence",
-        json!({"servers": servers, "stream": stream, "offset": offset, "n": n}),
-    );
-    match r.error {
-        Some(e) => Err(e),
-        None => Ok(serde_json::from_value(r.result).expect("sequence numbers")),
-    }
+    use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, pull};
+    use futures_util::StreamExt as _;
+
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
+    rt.block_on(async {
+        let client = async_nats::connect(servers).await.map_err(|e| e.to_string())?;
+        let js = async_nats::jetstream::new(client);
+        let stream = js.get_stream(format!("_ac_{stream}")).await.map_err(|e| e.to_string())?;
+        let mut config = pull::Config { ack_policy: AckPolicy::Explicit, ..Default::default() };
+        if offset > 0 {
+            config.deliver_policy = DeliverPolicy::ByStartSequence { start_sequence: offset };
+        }
+        let consumer = stream.create_consumer(config).await.map_err(|e| e.to_string())?;
+        let mut messages = consumer.messages().await.map_err(|e| e.to_string())?;
+        let mut out = Vec::with_capacity(n);
+        while out.len() < n {
+            match tokio::time::timeout(std::time::Duration::from_secs(1), messages.next()).await {
+                Ok(Some(Ok(msg))) => out.push(msg.info().map_err(|e| e.to_string())?.stream_sequence),
+                Ok(Some(Err(e))) => return Err(e.to_string()),
+                Ok(None) | Err(_) => {
+                    return Err(format!(
+                        "timed out to read from consumer; received {} messages, expected {n}",
+                        out.len()
+                    ));
+                }
+            }
+        }
+        Ok(out)
+    })
 }
