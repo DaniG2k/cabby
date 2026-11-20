@@ -716,9 +716,9 @@ pub fn client_closed<B>(req: &http::Request<B>) -> Option<CancellationToken> {
 struct HeaderTimeout<I> {
     io: I,
     conn: Arc<ConnState>,
-    sleep: Pin<Box<tokio::time::Sleep>>,
-    /// The sleep's deadline belongs to the current head.
-    armed: bool,
+    /// The deadline of the head being read; `None` outside a head, so a
+    /// long-lived (keep-alive or upgraded) connection holds no timer.
+    sleep: Option<Pin<Box<tokio::time::Sleep>>>,
     /// Bytes received while idle.
     idle_bytes: usize,
     /// The client closed its side while a request was served (see
@@ -729,12 +729,11 @@ struct HeaderTimeout<I> {
 impl<I> HeaderTimeout<I> {
     fn new(io: I, conn: Arc<ConnState>) -> Self {
         let deadline = tokio::time::Instant::now() + READ_HEADER_TIMEOUT;
-        Self { io, conn, sleep: Box::pin(tokio::time::sleep_until(deadline)), armed: true, idle_bytes: 0, eof: false }
+        Self { io, conn, sleep: Some(Box::pin(tokio::time::sleep_until(deadline))), idle_bytes: 0, eof: false }
     }
 
     fn arm(&mut self) {
-        self.sleep.as_mut().reset(tokio::time::Instant::now() + READ_HEADER_TIMEOUT);
-        self.armed = true;
+        self.sleep = Some(Box::pin(tokio::time::sleep_until(tokio::time::Instant::now() + READ_HEADER_TIMEOUT)));
     }
 }
 
@@ -759,14 +758,14 @@ impl<I: AsyncRead + Unpin> AsyncRead for HeaderTimeout<I> {
             return Poll::Ready(Ok(()));
         }
         if phase == PHASE_HEAD {
-            if !this.armed {
+            if this.sleep.is_none() {
                 this.arm();
             }
-            if tokio::time::Instant::now() >= this.sleep.deadline() {
+            if this.sleep.as_ref().is_some_and(|s| tokio::time::Instant::now() >= s.deadline()) {
                 return Poll::Ready(Err(header_timeout_error()));
             }
         } else {
-            this.armed = false;
+            this.sleep = None;
         }
         if phase != PHASE_IDLE {
             this.idle_bytes = 0;
@@ -798,7 +797,7 @@ impl<I: AsyncRead + Unpin> AsyncRead for HeaderTimeout<I> {
                     this.arm();
                 }
             }
-            (PHASE_HEAD, Poll::Pending) if this.sleep.as_mut().poll(cx).is_ready() => {
+            (PHASE_HEAD, Poll::Pending) if this.sleep.as_mut().is_some_and(|s| s.as_mut().poll(cx).is_ready()) => {
                 return Poll::Ready(Err(header_timeout_error()));
             }
             _ => {}
