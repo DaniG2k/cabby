@@ -47,14 +47,14 @@ use std::sync::{
 };
 
 use crate::common::{self, DisconnectMessage, RemoteDisconnectMessage, Reply, StreamMessage, filtered_identifier};
-use crate::logger::{LogValuer, Logger};
-use crate::{log_debug, log_error, log_warn};
 /// The messages a hub hands to sessions (upstream `encoders.EncodedMessage`, which
 /// the hub always passes as an `encoders.CachedEncodedMessage`). Its `to_json` is
 /// the `encoders.JSON` payload.
 pub use crate::encoders::CachedEncodedMessage as EncodedMessage;
 pub use crate::encoders::{CachedEncodedMessage, SharedFrame};
+use crate::logger::{LogValuer, Logger};
 use crate::utils::GoPool;
+use crate::{log_debug, log_error, log_warn};
 
 /// Capacity of each gate's broadcast queue (upstream `make(chan ..., 256)`).
 pub const BROADCAST_QUEUE_SIZE: usize = 256;

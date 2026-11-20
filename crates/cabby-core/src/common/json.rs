@@ -178,9 +178,9 @@ fn decode_error(e: serde_json::Error) -> DecodeError {
 /// Nesting is limited as on the current thread (see [`gojson::deep`]).
 fn decode_with<'de, S: DeserializeSeed<'de>>(raw: &'de [u8], seed: S) -> Result<S::Value, DecodeError> {
     let mut de = gojson::deep::deserializer(raw).map_err(DecodeError)?;
-    let value = seed.deserialize(&mut de).map_err(decode_error)?;
-    de.end().map_err(decode_error)?;
-    Ok(value)
+    let res = seed.deserialize(&mut de).and_then(|value| de.end().map(|()| value));
+    // Go checks the syntax before decoding: a syntax error wins over a type error.
+    res.map_err(|e| gojson::syntax::syntax_error(raw).map_or_else(|| decode_error(e), DecodeError))
 }
 
 /// Decodes a Go struct value in place: `null` leaves it untouched, an object merges
@@ -583,6 +583,9 @@ pub(super) fn decode_pub_sub_message(raw: &[u8]) -> Result<PubSubMessage, Decode
         _ => {}
     }
 
+    if let Some(e) = top_level_type_error(raw, "common.RemoteCommandMessage") {
+        return Err(e);
+    }
     let mut cmd = RemoteCommandMessage::default();
     decode_with(raw, InPlace(&mut cmd))?;
     if cmd.command.is_empty() {
@@ -595,9 +598,26 @@ pub(super) fn decode_remote_disconnect(raw: &[u8]) -> Result<RemoteDisconnectMes
     if first_byte(raw).is_none() {
         return Err(DecodeError("unexpected end of JSON input".to_owned()));
     }
+    if let Some(e) = top_level_type_error(raw, "common.RemoteDisconnectMessage") {
+        return Err(e);
+    }
     let mut msg = RemoteDisconnectMessage::default();
     decode_with(raw, InPlace(&mut msg))?;
     Ok(msg)
+}
+
+/// Go's `json.Unmarshal` error for valid JSON whose top-level value is not an
+/// object (or null) when decoding into the struct `go_type`.
+fn top_level_type_error(raw: &[u8], go_type: &str) -> Option<DecodeError> {
+    let kind = match first_byte(raw)? {
+        b'"' => "string",
+        b'[' => "array",
+        b't' | b'f' => "bool",
+        b'-' | b'0'..=b'9' => "number",
+        _ => return None,
+    };
+    serde_json::from_slice::<serde::de::IgnoredAny>(raw).ok()?;
+    Some(DecodeError(format!("json: cannot unmarshal {kind} into Go value of type {go_type}")))
 }
 
 #[cfg(test)]
