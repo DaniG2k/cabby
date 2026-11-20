@@ -7,9 +7,10 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, RwLock};
 
 use cabby_core::broadcast::{BroadcastError, Broadcaster, Handler};
-use cabby_core::logger::{Attr, Level, LogValue};
+use cabby_core::logger::{Attr, Level, LogValue, Logger};
 use cabby_core::toml_config::{self, TomlSection};
 use cabby_core::utils::MessageVerifier;
+use cabby_core::{log_at, log_debug, log_info};
 
 use crate::server::{self as http_server, HttpServer};
 
@@ -193,8 +194,8 @@ impl HttpBroadcaster {
             Err(resp) => resp,
             Ok(headers) => {
                 let max = inner.max_body_size();
-                if max.is_some_and(|max| request.body.len() as u64 > max) {
-                    log(Level::Debug, "request body is too large", &[]);
+                if let Some(max) = max.filter(|max| request.body.len() as u64 > *max) {
+                    log(Level::Debug, "request body is too large", &[Attr::new("limit", LogValue::Uint(max))]);
                     return HttpResponse::status(413, headers);
                 }
                 HttpResponse::status(inner.deliver(&request.body), headers)
@@ -368,9 +369,9 @@ impl RedisConfig {
 /// by one node.
 pub struct RedisBroadcaster {
     stream: String,
-    consumer: String,
     redis: RedisClientConfig,
     streamer: crate::redis::Streamer,
+    log: Logger,
 }
 
 impl RedisBroadcaster {
@@ -378,14 +379,11 @@ impl RedisBroadcaster {
         let name = crate::redis::connect::nanoid6();
         let redis = crate::redis::or_defaults(config.redis.as_ref());
         // Upstream: `l.With("context", "broadcast").With("provider", "redisx").With("consumer", name)`.
-        let log = crate::redis::LogContext {
-            context: "broadcast",
-            attrs: vec![("provider", "redisx".to_owned()), ("consumer", name.clone())],
-        };
-        let attrs = log.attrs.clone();
+        let log = Logger::default().with("context", "broadcast").with("provider", "redisx").with("consumer", &name);
+        let handler_log = log.clone();
         let handler: crate::redis::StreamHandler = Arc::new(move |message| match message.get("payload") {
             Some(payload) => {
-                crate::redis::log(cabby_core::logger::Level::Debug, "broadcast", "received broadcast", &attrs);
+                log_debug!(handler_log, "received broadcast");
                 node.handle_broadcast(payload.as_bytes()).map_err(|e| crate::redis::RedisError(e.0))
             }
             None => Err(crate::redis::RedisError("missing payload field".to_owned())),
@@ -399,9 +397,9 @@ impl RedisBroadcaster {
                 consumer_name: Some(name.clone()),
                 handler: Some(handler),
             },
-            log,
+            log.clone(),
         );
-        Self { stream: config.stream.clone(), consumer: name, redis, streamer }
+        Self { stream: config.stream.clone(), redis, streamer, log }
     }
 }
 
@@ -421,12 +419,7 @@ impl Broadcaster for RedisBroadcaster {
         } else {
             format!("Starting Redis broadcaster at {}", redis.hostname())
         };
-        crate::redis::log(
-            cabby_core::logger::Level::Info,
-            "broadcast",
-            &msg,
-            &[("provider", "redisx".to_owned()), ("consumer", self.consumer.clone()), ("stream", self.stream.clone())],
-        );
+        log_info!(self.log, &msg, "stream" => &self.stream);
         Ok(())
     }
 
@@ -474,21 +467,18 @@ pub struct LegacyRedisBroadcaster {
     redis: RedisClientConfig,
     subscriptions: Arc<crate::redis::subscription::Subscriptions>,
     started: std::sync::atomic::AtomicBool,
+    log: Logger,
 }
 
 /// Hands pub/sub payloads to the node (upstream `OnMessage` hook).
 struct PubSubSink {
     node: Arc<dyn Handler>,
+    log: Logger,
 }
 
 impl crate::redis::subscription::Sink for PubSubSink {
     fn message(&self, _channel: &str, payload: &[u8]) {
-        crate::redis::log(
-            cabby_core::logger::Level::Debug,
-            "broadcast",
-            "received pubsub message",
-            &[("provider", "redis".to_owned())],
-        );
+        log_debug!(self.log, "received pubsub message");
         self.node.handle_pubsub(payload);
     }
 }
@@ -496,21 +486,22 @@ impl crate::redis::subscription::Sink for PubSubSink {
 impl LegacyRedisBroadcaster {
     pub fn new(node: Arc<dyn Handler>, config: &LegacyRedisConfig) -> Self {
         let redis = crate::redis::or_defaults(config.redis.as_ref());
+        let log = Logger::default().with("context", "broadcast").with("provider", "redis");
         let subscriptions = crate::redis::subscription::Subscriptions::new(crate::redis::subscription::Settings {
-            context: "broadcast",
+            log: log.clone(),
             primary: config.channel.clone(),
             max_reconnect_attempts: redis.max_reconnect_attempts,
             connected_msg: "subscribed to Redis channel",
             reconnected_msg: "reconnected to Redis channel",
             exhausted_error: "Redis reconnect attempts exceeded",
+            subscribe_failed: "failed to subscribe to Redis channel",
             lost: &[
                 (cabby_core::logger::Level::Error, "Redis subscription error"),
                 (cabby_core::logger::Level::Warn, "Redis connection failed"),
             ],
-            attrs: vec![("provider", "redis".to_owned())],
         });
         subscriptions.subscribe(&config.channel);
-        Self { node, redis, subscriptions, started: std::sync::atomic::AtomicBool::new(false) }
+        Self { node, redis, subscriptions, started: std::sync::atomic::AtomicBool::new(false), log }
     }
 }
 
@@ -527,12 +518,12 @@ impl Broadcaster for LegacyRedisBroadcaster {
         } else {
             cabby_core::logger::Level::Debug
         };
-        crate::redis::log(level, "broadcast", &msg, &[("provider", "redis".to_owned())]);
+        log_at!(self.log, level, &msg);
 
         self.started.store(true, std::sync::atomic::Ordering::SeqCst);
         self.subscriptions.start(
             spec,
-            Arc::new(PubSubSink { node: Arc::clone(&self.node) }),
+            Arc::new(PubSubSink { node: Arc::clone(&self.node), log: self.log.clone() }),
             Box::new(move |err| {
                 let _ = done.send(BroadcastError(err));
             }),
@@ -544,12 +535,7 @@ impl Broadcaster for LegacyRedisBroadcaster {
         if !self.started.swap(false, std::sync::atomic::Ordering::SeqCst) {
             return Ok(());
         }
-        crate::redis::log(
-            cabby_core::logger::Level::Debug,
-            "broadcast",
-            "shutting down Redis pub/sub",
-            &[("provider", "redis".to_owned())],
-        );
+        log_debug!(self.log, "shutting down Redis pub/sub");
         self.subscriptions.shutdown(std::time::Duration::from_secs(2));
         Ok(())
     }
@@ -592,12 +578,18 @@ pub struct LegacyNatsBroadcaster {
     node: Arc<dyn Handler>,
     config: LegacyNatsConfig,
     conn: std::sync::Mutex<Option<cabby_core::nats::client::Connection>>,
+    log: Logger,
 }
 
 impl LegacyNatsBroadcaster {
     /// Upstream `NewLegacyNATSBroadcaster(node, config)`.
     pub fn new(node: Arc<dyn Handler>, config: &LegacyNatsConfig) -> Self {
-        Self { node, config: config.clone(), conn: std::sync::Mutex::new(None) }
+        Self {
+            node,
+            config: config.clone(),
+            conn: std::sync::Mutex::new(None),
+            log: Logger::default().with("context", "broadcast").with("provider", "nats"),
+        }
     }
 }
 
@@ -605,14 +597,18 @@ impl Broadcaster for LegacyNatsBroadcaster {
     fn start(&self, _done: Sender<BroadcastError>) -> Result<(), BroadcastError> {
         let nats = self.config.nats.clone().ok_or_else(|| BroadcastError("NATS configuration is missing".into()))?;
         let node = self.node.clone();
-        let conn = cabby_core::nats::client::Connection::open(&nats, "cabby-nats-broadcast", move |msg| {
-            node.handle_pubsub(&msg.payload)
-        })
-        .map_err(|e| BroadcastError(e.0))?;
+        let log = self.log.clone();
+        let conn =
+            cabby_core::nats::client::Connection::open(&nats, "cabby-nats-broadcast", self.log.clone(), move |msg| {
+                log_debug!(log, "received pubsub message");
+                node.handle_pubsub(&msg.payload)
+            })
+            .map_err(|e| BroadcastError(e.0))?;
         if let Err(e) = conn.subscribe_sync(&self.config.channel) {
             conn.close();
             return Err(BroadcastError(e.0));
         }
+        log_info!(self.log, "subscribing for broadcasts", "channel" => &self.config.channel);
         *self.conn.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(conn);
         Ok(())
     }
