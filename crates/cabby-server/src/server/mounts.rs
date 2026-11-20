@@ -33,7 +33,10 @@ pub fn api_handler(server: Arc<api::Server>, max_body_size: i64) -> impl Handler
                 Ok(body) => body.to_vec(),
                 // Any body over the limit makes the API answer 413.
                 Err(BodyError::TooLarge(limit)) => vec![0; usize::try_from(limit).unwrap_or(usize::MAX - 1) + 1],
-                Err(BodyError::Read(_)) => return status_response(422),
+                Err(BodyError::Read(e)) => {
+                    cabby_core::log_error!(api::api_logger(), "failed to read request body", "error" => e);
+                    return status_response(422);
+                }
             };
             let request = api::HttpRequest {
                 method: parts.method.as_str().to_owned(),

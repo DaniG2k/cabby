@@ -23,6 +23,7 @@ mod brokers;
 mod client_messages;
 mod health;
 mod issues;
+mod logging_server;
 mod origin;
 mod pusher;
 mod rpc_sessions;
