@@ -12,6 +12,13 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 php="${REVERB_PHP:-${here}/.php/bin/php}"
+# The build's compiled-in paths point where it was built; pass its php.ini and extension
+# directory explicitly so a moved bench/reverb/.php still loads ext-ev and the memory limit.
+php_args=()
+if [[ -z "${REVERB_PHP:-}" ]]; then
+  ext_dir="$(ls -d "${here}"/.php/lib/php/extensions/*/ 2>/dev/null | head -1)"
+  php_args=(-c "${here}/.php/etc/php.ini" -d "extension_dir=${ext_dir%/}")
+fi
 
 host=127.0.0.1 port=8080 app_id="" app_key="" secret=""
 while (($#)); do
@@ -28,7 +35,7 @@ while (($#)); do
   case "${arg}" in
     --version)
       cd "${here}"
-      exec "${php}" -r 'require "vendor/autoload.php";
+      exec "${php}" "${php_args[@]}" -r 'require "vendor/autoload.php";
         printf("reverb %s (laravel %s, php %s, event loop %s)\n",
           Composer\InstalledVersions::getPrettyVersion("laravel/reverb"),
           Composer\InstalledVersions::getPrettyVersion("laravel/framework"), PHP_VERSION,
@@ -55,4 +62,4 @@ export APP_ENV=production APP_DEBUG=false APP_KEY="base64:Y2FiYnktYmVuY2gtcmV2ZX
   REVERB_SERVER_HOST="${host}" REVERB_SERVER_PORT="${port}" \
   REVERB_APP_ID="${app_id}" REVERB_APP_KEY="${app_key}" REVERB_APP_SECRET="${secret}"
 cd "${here}"
-exec "${php}" artisan reverb:start --host="${host}" --port="${port}" --no-interaction
+exec "${php}" "${php_args[@]}" artisan reverb:start --host="${host}" --port="${port}" --no-interaction
