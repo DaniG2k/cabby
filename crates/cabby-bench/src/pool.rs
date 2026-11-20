@@ -9,6 +9,7 @@ use crate::BenchError;
 use crate::client::Client;
 use crate::counter::Accumulator;
 use crate::ledger::{ClientLedger, DeliveryLedger};
+use crate::pusher::Wire;
 use crate::rng::Rng;
 use crate::runtime::{block_on, rt};
 
@@ -34,6 +35,9 @@ pub struct PoolConfig {
     pub streams: Option<Vec<Vec<String>>>,
     pub on_connect: Option<PoolHook>,
     pub on_subscribe: Option<PoolHook>,
+    /// Wire format of the clients (Action Cable `$pubsub` streams, or public Pusher
+    /// channels).
+    pub wire: Wire,
 }
 
 struct Entry {
@@ -111,12 +115,12 @@ impl ClientPool {
         let mut tasks = Vec::with_capacity(cfg.c);
         for (idx, streams) in subsets.into_iter().enumerate() {
             let permit = Arc::clone(&sem).acquire_owned().await.expect("semaphore open");
-            let url = cfg.server_url.clone();
+            let (url, wire) = (cfg.server_url.clone(), cfg.wire);
             let (on_connect, on_subscribe) = (cfg.on_connect.clone(), cfg.on_subscribe.clone());
             let recorder = Arc::new(Recorder::new(idx.to_string(), cfg.accumulator.clone(), cfg.ledger.clone()));
             tasks.push(rt().spawn(async move {
                 let _permit = permit;
-                let client = Client::build(&url).map_err(|e| format!("client {idx}: build: {e}"))?;
+                let client = Client::build_with(&url, wire).map_err(|e| format!("client {idx}: build: {e}"))?;
                 client.record_into(recorder);
                 if let Err(e) = client.connect_async(None).await {
                     client.close_async().await;

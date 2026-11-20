@@ -650,6 +650,7 @@ pub fn build_pool(cfg: PoolConfig<'_>) -> PoolBuild {
                 streams: cfg.streams,
                 on_connect: None,
                 on_subscribe: None,
+                wire: Default::default(),
             });
             match r {
                 Ok(p) => PoolBuild { pool: Some(ClientPool::Rust(p)), error: None },
@@ -1057,6 +1058,8 @@ impl ReconnectingClient {
                     backoff: cfg.backoff,
                     stats: Arc::clone(stats),
                     seed: cfg.seed,
+                    wire: Default::default(),
+                    keepalive: Duration::ZERO,
                 },
             )),
             ClientStats::Go(stats) => {
