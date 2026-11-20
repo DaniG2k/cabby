@@ -5,13 +5,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use bytes::Bytes;
 use cabby_core::logger::{Attr, Level, LogValue};
 
 use crate::config::Config;
-use crate::node::{Connection, ConnectionError, Node, ReadPermit, Session, SessionOption, SessionReader};
+use crate::node::{Connection, Node, Session, SessionOption};
 use crate::server::{DefaultHeadersExtractor, RequestInfo};
-use crate::ws::{self, InboundHandler, SessionCallback, SessionHandler, WsConnection};
+use crate::ws::{self, SessionCallback, SessionHandler, WsConnection};
 
 const PING_INTERVAL_PARAMETER: &str = "pi";
 const PING_PRECISION_PARAMETER: &str = "ptp";
@@ -140,19 +139,6 @@ pub(super) fn headers_extractor(c: &Config) -> DefaultHeadersExtractor {
     }
 }
 
-/// Hands a WebSocket's messages to its session's reader.
-struct Inbound(SessionReader);
-
-impl InboundHandler for Inbound {
-    fn on_message(&self, msg: Bytes, permit: ws::ReadPermit) {
-        self.0.message(msg, Box::new(permit) as ReadPermit);
-    }
-
-    fn on_end(&self, err: ConnectionError) {
-        self.0.end(err);
-    }
-}
-
 /// Upstream `Runner.defaultWebSocketHandler`: an Action Cable session per
 /// connection, authenticated on connect, then served without a thread of its
 /// own (the connection pushes messages to the session's reader).
@@ -189,7 +175,7 @@ pub(super) fn default_websocket_handler(node: Arc<Node>, c: &Config) -> ws::Webs
             }
         });
 
-        conn.set_inbound_handler(Arc::new(Inbound(session.reader(callback))));
+        conn.set_inbound_handler(Arc::new(session.reader(callback)));
         Ok(())
     });
     ws::websocket_handler(action_cable_protocols(), Some(Arc::new(headers_extractor(c))), &c.ws, handler)

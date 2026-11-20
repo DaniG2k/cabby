@@ -16,6 +16,7 @@ use cabby_core::common::{
 use cabby_core::encoders::{EncodedMessage, EncodedMessageJson};
 use cabby_core::utils::GoPool;
 
+use super::call_context::with_close_context;
 use super::disconnect_queue::context_done;
 use super::session::go_value_text;
 use super::*;
@@ -600,7 +601,8 @@ impl Node {
         }
 
         let env = s.get_env();
-        let Outcome { result, error } = self.controller().authenticate(&s.get_id(), Some(&env));
+        let Outcome { result, error } =
+            with_close_context(s.close_context(), || self.controller().authenticate(&s.get_id(), Some(&env)));
 
         if s.is_closed() {
             return Ok(None);
@@ -706,7 +708,9 @@ impl Node {
         }
 
         let env = s.get_env();
-        let Outcome { result, error } = self.controller().subscribe(&s.get_id(), Some(&env), &env.identifiers, id);
+        let Outcome { result, error } = with_close_context(s.close_context(), || {
+            self.controller().subscribe(&s.get_id(), Some(&env), &env.identifiers, id)
+        });
 
         if s.is_closed() || (result.is_none() && error.is_none()) {
             return Ok(None);
@@ -754,8 +758,9 @@ impl Node {
         }
 
         let env = s.get_env();
-        let Outcome { mut result, error } =
-            self.controller().unsubscribe(&s.get_id(), Some(&env), &env.identifiers, id);
+        let Outcome { mut result, error } = with_close_context(s.close_context(), || {
+            self.controller().unsubscribe(&s.get_id(), Some(&env), &env.identifiers, id)
+        });
 
         if s.is_closed() || (result.is_none() && error.is_none()) {
             return Ok(None);
@@ -812,7 +817,9 @@ impl Node {
         };
 
         let env = s.get_env();
-        let Outcome { result, error } = self.controller().perform(&s.get_id(), Some(&env), &env.identifiers, id, data);
+        let Outcome { result, error } = with_close_context(s.close_context(), || {
+            self.controller().perform(&s.get_id(), Some(&env), &env.identifiers, id, data)
+        });
 
         if s.is_closed() || (result.is_none() && error.is_none()) {
             return Ok(None);
