@@ -30,7 +30,7 @@ pub use custom_printer::RubyPrinter;
 pub use gauge::Gauge;
 pub use printer::BasePrinter;
 pub(crate) use printer::log;
-pub use printer::{LogFormat, discard_logs, format_tint, init_logger, log_enabled, set_log_attrs};
+pub use printer::{LogFormat, discard_logs, format_tint, init_logger, install_logger, log_enabled, set_log_attrs};
 pub use statsd::StatsdWriter;
 
 /// Default rotation interval (seconds).
