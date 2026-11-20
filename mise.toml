@@ -1,5 +1,6 @@
-# Toolchains for Cabby and the pinned Go reference (see compat/upstream.lock).
+# Toolchains for Cabby. The Go reference (compat/upstream.lock) is built and tested in CI, which
+# installs Go 1.27.3 with actions/setup-go; to run `cargo xtask test --backend go` locally, add
+# `go = "1.27.3"` here (it matches `toolchain go1.27.3` in the reference go.mod).
 [tools]
 rust = { version = "1.100.0", components = "rustfmt,clippy" }
-go = "1.27.3"      # matches `toolchain go1.27.3` in the reference go.mod
 protoc = "36.2"
