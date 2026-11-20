@@ -67,6 +67,24 @@ Not covered: TLS, Sentinel, `max_conn`, statsd and log metric printers, macOS; H
 
 ## Status
 
-| ID | Status |
-|---|---|
-| H1–H7, M1–M9, Low | being fixed (see git history from November 2026) |
+Each fix has regression tests that fail before it and pass after it, run against both backends where Go can expose the behavior. The probes were re-run against the fixed build.
+
+| ID | Status | Result |
+|---|---|---|
+| H1 | fixed | re-resolves after a connection failure, like grpc-go: new backend reached at 30.0 s (Go 30.1 s; before: never) |
+| H2 | fixed (D-040, D-041) | bounded queues with back-pressure: 25 s Redis stall peaks at 25 MB (before 1.07 GB, Go 31 MB); NATS control operations no longer wait behind publications |
+| H3 | fixed (D-042) | exits 1 with Go's error after 49 s, like Go; nothing kept after a failure |
+| H4 | fixed (D-036) | threads blocked in RPC give up their command-pool seat: fresh client served in 0.00 s with 600 pending RPCs (before 17.5 s, Go 0.00 s) |
+| H5 | fixed | Go's `ReadHeaderTimeout` semantics; idle keep-alive connections stay open |
+| H6 | fixed | cluster batches split per slot: 30/30 published (before 3/30); also checked on a real single-node cluster |
+| H7 | in progress | |
+| M1 | fixed | Pusher uses the push-model reader: 1,000 idle Pusher connections add 5 threads (before 1,005, Go 7) |
+| M2 | fixed | session close cancels in-flight RPC and RPC-slot waits, with Go's metrics |
+| M3 | fixed | API checks method and auth before reading the body |
+| M4 | fixed (D-032 rewritten) | all review probes pass under ASAN; `cargo xtask asan` and a CI job; a raising formatter survives 10,000 prints |
+| M5 | fixed | runner reports CRASH / INCOMPLETE / MISSING / COUNT; `--record` only from complete runs; Go statuses enforced; CI runs all unit tests |
+| M6 | fixed | header values handled as bytes, like Go |
+| M7 | method fixed | warm-up, shuffled interleaved rounds, 5 runs; README wording corrected; results to be re-measured on the fixed build |
+| M8 | fixed | DS and HTTP broadcaster tests go through Cabby's real HTTP layer; memory broker expiry tested; Go bridge node cases call real Go |
+| M9 | fixed (D-044) | single-URL cluster probing like rueidis; embedded NATS supervised, output bounded |
+| Low | fixed, except D-045/D-046 (hyper parser limits, unread bodies) | nested JSON up to Go's 10,000 levels; HTTP framing, WebSocket close codes and Redis log/keepalive items match Go |
