@@ -91,7 +91,7 @@ fn token_list_contains(headers: &http::HeaderMap, name: http::header::HeaderName
     headers
         .get_all(name)
         .iter()
-        .filter_map(|v| v.to_str().ok())
+        .map(|v| String::from_utf8_lossy(v.as_bytes()))
         .any(|v| v.split(',').map(|t| t.trim_matches([' ', '\t'])).any(|t| t.eq_ignore_ascii_case(token)))
 }
 
@@ -142,8 +142,9 @@ impl Inner {
         if !token_list_contains(headers, SEC_WEBSOCKET_VERSION, "13") {
             return Err(400);
         }
-        let origin = headers.get(ORIGIN).map(|o| o.to_str().unwrap_or(""));
-        if !self.origins.allows(origin) {
+        // Header values are compared as the bytes that arrived, as Go does.
+        let origin = headers.get(ORIGIN).map(|o| String::from_utf8_lossy(o.as_bytes()));
+        if !self.origins.allows(origin.as_deref()) {
             log(
                 Level::Debug,
                 "WebSocket connection upgrade failed",
@@ -158,8 +159,9 @@ impl Inner {
         if !valid_challenge_key(key) {
             return Err(400);
         }
-        let client_protocols = headers.get(SEC_WEBSOCKET_PROTOCOL).and_then(|p| p.to_str().ok()).unwrap_or("");
-        let subprotocol = select_subprotocol(&self.subprotocols, client_protocols).unwrap_or("").to_owned();
+        let client_protocols =
+            headers.get(SEC_WEBSOCKET_PROTOCOL).map(|p| String::from_utf8_lossy(p.as_bytes())).unwrap_or_default();
+        let subprotocol = select_subprotocol(&self.subprotocols, &client_protocols).unwrap_or("").to_owned();
         Ok((tungstenite::handshake::derive_accept_key(key.as_bytes()), subprotocol))
     }
 
@@ -182,7 +184,8 @@ impl Inner {
                 return;
             }
         };
-        let stream = WebSocketStream::from_raw_socket(TokioIo::new(upgraded), Role::Server, Some(self.ws_config)).await;
+        let socket = connection::GorillaFrames::new(TokioIo::new(upgraded));
+        let stream = WebSocketStream::from_raw_socket(socket, Role::Server, Some(self.ws_config)).await;
         let (conn, io_loop) = connection::connect(stream, subprotocol);
 
         let extractor = self.extractor.as_deref().map(|e| e as &dyn HeadersExtractor);
