@@ -43,7 +43,12 @@ remaining Go runtime dependency. It does not require rewriting NATS.
   JetStream: `wait_jetstream_ready(max_seconds)` polls JetStream's account info over a
   regular client connection.
 - **Logs:** the server's output is always drained. It is echoed to stderr when `debug` or
-  `trace` is set. Upstream routes server logs to its logger only in debug mode.
+  `trace` is set. Upstream routes server logs to its logger only in debug mode. Only the last
+  64 KiB are kept, for start-up and exit errors.
+- **Supervision:** once started, the child is checked every 200 ms. If it exits before
+  `shutdown`, `embedded NATS server exited unexpectedly` is logged (`context=enats`, with the
+  exit status and the end of its output) and the runner exits 1 with that error (D-044):
+  upstream's in-process server can't die and leave AnyCable running.
 - **Shutdown:** `shutdown` (and `Drop`) sends SIGINT for a graceful stop (JetStream
   flushed) and kills the process if it hasn't exited after 10 s. Upstream disables
   JetStream, then shuts the in-process server down.

@@ -16,6 +16,7 @@ mod streamer;
 pub(crate) mod subscription;
 mod url;
 
+pub(crate) use streamer::LogContext;
 pub use streamer::{StreamHandler, Streamer, StreamerOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +29,9 @@ impl std::fmt::Display for RedisError {
 }
 
 impl std::error::Error for RedisError {}
+
+/// rueidis `DefaultTCPKeepAlive`.
+const DEFAULT_TCP_KEEPALIVE: Duration = Duration::from_secs(1);
 
 /// Redis adapter configuration (upstream `redis.RedisConfig`).
 ///
@@ -209,8 +213,23 @@ impl RedisConfig {
             let addr = addrs.into_iter().next().ok_or_else(|| RedisError("no Redis address".to_owned()))?;
             connect::Topology::Single(addr)
         };
+        // rueidis: `Dialer.KeepAlive` (1 s when unset) paces the PINGs on idle
+        // connections, and `ConnWriteTimeout` (the URL's `write_timeout`, by
+        // default ten keep-alive periods) bounds how long replies may take.
+        let keepalive = match self.keepalive_ping_interval {
+            0 => Some(DEFAULT_TCP_KEEPALIVE),
+            n if n < 0 => None,
+            n => Some(Duration::from_secs(n as u64)),
+        };
+        let write_timeout = if parsed.write_timeout.is_zero() {
+            keepalive.unwrap_or(DEFAULT_TCP_KEEPALIVE).max(DEFAULT_TCP_KEEPALIVE) * 10
+        } else {
+            parsed.write_timeout
+        };
         let spec = connect::ConnectSpec {
             topology,
+            keepalive,
+            write_timeout,
             username: options.username.clone(),
             password: options.password.clone(),
             db: options.select_db,
