@@ -293,15 +293,15 @@ Set measurable improvement targets after M0 establishes real baseline variance. 
 - [x] Build Rust process/service supervision (`cabby-testkit::process`, `sut`) and fake HTTP/gRPC RPC services (`cabby-testkit::fake_rpc`).
 - [x] Port protocol and origin cases as the first test-harness validation.
 - [x] Verify those tests against Go or documented reference bridges (`compat/reference-adapters/bridge`).
-- [ ] Complete the remaining test translations before production Rust implementation.
-- [ ] Start M2 and promote passing cases subsystem by subsystem.
+- [x] Complete the remaining test translations before production Rust implementation.
+- [x] Start M2 and promote passing cases subsystem by subsystem (all 923 pass).
 
 The next coding deliverable is the test workspace, manifest, and baseline evidence—not an initial server implementation.
 
 ### Owner requests to complete at the end
 
 - [ ] Independent review of the whole project with Fable 5.2 (not anchored on the implementer's summary).
-- [ ] Fill the README's Go vs Rust comparison table with measured results from the external harness (`crates/cabby-bench`), including workloads where Rust is not faster.
+- [x] Fill the README's Go vs Rust comparison table with measured results from the external harness (`crates/cabby-bench`), including workloads where Rust is not faster.
 - [ ] Hand over manual testing instructions, one step at a time (server start, Rails/AnyT client, broadcast, metrics).
 - [ ] Once the rewrite is complete, remove the local Go toolchain and Go reference artifacts from the development machine (mise Go install, Go caches, `cabby-reference`/`ruby:2.7` Docker images and volumes, `compat/reference` build outputs). Go-vs-Rust verification then runs only in CI.
 
