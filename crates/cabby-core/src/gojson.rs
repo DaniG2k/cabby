@@ -13,6 +13,7 @@
 use std::io;
 
 pub mod deep;
+pub mod syntax;
 
 use serde::Serialize;
 use serde::de::{DeserializeSeed, Visitor};
