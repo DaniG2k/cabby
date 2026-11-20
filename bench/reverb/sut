@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Laravel Reverb as a cabby-bench server under test (`cabby-bench <scenario> --protocol=pusher --sut bench/reverb/sut`).
+#
+# Accepts the AnyCable CLI flags the harness passes, keeps the ones Reverb can honour (host, port,
+# Pusher app id/key/secret), ignores the rest (paths, broker, RPC, metrics, tuning) and execs
+# `php artisan reverb:start`, so the PID the harness started is the Reverb server. Production
+# settings (APP_ENV=production, APP_DEBUG=false, no --debug, error-level logs, no scaling); see
+# bench/pusher/README.md.
+#
+# PHP: $REVERB_PHP, else the one bench/reverb/setup.sh builds into bench/reverb/.php.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+php="${REVERB_PHP:-${here}/.php/bin/php}"
+
+host=127.0.0.1 port=8080 app_id="" app_key="" secret=""
+while (($#)); do
+  arg="$1"
+  shift
+  value=""
+  case "${arg}" in
+    --*=*) value="${arg#*=}" arg="${arg%%=*}" ;;
+    --host | --port | --pusher_app_id | --pusher_app_key | --pusher_secret)
+      value="${1:-}"
+      shift || true
+      ;;
+  esac
+  case "${arg}" in
+    --version)
+      cd "${here}"
+      exec "${php}" -r 'require "vendor/autoload.php";
+        printf("reverb %s (laravel %s, php %s, event loop %s)\n",
+          Composer\InstalledVersions::getPrettyVersion("laravel/reverb"),
+          Composer\InstalledVersions::getPrettyVersion("laravel/framework"), PHP_VERSION,
+          (new ReflectionClass(React\EventLoop\Loop::get()))->getShortName());'
+      ;;
+    --host) host="${value}" ;;
+    --port) port="${value}" ;;
+    --pusher_app_id) app_id="${value}" ;;
+    --pusher_app_key) app_key="${value}" ;;
+    --pusher_secret) secret="${value}" ;;
+    *) ;; # other AnyCable flags have no Reverb counterpart
+  esac
+done
+[[ -n "${app_id}" && -n "${app_key}" && -n "${secret}" ]] || {
+  echo "reverb sut: --pusher_app_id, --pusher_app_key and --pusher_secret are required (run with --protocol=pusher)" >&2
+  exit 2
+}
+
+# Laravel reads the environment (and a .env, which this app does not have).
+for v in $(compgen -e | grep -E '^(REVERB_|APP_|LOG_|DB_|CACHE_|SESSION_|QUEUE_|BROADCAST_)' || true); do unset "${v}"; done
+export APP_ENV=production APP_DEBUG=false APP_KEY="base64:Y2FiYnktYmVuY2gtcmV2ZXJiLWFwcC1rZXktMzJieXQ=" \
+  LOG_CHANNEL=stderr LOG_LEVEL=error CACHE_STORE=array SESSION_DRIVER=array QUEUE_CONNECTION=sync \
+  BROADCAST_CONNECTION=null REVERB_SCALING_ENABLED=false \
+  REVERB_SERVER_HOST="${host}" REVERB_SERVER_PORT="${port}" \
+  REVERB_APP_ID="${app_id}" REVERB_APP_KEY="${app_key}" REVERB_APP_SECRET="${secret}"
+cd "${here}"
+exec "${php}" artisan reverb:start --host="${host}" --port="${port}" --no-interaction

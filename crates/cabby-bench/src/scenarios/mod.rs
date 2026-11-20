@@ -9,6 +9,9 @@
 //!   `$CABBY_BENCH_SUT`;
 //! * `--server-arg <flag>` (repeatable): extra server CLI flags.
 //!
+//! `--protocol=pusher` (both scenarios) switches clients, publisher and server to the
+//! Pusher protocol ([`crate::pusher`]).
+//!
 //! Go-runtime flags have no meaning for an external Rust harness and are not
 //! accepted: stress_publications' `--cpu-profile`, `--mem-profile`,
 //! `--block-profile`, `--mutex-profile` and reconnect_floods' `--pprof` (profile the
@@ -352,6 +355,14 @@ pub(crate) const SUT_FLAGS: [FlagDef; 2] = [
         usage: "extra server CLI flag, e.g. --server-arg=--broker=memory (repeatable)",
     },
 ];
+
+/// `--protocol`: the protocol the clients and the publisher speak ([`crate::pusher::Protocol`]).
+pub(crate) const PROTOCOL_FLAG: FlagDef = FlagDef {
+    name: "protocol",
+    kind: Kind::Str,
+    default: "actioncable",
+    usage: "client protocol: actioncable, or pusher (protocol 7, public channels, broadcasts over the signed Pusher HTTP API)",
+};
 
 /// The server binary: `--sut`, the test seam, or `$CABBY_BENCH_SUT`.
 pub(crate) fn resolve_sut(flag: Option<PathBuf>, seam: Option<PathBuf>) -> Option<PathBuf> {

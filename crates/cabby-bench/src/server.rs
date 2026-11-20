@@ -20,6 +20,12 @@
 //! `ANYCABLE_*` variables, telemetry is disabled (`ANYCABLE_DISABLE_TELEMETRY`) and
 //! [`ServerConfig::env`] is added.
 //!
+//! With [`ServerConfig::pusher`] set, the server also gets the Pusher app flags
+//! (`--pusher_app_id`, `--pusher_app_key`, `--pusher_secret`; Cabby and `anycable-go`
+//! take them as they are, the `bench/soketi` and `bench/reverb` wrappers translate them),
+//! [`Server::websocket_url`] is the Pusher endpoint `/app/<key>?protocol=7..` and
+//! [`Server::broadcast_url`] the Pusher HTTP API's `/apps/<id>/events`.
+//!
 //! The metrics endpoint is optional: a server without one (Action Cable, see
 //! `bench/actioncable`) answers it with an HTTP error, [`Server::has_metrics`] then
 //! reports `false`, every later read fails fast, and scenarios report what depends on
@@ -38,6 +44,7 @@ use std::time::{Duration, Instant};
 
 use crate::BenchError;
 use crate::net::loopback;
+use crate::pusher::PusherApp;
 use crate::resources::ProcessResources;
 
 /// Interval between readiness and exit probes (observed state, every wait bounded).
@@ -99,6 +106,8 @@ pub struct ServerConfig {
     pub start_timeout: Duration,
     /// Time between SIGTERM and SIGKILL on shutdown.
     pub shutdown_grace: Duration,
+    /// Pusher mode: the application the server serves ([`crate::pusher`]).
+    pub pusher: Option<PusherApp>,
 }
 
 impl ServerConfig {
@@ -113,6 +122,7 @@ impl ServerConfig {
             env: Vec::new(),
             start_timeout: Duration::from_secs(20),
             shutdown_grace: Duration::from_secs(5),
+            pusher: None,
         }
     }
 
@@ -167,6 +177,9 @@ impl ServerConfig {
             if let Some(v) = value {
                 a.push(format!("--{name}={v}"));
             }
+        }
+        if let Some(app) = &self.pusher {
+            a.extend(app.server_args());
         }
         a.extend(self.extra_args.iter().cloned());
         a
@@ -273,6 +286,7 @@ pub struct Server {
     stopped: Mutex<bool>,
     /// Whether the metrics endpoint exists ([`Server::has_metrics`]), probed once.
     metrics_served: OnceLock<bool>,
+    pusher: Option<PusherApp>,
 }
 
 fn capture(mut stream: impl Read + Send + 'static, sink: Arc<Mutex<Captured>>, forward: bool) -> JoinHandle<()> {
@@ -352,6 +366,7 @@ impl Server {
             grace: cfg.shutdown_grace,
             stopped: Mutex::new(false),
             metrics_served: OnceLock::new(),
+            pusher: cfg.pusher.clone(),
         };
         let deadline = Instant::now() + cfg.start_timeout;
         loop {
@@ -401,14 +416,21 @@ impl Server {
         self.pid
     }
 
-    /// `ws://127.0.0.1:<port>/cable`.
+    /// `ws://127.0.0.1:<port>/cable`, or the Pusher endpoint in Pusher mode.
     pub fn websocket_url(&self) -> String {
-        format!("ws://127.0.0.1:{}/cable", self.port)
+        match &self.pusher {
+            Some(app) => format!("ws://127.0.0.1:{}{}", self.port, app.websocket_path()),
+            None => format!("ws://127.0.0.1:{}/cable", self.port),
+        }
     }
 
-    /// `http://127.0.0.1:<port>/broadcast`.
+    /// `http://127.0.0.1:<port>/broadcast`, or the Pusher HTTP API's events endpoint in
+    /// Pusher mode.
     pub fn broadcast_url(&self) -> String {
-        format!("http://127.0.0.1:{}/broadcast", self.port)
+        match &self.pusher {
+            Some(app) => format!("http://127.0.0.1:{}{}", self.port, app.events_path()),
+            None => format!("http://127.0.0.1:{}/broadcast", self.port),
+        }
     }
 
     /// `http://127.0.0.1:<port>/metrics`.
@@ -599,5 +621,13 @@ mod tests {
         assert!(a.contains(&"--rpc_wait_timeout=-1".to_owned()));
         assert!(a.contains(&"--metrics_port=9090".to_owned()));
         assert!(!a.contains(&"--noauth".to_owned()));
+    }
+
+    #[test]
+    fn pusher_args() {
+        let cfg = ServerConfig { pusher: Some(PusherApp::default()), ..ServerConfig::new("cabby") };
+        let a = cfg.args(8080, 8080);
+        assert!(a.contains(&"--pusher_app_key=cabby-bench-key".to_owned()));
+        assert!(a.contains(&"--public_streams".to_owned()));
     }
 }
