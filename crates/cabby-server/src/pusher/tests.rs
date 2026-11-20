@@ -296,3 +296,28 @@ fn serves_the_pusher_protocol_and_rest_api() {
     assert_eq!(401, app.api("POST", "/apps/my-test-id/events?auth_timestamp=1", body).0);
     assert_eq!(422, app.api("DELETE", "/apps/my-test-id/events", b"").0);
 }
+
+/// Pins D-057: `POST .../batch_events` broadcasts every event of the batch to its
+/// channel (upstream answers 200 and broadcasts nothing); over 10 events is a 400.
+#[test]
+fn deviation_d057_batch_events_are_broadcast() {
+    let app = app();
+    let mut a = app.connect("1234.1234");
+    app.subscribe(&mut a, "1234.1234", "chat-1", None);
+    app.subscribe(&mut a, "1234.1234", "chat-2", None);
+
+    let body = br#"{"batch":[{"name":"e1","channel":"chat-1","data":"{\"n\":1}"},{"name":"e2","channel":"chat-2","data":"{\"n\":2}"}]}"#;
+    let target = signed_target(&app.conf, "POST", "/apps/my-test-id/batch_events", Some(body));
+    assert_eq!((200, "{}".to_owned()), app.api("POST", &target, body));
+    assert_eq!(r#"{"event":"e1","data":"{\"n\":1}","channel":"chat-1"}"#, recv(&mut a));
+    assert_eq!(r#"{"event":"e2","data":"{\"n\":2}","channel":"chat-2"}"#, recv(&mut a));
+
+    let events: Vec<String> = (0..11).map(|i| format!(r#"{{"name":"e","channel":"chat-1","data":"{i}"}}"#)).collect();
+    let big = format!(r#"{{"batch":[{}]}}"#, events.join(","));
+    let target = signed_target(&app.conf, "POST", "/apps/my-test-id/batch_events", Some(big.as_bytes()));
+    assert_eq!(400, app.api("POST", &target, big.as_bytes()).0);
+
+    let bad = br#"{"events":[]}"#;
+    let target = signed_target(&app.conf, "POST", "/apps/my-test-id/batch_events", Some(bad));
+    assert_eq!(422, app.api("POST", &target, bad).0);
+}
