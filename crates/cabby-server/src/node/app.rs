@@ -14,7 +14,9 @@ use cabby_core::common::{
     pub_sub_message_from_json, rejection_message,
 };
 use cabby_core::encoders::{EncodedMessage, EncodedMessageJson};
+use cabby_core::logger::{LogValue, LogValuer, Logger, compact_value_bytes, error_value, filtered_map, filtered_url};
 use cabby_core::utils::GoPool;
+use cabby_core::{log_debug, log_error, log_info, log_warn};
 
 use super::call_context::with_close_context;
 use super::disconnect_queue::context_done;
@@ -200,6 +202,24 @@ fn data_text(data: &Option<MessageData>) -> String {
     }
 }
 
+/// Go's `slog.Any("response", res)` for a nil-able result pointer (its
+/// `LogValue` reads `nil` for a nil receiver).
+fn result_value<T: LogValuer>(res: Option<&T>) -> LogValue {
+    res.map_or_else(|| LogValue::String("nil".to_owned()), LogValuer::log_value)
+}
+
+/// Upstream logs `&v` of the decoded batch (`*[]*StreamMessage`), which slog
+/// prints with `%+v` as element addresses; Cabby lists the messages instead.
+fn batch_log_value(batch: &[StreamMessage]) -> LogValue {
+    LogValue::List(batch.iter().map(LogValuer::log_value).collect())
+}
+
+/// The session's request headers as `logger.FilteredMap` takes them (`None`:
+/// a session without headers).
+fn sorted_headers(env: &SessionEnv) -> Option<std::collections::BTreeMap<String, String>> {
+    env.headers.as_ref().map(|h| h.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+}
+
 /// A `presence` reply (upstream `&common.Reply{Type: PresenceType, Identifier,
 /// Message: info}`). A dedicated message rather than a [`Reply`], whose message
 /// is a JSON value with sorted keys: the JSON encoder writes the info in Go's
@@ -249,6 +269,8 @@ struct Lifecycle {
 /// `node.Node`).
 pub struct Node {
     id: String,
+    /// Upstream `n.log`: the runner's logger with `context=node`.
+    log: Logger,
     config: Config,
     metrics: Arc<dyn Instrumenter>,
     clock: Arc<dyn Clock>,
@@ -282,11 +304,13 @@ impl Node {
             }
         }
 
-        let hub = Hub::new(config.hub_gopool_size.max(0) as usize);
+        let log = Logger::default().with("context", "node");
+        let hub = Hub::with_logger(config.hub_gopool_size.max(0) as usize, &log);
 
         let registered = metrics.is_some();
         let node = Arc::new(Node {
             id,
+            log,
             config,
             metrics: metrics.unwrap_or_else(|| Arc::new(NoopMetrics)),
             clock,
@@ -424,18 +448,22 @@ impl Node {
         }
         self.lifecycle_changed.notify_all();
 
-        if self.hub.size() > 0 {
+        let active = self.hub.size();
+        if active > 0 {
+            log_info!(self.log, "closing active connections", "num" => active);
             self.disconnect_all(ctx);
         }
         self.hub.shutdown();
 
-        if let Some(d) = read(&self.disconnector) {
-            // Upstream logs a failure and goes on.
-            let _ = d.shutdown(ctx);
+        if let Some(d) = read(&self.disconnector)
+            && let Err(e) = d.shutdown(ctx)
+        {
+            log_warn!(self.log, "failed to shutdown disconnector gracefully", "error" => e.0);
         }
 
-        // Upstream logs a failure and goes on.
-        let _ = self.controller().shutdown();
+        if let Err(e) = self.controller().shutdown() {
+            log_warn!(self.log, "failed to shutdown controller gracefully", "error" => e.to_string());
+        }
 
         Ok(())
     }
@@ -477,6 +505,18 @@ impl Node {
         while *left > 0 && !context_done(ctx) {
             left = done.wait_timeout(left, CONTEXT_CHECK).unwrap_or_else(PoisonError::into_inner).0;
         }
+        let finished = *left == 0;
+        drop(left);
+        if finished {
+            log_info!(self.log, "all active connections closed");
+        } else {
+            log_warn!(self.log, "terminated while disconnecting active sessions", "num" => self.hub.size());
+        }
+    }
+
+    /// The node's logger (upstream unexported field `log`).
+    pub fn logger(&self) -> Logger {
+        self.log.clone()
     }
 
     pub fn id(&self) -> String {
@@ -539,17 +579,26 @@ impl Node {
     /// Parses an application broadcast and passes it to the broker (upstream
     /// `HandleBroadcast`). Unparseable payloads are counted and ignored.
     pub fn handle_broadcast(&self, raw: &[u8]) -> Result<(), NodeError> {
-        let Ok(msg) = pub_sub_message_from_json(raw) else {
-            self.metrics.counter_increment(METRICS_UNKNOWN_BROADCAST);
-            return Ok(());
+        let msg = match pub_sub_message_from_json(raw) {
+            Ok(msg) => msg,
+            Err(e) => {
+                self.metrics.counter_increment(METRICS_UNKNOWN_BROADCAST);
+                log_warn!(self.log, "failed to parse pubsub message",
+                    "data" => compact_value_bytes(raw).log_value(), "error" => e.to_string());
+                return Ok(());
+            }
         };
 
         self.metrics.counter_increment(METRICS_PUBLICATIONS);
 
         let broker = self.broker();
         match msg {
-            PubSubMessage::Stream(m) => broker.handle_broadcast(&m).map_err(broker_error),
+            PubSubMessage::Stream(m) => {
+                log_debug!(self.log, "handle broadcast message", "payload" => m.log_value());
+                broker.handle_broadcast(&m).map_err(broker_error)
+            }
             PubSubMessage::Batch(batch) => {
+                log_debug!(self.log, "handle batch-broadcast message", "payload" => batch_log_value(&batch));
                 for el in &batch {
                     if let Err(e) = broker.handle_broadcast(el) {
                         return Err(NodeError(format!("failed to broadcast batch, cause: {}", e.message)));
@@ -557,7 +606,10 @@ impl Node {
                 }
                 Ok(())
             }
-            PubSubMessage::RemoteCommand(c) => broker.handle_command(&c).map_err(broker_error),
+            PubSubMessage::RemoteCommand(c) => {
+                log_debug!(self.log, "handle remote command", "command" => c.log_value());
+                broker.handle_command(&c).map_err(broker_error)
+            }
         }
     }
 
@@ -565,7 +617,11 @@ impl Node {
     /// (upstream `HandlePubSub`).
     pub fn handle_pub_sub(&self, raw: &[u8]) {
         match pub_sub_message_from_json(raw) {
-            Err(_) => self.metrics.counter_increment(METRICS_UNKNOWN_BROADCAST),
+            Err(e) => {
+                self.metrics.counter_increment(METRICS_UNKNOWN_BROADCAST);
+                log_warn!(self.log, "failed to parse pubsub message",
+                    "data" => compact_value_bytes(raw).log_value(), "error" => e.to_string());
+            }
             Ok(PubSubMessage::Stream(m)) => self.broadcast(&m),
             Ok(PubSubMessage::Batch(batch)) => batch.iter().for_each(|m| self.broadcast(m)),
             Ok(PubSubMessage::RemoteCommand(c)) => self.execute_remote_command(&c),
@@ -577,9 +633,10 @@ impl Node {
     }
 
     fn commit_session(&self, s: &Arc<Session>) {
-        if s.is_resumeable() {
-            // Upstream logs a failure to persist the session.
-            let _ = self.broker().commit_session(&s.get_id(), s.as_ref());
+        if s.is_resumeable()
+            && let Err(e) = self.broker().commit_session(&s.get_id(), s.as_ref())
+        {
+            log_error!(s.logger(), "failed to persist session in cache", "error" => e.message);
         }
     }
 
@@ -605,8 +662,16 @@ impl Node {
             with_close_context(s.close_context(), || self.controller().authenticate(&s.get_id(), Some(&env)));
 
         if s.is_closed() {
+            log_debug!(s.logger(), "skip authenticate result: closed");
             return Ok(None);
         }
+
+        if result.is_none() && error.is_none() {
+            return Ok(None);
+        }
+
+        log_debug!(s.logger(), "controller authenticate",
+            "response" => result_value(result.as_ref()), "err" => error_value(error.as_ref()));
 
         if let Some(err) = error {
             s.disconnect("Auth Error", CLOSE_INTERNAL_SERVER_ERR);
@@ -659,17 +724,27 @@ impl Node {
         let broker = self.broker();
         let cached = match broker.restore_session(&prev_sid) {
             Ok(Some(cached)) => cached,
-            // Upstream logs a fetch failure or a cache miss.
-            Ok(None) | Err(_) => return false,
+            Ok(None) => {
+                log_debug!(s.logger(), "session not found in cache", "old_sid" => &prev_sid);
+                return false;
+            }
+            Err(e) => {
+                log_error!(s.logger(), "failed to fetch session cache", "old_sid" => &prev_sid, "error" => e.message);
+                return false;
+            }
         };
 
         if s.is_closed() {
+            log_debug!(s.logger(), "skip restore result: closed");
             return false;
         }
 
-        if s.restore_from_cache(&cached).is_err() {
+        if let Err(e) = s.restore_from_cache(&cached) {
+            log_error!(s.logger(), "failed to restore session from cache", "old_sid" => &prev_sid, "error" => e.0);
             return false;
         }
+
+        log_debug!(s.logger(), "session restored", "old_sid" => &prev_sid);
 
         {
             let _reg = s.registration();
@@ -712,9 +787,17 @@ impl Node {
             self.controller().subscribe(&s.get_id(), Some(&env), &env.identifiers, id)
         });
 
-        if s.is_closed() || (result.is_none() && error.is_none()) {
+        if s.is_closed() {
+            log_debug!(s.logger(), "skip subscribe result: closed");
             return Ok(None);
         }
+
+        if result.is_none() && error.is_none() {
+            return Ok(None);
+        }
+
+        log_debug!(s.logger(), "controller subscribe",
+            "response" => result_value(result.as_ref()), "err" => error_value(error.as_ref()));
 
         let mut confirmed = false;
         match (&error, &result) {
@@ -725,6 +808,10 @@ impl Node {
             (None, Some(res)) if res.status == Status::Success => {
                 confirmed = true;
                 s.subscriptions().add_channel(id);
+                log_debug!(s.logger(), "subscribed", "identifier" => filtered_identifier(id).log_value());
+            }
+            (None, Some(_)) => {
+                log_debug!(s.logger(), "subscription rejected", "identifier" => filtered_identifier(id).log_value());
             }
             _ => {}
         }
@@ -737,14 +824,18 @@ impl Node {
         if confirmed {
             self.commit_session(s);
 
-            if msg.history.since > 0 || !msg.history.streams.is_empty() {
-                // Upstream logs a failure to retrieve the history.
-                let _ = self.history(s, msg);
+            if (msg.history.since > 0 || !msg.history.streams.is_empty())
+                && let Err(e) = self.history(s, msg)
+            {
+                log_warn!(s.logger(), "couldn't retrieve history",
+                    "identifier" => filtered_identifier(id).log_value(), "error" => e.0);
             }
 
-            if let Some(presence) = &msg.presence {
-                // Upstream logs a failure to process the presence join.
-                let _ = self.handle_presence_reply(s, id, PRESENCE_JOIN_TYPE, Some(presence));
+            if let Some(presence) = &msg.presence
+                && let Err(e) = self.handle_presence_reply(s, id, PRESENCE_JOIN_TYPE, Some(presence))
+            {
+                log_warn!(s.logger(), "couldn't process presence join",
+                    "identifier" => filtered_identifier(id).log_value(), "error" => e.0);
             }
         }
 
@@ -762,9 +853,17 @@ impl Node {
             self.controller().unsubscribe(&s.get_id(), Some(&env), &env.identifiers, id)
         });
 
-        if s.is_closed() || (result.is_none() && error.is_none()) {
+        if s.is_closed() {
+            log_debug!(s.logger(), "skip unsubscribe result: closed");
             return Ok(None);
         }
+
+        if result.is_none() && error.is_none() {
+            return Ok(None);
+        }
+
+        log_debug!(s.logger(), "controller unsubscribe",
+            "response" => result_value(result.as_ref()), "err" => error_value(error.as_ref()));
 
         let mut presence_stream = String::new();
         match (&error, result.as_mut()) {
@@ -782,6 +881,7 @@ impl Node {
                     presence_stream = env.get_channel_state_field(id, PRESENCE_STREAM_STATE);
                     env.remove_channel_state(id);
                 });
+                log_debug!(s.logger(), "unsubscribed", "identifier" => filtered_identifier(id).log_value());
             }
         }
 
@@ -798,8 +898,10 @@ impl Node {
 
         // Make sure presence is removed on explicit unsubscribe
         if !presence_stream.is_empty() {
-            // Upstream logs a failure to remove the presence record.
-            let _ = self.broker().presence_remove(&presence_stream, &s.get_id());
+            log_debug!(s.logger(), "remove presence", "stream" => &presence_stream);
+            if let Err(e) = self.broker().presence_remove(&presence_stream, &s.get_id()) {
+                log_error!(s.logger(), "failed to remove presence", "error" => e.message);
+            }
         }
 
         Ok(result)
@@ -821,9 +923,17 @@ impl Node {
             self.controller().perform(&s.get_id(), Some(&env), &env.identifiers, id, data)
         });
 
-        if s.is_closed() || (result.is_none() && error.is_none()) {
+        if s.is_closed() {
+            log_debug!(s.logger(), "skip perform result: closed");
             return Ok(None);
         }
+
+        if result.is_none() && error.is_none() {
+            return Ok(None);
+        }
+
+        log_debug!(s.logger(), "controller perform",
+            "response" => result_value(result.as_ref()), "err" => error_value(error.as_ref()));
 
         if let Some(err) = &error
             && result.as_ref().is_none_or(|r| r.status == Status::Error)
@@ -856,6 +966,7 @@ impl Node {
         let backlog = self.retrieve_history(history, &streams);
 
         if s.is_closed() {
+            log_debug!(s.logger(), "skip history result: closed");
             return Ok(());
         }
 
@@ -906,6 +1017,8 @@ impl Node {
     pub fn whisper(&self, s: &Arc<Session>, msg: &Message) -> Result<(), NodeError> {
         let stream = s.channel_state_field(&msg.identifier, WHISPER_STREAM_STATE);
         if stream.is_empty() {
+            log_debug!(s.logger(), "whisper stream not found",
+                "identifier" => filtered_identifier(&msg.identifier).log_value());
             return Ok(());
         }
 
@@ -916,8 +1029,10 @@ impl Node {
             ..Default::default()
         };
 
-        // Upstream logs a failure to whisper.
-        let _ = self.broker().handle_broadcast(&broadcast);
+        match self.broker().handle_broadcast(&broadcast) {
+            Err(e) => log_error!(s.logger(), "failed to whisper", "stream" => &broadcast.stream, "err" => e.message),
+            Ok(()) => log_debug!(s.logger(), "whispered", "stream" => &broadcast.stream),
+        }
 
         Ok(())
     }
@@ -939,6 +1054,7 @@ impl Node {
         let info = self.broker().presence_info(&stream, Some(&PresenceInfoOptions::new()));
 
         if s.is_closed() {
+            log_debug!(s.logger(), "skip presence result: closed");
             return Ok(());
         }
 
@@ -967,16 +1083,23 @@ impl Node {
     /// Delivers a stream message to local sessions (upstream `Broadcast`).
     pub fn broadcast(&self, msg: &StreamMessage) {
         self.metrics.counter_increment(METRICS_BROADCAST_MSG);
+        log_debug!(self.log, "incoming broadcast message", "payload" => msg.log_value());
         self.hub.broadcast_message(msg.clone());
     }
 
     pub fn execute_remote_command(&self, msg: &RemoteCommandMessage) {
         self.metrics.counter_increment(METRICS_REMOTE_COMMANDS);
-        // Upstream logs an unparseable disconnect payload.
-        if msg.command == "disconnect"
-            && let Ok(dmsg) = msg.to_remote_disconnect_message()
-        {
-            self.remote_disconnect(&dmsg);
+        if msg.command == "disconnect" {
+            match msg.to_remote_disconnect_message() {
+                Ok(dmsg) => {
+                    log_debug!(self.log, "incoming remote command", "command" => dmsg.log_value());
+                    self.remote_disconnect(&dmsg);
+                }
+                Err(e) => {
+                    log_warn!(self.log, "failed to parse remote disconnect command",
+                        "data" => msg.log_value(), "error" => e.to_string());
+                }
+            }
         }
     }
 
@@ -991,10 +1114,15 @@ impl Node {
         {
             let _reg = s.registration();
             // Unsubscribe from all streams to clean up broker subscriptions
-            for streams in s.subscriptions().to_map().into_values() {
+            let all_streams = s.subscriptions().to_map();
+            let channels = all_streams.len();
+            for streams in all_streams.into_values() {
                 for stream in streams {
                     broker.unsubscribe(&stream);
                 }
+            }
+            if channels > 0 {
+                log_debug!(s.logger(), "unsubscribed from broker streams", "channels" => channels);
             }
 
             // Make sure the session is removed from the hub, so we don't try to
@@ -1024,13 +1152,26 @@ impl Node {
         let subscriptions = s.subscriptions().channels();
         let env = s.get_env();
 
-        self.controller()
-            .disconnect(&s.get_id(), Some(&env), &env.identifiers, &subscriptions)
-            .map_err(|e| NodeError(e.message))
+        log_debug!(s.logger(), "disconnect",
+            "ids" => &env.identifiers,
+            "url" => filtered_url(&env.url).log_value(),
+            "headers" => filtered_map(sorted_headers(&env).as_ref()).log_value(),
+            "subscriptions" => subscriptions.len());
+
+        let res = self.controller().disconnect(&s.get_id(), Some(&env), &env.identifiers, &subscriptions);
+
+        if let Err(e) = &res {
+            log_error!(s.logger(), "controller disconnect failed", "error" => e.to_string());
+        }
+
+        log_debug!(s.logger(), "controller disconnect succeeded");
+
+        res.map_err(|e| NodeError(e.message))
     }
 
     pub fn remote_disconnect(&self, msg: &RemoteDisconnectMessage) {
         self.metrics.counter_increment(METRICS_BROADCAST_MSG);
+        log_debug!(self.log, "incoming pubsub command", "data" => msg.log_value());
         self.hub.remote_disconnect(msg.clone());
     }
 
@@ -1123,9 +1264,10 @@ impl Node {
                 self.handle_call_reply(s, reply.cstate.as_ref(), &reply.broadcasts, &reply.transmissions);
             dirty = dirty || connection_dirty;
 
-            if let Some(presence) = &reply.presence {
-                // Upstream logs a failure to process the presence event.
-                let _ = self.handle_presence_reply(s, id, &presence.kind, Some(presence));
+            if let Some(presence) = &reply.presence
+                && let Err(e) = self.handle_presence_reply(s, id, &presence.kind, Some(presence))
+            {
+                log_warn!(s.logger(), "failed to process presence", "err" => e.0);
             }
         }
 
@@ -1181,6 +1323,8 @@ impl Node {
 
         let sid = s.get_id();
         let broker = self.broker();
+        log_debug!(s.logger(), "presence event", "event" => event,
+            "presence" => presence.map_or_else(|| LogValue::String("<nil>".to_owned()), LogValuer::log_value));
         match event {
             PRESENCE_JOIN_TYPE => {
                 let Some(presence) = presence else {
@@ -1218,6 +1362,8 @@ impl Executor for Node {
     }
 
     fn handle_command(&self, session: &Arc<Session>, msg: &Message) -> Result<(), NodeError> {
+        log_debug!(session.logger(), "incoming message", "data" => msg.log_value());
+
         session.keepalive();
 
         let res = match msg.command.as_str() {
@@ -1279,14 +1425,21 @@ impl SubscriberHandler for Node {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NullController;
 
+/// Upstream `l.With("context", "rpc", "impl", "null")`.
+fn null_controller_log() -> Logger {
+    Logger::default().with("context", "rpc").with("impl", "null")
+}
+
 impl Controller for NullController {
     fn start(&self) -> Result<(), ControllerError> {
+        log_info!(null_controller_log(), "no RPC configured");
         Ok(())
     }
     fn shutdown(&self) -> Result<(), ControllerError> {
         Ok(())
     }
     fn authenticate(&self, _sid: &str, _env: Option<&SessionEnv>) -> Outcome<ConnectResult> {
+        log_debug!(null_controller_log(), "reject connection");
         Outcome {
             result: Some(ConnectResult {
                 status: Status::Failure,
@@ -1298,6 +1451,7 @@ impl Controller for NullController {
         }
     }
     fn subscribe(&self, _sid: &str, _env: Option<&SessionEnv>, _ids: &str, channel: &str) -> Outcome<CommandResult> {
+        log_debug!(null_controller_log(), "reject subscription", "channel" => channel);
         Outcome {
             result: Some(CommandResult {
                 status: Status::Failure,
