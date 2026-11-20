@@ -5,8 +5,15 @@ use std::net::{ToSocketAddrs, UdpSocket};
 use std::sync::Mutex;
 
 use cabby_core::common::StringMap;
+use cabby_core::logger::{Level, Logger};
 
 use super::{IntervalWriter, Metrics, MetricsError, StatsdConfig};
+
+/// go-statsd's logger (upstream `StatsdLogger`: the runner's logger with
+/// `service=statsd`; messages containing `Error` at error level).
+fn statsd_log(level: Level, msg: &str) {
+    Logger::default().with("service", "statsd").log(level, msg, &[]);
+}
 
 /// Where tags go and how they are separated (go-statsd `TagFormat`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,17 +57,31 @@ impl StatsdWriter {
     }
 
     fn connect(&self) -> Option<UdpSocket> {
-        let addr = self.config.host.to_socket_addrs().ok()?.next()?;
-        let local = if addr.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
-        let socket = UdpSocket::bind(local).ok()?;
-        socket.connect(addr).ok()?;
-        socket.set_nonblocking(true).ok()?;
-        Some(socket)
+        let connect = || -> std::io::Result<UdpSocket> {
+            let addr = self
+                .config
+                .host
+                .to_socket_addrs()?
+                .next()
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no address found"))?;
+            let local = if addr.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
+            let socket = UdpSocket::bind(local)?;
+            socket.connect(addr)?;
+            socket.set_nonblocking(true)?;
+            Ok(socket)
+        };
+        match connect() {
+            Ok(socket) => Some(socket),
+            Err(e) => {
+                statsd_log(Level::Error, &format!("Error connecting to server: {e}"));
+                None
+            }
+        }
     }
 }
 
 impl IntervalWriter for StatsdWriter {
-    fn run(&self, _interval: u64) -> Result<(), MetricsError> {
+    fn run(&self, interval: u64) -> Result<(), MetricsError> {
         let mut rendered = String::new();
         let mut in_name = false;
         if let Some(tags) = &self.tags {
@@ -82,6 +103,25 @@ impl IntervalWriter for StatsdWriter {
         }
         let socket = self.connect();
         *self.client.lock().unwrap_or_else(|e| e.into_inner()) = Some(Client { socket, tags: rendered, in_name });
+
+        let tags_info = match &self.tags {
+            // Go's `%v` of a map: sorted `map[k:v ...]`.
+            Some(tags) => {
+                let mut sorted: Vec<_> = tags.iter().map(|(k, v)| format!("{k}:{v}")).collect();
+                sorted.sort();
+                format!(", tags=map[{}], style={}", sorted.join(" "), self.config.tag_format)
+            }
+            None => String::new(),
+        };
+        // Upstream logs through the runner's logger (no context).
+        Logger::default().log(
+            Level::Info,
+            &format!(
+                "Send statsd metrics to {} with every {interval}s (prefix={}{tags_info})",
+                self.config.host, self.config.prefix
+            ),
+            &[],
+        );
         Ok(())
     }
 
@@ -138,16 +178,24 @@ impl IntervalWriter for StatsdWriter {
             return Ok(());
         };
         let max = usize::try_from(self.config.max_packet_size).unwrap_or(0).max(1);
+        let mut packets = Vec::new();
         let mut packet = String::with_capacity(max);
         for l in lines {
             if !packet.is_empty() && packet.len() + l.len() > max {
-                let _ = socket.send(packet.as_bytes());
-                packet.clear();
+                packets.push(std::mem::take(&mut packet));
             }
             packet.push_str(&l);
         }
         if !packet.is_empty() {
-            let _ = socket.send(packet.as_bytes());
+            packets.push(packet);
+        }
+        for packet in packets {
+            if let Err(e) = socket.send(packet.as_bytes()) {
+                // go-statsd logs the failure, closes the socket and reconnects later.
+                statsd_log(Level::Error, &format!("Error writing to socket: {e}"));
+                client.socket = None;
+                break;
+            }
         }
         Ok(())
     }

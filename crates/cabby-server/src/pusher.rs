@@ -874,7 +874,10 @@ impl NodeExecutor for Executor {
                 Message { command: msg.command.clone(), identifier: msg.identifier.clone(), ..Default::default() };
 
             if let Err(err) = self.verify_private_channel(session, msg) {
-                log(Level::Debug, "pusher authorization failed", &[Attr::new("err", LogValue::String(err))]);
+                // Upstream logs through the session logger (`context=node sid=...`).
+                let session_log =
+                    cabby_core::logger::Logger::default().with("context", "node").with("sid", session.get_id());
+                cabby_core::log_debug!(session_log, "pusher authorization failed", "err" => err);
                 subscribe.identifier = channel_to_identifier("");
             }
 

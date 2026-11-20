@@ -5,6 +5,7 @@ use crate::common::{
     self, CommandResult, ConnectResult, Controller, ControllerError, Outcome, SessionEnv, Status, StringMap,
 };
 use crate::gojson;
+use crate::logger::{LogValuer, Logger};
 use crate::utils::MessageVerifier;
 
 /// Invalid TOML or a type mismatch while decoding a config.
@@ -125,6 +126,8 @@ pub struct StreamsController {
     /// an empty key).
     verifier: Option<MessageVerifier>,
     resolver: StreamResolver,
+    /// Upstream `l.With("context", "streams")`.
+    log: Logger,
 }
 
 /// Go `json.Unmarshal(identifier, &T)` for a struct of string fields.
@@ -141,7 +144,12 @@ impl StreamsController {
     /// rejected.
     pub fn new(key: &str, resolver: StreamResolver) -> Self {
         let verifier = (!key.is_empty()).then(|| MessageVerifier::new(key));
-        Self { verifier, resolver }
+        Self { verifier, resolver, log: Logger::default().with("context", "streams") }
+    }
+
+    /// Upstream `c.log.With("identifier", common.FilteredIdentifier(identifier))`.
+    fn identifier_log(&self, identifier: &str) -> Logger {
+        self.log.with("identifier", common::filtered_identifier(identifier).log_value())
     }
 
     /// Upstream `NewStreamsController(conf)`: `{"stream_name": ...}` (public, if
@@ -200,6 +208,9 @@ impl StreamsController {
 
         if request.signed_stream_name.is_empty() {
             let stream = request.stream_name.clone();
+            if crate::logger::enabled(crate::logger::Level::Debug) {
+                crate::log_debug!(self.identifier_log(identifier), "unsigned", "stream" => &stream);
+            }
             return Ok((request, stream));
         }
 
@@ -232,6 +243,9 @@ impl Controller for StreamsController {
         let (request, stream) = match self.verified_stream(identifier) {
             Ok(verified) => verified,
             Err(err) => {
+                if crate::logger::enabled(crate::logger::Level::Debug) {
+                    crate::log_debug!(self.identifier_log(identifier), "subscription failed", "error" => &err.message);
+                }
                 return Outcome {
                     result: Some(CommandResult {
                         status: Status::Failure,
@@ -242,6 +256,11 @@ impl Controller for StreamsController {
                 };
             }
         };
+
+        if crate::logger::enabled(crate::logger::Level::Debug) {
+            let msg = if request.signed_stream_name.is_empty() { "" } else { "subscribed verified" };
+            crate::log_debug!(self.identifier_log(identifier), msg, "stream" => &stream);
+        }
 
         let mut state: Option<StringMap> = None;
         if request.whisper {

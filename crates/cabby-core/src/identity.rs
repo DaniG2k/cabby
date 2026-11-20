@@ -16,6 +16,7 @@ use sha2::{Sha256, Sha384, Sha512};
 use crate::common::{
     CommandResult, ConnectResult, Controller, ControllerError, Outcome, SessionEnv, Status, StringMap,
 };
+use crate::logger::{self, LogValuer, Logger};
 use crate::toml_config::{self, DeValue, DecodeError, Decoder, FromToml};
 
 const DISCONNECT_UNAUTHORIZED: &str = "{\"type\":\"disconnect\",\"reason\":\"unauthorized\",\"reconnect\":false}";
@@ -251,6 +252,8 @@ pub struct JwtIdentifier {
     param_name: String,
     header_name: String,
     required: bool,
+    /// Upstream `l.With("context", "jwt")`.
+    log: Logger,
 }
 
 impl JwtIdentifier {
@@ -260,6 +263,7 @@ impl JwtIdentifier {
             param_name: config.param.clone(),
             header_name: config.header_key(),
             required: config.force,
+            log: Logger::default().with("context", "jwt"),
         }
     }
 
@@ -286,6 +290,13 @@ impl Identifier for JwtIdentifier {
         };
 
         if raw_token.is_empty() {
+            if logger::enabled(logger::Level::Debug) {
+                let headers: Option<std::collections::BTreeMap<String, String>> =
+                    env.headers.as_ref().map(|h| h.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+                crate::log_debug!(self.log, "no token is found",
+                    "url" => logger::filtered_url(&env.url).log_value(),
+                    "headers" => logger::filtered_map(headers.as_ref()).log_value());
+            }
             if self.required {
                 return failure(DISCONNECT_UNAUTHORIZED);
             }
@@ -294,8 +305,14 @@ impl Identifier for JwtIdentifier {
 
         let claims = match verify_hmac_jwt(&raw_token, &self.secret, SystemTime::now()) {
             Ok(claims) => claims,
-            Err(JwtError::Expired) => return failure(DISCONNECT_TOKEN_EXPIRED),
-            Err(JwtError::Invalid) => return failure(DISCONNECT_UNAUTHORIZED),
+            Err(JwtError::Expired) => {
+                crate::log_debug!(self.log, "token has expired");
+                return failure(DISCONNECT_TOKEN_EXPIRED);
+            }
+            Err(JwtError::Invalid(error)) => {
+                crate::log_debug!(self.log, "invalid token", "error" => error);
+                return failure(DISCONNECT_UNAUTHORIZED);
+            }
         };
 
         match claims.get("ext") {
@@ -327,38 +344,86 @@ fn failure(transmission: &str) -> Outcome<ConnectResult> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum JwtError {
     /// The signature is valid but `exp` has passed (golang-jwt `ErrTokenExpired`).
     Expired,
-    /// Any other parse, signature or claims failure.
-    Invalid,
+    /// Any other parse, signature or claims failure, with golang-jwt's error text.
+    Invalid(String),
 }
 
+/// golang-jwt `newError(message, kind, more...)`.
+fn jwt_error(kind: &str, message: &str, more: &[&str]) -> JwtError {
+    let mut out = kind.to_owned();
+    if !message.is_empty() {
+        out.push_str(": ");
+        out.push_str(message);
+    }
+    for m in more {
+        out.push_str(": ");
+        out.push_str(m);
+    }
+    JwtError::Invalid(out)
+}
+
+const ERR_TOKEN_MALFORMED: &str = "token is malformed";
+const ERR_TOKEN_UNVERIFIABLE: &str = "token is unverifiable";
+const ERR_TOKEN_SIGNATURE_INVALID: &str = "token signature is invalid";
+const ERR_TOKEN_INVALID_CLAIMS: &str = "token has invalid claims";
+
+/// Signing methods golang-jwt registers (`GetSigningMethod`).
+const KNOWN_METHODS: &[&str] = &[
+    "HS256", "HS384", "HS512", "RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512",
+    "EdDSA", "none",
+];
+
 /// golang-jwt `RawURLEncoding` segment decoding (non-strict: trailing bits are
-/// ignored, `\r` and `\n` are skipped, padding is rejected).
-fn decode_segment(seg: &str) -> Option<Vec<u8>> {
+/// ignored, `\r` and `\n` are skipped, padding is rejected). The error is Go's
+/// `base64.CorruptInputError` text.
+fn decode_segment(seg: &str) -> Result<Vec<u8>, String> {
     const ENGINE: GeneralPurpose = GeneralPurpose::new(
         &base64::alphabet::URL_SAFE,
         GeneralPurposeConfig::new()
             .with_decode_allow_trailing_bits(true)
             .with_decode_padding_mode(DecodePaddingMode::RequireNone),
     );
-    if seg.contains(['\r', '\n']) {
-        let cleaned: String = seg.chars().filter(|c| !matches!(c, '\r' | '\n')).collect();
-        ENGINE.decode(cleaned).ok()
-    } else {
-        ENGINE.decode(seg).ok()
+    let corrupt = |at: usize| format!("illegal base64 data at input byte {at}");
+    let mut last = 0;
+    let mut count = 0usize;
+    for (i, b) in seg.bytes().enumerate() {
+        match b {
+            b'\r' | b'\n' => {}
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' => {
+                last = i;
+                count += 1;
+            }
+            _ => return Err(corrupt(i)),
+        }
     }
+    if count % 4 == 1 {
+        return Err(corrupt(last));
+    }
+    let decoded = if seg.contains(['\r', '\n']) {
+        let cleaned: String = seg.chars().filter(|c| !matches!(c, '\r' | '\n')).collect();
+        ENGINE.decode(cleaned)
+    } else {
+        ENGINE.decode(seg)
+    };
+    decoded.map_err(|e| e.to_string())
 }
 
-/// A JSON object segment (Go `json.Unmarshal` into a map: `null` is an empty map).
-fn decode_object(seg: &str) -> Option<Map<String, Value>> {
-    match serde_json::from_slice::<Value>(&decode_segment(seg)?).ok()? {
-        Value::Object(map) => Some(map),
-        Value::Null => Some(Map::new()),
-        _ => None,
-    }
+/// A JSON object segment (Go `json` decoding into a map: `null` is an empty
+/// map); a value of another kind fails with `encoding/json`'s type error.
+fn decode_object(bytes: &[u8], go_type: &str) -> Result<Map<String, Value>, String> {
+    let kind = match serde_json::from_slice::<Value>(bytes).map_err(|e| e.to_string())? {
+        Value::Object(map) => return Ok(map),
+        Value::Null => return Ok(Map::new()),
+        Value::String(_) => "string",
+        Value::Number(_) => "number",
+        Value::Bool(_) => "bool",
+        Value::Array(_) => "array",
+    };
+    Err(format!("json: cannot unmarshal {kind} into Go value of type {go_type}"))
 }
 
 fn verify_mac<M: Mac + KeyInit>(key: &[u8], signing_input: &[u8], signature: &[u8]) -> bool {
@@ -368,50 +433,69 @@ fn verify_mac<M: Mac + KeyInit>(key: &[u8], signing_input: &[u8], signature: &[u
 }
 
 /// Parses and verifies an HMAC-signed JWT as golang-jwt v5 `jwt.Parse` does with a
-/// key function accepting only HMAC methods: structure, header and claims first,
-/// then the signature, then the time claims (`exp` and `nbf`, no leeway).
+/// key function accepting only HMAC methods: structure, header and claims, the
+/// signing method, the signature segment, the key function, the signature, then
+/// the time claims (`exp` and `nbf`, no leeway). Errors carry golang-jwt's text.
 fn verify_hmac_jwt(token: &str, secret: &[u8], now: SystemTime) -> Result<Map<String, Value>, JwtError> {
-    let (header, rest) = token.split_once('.').ok_or(JwtError::Invalid)?;
-    let (payload, signature) = rest.split_once('.').ok_or(JwtError::Invalid)?;
-    if signature.contains('.') {
-        return Err(JwtError::Invalid);
-    }
+    let parts: Vec<&str> = token.split('.').collect();
+    let [header, payload, signature] = parts[..] else {
+        return Err(jwt_error(ERR_TOKEN_MALFORMED, "token contains an invalid number of segments", &[]));
+    };
 
-    let header_map = decode_object(header).ok_or(JwtError::Invalid)?;
-    let claims = decode_object(payload).ok_or(JwtError::Invalid)?;
-    let signature = decode_segment(signature).ok_or(JwtError::Invalid)?;
+    let header_bytes =
+        decode_segment(header).map_err(|e| jwt_error(ERR_TOKEN_MALFORMED, "could not base64 decode header", &[&e]))?;
+    let header_map = decode_object(&header_bytes, "map[string]interface {}")
+        .map_err(|e| jwt_error(ERR_TOKEN_MALFORMED, "could not JSON decode header", &[&e]))?;
+    let claims_bytes =
+        decode_segment(payload).map_err(|e| jwt_error(ERR_TOKEN_MALFORMED, "could not base64 decode claim", &[&e]))?;
+    let claims = decode_object(&claims_bytes, "jwt.MapClaims")
+        .map_err(|e| jwt_error(ERR_TOKEN_MALFORMED, "could not JSON decode claim", &[&e]))?;
+
+    let alg = match header_map.get("alg") {
+        Some(Value::String(alg)) if KNOWN_METHODS.contains(&alg.as_str()) => alg.as_str(),
+        Some(Value::String(_)) => {
+            return Err(jwt_error(ERR_TOKEN_UNVERIFIABLE, "signing method (alg) is unavailable", &[]));
+        }
+        _ => return Err(jwt_error(ERR_TOKEN_UNVERIFIABLE, "signing method (alg) is unspecified", &[])),
+    };
+    let signature = decode_segment(signature)
+        .map_err(|e| jwt_error(ERR_TOKEN_MALFORMED, "could not base64 decode signature", &[&e]))?;
 
     let signing_input = &token.as_bytes()[..header.len() + 1 + payload.len()];
-    let valid = match header_map.get("alg").and_then(Value::as_str) {
-        Some("HS256") => verify_mac::<Hmac<Sha256>>(secret, signing_input, &signature),
-        Some("HS384") => verify_mac::<Hmac<Sha384>>(secret, signing_input, &signature),
-        Some("HS512") => verify_mac::<Hmac<Sha512>>(secret, signing_input, &signature),
-        // Unknown, missing and non-HMAC methods are all rejected.
-        _ => false,
+    let valid = match alg {
+        "HS256" => verify_mac::<Hmac<Sha256>>(secret, signing_input, &signature),
+        "HS384" => verify_mac::<Hmac<Sha384>>(secret, signing_input, &signature),
+        "HS512" => verify_mac::<Hmac<Sha512>>(secret, signing_input, &signature),
+        // Other methods are rejected by the key function.
+        other => {
+            let reason = format!("unexpected signing method: {other}");
+            return Err(jwt_error(ERR_TOKEN_UNVERIFIABLE, "error while executing keyfunc", &[&reason]));
+        }
     };
     if !valid {
-        return Err(JwtError::Invalid);
+        return Err(jwt_error(ERR_TOKEN_SIGNATURE_INVALID, "", &["signature is invalid"]));
     }
 
     let now_nanos = match now.duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_nanos() as i128,
         Err(e) => -(e.duration().as_nanos() as i128),
     };
-    let exp = numeric_date(&claims, "exp");
-    let nbf = numeric_date(&claims, "nbf");
 
-    if let Ok(Some(exp)) = exp
-        && now_nanos >= exp
-    {
-        return Err(JwtError::Expired);
+    // golang-jwt's validator collects every failing claim; an expired token is
+    // reported as such whatever else fails.
+    let mut errors: Vec<&str> = Vec::new();
+    match numeric_date(&claims, "exp") {
+        Ok(Some(exp)) if now_nanos >= exp => return Err(JwtError::Expired),
+        Ok(_) => {}
+        Err(()) => errors.push("invalid type for claim: exp is invalid"),
     }
-    let nbf_ok = match nbf {
-        Ok(Some(nbf)) => now_nanos >= nbf,
-        Ok(None) => true,
-        Err(()) => false,
-    };
-    if exp.is_err() || !nbf_ok {
-        return Err(JwtError::Invalid);
+    match numeric_date(&claims, "nbf") {
+        Ok(Some(nbf)) if now_nanos < nbf => errors.push("token is not valid yet"),
+        Ok(_) => {}
+        Err(()) => errors.push("invalid type for claim: nbf is invalid"),
+    }
+    if !errors.is_empty() {
+        return Err(jwt_error(ERR_TOKEN_INVALID_CLAIMS, "", &[&errors.join(", ")]));
     }
 
     Ok(claims)
@@ -527,11 +611,33 @@ mod tests {
         assert!(url_raw_query("ws://x/\ncable").is_err());
     }
 
+    /// Pins the logging deviation for malformed JWT segments: golang-jwt's
+    /// prefix and Go's type errors are kept, but a JSON syntax error carries
+    /// serde_json's text (Go: `encoding/json`'s, e.g. `invalid character 'x'
+    /// looking for beginning of value`).
+    #[test]
+    fn jwt_json_syntax_error_detail_is_serde_text() {
+        let now = SystemTime::now();
+        let token =
+            |header: &[u8]| format!("{}.e30.c2ln", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header));
+        assert_eq!(
+            verify_hmac_jwt(&token(b"[1]"), b"s", now),
+            Err(JwtError::Invalid(
+                "token is malformed: could not JSON decode header: json: cannot unmarshal array into Go value of type map[string]interface {}"
+                    .into()
+            ))
+        );
+        let Err(JwtError::Invalid(syntax)) = verify_hmac_jwt(&token(b"x"), b"s", now) else {
+            panic!("a malformed header is rejected");
+        };
+        assert_eq!("token is malformed: could not JSON decode header: expected value at line 1 column 1", syntax);
+    }
+
     #[test]
     fn decodes_segments_without_padding() {
-        assert_eq!(decode_segment("Zm8"), Some(b"fo".to_vec()));
-        assert_eq!(decode_segment("Zm8="), None);
-        assert_eq!(decode_segment("-_8"), Some(vec![0xfb, 0xff]));
+        assert_eq!(decode_segment("Zm8"), Ok(b"fo".to_vec()));
+        assert_eq!(decode_segment("Zm8="), Err("illegal base64 data at input byte 3".to_owned()));
+        assert_eq!(decode_segment("-_8"), Ok(vec![0xfb, 0xff]));
     }
 
     #[test]
@@ -545,8 +651,14 @@ mod tests {
         let sig = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
         let token = format!("{header}.{payload}.{sig}");
         assert_eq!(verify_hmac_jwt(&token, b"s", now), Err(JwtError::Expired));
-        assert_eq!(verify_hmac_jwt(&token, b"t", now), Err(JwtError::Invalid));
-        assert_eq!(verify_hmac_jwt(&format!("{token}.x"), b"s", now), Err(JwtError::Invalid));
+        assert_eq!(
+            verify_hmac_jwt(&token, b"t", now),
+            Err(JwtError::Invalid("token signature is invalid: signature is invalid".into()))
+        );
+        assert_eq!(
+            verify_hmac_jwt(&format!("{token}.x"), b"s", now),
+            Err(JwtError::Invalid("token is malformed: token contains an invalid number of segments".into()))
+        );
         assert!(verify_hmac_jwt(&token, b"s", UNIX_EPOCH).is_ok());
     }
 }
