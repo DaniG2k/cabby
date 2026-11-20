@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340" width="720" height="340" role="img" aria-labelledby="t d">
+<title id="t">Server CPU at the same delivered rate</title><desc id="d">Average cores used while delivering the load; lower is better. 50k msg/s: AnyCable (Go) 1.22 cores, Cabby (Rust) 1.11 cores; 100k msg/s: AnyCable (Go) 2.08 cores, Cabby (Rust) 1.87 cores; 150k msg/s: AnyCable (Go) 3.00 cores, Cabby (Rust) 2.81 cores</desc>
+<style>
+  .surface { fill: #fcfcfb; } .s0 { fill: #2a78d6; } .s1 { fill: #eb6834; }
+  .t1 { fill: #0b0b0b; } .t2 { fill: #52514e; } .grid { stroke: #e4e3df; } .axis { stroke: #b9b8b2; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #1a1a19; } .s0 { fill: #3987e5; } .s1 { fill: #d95926; }
+    .t1 { fill: #f0efec; } .t2 { fill: #c3c2b7; } .grid { stroke: #383835; } .axis { stroke: #5e5d58; }
+  }
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+</style>
+<rect class="surface" width="720" height="340" rx="8"/>
+<text class="t1" x="64" y="30" font-size="16" font-weight="600">Server CPU at the same delivered rate</text>
+<text class="t2" x="64" y="50" font-size="12">Average cores used while delivering the load; lower is better</text>
+<rect class="s0" x="64" y="64" width="12" height="12" rx="3"/>
+<text class="t2" x="82" y="74" font-size="12">AnyCable (Go)</text>
+<rect class="s1" x="210" y="64" width="12" height="12" rx="3"/>
+<text class="t2" x="228" y="74" font-size="12">Cabby (Rust)</text>
+<line class="axis" x1="64" x2="696" y1="292.0" y2="292.0" stroke-width="1"/>
+<text class="t2" x="56" y="296.0" font-size="11" text-anchor="end">0</text>
+<line class="grid" x1="64" x2="696" y1="242.0" y2="242.0" stroke-width="1"/>
+<text class="t2" x="56" y="246.0" font-size="11" text-anchor="end">1</text>
+<line class="grid" x1="64" x2="696" y1="192.0" y2="192.0" stroke-width="1"/>
+<text class="t2" x="56" y="196.0" font-size="11" text-anchor="end">2</text>
+<line class="grid" x1="64" x2="696" y1="142.0" y2="142.0" stroke-width="1"/>
+<text class="t2" x="56" y="146.0" font-size="11" text-anchor="end">3</text>
+<line class="grid" x1="64" x2="696" y1="92.0" y2="92.0" stroke-width="1"/>
+<text class="t2" x="56" y="96.0" font-size="11" text-anchor="end">4</text>
+<text class="t2" x="14" y="192" font-size="11" transform="rotate(-90 14 192)" text-anchor="middle">cores</text>
+<path class="s0" d="M112.3,292.0 V235.0 Q112.3,231.0 116.3,231.0 H164.3 Q168.3,231.0 168.3,235.0 V292.0 Z"/>
+<text class="t1" x="140.3" y="225.0" font-size="11" text-anchor="middle">1.22</text>
+<path class="s1" d="M170.3,292.0 V240.5 Q170.3,236.5 174.3,236.5 H222.3 Q226.3,236.5 226.3,240.5 V292.0 Z"/>
+<text class="t1" x="198.3" y="230.5" font-size="11" text-anchor="middle">1.11</text>
+<text class="t2" x="169.3" y="312" font-size="12" text-anchor="middle">50k msg/s</text>
+<path class="s0" d="M323.0,292.0 V192.0 Q323.0,188.0 327.0,188.0 H375.0 Q379.0,188.0 379.0,192.0 V292.0 Z"/>
+<text class="t1" x="351.0" y="182.0" font-size="11" text-anchor="middle">2.08</text>
+<path class="s1" d="M381.0,292.0 V202.5 Q381.0,198.5 385.0,198.5 H433.0 Q437.0,198.5 437.0,202.5 V292.0 Z"/>
+<text class="t1" x="409.0" y="192.5" font-size="11" text-anchor="middle">1.87</text>
+<text class="t2" x="380.0" y="312" font-size="12" text-anchor="middle">100k msg/s</text>
+<path class="s0" d="M533.7,292.0 V146.0 Q533.7,142.0 537.7,142.0 H585.7 Q589.7,142.0 589.7,146.0 V292.0 Z"/>
+<text class="t1" x="561.7" y="136.0" font-size="11" text-anchor="middle">3.00</text>
+<path class="s1" d="M591.7,292.0 V155.5 Q591.7,151.5 595.7,151.5 H643.7 Q647.7,151.5 647.7,155.5 V292.0 Z"/>
+<text class="t1" x="619.7" y="145.5" font-size="11" text-anchor="middle">2.81</text>
+<text class="t2" x="590.7" y="312" font-size="12" text-anchor="middle">150k msg/s</text>
+</svg>

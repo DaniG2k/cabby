@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340" width="720" height="340" role="img" aria-labelledby="t d">
+<title id="t">Broadcast delivery latency, p99</title><desc id="d">Publish to client delivery, 1,000 clients; lower is better. 50k msg/s: AnyCable (Go) 0.81 ms, Cabby (Rust) 0.67 ms; 100k msg/s: AnyCable (Go) 2.50 ms, Cabby (Rust) 1.46 ms; 150k msg/s: AnyCable (Go) 9.35 ms, Cabby (Rust) 7.32 ms</desc>
+<style>
+  .surface { fill: #fcfcfb; } .s0 { fill: #2a78d6; } .s1 { fill: #eb6834; }
+  .t1 { fill: #0b0b0b; } .t2 { fill: #52514e; } .grid { stroke: #e4e3df; } .axis { stroke: #b9b8b2; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #1a1a19; } .s0 { fill: #3987e5; } .s1 { fill: #d95926; }
+    .t1 { fill: #f0efec; } .t2 { fill: #c3c2b7; } .grid { stroke: #383835; } .axis { stroke: #5e5d58; }
+  }
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+</style>
+<rect class="surface" width="720" height="340" rx="8"/>
+<text class="t1" x="64" y="30" font-size="16" font-weight="600">Broadcast delivery latency, p99</text>
+<text class="t2" x="64" y="50" font-size="12">Publish to client delivery, 1,000 clients; lower is better</text>
+<rect class="s0" x="64" y="64" width="12" height="12" rx="3"/>
+<text class="t2" x="82" y="74" font-size="12">AnyCable (Go)</text>
+<rect class="s1" x="210" y="64" width="12" height="12" rx="3"/>
+<text class="t2" x="228" y="74" font-size="12">Cabby (Rust)</text>
+<line class="axis" x1="64" x2="696" y1="292.0" y2="292.0" stroke-width="1"/>
+<text class="t2" x="56" y="296.0" font-size="11" text-anchor="end">0</text>
+<line class="grid" x1="64" x2="696" y1="242.0" y2="242.0" stroke-width="1"/>
+<text class="t2" x="56" y="246.0" font-size="11" text-anchor="end">5</text>
+<line class="grid" x1="64" x2="696" y1="192.0" y2="192.0" stroke-width="1"/>
+<text class="t2" x="56" y="196.0" font-size="11" text-anchor="end">10</text>
+<line class="grid" x1="64" x2="696" y1="142.0" y2="142.0" stroke-width="1"/>
+<text class="t2" x="56" y="146.0" font-size="11" text-anchor="end">15</text>
+<line class="grid" x1="64" x2="696" y1="92.0" y2="92.0" stroke-width="1"/>
+<text class="t2" x="56" y="96.0" font-size="11" text-anchor="end">20</text>
+<text class="t2" x="14" y="192" font-size="11" transform="rotate(-90 14 192)" text-anchor="middle">ms</text>
+<path class="s0" d="M112.3,292.0 V287.9 Q112.3,283.9 116.3,283.9 H164.3 Q168.3,283.9 168.3,287.9 V292.0 Z"/>
+<text class="t1" x="140.3" y="277.9" font-size="11" text-anchor="middle">0.81</text>
+<path class="s1" d="M170.3,292.0 V289.3 Q170.3,285.3 174.3,285.3 H222.3 Q226.3,285.3 226.3,289.3 V292.0 Z"/>
+<text class="t1" x="198.3" y="279.3" font-size="11" text-anchor="middle">0.67</text>
+<text class="t2" x="169.3" y="312" font-size="12" text-anchor="middle">50k msg/s</text>
+<path class="s0" d="M323.0,292.0 V271.0 Q323.0,267.0 327.0,267.0 H375.0 Q379.0,267.0 379.0,271.0 V292.0 Z"/>
+<text class="t1" x="351.0" y="261.0" font-size="11" text-anchor="middle">2.50</text>
+<path class="s1" d="M381.0,292.0 V281.4 Q381.0,277.4 385.0,277.4 H433.0 Q437.0,277.4 437.0,281.4 V292.0 Z"/>
+<text class="t1" x="409.0" y="271.4" font-size="11" text-anchor="middle">1.46</text>
+<text class="t2" x="380.0" y="312" font-size="12" text-anchor="middle">100k msg/s</text>
+<path class="s0" d="M533.7,292.0 V202.5 Q533.7,198.5 537.7,198.5 H585.7 Q589.7,198.5 589.7,202.5 V292.0 Z"/>
+<text class="t1" x="561.7" y="192.5" font-size="11" text-anchor="middle">9.35</text>
+<path class="s1" d="M591.7,292.0 V222.8 Q591.7,218.8 595.7,218.8 H643.7 Q647.7,218.8 647.7,222.8 V292.0 Z"/>
+<text class="t1" x="619.7" y="212.8" font-size="11" text-anchor="middle">7.32</text>
+<text class="t2" x="590.7" y="312" font-size="12" text-anchor="middle">150k msg/s</text>
+</svg>

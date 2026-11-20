@@ -85,27 +85,55 @@ the Go server are recorded in [`compat/deviations.md`](compat/deviations.md), mo
 
 ## Benchmarks: Go vs Rust
 
-| Workload | AnyCable (Go) | Cabby (Rust) |
-|---|---|---|
-| Idle connections: memory per connection | pending | pending |
-| Broadcast fan-out: delivered msg/s, p50/p95/p99 latency | pending | pending |
-| Connection churn and resubscription | pending | pending |
-| Slow readers mixed with healthy clients | pending | pending |
-| Slow or unavailable RPC with queue saturation | pending | pending |
-| Cluster broadcast and reconnect recovery | pending | pending |
+Release builds of both servers, launched with identical AnyCable flags by Cabby's external load
+harness ([`crates/cabby-bench`](crates/cabby-bench)), measured on one machine (AMD Ryzen 5 PRO
+6650H, Linux 7.3). The server under test was pinned to 2 physical cores (4 CPUs); the load
+generator ran on the other 4 cores. Each value is the median of 3 runs. Every delivered message
+was reconciled by ID, and no run lost, duplicated or reordered a message.
 
-No numbers yet: results (with charts) will be published once Cabby passes the full
-compatibility suite, using the external load harness in [`crates/cabby-bench`](crates/cabby-bench)
-against both binaries on the same hardware and settings, with the load generator outside the
-measured process and repeated runs. Workloads where Rust is not faster will be reported too.
-Methodology: [`SPEC.md` §10](SPEC.md#10-performance-evaluation).
+<p align="center">
+  <img src="docs/benchmarks/memory.svg" width="720" alt="Peak server memory: 1,000 idle clients, Go 55 MB vs Cabby 22 MB; 10,000 idle clients, Go 290 MB vs Cabby 100 MB; 5,000-client room at 100k msg/s, Go 176 MB vs Cabby 58 MB." />
+  <img src="docs/benchmarks/latency.svg" width="720" alt="Broadcast delivery latency p99 with 1,000 clients: 50k msg/s, Go 0.81 ms vs Cabby 0.67 ms; 100k msg/s, Go 2.50 ms vs Cabby 1.46 ms; 150k msg/s, Go 9.35 ms vs Cabby 7.32 ms." />
+  <img src="docs/benchmarks/cpu.svg" width="720" alt="Server CPU at the same delivered rate: 50k msg/s, Go 1.22 vs Cabby 1.11 cores; 100k msg/s, Go 2.08 vs Cabby 1.87; 150k msg/s, Go 3.00 vs Cabby 2.81." />
+</p>
 
-One early, non-benchmark observation from the conformance suite (`tests/conformance/threads.rs`):
+| Workload | Metric | AnyCable (Go) | Cabby (Rust) |
+|---|---|---:|---:|
+| Idle connections | Memory with 1,000 / 10,000 clients | 55 / 290 MB | 22 / 100 MB |
+| | Memory per extra connection | 26.8 KB | **8.8 KB** |
+| Fan-out, 1,000 clients × 5 of 100 streams | Delivered at 50k / 100k / 150k msg/s | 100% / 100% / 100% | 100% / 100% / 100% |
+| | Latency p50 at 50k / 100k / 150k msg/s | 0.39 / 0.34 / 0.81 ms | 0.32 / 0.27 / 0.61 ms |
+| | Latency p99 at 50k / 100k / 150k msg/s | 0.81 / 2.50 / 9.35 ms | 0.67 / 1.46 / 7.32 ms |
+| | Server CPU at 50k / 100k / 150k msg/s | 1.22 / 2.08 / 3.00 cores | 1.11 / 1.87 / 2.81 cores |
+| | Server memory | 72 MB | 28 MB |
+| Large room, 5,000 clients on one stream, 100k msg/s | Latency p50 / p99 | 26.0 / 59.7 ms | 22.5 / 46.8 ms |
+| | Server CPU / memory | 3.20 cores / 176 MB | 3.17 cores / 58 MB |
+| Reconnect floods: 2,000 clients, 500 then 1,000 dropped at once, 5 ms RPC | Recovery after each wave | 0.81 s / 1.02 s | 0.81 s / 1.02 s |
+| | Connect → welcome p99 | 97 ms | 93 ms |
+| | Ping round trip p99 during the floods | 0.5 ms | 0.5 ms |
+| | Server memory | 101 MB | 38 MB |
+| OS threads | Idle / peak during a 10,000-client connect burst | 10 / 11 | 33 / 101 |
 
-| Server OS threads | AnyCable (Go) | Cabby (Rust) |
-|---|---:|---:|
-| Change after opening 300 more idle connections | +4 | +0 |
-| Change during 20 broadcasts to 301 subscribers | +0 | +0 |
+What this shows:
+
+- **Memory is where Cabby wins clearly**: about a third of Go's per connection and overall.
+- **Latency and CPU are modestly better** (17–42% lower p99 latency, 1–10% less CPU at the
+  same delivered rate). Neither server hit its throughput ceiling at 150k deliveries/s on
+  2 cores, so peak throughput is not compared here.
+- **Reconnect recovery is identical**: it is governed by the clients' backoff and the
+  disconnect-queue rate, which both servers implement the same way.
+- **Go uses fewer OS threads.** Go multiplexes its goroutines onto about one thread per CPU.
+  Cabby has a fixed set of helper threads (hub shards, timers, adapters) plus a bounded
+  command pool that grows during connect bursts and shrinks after 30 s idle. Thread count
+  never scales with connections in either server.
+- **Not measured yet:** slow readers mixed with healthy clients, a slow or unavailable RPC with
+  queue saturation, and multi-node (Redis/NATS) broadcast.
+
+Reproduce: `cargo build --release -p cabby-server -p cabby-bench && cargo xtask reference-build
+&& compat/scripts/bench-compare.sh`, then `compat/scripts/bench-summary.py` and
+`compat/scripts/bench-charts.py`. Raw results for these numbers are in
+[`docs/benchmarks/results`](docs/benchmarks/results); methodology:
+[`SPEC.md` §10](SPEC.md#10-performance-evaluation).
 
 ## Compatibility progress
 
