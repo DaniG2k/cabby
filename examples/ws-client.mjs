@@ -11,7 +11,11 @@ const url = process.argv[3] ?? "ws://localhost:8080/cable";
 const identifier = JSON.stringify({ channel: "$pubsub", stream_name: stream });
 
 const ws = new WebSocket(url, ["actioncable-v1-json"]);
-const log = (...args) => console.log(new Date().toISOString().slice(11, 23), ...args);
+const time = () => {
+  const d = new Date();
+  return `${d.toTimeString().slice(0, 8)}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+};
+const log = (...args) => console.log(time(), ...args);
 
 ws.addEventListener("open", () => log(`connected to ${url}`));
 ws.addEventListener("message", (event) => {
