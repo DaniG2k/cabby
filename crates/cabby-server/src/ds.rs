@@ -273,7 +273,10 @@ fn url_path(target: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' {
-            let hex = bytes.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok());
+            let hex = bytes
+                .get(i + 1..i + 3)
+                .filter(|h| h.iter().all(u8::is_ascii_hexdigit))
+                .and_then(|h| std::str::from_utf8(h).ok());
             match hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
                 Some(b) => {
                     out.push(b);
@@ -1268,7 +1271,7 @@ struct Endpoint(Arc<Handler>);
 impl server::Handler for Endpoint {
     fn call(&self, req: server::Request) -> ResponseFuture {
         let handler = self.0.clone();
-        let (writer, client_gone, response) = server::channel_response();
+        let (writer, client_gone, response) = server::channel_response_for(&req);
         let conn = server::conn_info(&req);
         let (parts, _body) = req.into_parts();
         let request = HttpRequest::from_parts(&parts, &conn);

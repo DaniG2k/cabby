@@ -12,8 +12,13 @@
 //! ordered under one lock.
 //!
 //! On the server, [`ChannelResponseWriter`] turns these calls into a hyper
-//! response: the head goes out with the first status line, write or flush; body
-//! bytes are queued for a streaming [`Body`]. The queue is bounded
+//! response the way Go's server frames one: the status line is recorded, and the
+//! head goes out with the first flush, once more than
+//! [`BUFFER_BEFORE_CHUNKING`] body bytes are written, or when the handler
+//! finishes (then with a `Content-Length`, as Go sets one for a short body
+//! written by a handler that returned). A missing `Content-Type` is sniffed from
+//! the first body bytes, as Go does. Body bytes are queued for a streaming
+//! [`Body`]. The queue is bounded
 //! ([`MAX_BUFFERED`] bytes): a writer that finds it full waits for the client to
 //! catch up, at most [`WRITE_TIMEOUT`], then fails the write (the session then
 //! disconnects, as for a failed socket write). Writers always run on blocking
@@ -31,6 +36,7 @@ use hyper::body::Frame;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
+use super::http_server::BUFFER_BEFORE_CHUNKING;
 use super::{Body, BoxError, Response};
 
 /// Go's `http.ResponseWriter` plus `http.Flusher`.
@@ -98,6 +104,9 @@ struct ChannelState {
     /// The client is gone (the body or the pending response was dropped).
     gone: bool,
     waker: Option<Waker>,
+    /// The whole body's length, when the handler finished before the head
+    /// was sent.
+    exact: Option<u64>,
 }
 
 struct ChannelShared {
@@ -133,13 +142,41 @@ impl ChannelShared {
 pub struct ChannelResponseWriter {
     headers: http::HeaderMap,
     head: Option<oneshot::Sender<http::response::Parts>>,
+    /// The status recorded by `write_header` before the head is sent.
+    status: Option<u16>,
+    /// Body bytes queued before the head (at most [`BUFFER_BEFORE_CHUNKING`]).
+    pending: usize,
+    /// The request is a HEAD request.
+    head_request: bool,
     shared: Arc<ChannelShared>,
     finished: bool,
 }
 
+/// Go `bodyAllowedForStatus`.
+fn body_allowed(status: u16) -> bool {
+    !((100..200).contains(&status) || status == 204 || status == 304)
+}
+
 impl ChannelResponseWriter {
-    fn send_head(&mut self, status: u16) {
+    /// Sends the head; `extra` are body bytes about to be queued (sniffed with
+    /// the queued ones when there is no `Content-Type`).
+    fn send_head(&mut self, extra: &[u8]) {
         let Some(tx) = self.head.take() else { return };
+        let status = self.status.unwrap_or(200);
+        if body_allowed(status)
+            && !self.headers.contains_key(http::header::CONTENT_TYPE)
+            && !self.headers.contains_key(http::header::TRANSFER_ENCODING)
+        {
+            let mut first = Vec::new();
+            for chunk in &self.shared.state().chunks {
+                first.extend_from_slice(chunk);
+            }
+            first.extend_from_slice(extra);
+            if !first.is_empty() {
+                self.headers
+                    .insert(http::header::CONTENT_TYPE, http::HeaderValue::from_static(sniff_content_type(&first)));
+            }
+        }
         let mut resp = http::Response::new(());
         *resp.status_mut() = http::StatusCode::from_u16(status).unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR);
         *resp.headers_mut() = std::mem::take(&mut self.headers);
@@ -147,6 +184,75 @@ impl ChannelResponseWriter {
         // The receiver is gone when the client went away before the head.
         let _ = tx.send(parts);
     }
+
+    /// Queues `data` before the head while the total stays within
+    /// [`BUFFER_BEFORE_CHUNKING`]; `false` when the head must go out first.
+    fn buffer_before_head(&mut self, data: &[u8]) -> bool {
+        if self.head.is_none() || self.pending + data.len() > BUFFER_BEFORE_CHUNKING {
+            return false;
+        }
+        let mut s = self.shared.state();
+        if !s.gone {
+            s.buffered += data.len();
+            s.chunks.push_back(Bytes::copy_from_slice(data));
+        }
+        self.pending += data.len();
+        true
+    }
+}
+
+/// Go `http.DetectContentType` for the bodies Cabby writes: byte order marks,
+/// HTML and XML documents, PDF, other binary data, and plain text.
+pub fn sniff_content_type(data: &[u8]) -> &'static str {
+    let data = &data[..data.len().min(512)];
+    if data.starts_with(&[0xFE, 0xFF]) {
+        return "text/plain; charset=utf-16be";
+    }
+    if data.starts_with(&[0xFF, 0xFE]) {
+        return "text/plain; charset=utf-16le";
+    }
+    if data.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        return "text/plain; charset=utf-8";
+    }
+    let start = data.iter().position(|b| !b"\t\n\x0c\r ".contains(b)).unwrap_or(data.len());
+    let text = &data[start..];
+    const HTML: [&[u8]; 17] = [
+        b"<!DOCTYPE HTML",
+        b"<HTML",
+        b"<HEAD",
+        b"<SCRIPT",
+        b"<IFRAME",
+        b"<H1",
+        b"<DIV",
+        b"<FONT",
+        b"<TABLE",
+        b"<A",
+        b"<STYLE",
+        b"<TITLE",
+        b"<B",
+        b"<BODY",
+        b"<BR",
+        b"<P",
+        b"<!--",
+    ];
+    for sig in HTML {
+        if text.len() > sig.len()
+            && text[..sig.len()].eq_ignore_ascii_case(sig)
+            && matches!(text[sig.len()], b' ' | b'>')
+        {
+            return "text/html; charset=utf-8";
+        }
+    }
+    if text.starts_with(b"<?xml") {
+        return "text/xml; charset=utf-8";
+    }
+    if data.starts_with(b"%PDF-") {
+        return "application/pdf";
+    }
+    if data.iter().any(|&b| matches!(b, 0x00..=0x08 | 0x0B | 0x0E..=0x1A | 0x1C..=0x1F)) {
+        return "application/octet-stream";
+    }
+    "text/plain; charset=utf-8"
 }
 
 impl ResponseWriter for ChannelResponseWriter {
@@ -154,18 +260,25 @@ impl ResponseWriter for ChannelResponseWriter {
         &mut self.headers
     }
 
+    /// Records the status (only the first call counts); the head goes out with
+    /// the first flush, a body larger than Go's buffer, or the handler's end.
     fn write_header(&mut self, status: u16) {
-        self.send_head(status);
+        if self.head.is_some() && self.status.is_none() {
+            self.status = Some(status);
+        }
     }
 
     fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        self.send_head(200);
         if self.finished {
             return Err(std::io::Error::other("http: response already finished"));
         }
         if data.is_empty() {
             return Ok(0);
         }
+        if self.buffer_before_head(data) {
+            return Ok(data.len());
+        }
+        self.send_head(data);
         let deadline = Instant::now() + self.shared.write_timeout;
         let mut s = self.shared.state();
         loop {
@@ -193,14 +306,28 @@ impl ResponseWriter for ChannelResponseWriter {
 
     fn flush(&mut self) {
         // Queued bytes are sent as soon as the body is polled.
-        self.send_head(200);
+        self.send_head(&[]);
     }
 
     fn finish(&mut self) {
         if self.finished {
             return;
         }
-        self.send_head(200);
+        if self.head.is_some() {
+            // Go sets the length of a body the handler wrote in full (none for
+            // a HEAD request that wrote nothing).
+            let status = self.status.unwrap_or(200);
+            let pending = self.pending as u64;
+            if body_allowed(status)
+                && !self.headers.contains_key(http::header::CONTENT_LENGTH)
+                && !self.headers.contains_key(http::header::TRANSFER_ENCODING)
+                && (!self.head_request || pending > 0)
+            {
+                self.headers.insert(http::header::CONTENT_LENGTH, http::HeaderValue::from(pending));
+                self.shared.state().exact = Some(pending);
+            }
+            self.send_head(&[]);
+        }
         self.finished = true;
         let waker = {
             let mut s = self.shared.state();
@@ -247,6 +374,13 @@ impl hyper::body::Body for ChannelBody {
         let s = self.shared.state();
         s.chunks.is_empty() && (s.finished || s.gone)
     }
+
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        match self.shared.state().exact {
+            Some(n) => hyper::body::SizeHint::with_exact(n),
+            None => hyper::body::SizeHint::default(),
+        }
+    }
 }
 
 impl Drop for ChannelBody {
@@ -279,12 +413,28 @@ impl Drop for PendingGuard {
 /// dropped).
 pub fn channel_response()
 -> (ChannelResponseWriter, CancellationToken, impl std::future::Future<Output = Response> + Send + 'static) {
-    channel_response_with_limits(MAX_BUFFERED, WRITE_TIMEOUT)
+    channel_response_with_limits(MAX_BUFFERED, WRITE_TIMEOUT, false, None)
+}
+
+/// [`channel_response`] for `req`: a HEAD response gets no `Content-Length: 0`
+/// when nothing is written, as in Go, and the token is also cancelled when
+/// the client closes its side of the connection (Go's request context ends).
+pub fn channel_response_for<B>(
+    req: &http::Request<B>,
+) -> (ChannelResponseWriter, CancellationToken, impl std::future::Future<Output = Response> + Send + 'static) {
+    channel_response_with_limits(
+        MAX_BUFFERED,
+        WRITE_TIMEOUT,
+        req.method() == http::Method::HEAD,
+        super::http_server::client_closed(req),
+    )
 }
 
 fn channel_response_with_limits(
     max_buffered: usize,
     write_timeout: Duration,
+    head_request: bool,
+    client_closed: Option<CancellationToken>,
 ) -> (ChannelResponseWriter, CancellationToken, impl std::future::Future<Output = Response> + Send + 'static) {
     let (tx, rx) = oneshot::channel();
     let shared = Arc::new(ChannelShared {
@@ -292,11 +442,14 @@ fn channel_response_with_limits(
         space: Condvar::new(),
         max_buffered,
         write_timeout,
-        client_gone: CancellationToken::new(),
+        client_gone: client_closed.map_or_else(CancellationToken::new, |c| c.child_token()),
     });
     let writer = ChannelResponseWriter {
         headers: http::HeaderMap::new(),
         head: Some(tx),
+        status: None,
+        pending: 0,
+        head_request,
         shared: shared.clone(),
         finished: false,
     };
@@ -369,8 +522,9 @@ mod tests {
     #[test]
     fn deviation_d031_writes_to_a_stalled_client_time_out() {
         runtime().block_on(async {
-            let (mut w, _gone, resp) = channel_response_with_limits(4, Duration::from_millis(50));
+            let (mut w, _gone, resp) = channel_response_with_limits(4, Duration::from_millis(50), false, None);
             w.write_header(200);
+            w.flush();
             // The client got the head but reads nothing.
             let _resp = resp.await;
             let writer = std::thread::spawn(move || {
@@ -388,8 +542,9 @@ mod tests {
     #[test]
     fn a_reading_client_unblocks_writers() {
         runtime().block_on(async {
-            let (mut w, _gone, resp) = channel_response_with_limits(4, Duration::from_secs(5));
+            let (mut w, _gone, resp) = channel_response_with_limits(4, Duration::from_secs(5), false, None);
             w.write_header(200);
+            w.flush();
             let resp = resp.await;
             let writer = std::thread::spawn(move || {
                 for _ in 0..10 {
@@ -407,9 +562,85 @@ mod tests {
         runtime().block_on(async {
             let (mut w, gone, resp) = channel_response();
             w.write_header(200);
+            w.flush();
             drop(resp.await);
             assert!(gone.is_cancelled());
             assert!(w.write(b"late").is_err());
         });
+    }
+
+    /// Low (HTTP framing): like Go's server, a short body written by a
+    /// handler that returns without flushing gets a `Content-Length` (and a
+    /// sniffed `Content-Type` when it set none); a flushed or longer body
+    /// streams (chunked). Before, every response streamed.
+    #[test]
+    fn frames_responses_like_go() {
+        use hyper::body::Body as _;
+        runtime().block_on(async {
+            let (mut w, _gone, resp) = channel_response();
+            w.headers_mut().insert("content-type", http::HeaderValue::from_static("application/json"));
+            w.write(b"[1,").unwrap();
+            w.write(b"2]").unwrap();
+            w.finish();
+            let resp = resp.await;
+            assert_eq!("5", resp.headers()["content-length"]);
+            assert_eq!("application/json", resp.headers()["content-type"]);
+            assert_eq!(Some(5), resp.body().size_hint().exact());
+
+            let (mut w, _gone, resp) = channel_response();
+            w.write_header(400);
+            w.write(b"bad request\n").unwrap();
+            drop(w);
+            let resp = resp.await;
+            assert_eq!(400, resp.status());
+            assert_eq!("12", resp.headers()["content-length"]);
+            assert_eq!("text/plain; charset=utf-8", resp.headers()["content-type"]);
+
+            // Nothing written: `Content-Length: 0`, except for HEAD requests
+            // and statuses without a body.
+            let (mut w, _gone, resp) = channel_response();
+            w.write_header(204);
+            drop(w);
+            assert!(resp.await.headers().get("content-length").is_none());
+            let (w, _gone, resp) = channel_response_for(&http::Request::head("/").body(()).unwrap());
+            drop(w);
+            assert!(resp.await.headers().get("content-length").is_none());
+            let (w, _gone, resp) = channel_response_for(&http::Request::get("/").body(()).unwrap());
+            drop(w);
+            assert_eq!("0", resp.await.headers()["content-length"]);
+
+            // The head waits for a flush (only the first status counts).
+            let (mut w, _gone, resp) = channel_response();
+            w.write_header(200);
+            w.write_header(500);
+            let mut resp = Box::pin(resp);
+            assert!(tokio::time::timeout(Duration::from_millis(50), resp.as_mut()).await.is_err());
+            w.flush();
+            let resp = resp.await;
+            assert_eq!(200, resp.status());
+            assert!(resp.headers().get("content-length").is_none());
+            assert_eq!(None, resp.body().size_hint().exact());
+
+            // More than Go's 2048-byte buffer: the head goes out, chunked.
+            let (mut w, _gone, resp) = channel_response();
+            w.write(&[b'a'; 2048]).unwrap();
+            let mut resp = Box::pin(resp);
+            assert!(tokio::time::timeout(Duration::from_millis(50), resp.as_mut()).await.is_err());
+            w.write(b"b").unwrap();
+            let resp = resp.await;
+            assert!(resp.headers().get("content-length").is_none());
+            assert_eq!("text/plain; charset=utf-8", resp.headers()["content-type"]);
+            drop(w);
+            assert_eq!(2049, resp.into_body().collect().await.unwrap().to_bytes().len());
+        });
+    }
+
+    #[test]
+    fn sniffs_content_types_like_go() {
+        assert_eq!("text/plain; charset=utf-8", sniff_content_type(b"Ah, ha, ha, ha, stayin' alive"));
+        assert_eq!("text/html; charset=utf-8", sniff_content_type(b"\n <html><body>"));
+        assert_eq!("text/xml; charset=utf-8", sniff_content_type(b"<?xml version=\"1.0\"?>"));
+        assert_eq!("application/octet-stream", sniff_content_type(b"\x00\x01"));
+        assert_eq!("text/plain; charset=utf-8", sniff_content_type("caf\u{e9}".as_bytes()));
     }
 }

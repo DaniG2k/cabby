@@ -267,40 +267,76 @@ impl Server {
 
     /// Routes one request through the server's handlers (upstream
     /// `server.ServeHTTP`): `<path>/publish` exactly and anything under
-    /// `<path>/presence/`; everything else (or before `start`) is 404.
+    /// `<path>/presence/`; everything else (or before `start`) is the router's
+    /// `404 page not found`.
     pub fn serve(&self, req: &HttpRequest) -> HttpResponse {
-        if !self.started.load(Ordering::SeqCst) {
-            return HttpResponse::with_status(404);
-        }
-        let path = req.path.split(['?', '#']).next().unwrap_or_default();
-        match path.strip_prefix(self.conf.path.as_str()) {
-            Some("/publish") => self.publish(req),
-            Some(rest) if rest.starts_with("/presence/") => self.presence(req, path),
-            _ => HttpResponse::with_status(404),
+        match self.check(req) {
+            Check::Done(resp) => resp,
+            Check::ReadBody(resp) => {
+                let body = match self.max_body_size() {
+                    Some(max) if req.body.len() as u64 > max => PublishBody::TooLarge,
+                    _ => PublishBody::Read(&req.body),
+                };
+                self.finish_publish(resp, body)
+            }
         }
     }
 
-    /// Upstream `PublishHandler`.
-    fn publish(&self, req: &HttpRequest) -> HttpResponse {
+    /// The first step of [`Server::serve`] for a request whose body has not
+    /// been read: everything up to the publish handler's body read (routing,
+    /// CORS, method and authorization), as upstream, so an unauthorized client
+    /// cannot make the server read its body.
+    pub fn check(&self, req: &HttpRequest) -> Check {
+        if !self.started.load(Ordering::SeqCst) {
+            return Check::Done(not_found());
+        }
+        let path = req.path.split(['?', '#']).next().unwrap_or_default();
+        match path.strip_prefix(self.conf.path.as_str()) {
+            Some("/publish") => self.publish_check(req),
+            Some(rest) if rest.starts_with("/presence/") => Check::Done(self.presence(req, path)),
+            _ => Check::Done(not_found()),
+        }
+    }
+
+    /// The body limit of publish requests (`max_body_size`; `None`: unlimited).
+    pub fn max_body_size(&self) -> Option<u64> {
+        u64::try_from(self.conf.max_body_size).ok().filter(|m| *m > 0)
+    }
+
+    /// Upstream `PublishHandler` up to reading the body.
+    fn publish_check(&self, req: &HttpRequest) -> Check {
         let mut resp = HttpResponse::default();
         if let Some(hosts) = &self.cors_hosts {
             write_cors_headers(&mut resp, req, hosts);
             if req.method == "OPTIONS" {
                 resp.status = 200;
-                return resp;
+                return Check::Done(resp);
             }
         }
+        if req.method != "POST" {
+            resp.status = 422;
+            return Check::Done(resp);
+        }
+        if !self.authenticator.authenticate(req) {
+            resp.status = 401;
+            return Check::Done(resp);
+        }
+        Check::ReadBody(resp)
+    }
 
-        resp.status = if req.method != "POST" {
-            422
-        } else if !self.authenticator.authenticate(req) {
-            401
-        } else if self.conf.max_body_size > 0 && req.body.len() as u64 > self.conf.max_body_size as u64 {
-            413
-        } else if self.handler.handle_broadcast(&req.body).is_ok() {
-            201
-        } else {
-            501
+    /// Upstream `PublishHandler` after reading the body: `resp` is the one
+    /// [`Server::check`] returned in [`Check::ReadBody`].
+    pub fn finish_publish(&self, mut resp: HttpResponse, body: PublishBody<'_>) -> HttpResponse {
+        resp.status = match body {
+            PublishBody::TooLarge => 413,
+            PublishBody::Failed => 422,
+            PublishBody::Read(body) => {
+                if self.handler.handle_broadcast(body).is_ok() {
+                    201
+                } else {
+                    501
+                }
+            }
         };
         resp
     }
@@ -328,6 +364,39 @@ impl Server {
                 resp
             }
         }
+    }
+}
+
+/// What [`Server::check`] decided before the request body is read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Check {
+    /// The final response; the body is not needed.
+    Done(HttpResponse),
+    /// A publish request that passed the checks: read the body (at most
+    /// [`Server::max_body_size`]) and pass this response to
+    /// [`Server::finish_publish`].
+    ReadBody(HttpResponse),
+}
+
+/// The outcome of reading a publish request's body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublishBody<'a> {
+    Read(&'a [u8]),
+    /// Over the limit (Go `http.MaxBytesError`): 413.
+    TooLarge,
+    /// The body could not be read: 422.
+    Failed,
+}
+
+/// Go `http.NotFound`, as chi answers paths without a handler.
+fn not_found() -> HttpResponse {
+    HttpResponse {
+        status: 404,
+        headers: vec![
+            ("Content-Type".to_owned(), "text/plain; charset=utf-8".to_owned()),
+            ("X-Content-Type-Options".to_owned(), "nosniff".to_owned()),
+        ],
+        body: b"404 page not found\n".to_vec(),
     }
 }
 
