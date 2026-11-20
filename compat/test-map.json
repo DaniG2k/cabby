@@ -23,7 +23,7 @@
       "pass": 923
     },
     "rust_only": {
-      "cases": 56
+      "cases": 62
     },
     "translation": {
       "reviewed": 923
@@ -26284,6 +26284,24 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "conformance::client_messages::messages_nested_deeper_than_go_limit_stop_the_reader",
+      "relation": "external",
+      "links": [
+        "26a1a703:encoders/json_test.go#TestJSONEncoder/.Decode"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::client_messages::messages_nested_up_to_go_limit_are_processed",
+      "relation": "external",
+      "links": [
+        "26a1a703:encoders/json_test.go#TestJSONEncoder/.Decode"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
       "rust_case": "conformance::health::health_endpoint_answers_ok",
       "relation": "external",
       "links": [
@@ -26416,6 +26434,33 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "conformance::rpc_sessions::closing_a_session_aborts_its_rpc_call",
+      "relation": "external",
+      "links": [
+        "26a1a703:rpc/rpc_test.go#TestAuthenticate/Canceled_during_RPC"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::rpc_sessions::closing_a_session_cancels_its_wait_for_an_rpc_slot",
+      "relation": "external",
+      "links": [
+        "26a1a703:rpc/rpc_test.go#TestWaitTimeout/Session_closes_while_waiting_for_a_slot"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::rpc_sessions::rpc_backlog_does_not_delay_other_sessions",
+      "relation": "external",
+      "links": [
+        "26a1a703:rpc/rpc_test.go#TestWaitTimeout/Subscribe_times_out_waiting_for_a_slot"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
       "rust_case": "conformance::sse::authentication_failure",
       "relation": "external",
       "links": [
@@ -26525,7 +26570,7 @@
       "links": [
         "anycable/anycable/issues/265"
       ],
-      "reference_status": "unverified",
+      "reference_status": "pass",
       "rust_status": "pass"
     },
     {
@@ -26534,7 +26579,16 @@
       "links": [
         "anycable/anycable/issues/265"
       ],
-      "reference_status": "unverified",
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::threads::idle_pusher_connections_do_not_add_threads",
+      "relation": "issue",
+      "links": [
+        "anycable/anycable/issues/265"
+      ],
+      "reference_status": "pass",
       "rust_status": "pass"
     },
     {
@@ -26688,7 +26742,7 @@
       "links": [
         "anycable/anycable/issues/275"
       ],
-      "reference_status": "unverified",
+      "reference_status": "upstream_failure",
       "rust_status": "pass"
     },
     {
@@ -26697,7 +26751,7 @@
       "links": [
         "anycable/anycable/issues/263"
       ],
-      "reference_status": "unverified",
+      "reference_status": "pass",
       "rust_status": "pass"
     },
     {
@@ -26706,7 +26760,7 @@
       "links": [
         "anycable/anycable/issues/275"
       ],
-      "reference_status": "unverified",
+      "reference_status": "upstream_failure",
       "rust_status": "pass"
     },
     {
