@@ -1,5 +1,6 @@
 //! `cargo xtask`: maintenance tasks for the Cabby migration (SPEC.md §4, §5, §9).
 
+mod asan;
 mod inventory;
 mod manifest;
 mod reference;
@@ -41,6 +42,9 @@ enum Cmd {
     },
     /// Verify vendored upstream inputs (rpc.proto) against upstream.lock.
     CheckInputs,
+    /// Run the mruby binding's tests (cabby-mruby-sys) under AddressSanitizer
+    /// (x86_64 Linux; docs/mruby.md).
+    Asan,
     /// Print translation / reference / implementation coverage.
     Report {
         /// Also break coverage down per upstream file directory.
@@ -84,6 +88,7 @@ fn main() -> Result<()> {
         Cmd::Inventory => inventory::run(),
         Cmd::Test { backend, record, filter } => runner::run(backend, record, filter.as_deref()),
         Cmd::CheckInputs => reference::check_inputs(),
+        Cmd::Asan => asan::run(),
         Cmd::Report { by_package } => manifest::report_with(by_package),
         Cmd::MarkReviewed { patterns, except } => manifest::mark_reviewed(&patterns, &except),
     }
