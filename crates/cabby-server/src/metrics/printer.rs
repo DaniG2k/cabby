@@ -181,10 +181,10 @@ fn format_tint_at(t: &LocalTime, level: Level, msg: &str, attrs: &[Attr]) -> Str
         Level::Error => "ERR",
     });
     out.push(' ');
-    if !msg.is_empty() {
-        out.push_str(msg);
-        out.push(' ');
-    }
+    // tint writes the message and a space even when the message is empty (the
+    // metrics snapshot line reads `INF  nodeid=...`).
+    out.push_str(msg);
+    out.push(' ');
     for a in attrs {
         tint_attr(&mut out, "", a);
     }
@@ -223,7 +223,8 @@ fn tint_string(out: &mut String, s: &str) {
 
 impl IntervalWriter for BasePrinter {
     fn run(&self, interval: u64) -> Result<(), MetricsError> {
-        let mut attrs = vec![Attr::new("context", LogValue::String("metrics".into()))];
+        // Upstream gives printers the runner's logger (no `context=metrics`).
+        let mut attrs = Vec::with_capacity(2);
         attrs.push(Attr::new("interval", LogValue::Uint(interval)));
         if let Some(filter) = &self.filter {
             let mut fields: Vec<&str> = filter.iter().map(String::as_str).collect();
@@ -237,9 +238,7 @@ impl IntervalWriter for BasePrinter {
     fn stop(&self) {}
 
     fn write(&self, metrics: &Metrics) -> Result<(), MetricsError> {
-        let mut attrs = vec![Attr::new("context", LogValue::String("metrics".into()))];
-        attrs.extend(self.snapshot_attrs(metrics));
-        log(Level::Info, "", &attrs);
+        log(Level::Info, "", &self.snapshot_attrs(metrics));
         Ok(())
     }
 }
@@ -263,7 +262,7 @@ mod logger_tests {
         let (time, rest) = line.split_at(23);
         assert_eq!(b' ', time.as_bytes()[10]);
         assert_eq!(" INF Starting AnyCable nodeid=abc x=\"a b\" n=2\n", rest);
-        assert_eq!(" WRN k=v\n", &format_tint(Level::Warn, "", &[Attr::new("k", LogValue::String("v".into()))])[23..]);
+        assert_eq!(" WRN  k=v\n", &format_tint(Level::Warn, "", &[Attr::new("k", LogValue::String("v".into()))])[23..]);
     }
 
     /// tint prints the time in the local zone (Go's `time.Local`).

@@ -234,6 +234,11 @@ impl Metrics {
 
         let writers: Vec<Arc<dyn IntervalWriter>> = self.writers.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if writers.is_empty() {
+            printer::log(
+                Level::Debug,
+                "no metrics writers, disabling metrics rotation",
+                &[Attr::new("context", LogValue::String("metrics".into()))],
+            );
             if has_server {
                 // No rotation to drive; keep running until shut down.
                 self.shutdown.cancelled().await;
@@ -255,6 +260,16 @@ impl Metrics {
             tokio::select! {
                 () = self.shutdown.cancelled() => return Ok(()),
                 () = tokio::time::sleep(interval) => {
+                    if cabby_core::logger::enabled(Level::Debug) {
+                        printer::log(
+                            Level::Debug,
+                            "rotate metrics",
+                            &[
+                                Attr::new("context", LogValue::String("metrics".into())),
+                                Attr::new("interval", LogValue::String(go_duration_secs(interval.as_secs()))),
+                            ],
+                        );
+                    }
                     self.rotate();
                     for writer in &writers {
                         if let Err(e) = writer.write(self) {
@@ -391,5 +406,28 @@ impl Instrumenter for Metrics {
     }
     fn register_gauge(&self, name: &str, desc: &str) {
         self.register(&self.shared.gauges, name, Gauge::new(name, desc));
+    }
+}
+
+/// Go's `time.Duration.String()` for a whole number of seconds (`15s`, `1m0s`, `1h0m0s`).
+fn go_duration_secs(secs: u64) -> String {
+    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+    if h > 0 {
+        format!("{h}h{m}m{s}s")
+    } else if m > 0 {
+        format!("{m}m{s}s")
+    } else {
+        format!("{s}s")
+    }
+}
+
+#[cfg(test)]
+mod duration_tests {
+    #[test]
+    fn formats_like_go_durations() {
+        assert_eq!("15s", super::go_duration_secs(15));
+        assert_eq!("1m0s", super::go_duration_secs(60));
+        assert_eq!("1h1m5s", super::go_duration_secs(3665));
+        assert_eq!("0s", super::go_duration_secs(0));
     }
 }
