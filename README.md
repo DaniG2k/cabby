@@ -214,6 +214,55 @@ Reproduce: `bench/soketi/setup.sh && bench/reverb/setup.sh` (the latter builds P
 `compat/scripts/bench-charts.py docs/benchmarks/pusher-results docs/benchmarks --protocol=pusher`.
 Raw results: [`docs/benchmarks/pusher-results`](docs/benchmarks/pusher-results).
 
+## Soak test: memory over hours of churn
+
+AnyCable users have reported memory that grows slowly over days in production
+([anycable/anycable#265](https://github.com/anycable/anycable/issues/265)). To check both servers
+for this, `cabby-bench soak` imitates a Rails app with Turbo pages for two hours: 200 clients
+keep connecting (authenticated over RPC, 2% rejected), subscribing to 1–3 of 100 streams,
+navigating, and leaving after 2–30 s (half with a close handshake, half by dropping the TCP
+connection), while 20 broadcasts per second go out. Both servers ran side by side on their own
+cores with the same random schedule. After the run, the clients leave, the disconnect queue
+drains, and the leftover memory is measured after 30 s.
+
+<p align="center">
+  <img src="docs/benchmarks/soak-memory.svg" width="720" alt="Server memory over a two-hour soak. AnyCable rises from 26 MB idle to 37 MB at the end of warm-up and ends at 38.0 MB. Cabby rises from 12 MB idle to 17 MB and ends at 18.0 MB. Both lines are nearly flat." />
+</p>
+
+| | AnyCable (Go) | Cabby (Rust) |
+|---|---:|---:|
+| Sessions / subscriptions over 2 hours | 78,202 / 304,520 | 78,201 / 304,520 |
+| Memory: idle → after warm-up → end | 26.4 → 37.2 → 38.0 MB | 12.1 → 16.9 → **18.0 MB** |
+| Growth after warm-up (1st hour / 2nd hour) | 0.78 / 0.10 MB/h | 0.48 / 0.49 MB/h |
+| After the clients left: memory / threads / sockets | 35.5 MB / 8 / 2 (baseline 2) | **17.8 MB** / 28 / 4 (baseline 4) |
+| Delivery p99 latency | 0.94 ms | **0.81 ms** |
+| Missing / duplicate / misrouted messages | 0 / 0 / 0 | 0 / 0 / 0 |
+
+A slow creep of half a megabyte per hour could be a leak or the allocator settling, so both
+servers were also run at nearly three times the churn: 400 clients living 1–3 s, about 211,000
+sessions in 20 minutes. Neither server's memory grew with the number of sessions: Cabby levelled
+off at 51.9–52.4 MB, AnyCable at 139–140 MB, after about 10 minutes, so whatever leaks is under a
+few bytes per session ([`docs/benchmarks/soak-churn`](docs/benchmarks/soak-churn)).
+
+What this shows:
+
+- **No leak on this workload, in either server.** Both level off, and sockets, file descriptors
+  and threads go back to their idle counts once the clients leave. AnyCable #265 may need
+  something this workload doesn't do (a particular broker, days of uptime, or a Go runtime
+  behavior).
+- **Cabby uses half the memory** during the run and after it.
+- **Freed memory is kept, not returned to the OS.** After the high-churn run, Cabby stayed at
+  52 MB against 12 MB idle (glibc's allocator keeps freed pages for reuse); AnyCable dropped from
+  140 to 69 MB (Go's runtime returns some). Peak memory is what to plan for with either server.
+- **The soak found one Cabby bug, now fixed:** idle HTTP RPC connections were closed only when
+  the next RPC call came in, so after traffic stopped Cabby kept up to 6 sockets open. Like Go,
+  each one now closes 10 s after it goes idle.
+
+Reproduce: `cargo build --release -p cabby-server -p cabby-bench`, then
+`DURATION=2h compat/scripts/soak-compare.sh` (the high-churn run: `DURATION=20m WARMUP=2m
+CLIENTS=400 SOAK_ARGS="--lifetime-min=1s --lifetime-max=3s --pause-min=100ms --pause-max=500ms"`).
+Raw results: [`docs/benchmarks/soak`](docs/benchmarks/soak).
+
 ## Compatibility progress
 
 Cabby is built tests-first: AnyCable's entire test corpus was translated to Rust and verified

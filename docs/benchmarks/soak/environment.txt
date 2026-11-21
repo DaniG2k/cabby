@@ -1,0 +1,8 @@
+date=2026-11-20T22:29:11Z
+cpu=AMD Ryzen 5 PRO 6650H with Radeon Graphics
+kernel=7.3.0-10-generic
+memory=11 GiB
+anycable_cpus=0-1 anycable_bench_cpus=4-7 cabby_cpus=2-3 cabby_bench_cpus=8-11 bench_threads=4
+flags=--duration=2h --warmup=5m --sample-interval=30s -c 200 -r 20 -S 100 --seed=1 --non-interactive
+cabby=5bf7c6d 1.6.21
+anycable-go="26a1a703a54b870e42f5660c3d0785db2c602764" 1.6.21

@@ -15,11 +15,12 @@ plan and progress. Don't rely on earlier conversations.
 - **Done:** all 923 upstream cases pass (1191 tests). The general review
   (`docs/review/2026-11-fable-review.md`) and the security review
   (`docs/review/2026-11-security-review.md`) are fixed. The README has the three-way benchmark
-  (Action Cable vs AnyCable vs Cabby), with raw results in `docs/benchmarks/results`.
-- **Next:**
-  1. Pusher-protocol benchmark (Cabby/AnyCable Pusher modes vs Soketi and Laravel Reverb), needing
-     a Pusher client mode in `crates/cabby-bench`.
-  2. A soak test for AnyCable #265.
+  (Action Cable vs AnyCable vs Cabby, raw results in `docs/benchmarks/results`), the
+  Pusher-protocol benchmark (vs Soketi and Reverb, `docs/benchmarks/pusher-results`) and the
+  AnyCable #265 soak (`docs/benchmarks/soak`, `docs/benchmarks/soak-churn`). Every SPEC §11 owner
+  request is done.
+- **Next:** nothing planned. Candidates: production trials; if AnyCable asks, a Go patch for
+  GHSA-3r94-gr9m-jc7q.
 - **Security reports to AnyCable:** the owner reported the `?pi=9223372036` crash privately as
   GHSA-3r94-gr9m-jc7q (2026-11-21). The `$pusher` signature bypass (reachable from `/cable`) is not
   reported yet. Both are fixed in Cabby (D-054, D-055). Keep the details out of the README until
