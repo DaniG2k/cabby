@@ -6997,8 +6997,8 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
-        "[src] inherent window: AnyT's 0.5 s no-message check"
+        "[src] inherent window: AnyT's 0.5 s no-message check",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::broadcast_to_others",
@@ -7039,8 +7039,8 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
-        "[src] inherent window: AnyT's 0.5 s no-message check"
+        "[src] inherent window: AnyT's 0.5 s no-message check",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::whisper_to_others",
@@ -24761,8 +24761,8 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] inherent window: the server's default ping_interval (3 s); two pings take about 6 s, each within AnyT's 5 s receive timeout",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
@@ -24853,8 +24853,8 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] inherent window: AnyT's `client.close` waits 0.5 s and fails on unprocessed messages",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
@@ -24948,9 +24948,9 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] AnyT's Action Cable-only `sleep 1` is dropped: the welcome arrives after the session is registered (compat/deviations.md)",
         "[src] serialized across variants and published after the server's Redis pub/sub subscribed: the pub/sub command channel is shared on the shared Redis",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
@@ -24997,8 +24997,8 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] restart_server! is ported as stopping the server (SIGTERM, SIGKILL after 3 s as ChildProcess does); the disconnect is sent while stopping, the restart is not performed",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
@@ -25369,8 +25369,8 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] inherent window: AnyT's `client.close` waits 0.5 s and fails on unprocessed messages",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
@@ -25417,8 +25417,8 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] inherent window: AnyT's `client.close` waits 0.5 s and fails on unprocessed messages",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
@@ -25605,8 +25605,8 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] AnyT's `sleep 1` after unsubscribe is replaced by a barrier subscription (Cabby::BarrierChannel) on the same session (in-order command handling, compat/deviations.md); inherent window: AnyT's 0.5 s no-message check",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
@@ -25698,8 +25698,8 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] AnyT's `sleep 1` after unsubscribe is replaced by a barrier subscription (Cabby::BarrierChannel) on the same session (in-order command handling, compat/deviations.md); inherent window: AnyT's 0.5 s no-message check",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
@@ -25790,8 +25790,8 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] AnyT's `sleep 1` after unsubscribe is replaced by a barrier subscription (Cabby::BarrierChannel) on the same session (in-order command handling, compat/deviations.md); inherent window: AnyT's 0.5 s no-message check",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
@@ -25929,8 +25929,8 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] the two `sleep 0.2` are replaced by a session barrier after `unfollow` and a witness client that receives Y before Z is broadcast",
+        "[src] test-conformance-embedded runs cmd/embedded-cable; instantiated with the server binary configured only through the environment, HTTP RPC, and the broadcast handler at /broadcast on the main port (ANYCABLE_HTTP_BROADCAST_PATH)",
         "[src] TLS for WebSocket (--ssl_cert/--ssl_key, wss) and gRPC RPC (--rpc_enable_tls --rpc_tls_verify=false) with etc/ssl/server.crt; the client does not verify the certificate"
       ],
       "rust_cases": [
