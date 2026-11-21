@@ -645,9 +645,7 @@ pub fn rust_annotations() -> Result<Vec<Annotation>> {
         let mut files = vec![(main.clone(), Vec::<String>::new())];
         // `read_dir` order depends on the filesystem; sort so that notes merged from
         // several files come out in the same order on every machine (CI checks it).
-        let mut others: Vec<_> = std::fs::read_dir(&base)?
-            .map(|e| e.map(|e| e.path()))
-            .collect::<Result<_, _>>()?;
+        let mut others: Vec<_> = std::fs::read_dir(&base)?.map(|e| e.map(|e| e.path())).collect::<Result<_, _>>()?;
         others.retain(|p| p.extension().is_some_and(|x| x == "rs") && *p != main);
         others.sort();
         for p in others {
