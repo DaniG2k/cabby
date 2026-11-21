@@ -1,6 +1,6 @@
 # Cabby: tests-first AnyCable Rust port specification
 
-Status: M0–M7 benchmarks done: all 923 upstream cases pass; general review fixed; three-way benchmark (Action Cable / AnyCable / Cabby) in the README. Remaining: Pusher-protocol benchmark, AnyCable issue 265 soak test.
+Status: M0–M7 benchmarks done: all 923 upstream cases pass; general review fixed; three-way, Pusher-protocol and AnyCable issue 265 soak benchmarks in the README. All §11 owner requests done.
 Prepared: 2026-11-17. Progress: `cargo xtask report`; baseline evidence: `compat/baseline/README.md`.
 Project name: **Cabby**. Directory and planned binary: `cabby` (an independent AnyCable-compatible implementation).
 
@@ -301,7 +301,7 @@ The next coding deliverable is the test workspace, manifest, and baseline eviden
 ### Owner requests to complete at the end
 
 - [x] Pusher-protocol benchmark: Cabby and AnyCable Pusher modes vs Soketi and Laravel Reverb, through a Pusher client mode in the harness.
-- [ ] Soak test for AnyCable issue 265 (memory over hours of churn), Cabby vs AnyCable.
+- [x] Soak test for AnyCable issue 265 (memory over hours of churn), Cabby vs AnyCable: 2-hour soak plus a high-churn run, in the README (D-005). No growth with churn in either server; it found and fixed one Cabby bug (idle HTTP RPC connections not closed after traffic stopped).
 
 - [x] Independent review of the whole project with Fable 5.2 (not anchored on the implementer's summary).
 - [x] Fill the README's Go vs Rust comparison table with measured results from the external harness (`crates/cabby-bench`), including workloads where Rust is not faster.
