@@ -254,9 +254,6 @@ What this shows:
 - **Freed memory is kept, not returned to the OS.** After the high-churn run, Cabby stayed at
   52 MB against 12 MB idle (glibc's allocator keeps freed pages for reuse); AnyCable dropped from
   140 to 69 MB (Go's runtime returns some). Peak memory is what to plan for with either server.
-- **The soak found one Cabby bug, now fixed:** idle HTTP RPC connections were closed only when
-  the next RPC call came in, so after traffic stopped Cabby kept up to 6 sockets open. Like Go,
-  each one now closes 10 s after it goes idle.
 
 Reproduce: `cargo build --release -p cabby-server -p cabby-bench`, then
 `DURATION=2h compat/scripts/soak-compare.sh` (the high-churn run: `DURATION=20m WARMUP=2m

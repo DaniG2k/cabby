@@ -643,11 +643,16 @@ pub fn rust_annotations() -> Result<Vec<Annotation>> {
         let main = tests_dir.join(&t.path);
         let base = main.parent().unwrap().to_path_buf();
         let mut files = vec![(main.clone(), Vec::<String>::new())];
-        for e in std::fs::read_dir(&base)? {
-            let p = e?.path();
-            if p.extension().is_some_and(|x| x == "rs") && p != main {
-                files.push((p.clone(), vec![p.file_stem().unwrap().to_string_lossy().into_owned()]));
-            }
+        // `read_dir` order depends on the filesystem; sort so that notes merged from
+        // several files come out in the same order on every machine (CI checks it).
+        let mut others: Vec<_> = std::fs::read_dir(&base)?
+            .map(|e| e.map(|e| e.path()))
+            .collect::<Result<_, _>>()?;
+        others.retain(|p| p.extension().is_some_and(|x| x == "rs") && *p != main);
+        others.sort();
+        for p in others {
+            let stem = p.file_stem().unwrap().to_string_lossy().into_owned();
+            files.push((p, vec![stem]));
         }
         for (file, prefix) in files {
             let text = std::fs::read_to_string(&file)?;
