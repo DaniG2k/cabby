@@ -253,7 +253,7 @@ impl Handler for WebsocketHandler {
         {
             headers.insert(http::header::SEC_WEBSOCKET_PROTOCOL, v);
         }
-        if let Ok(v) = http::HeaderValue::from_str(&crate::telemetry::version()) {
+        if let Ok(v) = http::HeaderValue::from_str(crate::version::ANYCABLE_COMPAT) {
             headers.insert("x-anycable-version", v);
         }
 
