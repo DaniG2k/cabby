@@ -114,7 +114,12 @@ pub(super) fn schema_version(conn: &Connection) -> Result<i64, StoreError> {
             .parse::<i64>()
             .ok()
             .filter(|v| *v >= 0)
-            .ok_or_else(|| StoreError::Corrupt(format!("invalid schema_version {v:?}"))),
+            // Readable, but not a version Cabby wrote: refuse it (spec §6), never move it aside.
+            .ok_or_else(|| {
+                StoreError::Other(format!(
+                    "invalid schema_version {v:?} in its meta table (not written by Cabby?); fix it or move the file away"
+                ))
+            }),
     }
 }
 
@@ -646,5 +651,17 @@ mod tests {
         let copy = Connection::open(&copy).unwrap();
         assert_eq!(Some("e1".to_owned()), meta_get(&copy, "epoch").unwrap());
         assert_eq!(Some("0".to_owned()), meta_get(&copy, "clean_shutdown").unwrap());
+    }
+
+    #[test]
+    fn a_non_numeric_schema_version_is_an_error_not_corruption() {
+        let dir = TempDir::new();
+        let path = dir.file("cabby.db");
+        meta_set(&open(&path).unwrap(), "schema_version", "one").unwrap();
+
+        match open(&path) {
+            Err(StoreError::Other(why)) => assert!(why.contains("schema_version \"one\""), "{why}"),
+            other => panic!("expected a startup error, got {other:?}"),
+        }
     }
 }

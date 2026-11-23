@@ -88,34 +88,97 @@ pub(super) fn load(
         LockError::Io(e) => error(path, format!("cannot open the lock file {}: {e}", files::lock_path(path).display())),
     })?;
 
-    let (mut conn, moved) = match open_file(path) {
+    // Corruption can show at open (quick_check) or only while reading; either
+    // way the file is moved aside once and a new one started (spec §6).
+    // Nothing reaches the memory broker until the whole file was read.
+    let (mut conn, mut moved) = match open_file(path) {
         Ok(conn) => (conn, None),
         Err(StoreError::Corrupt(why)) => {
-            let moved = files::move_aside(path, units::now_secs(clock))
-                .map_err(|e| error(path, format!("is corrupt ({why}) and could not be moved aside: {e}")))?;
-            log_warn!(log(), &format!("the SQLite database is corrupt ({why}); moved it to {} and starting a new one",
-                moved.display()), "path" => path.display().to_string());
+            let moved = move_aside(path, &why, clock)?;
             (open_file(path).map_err(|e| error(path, e))?, Some(moved))
         }
         Err(e) => return Err(error(path, e)),
     };
+    let contents = match read(&mut conn, moved.clone(), config, clock) {
+        Ok(contents) => contents,
+        Err(StoreError::Corrupt(why)) if moved.is_none() => {
+            drop(conn);
+            let to = move_aside(path, &why, clock)?;
+            conn = open_file(path).map_err(|e| error(path, e))?;
+            moved = Some(to);
+            read(&mut conn, moved.clone(), config, clock).map_err(|e| error(path, e))?
+        }
+        Err(e) => return Err(error(path, e)),
+    };
 
-    let saved = store::meta_get(&conn, "epoch").map_err(|e| error(path, e))?.filter(|e| !e.is_empty());
-    let clean = store::meta_get(&conn, "clean_shutdown").map_err(|e| error(path, e))?.as_deref() == Some("1");
+    let Contents { epoch, previous, streams, sessions } = contents;
+    memory.set_epoch(&epoch);
+    let messages = streams.iter().map(|s| s.entries.len()).sum();
+    let stream_count = streams.len();
+    for s in streams {
+        memory.restore_stream(&s.name, s.max_offset, s.deadline, s.entries).map_err(|e| error(path, e.message))?;
+    }
+    let session_count = sessions.len();
+    for (sid, data, expires_at_ms) in sessions {
+        memory.restore_session_with_deadline(&sid, data, expires_at_ms);
+    }
+    let report = LoadReport {
+        messages,
+        streams: stream_count,
+        sessions: session_count,
+        epoch,
+        previous,
+        took: started.elapsed(),
+    };
+    log_info!(log(), &report.summary(), "path" => path.display().to_string());
+    Ok(Loaded { db: Database { conn, lock, path: path.to_owned() }, report })
+}
+
+/// Renames a corrupt database (with its -wal and -shm) and logs where it went.
+fn move_aside(path: &Path, why: &str, clock: &dyn Clock) -> Result<PathBuf, BrokerError> {
+    let moved = files::move_aside(path, units::now_secs(clock))
+        .map_err(|e| error(path, format!("is corrupt ({why}) and could not be moved aside: {e}")))?;
+    log_warn!(log(), &format!("the SQLite database is corrupt ({why}); moved it to {} and starting a new one",
+        moved.display()), "path" => path.display().to_string());
+    Ok(moved)
+}
+
+/// A stream as stored: its offset, deadline and contiguous tail.
+struct StoredStream {
+    name: String,
+    max_offset: u64,
+    deadline: i64,
+    entries: Vec<Entry>,
+}
+
+/// Everything the loader takes from the file.
+struct Contents {
+    epoch: String,
+    previous: Previous,
+    streams: Vec<StoredStream>,
+    /// (sid, data, expires_at_ms)
+    sessions: Vec<(String, Vec<u8>, i64)>,
+}
+
+/// Decides the epoch, marks the run, and reads the streams and sessions.
+fn read(
+    conn: &mut Connection,
+    moved: Option<PathBuf>,
+    config: &Config,
+    clock: &dyn Clock,
+) -> Result<Contents, StoreError> {
+    let saved = store::meta_get(conn, "epoch")?.filter(|e| !e.is_empty());
+    let clean = store::meta_get(conn, "clean_shutdown")?.as_deref() == Some("1");
     let (epoch, previous) = match (moved, saved) {
         (Some(moved), _) => (nanoid(4), Previous::Corrupt(moved)),
         (None, None) => (nanoid(4), Previous::NewDatabase),
         (None, Some(saved)) if clean => (saved, Previous::Clean),
         (None, Some(_)) => (nanoid(4), Previous::Unclean),
     };
-    store::mark_running(&mut conn, &epoch).map_err(|e| error(path, e))?;
-    memory.set_epoch(&epoch);
-
-    let (messages, streams) = load_streams(&conn, memory, config, clock).map_err(|e| error(path, e))?;
-    let sessions = load_sessions(&conn, memory, clock).map_err(|e| error(path, e))?;
-    let report = LoadReport { messages, streams, sessions, epoch, previous, took: started.elapsed() };
-    log_info!(log(), &report.summary(), "path" => path.display().to_string());
-    Ok(Loaded { db: Database { conn, lock, path: path.to_owned() }, report })
+    store::mark_running(conn, &epoch)?;
+    let streams = read_streams(conn, config, clock)?;
+    let sessions = read_sessions(conn, clock)?;
+    Ok(Contents { epoch, previous, streams, sessions })
 }
 
 fn error(path: &Path, e: impl Display) -> BrokerError {
@@ -129,14 +192,8 @@ fn open_file(path: &Path) -> Result<Connection, StoreError> {
     store::open(path)
 }
 
-/// Installs every stream still within its deadline with its contiguous tail;
-/// returns (messages, streams).
-fn load_streams(
-    conn: &Connection,
-    memory: &Memory,
-    config: &Config,
-    clock: &dyn Clock,
-) -> Result<(usize, usize), StoreError> {
+/// Every stream still within its deadline, with its contiguous tail.
+fn read_streams(conn: &Connection, config: &Config, clock: &dyn Clock) -> Result<Vec<StoredStream>, StoreError> {
     let now = units::now_secs(clock);
     let cutoff = units::history_cutoff(now, config.history_ttl);
     let limit = i64::try_from(config.history_limit).unwrap_or(i64::MAX);
@@ -145,7 +202,7 @@ fn load_streams(
         .query_map([now], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<Result<_, _>>()?;
     let mut tail = conn.prepare(store::LOAD_TAIL)?;
-    let (mut messages, mut streams) = (0, 0);
+    let mut streams = Vec::with_capacity(rows.len());
     for (name, max_seq, deadline) in rows {
         let Some(max_offset) = units::offset_from_sql(max_seq) else { continue };
         // Walk down from max_seq; stop at the first gap or expired entry.
@@ -161,24 +218,16 @@ fn load_streams(
             expected -= 1;
         }
         entries.reverse();
-        messages += entries.len();
-        memory.restore_stream(&name, max_offset, deadline, entries).map_err(|e| StoreError::Other(e.message))?;
-        streams += 1;
+        streams.push(StoredStream { name, max_offset, deadline, entries });
     }
-    Ok((messages, streams))
+    Ok(streams)
 }
 
-/// Restores every unexpired session with its stored expiry.
-fn load_sessions(conn: &Connection, memory: &Memory, clock: &dyn Clock) -> Result<usize, StoreError> {
+/// Every unexpired session with its stored expiry.
+fn read_sessions(conn: &Connection, clock: &dyn Clock) -> Result<Vec<(String, Vec<u8>, i64)>, StoreError> {
     let mut stmt = conn.prepare(store::LOAD_SESSIONS)?;
-    let mut rows = stmt.query([units::now_millis(clock)])?;
-    let mut sessions = 0;
-    while let Some(row) = rows.next()? {
-        let sid: String = row.get(0)?;
-        memory.restore_session_with_deadline(&sid, row.get(1)?, row.get(2)?);
-        sessions += 1;
-    }
-    Ok(sessions)
+    let rows = stmt.query_map([units::now_millis(clock)], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 #[cfg(test)]
@@ -461,5 +510,60 @@ mod tests {
             format!("{head} (epoch abcd, new database, the corrupt file was moved to /d/cabby.db.corrupt-5) in 18 ms"),
             report(Previous::Corrupt("/d/cabby.db.corrupt-5".into())).summary()
         );
+    }
+
+    /// Swaps the root pages of `history_stream_seq` and a decoy index, so the
+    /// file passes `quick_check` (it doesn't compare indexes with their
+    /// tables) but reading a stream's tail through the index hits a row that
+    /// doesn't exist: `SQLITE_CORRUPT`.
+    fn corrupt_the_history_index(db: &Path) {
+        let conn = store::open(db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE decoy (stream TEXT, seq INTEGER);
+             CREATE UNIQUE INDEX decoy_idx ON decoy (stream, seq);
+             INSERT INTO decoy (rowid, stream, seq) VALUES (1000, 's', 1), (1001, 's', 2);",
+        )
+        .unwrap();
+        let root = |name: &str| -> i64 {
+            conn.query_row("SELECT rootpage FROM sqlite_schema WHERE name = ?1", [name], |r| r.get(0)).unwrap()
+        };
+        let (history_root, decoy_root) = (root("history_stream_seq"), root("decoy_idx"));
+        conn.execute_batch("PRAGMA writable_schema = ON").unwrap();
+        conn.execute("UPDATE sqlite_schema SET rootpage = ?1 WHERE name = 'history_stream_seq'", [decoy_root]).unwrap();
+        conn.execute("UPDATE sqlite_schema SET rootpage = ?1 WHERE name = 'decoy_idx'", [history_root]).unwrap();
+        conn.execute_batch("PRAGMA writable_schema = OFF").unwrap();
+        drop(conn);
+        assert!(store::open(db).is_ok(), "the damage passes the checks at open");
+    }
+
+    #[test]
+    fn corruption_found_while_loading_moves_the_file_aside_too() {
+        let dir = TempDir::new();
+        seed(&dir.db(), 300, &[history("s", 1), history("s", 2), commit("live", (T0 + 10) * 1000)], &[]);
+        corrupt_the_history_index(&dir.db());
+
+        let (memory, loaded) = load_into(&dir, &Config::new(), &TestClock::new()).unwrap();
+
+        let Previous::Corrupt(moved) = &loaded.report.previous else {
+            panic!("expected Corrupt, got {:?}", loaded.report.previous)
+        };
+        assert!(moved.exists(), "the corrupt file is kept for inspection");
+        let r = &loaded.report;
+        assert_eq!((0, 0, 0), (r.messages, r.streams, r.sessions), "a new database");
+        assert_eq!(None, memory.history_since("s", 0).unwrap(), "nothing from the corrupt file reached memory");
+        assert_eq!(None, memory.restore_session("live").unwrap());
+        assert_eq!(1, store::schema_version(&loaded.db.conn).unwrap());
+    }
+
+    #[test]
+    fn a_non_numeric_schema_version_is_refused_and_the_file_kept() {
+        let dir = TempDir::new();
+        seed(&dir.db(), 300, &[], &[("schema_version", "one")]);
+
+        let err = load_into(&dir, &Config::new(), &TestClock::new()).err().expect("refused");
+
+        assert!(err.message.contains("schema_version \"one\""), "{}", err.message);
+        assert!(dir.db().exists());
+        assert!(corrupt_files(&dir).is_empty());
     }
 }
