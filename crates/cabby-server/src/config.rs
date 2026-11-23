@@ -1,9 +1,9 @@
 //! Main application configuration (upstream package `config`).
 //!
 //! [`Config`] composes every package's canonical configuration type, one per TOML
-//! table. The only section with a type of its own here is `[metrics]`
-//! ([`MetricsConfig`]): the main configuration exposes the metrics tags as a plain
-//! map, where `metrics::Config` keeps Go's nil/empty distinction.
+//! table. The sections with a type of their own here are `[metrics]` and `[sqlite]`
+//! ([`MetricsConfig`], [`SqliteConfig`]): the main configuration exposes the metrics
+//! tags as a plain map, where `metrics::Config` keeps Go's nil/empty distinction.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -120,6 +120,34 @@ impl From<&MetricsConfig> for crate::metrics::Config {
     }
 }
 
+/// `[sqlite]`: the SQLite broker's database (`--sqlite_path`,
+/// `CABBY_SQLITE_PATH`). A Cabby-only section (deviation D-065), so it has no
+/// `ANYCABLE_*` alias.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SqliteConfig {
+    /// The database file; required with `broker.adapter = "sqlite"`.
+    pub path: String,
+}
+
+cabby_core::toml_section!(SqliteConfig, "sqlite.Config" {
+    "path" => path,
+});
+
+impl SqliteConfig {
+    /// Renders the annotated TOML section.
+    pub fn to_toml(&self) -> String {
+        let mut out =
+            String::from("# Database file for --broker=sqlite (created with mode 0600 in a 0700 directory)\n");
+        if self.path.is_empty() {
+            out.push_str("# path = \"/var/lib/cabby/cabby.db\"\n");
+        } else {
+            out.push_str(&format!("path = {}\n", toml_config::go_quote(&self.path)));
+        }
+        out.push('\n');
+        out
+    }
+}
+
 /// Upstream `config.Config`.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Config {
@@ -145,6 +173,8 @@ pub struct Config {
     pub ws: crate::ws::Config,
     pub rpc: RpcConfig,
     pub broker: BrokerConfig,
+    /// `[sqlite]` (Cabby only, D-065).
+    pub sqlite: SqliteConfig,
     pub redis: RedisConfig,
     /// `[redis_pubsub_broadcast]`
     pub legacy_redis_broadcast: crate::broadcast::LegacyRedisConfig,
@@ -190,6 +220,7 @@ cabby_core::toml_section!(Config, "config.Config" {
     "ws" => ws,
     "rpc" => rpc,
     "broker" => broker,
+    "sqlite" => sqlite,
     "redis" => redis,
     "redis_pubsub_broadcast" => legacy_redis_broadcast,
     "redis_stream_broadcast" => redis_broadcast,
@@ -350,11 +381,12 @@ impl Config {
             _ => out.push_str("# presets = [\"broker\"]\n\n"),
         }
 
-        let sections: [(&str, String); 13] = [
+        let sections: [(&str, String); 14] = [
             ("# Server configuration\n[server]\n", self.server.to_toml()),
             ("# Logging configuration\n[logging]\n", self.log.to_toml()),
             ("# RPC configuration\n[rpc]\n", self.rpc.to_toml()),
             ("# Broker configuration\n[broker]\n", self.broker.to_toml()),
+            ("# SQLite broker configuration (--broker=sqlite)\n[sqlite]\n", self.sqlite.to_toml()),
             ("# JWT configuration\n[jwt]\n", self.jwt.to_toml()),
             ("# Pub/sub (signed) streams configuration\n[streams]\n", self.streams.to_toml()),
             ("# WebSockets configuration\n[ws]\n", self.ws.to_toml()),
@@ -576,5 +608,44 @@ mod tests {
     fn atoi_errors_match_go() {
         assert_eq!(go_atoi("42"), Ok(42));
         assert_eq!(go_atoi("4x").unwrap_err().0, "strconv.Atoi: parsing \"4x\": invalid syntax");
+    }
+
+    #[test]
+    fn sqlite_path_comes_from_the_sqlite_section() {
+        let mut c = Config::new();
+        let unknown = toml_config::decode(&mut c, "[sqlite]\npath = \"/var/lib/cabby/cabby.db\"\n").unwrap();
+        assert!(unknown.is_empty(), "{unknown:?}");
+        assert_eq!("/var/lib/cabby/cabby.db", c.sqlite.path);
+    }
+
+    #[test]
+    fn printed_configuration_has_a_sqlite_section_that_reads_back() {
+        assert!(Config::new().to_toml().contains(
+            "# SQLite broker configuration (--broker=sqlite)\n[sqlite]\n\
+             # Database file for --broker=sqlite (created with mode 0600 in a 0700 directory)\n\
+             # path = \"/var/lib/cabby/cabby.db\"\n\n"
+        ));
+
+        let mut c = Config::new();
+        c.sqlite.path = "/data/cabby.db".into();
+        let mut back = Config::new();
+        let unknown = toml_config::decode(&mut back, &c.to_toml()).unwrap();
+        assert!(unknown.is_empty(), "{unknown:?}");
+        assert_eq!("/data/cabby.db", back.sqlite.path);
+    }
+
+    /// Pins spec §2: `--presets=broker` only fills in a default broker.
+    #[test]
+    fn broker_preset_keeps_an_explicit_sqlite_broker() {
+        let mut c = Config::new();
+        c.user_presets = Some(vec!["broker".to_owned()]);
+        c.broker.adapter = "sqlite".to_owned();
+        c.load_presets(&EnvMap::new()).unwrap();
+        assert_eq!("sqlite", c.broker.adapter);
+
+        let mut d = Config::new();
+        d.user_presets = Some(vec!["broker".to_owned()]);
+        d.load_presets(&EnvMap::new()).unwrap();
+        assert_eq!("memory", d.broker.adapter, "the preset still picks a broker when none was chosen");
     }
 }
