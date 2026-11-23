@@ -5404,7 +5404,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 §9: throughput and latency with `--broker=sqlite` match `--broker=memory` within run noise, on the Linux benchmark box with the existing harness (`compat/scripts/bench-compare.sh`, `crates/cabby-bench`). The harness passes `--broker=none` by default (`crates/cabby-bench/src/server.rs` `ServerConfig::args`); two wrapper SUTs append the broker flags last, so they win (`--server-arg` relies on the same last-flag-wins rule, `crates/cabby-bench/src/lib.rs`). Both wrappers keep history, so the comparison isolates the write-behind cost.
 
-The box (`ssh <bench-box>`, repo `~/Documents/apps/cabby`) is at an older `main` (`6e37634` on 2026-11-23); this task pushes the branch to it over SSH, not to GitHub. CLAUDE.md: run benchmarks only with the machine idle.
+The Linux benchmark box (`ssh <bench-box>`, the repo at `<repo>` there) is at an older `main` (`6e37634` on 2026-11-23); this task pushes the branch to it over SSH, not to GitHub. CLAUDE.md: run benchmarks only with the machine idle.
 
 **Files:**
 - Create: `bench/sqlite/cabby-memory`
@@ -5460,7 +5460,7 @@ Expected: `* [new branch]      sqlite-broker -> sqlite-broker`.
 - [ ] **Step 3: Build on the box and check the wrappers**
 
 ```sh
-ssh <bench-box> 'cd ~/Documents/apps/cabby && git switch sqlite-broker && \
+ssh <bench-box> 'cd <repo> && git switch sqlite-broker && \
   mise exec -- cargo build --release -p cabby-server -p cabby-bench 2>&1 | tail -1 && \
   bench/sqlite/cabby-memory --broker=none --print-config | grep -A2 "^\[broker\]" && \
   bench/sqlite/cabby-sqlite --broker=none --print-config | grep -A3 -E "^\[(broker|sqlite)\]"'
@@ -5470,7 +5470,7 @@ Expected: `Finished \`release\` …`; the first config shows `adapter = "memory"
 - [ ] **Step 4: Run the comparison (machine idle)**
 
 ```sh
-ssh <bench-box> 'cd ~/Documents/apps/cabby && uptime && \
+ssh <bench-box> 'cd <repo> && uptime && \
   nohup env SUTS="cabby-memory cabby-sqlite" compat/scripts/bench-compare.sh docs/benchmarks/sqlite-results \
   > /tmp/bench-sqlite.log 2>&1 &'
 ```
@@ -5478,12 +5478,12 @@ Check `uptime` first: a load average near 0 means idle. The run takes about an h
 ```sh
 ssh <bench-box> 'tail -1 /tmp/bench-sqlite.log'
 ```
-Expected eventually: `results in /home/…/Documents/apps/cabby/docs/benchmarks/sqlite-results`.
+Expected eventually: `results in <repo>/docs/benchmarks/sqlite-results`.
 
 - [ ] **Step 5: Summarize and judge**
 
 ```sh
-ssh <bench-box> 'cd ~/Documents/apps/cabby && python3 compat/scripts/bench-summary.py docs/benchmarks/sqlite-results'
+ssh <bench-box> 'cd <repo> && python3 compat/scripts/bench-summary.py docs/benchmarks/sqlite-results'
 ```
 Expected: a Markdown table with `cabby-memory` and `cabby-sqlite` columns. Pass criterion (§9 "within run noise"): for every workload, the `cabby-sqlite` median of delivered throughput, p50 and p99 latency and CPU lies within the min-max spread of the five `cabby-memory` runs (read the per-run files `docs/benchmarks/sqlite-results/<workload>.cabby-memory.<n>.txt` for the spread). Memory may be higher by about the queue's size; note it. If a metric is outside the spread, rerun that workload once (`SUTS=… RUNS=5` with only that `run …` line) before treating it as a regression, and report it rather than tuning silently. Also note `exit=` lines or `generator_saturated=true` runs, which the summary excludes.
 
