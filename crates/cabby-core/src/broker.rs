@@ -352,6 +352,18 @@ impl Memstream {
         read(&self.state).deadline
     }
 
+    /// Installs restored state: the last assigned offset, the deadline (unix
+    /// seconds) and the newest entries in ascending offsets, at most `limit`.
+    fn restore(&self, offset: u64, deadline: i64, entries: Vec<Entry>) {
+        let mut st = write(&self.state);
+        st.offset = offset;
+        st.deadline = deadline;
+        st.data = VecDeque::from(entries);
+        while st.data.len() > self.limit {
+            st.data.pop_front();
+        }
+    }
+
     fn append(&self, st: &mut MemstreamState, entry: Entry, now: SystemTime) {
         st.data.push_back(entry);
         while st.data.len() > self.limit {
@@ -568,6 +580,28 @@ impl Memory {
             b.broadcast(&msg);
         }
         Ok(Some(recorded))
+    }
+
+    /// Installs a stream loaded from storage: `max_offset` is its last assigned
+    /// offset, `deadline` (unix seconds) when it may be dropped, and `entries`
+    /// its newest entries, in ascending and contiguous offsets ending at
+    /// `max_offset` (or none).
+    pub fn restore_stream(
+        &self,
+        name: &str,
+        max_offset: u64,
+        deadline: i64,
+        entries: Vec<Entry>,
+    ) -> Result<(), BrokerError> {
+        let contiguous = entries.windows(2).all(|w| w[1].offset == w[0].offset + 1);
+        let anchored = entries.last().is_none_or(|e| e.offset == max_offset);
+        if !contiguous || !anchored {
+            return Err(BrokerError {
+                message: format!("restored entries of {name} must be contiguous and end at offset {max_offset}"),
+            });
+        }
+        self.inner.stream_or_create(name).restore(max_offset, deadline, entries);
+        Ok(())
     }
 }
 
@@ -1124,6 +1158,60 @@ mod tests {
         unique.dedup();
         assert_eq!(offsets.len(), unique.len(), "every broadcast got its own offset");
         assert_eq!((1..=400).collect::<Vec<u64>>(), unique);
+    }
+
+    #[test]
+    fn memory_restore_stream_installs_offset_and_entries() {
+        let broker = Memory::new(None, None, &Config::new(), TestClock::new());
+        let epoch = broker.epoch();
+        let entries = vec![
+            Entry { offset: 7, timestamp: 1_700_000_000, data: "g".into() },
+            Entry { offset: 8, timestamp: 1_700_000_000, data: "h".into() },
+        ];
+        broker.restore_stream("s", 8, 1_700_003_000, entries).unwrap();
+
+        let stored: Vec<(u64, String)> =
+            broker.history_since("s", 0).unwrap().unwrap_or_default().into_iter().map(|m| (m.offset, m.data)).collect();
+        assert_eq!(vec![(7, "g".to_owned()), (8, "h".to_owned())], stored);
+        // A client that saw offset 7 gets 8 (filter_by_offset needs the offset within the stored range).
+        let after: Vec<u64> = broker.history_from("s", &epoch, 7).unwrap().into_iter().map(|m| m.offset).collect();
+        assert_eq!(vec![8], after);
+        assert_eq!(Some(8), broker.peak("s").unwrap().map(|m| m.offset));
+        assert_eq!(9, broker.add("s", "i"), "the next broadcast continues after the restored offset");
+    }
+
+    #[test]
+    fn memory_restored_empty_stream_keeps_its_offset_until_its_deadline() {
+        let clock = TestClock::new();
+        let broker = Memory::new(None, None, &Config::new(), clock.clone());
+        broker.restore_stream("s", 5, 1_700_000_010, Vec::new()).unwrap();
+
+        broker.expire();
+        assert_eq!(Some(vec![]), broker.history_since("s", 0).unwrap(), "kept before its deadline");
+        assert_eq!(None, broker.peak("s").unwrap(), "no entries");
+
+        clock.advance(Duration::from_secs(11));
+        broker.expire();
+        assert_eq!(None, broker.history_since("s", 0).unwrap(), "dropped after its deadline");
+        assert_eq!(1, broker.add("s", "x"));
+    }
+
+    #[test]
+    fn memory_restored_empty_stream_continues_after_its_offset() {
+        let broker = Memory::new(None, None, &Config::new(), TestClock::new());
+        broker.restore_stream("s", 5, 1_700_000_010, Vec::new()).unwrap();
+        assert_eq!(6, broker.add("s", "x"));
+    }
+
+    #[test]
+    fn memory_restore_stream_rejects_gaps_and_unanchored_tails() {
+        let broker = Memory::new(None, None, &Config::new(), TestClock::new());
+        let e = |offset| Entry { offset, timestamp: 1_700_000_000, data: String::new() };
+
+        assert!(broker.restore_stream("gap", 3, 0, vec![e(1), e(3)]).is_err());
+        assert!(broker.restore_stream("unanchored", 4, 0, vec![e(2), e(3)]).is_err());
+        assert!(broker.restore_stream("ok", 3, 0, vec![e(2), e(3)]).is_ok());
+        assert_eq!(None, broker.history_since("gap", 0).unwrap(), "a refused stream is not created");
     }
 
     #[test]
