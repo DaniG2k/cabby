@@ -23,7 +23,7 @@
       "pass": 923
     },
     "rust_only": {
-      "cases": 91
+      "cases": 92
     },
     "translation": {
       "reviewed": 923
@@ -26858,6 +26858,15 @@
       "relation": "regression",
       "links": [
         "26a1a703:broker/memory_test.go#TestMemory_FromOffset/With_unknown_epoch"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::sqlite::a_failed_start_keeps_the_epoch",
+      "relation": "regression",
+      "links": [
+        "26a1a703:node/broker_integration_test.go#TestIntegrationRestore_Memory/Restore_session_connection_and_channels_state"
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"

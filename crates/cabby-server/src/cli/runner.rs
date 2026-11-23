@@ -101,6 +101,10 @@ pub struct Runner {
     node_broker: Option<Arc<dyn core_broker::Broker>>,
     /// The router route for the Pusher channel, attached once the broker exists.
     pusher_controller: Option<Arc<DeferredController>>,
+    /// Shut down when [`Runner::run`] or [`Runner::run_node`] fails after it
+    /// was created: the SQLite broker, so a failed start leaves its file clean
+    /// (everything it assigned is persisted) and the next start keeps the epoch.
+    startup_cleanup: Option<Arc<dyn Shutdownable>>,
 }
 
 impl std::fmt::Debug for Runner {
@@ -142,6 +146,7 @@ impl Runner {
             node: None,
             node_broker: None,
             pusher_controller: None,
+            startup_cleanup: None,
         };
         r.check_and_set_defaults(options)?;
         Ok(r)
@@ -293,6 +298,22 @@ impl Runner {
     /// Starts the server and blocks until it stops: a signal-initiated shutdown
     /// completed (`Ok`) or a component failed (upstream `Run`).
     pub fn run(&mut self) -> Result<(), CliError> {
+        let result = self.serve();
+        self.clean_up_after(&result);
+        result
+    }
+
+    /// On a failed start (or a component failure), shuts down what must not be
+    /// left half-open; a no-op after a completed shutdown.
+    fn clean_up_after(&self, result: &Result<(), CliError>) {
+        if result.is_err()
+            && let Some(cleanup) = &self.startup_cleanup
+        {
+            let _ = cleanup.shutdown();
+        }
+    }
+
+    fn serve(&mut self) -> Result<(), CliError> {
         let _guard = self.runtime.enter();
         let procs = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
         self.announce_debug_mode();
@@ -432,7 +453,9 @@ impl Runner {
     /// Builds and starts the node and its components (upstream unexported
     /// `runNode`); the node is then available from [`Runner::node`].
     pub fn run_node(&mut self) -> Result<(), CliError> {
-        self.build_node().map(drop)
+        let result = self.build_node().map(drop);
+        self.clean_up_after(&result);
+        result
     }
 
     fn build_node(&mut self) -> Result<Arc<Node>, CliError> {
@@ -721,7 +744,7 @@ impl Runner {
     /// `--broker=sqlite` (Cabby only, D-065): the memory broker with a
     /// write-behind SQLite copy, loaded before the server accepts connections.
     fn new_sqlite_broker(
-        &self,
+        &mut self,
         node: &Arc<Node>,
         broadcaster: Arc<dyn core_broker::Broadcaster>,
     ) -> Result<BrokerPair, CliError> {
@@ -738,8 +761,10 @@ impl Runner {
             )
             .map_err(|e| CliError(e.message))?,
         );
-        let runner: Arc<dyn Broker> =
+        let runner =
             Arc::new(super::sqlite::SqliteRunnerBroker { broker: broker.clone(), ctx: self.shutdown_ctx.clone() });
+        self.startup_cleanup = Some(runner.clone());
+        let runner: Arc<dyn Broker> = runner;
         let node_broker: Arc<dyn core_broker::Broker> = broker;
         Ok((runner, node_broker))
     }
