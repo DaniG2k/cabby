@@ -12,17 +12,19 @@
 //! Units: history timestamps and stream deadlines are unix seconds, session
 //! expiries unix milliseconds (`units`).
 
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
 use super::{Broadcaster, Broker, BrokerError, Cacheable, Clock, Config, Memory, PresenceInfoOptions, Presenter, lock};
 use crate::common::{PresenceEvent, PresenceInfo, RemoteCommandMessage, StreamMessage};
-use crate::log_warn;
 use crate::logger::Logger;
+use crate::{log_error, log_warn};
 use persister::{Persister, Timing};
 use queue::{WriteOp, WriteQueue};
 
@@ -107,9 +109,28 @@ pub struct SqliteBroker {
 enum Writer {
     /// Loaded; the thread is not started yet.
     Ready(Box<Persister>),
-    /// The thread runs and reports whether its final flush marked the shutdown clean.
-    Running(Receiver<bool>),
+    /// The thread runs and reports whether its final flush marked the
+    /// shutdown clean; nothing is sent if it panicked.
+    Running {
+        done: Receiver<bool>,
+        thread: JoinHandle<()>,
+    },
     Stopped,
+}
+
+/// How [`SqliteBroker::stop`] ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ending {
+    /// The final write went through and marked the shutdown clean.
+    Clean,
+    /// The final write failed, ran out of time or history was dropped.
+    Unclean,
+    /// The writer did not report back within the budget plus the grace.
+    TimedOut,
+    /// The writer thread panicked earlier.
+    WriterDied,
+    /// A second call.
+    AlreadyStopped,
 }
 
 impl SqliteBroker {
@@ -154,18 +175,34 @@ impl SqliteBroker {
     /// closes the database and releases the lock. Returns whether the shutdown
     /// was marked clean (false for a second call).
     pub fn shutdown_within(&self, budget: Duration) -> bool {
+        self.stop(budget) == Ending::Clean
+    }
+
+    /// [`SqliteBroker::shutdown_within`], saying how the writer ended.
+    fn stop(&self, budget: Duration) -> Ending {
         let _ = Broker::shutdown(&self.memory);
         let deadline = Instant::now() + budget;
         self.queue.close(deadline);
+        let path = self.path.display().to_string();
+        let ended = |clean: bool| if clean { Ending::Clean } else { Ending::Unclean };
         match std::mem::replace(&mut *lock(&self.writer), Writer::Stopped) {
-            Writer::Stopped => false,
-            Writer::Ready(persister) => persister.finish(deadline),
-            Writer::Running(done) => match done.recv_timeout(budget + FINISH_GRACE) {
-                Ok(clean) => clean,
-                Err(_) => {
-                    log_warn!(log(), &format!("the SQLite writer did not finish within {} s; the next start uses a new epoch",
-                        budget.as_secs()), "path" => self.path.display().to_string());
-                    false
+            Writer::Stopped => Ending::AlreadyStopped,
+            Writer::Ready(persister) => ended(persister.finish(deadline)),
+            Writer::Running { done, thread } => match done.recv_timeout(budget + FINISH_GRACE) {
+                Ok(clean) => {
+                    let _ = thread.join();
+                    ended(clean)
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    log_warn!(log(), &format!("the SQLite writer did not finish within {} ms; the next start uses a new epoch",
+                        (budget + FINISH_GRACE).as_millis()), "path" => path);
+                    Ending::TimedOut
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    let _ = thread.join();
+                    log_warn!(log(), "the SQLite writer had stopped after a panic; the next start uses a new epoch",
+                        "path" => path);
+                    Ending::WriterDied
                 }
             },
         }
@@ -200,13 +237,25 @@ impl Broker for SqliteBroker {
         };
         Broker::start(&self.memory)?;
         let (done, finished) = mpsc::channel();
-        std::thread::Builder::new()
+        let path = self.path.display().to_string();
+        let thread = std::thread::Builder::new()
             .name("cabby-sqlite".into())
-            .spawn(move || {
-                let _ = done.send(persister.run());
+            .spawn(move || match catch_unwind(AssertUnwindSafe(|| persister.run())) {
+                Ok(clean) => {
+                    let _ = done.send(clean);
+                }
+                Err(panic) => {
+                    let why = panic
+                        .downcast_ref::<&str>()
+                        .map(|s| (*s).to_owned())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "unknown panic".to_owned());
+                    log_error!(log(), "the SQLite writer panicked; nothing more is written to the database",
+                        "path" => path, "error" => why);
+                }
             })
             .map_err(|e| BrokerError { message: format!("failed to start the SQLite writer: {e}") })?;
-        *writer = Writer::Running(finished);
+        *writer = Writer::Running { done: finished, thread };
         Ok(())
     }
 
@@ -607,5 +656,54 @@ mod tests {
         broker.handle_broadcast(&msg("quiet", "q4", false)).unwrap();
         assert_eq!(Some(4), broker.peak("quiet").unwrap().map(|m| m.offset), "the dropped offsets are not reused");
         assert!(broker.shutdown_within(Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn a_writer_stuck_past_the_budget_times_out() {
+        let dir = TempDir::new();
+        let clock = TestClock::new();
+        let broker = open(&dir, &clock);
+        broker.start().unwrap();
+        // Another connection holds SQLite's write lock: the writer's next batch
+        // waits out its 5 s busy timeout, longer than the budget plus the grace.
+        let blocker = rusqlite::Connection::open(dir.db()).unwrap();
+        blocker.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        broker.handle_broadcast(&msg("s", "a", false)).unwrap();
+
+        let started = Instant::now();
+        assert_eq!(Ending::TimedOut, broker.stop(Duration::ZERO));
+        let waited = started.elapsed();
+        assert!(waited >= FINISH_GRACE && waited < Duration::from_secs(4), "waited {waited:?}");
+        blocker.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(Ending::AlreadyStopped, broker.stop(Duration::ZERO));
+    }
+
+    #[test]
+    fn a_writer_that_panicked_is_reported_as_such() {
+        let dir = TempDir::new();
+        let clock = TestClock::new();
+        let broker = open(&dir, &clock);
+        if let Writer::Ready(persister) = &mut *lock(&broker.writer) {
+            persister.panic_on_tick = true;
+        }
+        broker.start().unwrap();
+        // Waits for the panic (its first tick), so stop() can't race it.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !matches!(&*lock(&broker.writer), Writer::Running { thread, .. } if thread.is_finished()) {
+            assert!(Instant::now() < deadline, "the writer did not panic");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        assert_eq!(Ending::WriterDied, broker.stop(Duration::from_secs(5)));
+        drop(broker);
+        assert_eq!(Previous::Unclean, open(&dir, &clock).report().previous);
+    }
+
+    #[test]
+    fn a_graceful_stop_reports_clean() {
+        let dir = TempDir::new();
+        let broker = open(&dir, &TestClock::new());
+        broker.start().unwrap();
+        assert_eq!(Ending::Clean, broker.stop(Duration::from_secs(5)));
     }
 }

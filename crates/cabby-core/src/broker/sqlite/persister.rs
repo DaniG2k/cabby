@@ -95,6 +95,9 @@ pub(super) struct Persister {
     dropped: StreamMaxima,
     last_prune: Instant,
     errors: ErrorLog,
+    /// Makes the next tick panic (tests of a writer that died).
+    #[cfg(test)]
+    pub(super) panic_on_tick: bool,
 }
 
 impl Persister {
@@ -119,6 +122,8 @@ impl Persister {
             dropped: StreamMaxima::new(),
             last_prune: Instant::now(),
             errors: ErrorLog::new(timing.error_log_interval),
+            #[cfg(test)]
+            panic_on_tick: false,
         }
     }
 
@@ -135,6 +140,8 @@ impl Persister {
     /// One step: write the next batch (or retry the failed one after a pause),
     /// report the queue size, and prune when due.
     pub(super) fn tick(&mut self) {
+        #[cfg(test)]
+        assert!(!self.panic_on_tick, "a writer panic for the test");
         if self.pending.is_empty() {
             self.pending = self.queue.take_batch(self.timing.flush_interval);
         } else {
