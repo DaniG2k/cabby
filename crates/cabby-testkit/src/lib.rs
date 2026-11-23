@@ -12,6 +12,7 @@
 //! * [`ports`]: isolated local ports.
 //! * [`services`]: required external Redis/NATS services with per-test scopes.
 //! * [`sut`]: the server under test as an external process.
+//! * [`sqlite_broker`]: the SQLite broker through the binary (Cabby only, D-065).
 //! * [`fake_rpc`]: scriptable fake AnyCable RPC application (gRPC and HTTP RPC).
 //! * [`fake_http`], [`udp`]: recording HTTP/UDP endpoints (telemetry, StatsD).
 //! * [`rpc_doubles`]: client/service/helper doubles for the Rust RPC controller.
@@ -33,6 +34,7 @@ pub mod reference;
 pub mod rpc_doubles;
 pub mod runtime;
 pub mod services;
+pub mod sqlite_broker;
 pub mod sut;
 pub mod sync;
 pub mod timers;
