@@ -78,6 +78,9 @@ struct Lanes {
     history_dropped: bool,
     /// The highest dropped offset per stream, not yet taken by the writer.
     dropped_streams: StreamMaxima,
+    /// Wakeups sent by `push` (tests check they stay rare).
+    #[cfg(test)]
+    notifies: u64,
 }
 
 impl Lanes {
@@ -149,6 +152,7 @@ impl WriteQueue {
         if lanes.closed.is_some() {
             return None;
         }
+        let before = lanes.len();
         let seq = lanes.next_seq;
         lanes.next_seq += 1;
         lanes.lane(op.kind()).push_back((seq, op));
@@ -162,7 +166,13 @@ impl WriteQueue {
                 }
             }
         }
-        if lanes.len() >= self.batch {
+        // Wake the taker only when this push fills a batch: it rechecks under
+        // the lock, and a partial batch is taken on its tick anyway.
+        if before < self.batch && lanes.len() >= self.batch {
+            #[cfg(test)]
+            {
+                lanes.notifies += 1;
+            }
             self.ready.notify_one();
         }
         dropped
@@ -175,6 +185,11 @@ impl WriteQueue {
     /// Whether a history op was dropped during this run.
     pub(crate) fn history_dropped(&self) -> bool {
         lock(&self.lanes).history_dropped
+    }
+
+    #[cfg(test)]
+    fn notifies(&self) -> u64 {
+        lock(&self.lanes).notifies
     }
 
     /// Takes the highest dropped offset per stream since the last call.
@@ -360,5 +375,35 @@ mod tests {
         q.push(touch("a", 2));
         assert!(!q.history_dropped());
         assert!(q.take_dropped_streams().is_empty());
+    }
+
+    #[test]
+    fn a_backlog_wakes_the_taker_once_per_batch_crossing() {
+        let q = WriteQueue::new(10_000, 1000);
+        for offset in 0..2500 {
+            q.push(history("s", offset));
+        }
+        assert_eq!(1, q.notifies(), "one wakeup when the batch filled up");
+
+        assert_eq!(1000, q.take_batch(Duration::ZERO).len());
+        for offset in 2500..2510 {
+            q.push(history("s", offset));
+        }
+        assert_eq!(1, q.notifies(), "still a full batch queued: no more wakeups");
+
+        while !q.take_batch(Duration::ZERO).is_empty() {}
+        for offset in 0..1000 {
+            q.push(history("t", offset));
+        }
+        assert_eq!(2, q.notifies(), "the next crossing wakes it again");
+    }
+
+    #[test]
+    fn a_full_queue_at_the_batch_size_does_not_wake_on_every_drop() {
+        let q = WriteQueue::new(3, 3);
+        for offset in 0..10 {
+            q.push(history("s", offset));
+        }
+        assert_eq!(1, q.notifies());
     }
 }
