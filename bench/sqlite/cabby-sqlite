@@ -1,0 +1,5 @@
+#!/bin/sh
+# Cabby on the SQLite broker, on a fresh database per run, for the comparison with cabby-memory.
+# exec keeps the PID the harness samples.
+dir="$(mktemp -d "${TMPDIR:-/tmp}/cabby-bench-sqlite.XXXXXX")"
+exec "$(dirname "$0")/../../target/release/cabby" "$@" --broker=sqlite "--sqlite_path=${dir}/cabby.db"

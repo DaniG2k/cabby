@@ -14,6 +14,7 @@
 # summary by compat/scripts/bench-summary.py.
 #
 # Usage: [SUTS="actioncable anycable-go cabby"] compat/scripts/bench-compare.sh [OUT]
+#        SUTS="cabby-memory cabby-sqlite" compares the memory and SQLite brokers (bench/sqlite).
 #        (default OUT: docs/benchmarks/results)
 set -euo pipefail
 
@@ -31,12 +32,14 @@ declare -A BIN=(
   [actioncable]="${ROOT}/bench/actioncable/sut"
   [anycable-go]="${ROOT}/target/reference-bin/anycable-go"
   [cabby]="${ROOT}/target/release/cabby"
+  [cabby-memory]="${ROOT}/bench/sqlite/cabby-memory"
+  [cabby-sqlite]="${ROOT}/bench/sqlite/cabby-sqlite"
 )
 [[ -x "${BENCH}" ]] || { echo "missing ${BENCH}: build release binaries first" >&2; exit 1; }
 read -r -a REQUESTED <<<"${SUTS:-actioncable anycable-go cabby}"
 SUT_LIST=()
 for sut in "${REQUESTED[@]}"; do
-  [[ -n "${BIN[${sut}]:-}" ]] || { echo "unknown server ${sut} (actioncable, anycable-go, cabby)" >&2; exit 1; }
+  [[ -n "${BIN[${sut}]:-}" ]] || { echo "unknown server ${sut} (actioncable, anycable-go, cabby, cabby-memory, cabby-sqlite)" >&2; exit 1; }
   if [[ "${sut}" == actioncable ]]; then
     if ! AC_VERSION="$("${BIN[actioncable]}" --version 2>/dev/null)"; then
       echo "skipping actioncable: Ruby or its gems are not installed (see bench/actioncable/README.md)" >&2
