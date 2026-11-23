@@ -1,10 +1,14 @@
 //! The database file (spec §4): connection settings, schema and migrations,
 //! and the `meta` table.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension};
+use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, params};
+
+use super::queue::WriteOp;
+use super::units;
 
 /// How long a statement waits for a lock another connection holds.
 pub(super) const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -154,10 +158,80 @@ pub(super) fn mark_running(conn: &mut Connection, epoch: &str) -> Result<(), Sto
     Ok(())
 }
 
+/// The streams a batch wrote (pruning by limit visits only these).
+pub(super) type Touched = BTreeSet<String>;
+
+const INSERT_HISTORY: &str = "INSERT INTO history (stream, seq, ts, data) VALUES (?1, ?2, ?3, ?4)
+  ON CONFLICT (stream, seq) DO UPDATE SET ts = excluded.ts, data = excluded.data";
+const UPSERT_SESSION: &str = "INSERT INTO sessions (sid, data, expires_at_ms) VALUES (?1, ?2, ?3)
+  ON CONFLICT (sid) DO UPDATE SET data = excluded.data, expires_at_ms = excluded.expires_at_ms";
+const TOUCH_SESSION: &str = "UPDATE sessions SET expires_at_ms = ?2 WHERE sid = ?1";
+/// Keeps the highest offset (concurrent broadcasts may enqueue out of order),
+/// unless the stored row's deadline has passed: the memory broker dropped that
+/// stream and restarted its offsets, so the batch's offset is the stream's.
+const UPSERT_STREAM: &str = "INSERT INTO streams (stream, max_seq, deadline) VALUES (?1, ?2, ?3)
+  ON CONFLICT (stream) DO UPDATE SET
+    max_seq = CASE WHEN streams.deadline < ?4 THEN excluded.max_seq
+                   ELSE max(streams.max_seq, excluded.max_seq) END,
+    deadline = max(streams.deadline, excluded.deadline)";
+
+/// Writes `ops` in one transaction, in order, and upserts `streams` for every
+/// stream they wrote. With `clean_shutdown`, marks the shutdown clean in the
+/// same transaction (spec §5). `now_secs` decides whether a stored stream row
+/// is stale. Nothing is written if any statement fails.
+pub(super) fn write_batch(
+    conn: &mut Connection,
+    ops: &[WriteOp],
+    history_ttl: i64,
+    now_secs: i64,
+    clean_shutdown: bool,
+) -> Result<Touched, StoreError> {
+    let tx = conn.transaction()?;
+    // The newest offset and timestamp of each stream in the batch.
+    let mut newest: BTreeMap<&str, (u64, i64)> = BTreeMap::new();
+    {
+        let mut history = tx.prepare_cached(INSERT_HISTORY)?;
+        let mut commit = tx.prepare_cached(UPSERT_SESSION)?;
+        let mut touch = tx.prepare_cached(TOUCH_SESSION)?;
+        for op in ops {
+            match op {
+                WriteOp::History { stream, offset, ts_secs, data } => {
+                    history.execute(params![stream, units::offset_to_sql(*offset), ts_secs, data])?;
+                    let entry = newest.entry(stream.as_str()).or_insert((*offset, *ts_secs));
+                    *entry = (entry.0.max(*offset), entry.1.max(*ts_secs));
+                }
+                WriteOp::SessionCommit { sid, data, expires_at_ms } => {
+                    commit.execute(params![sid, data, expires_at_ms])?;
+                }
+                WriteOp::SessionTouch { sid, expires_at_ms } => {
+                    touch.execute(params![sid, expires_at_ms])?;
+                }
+            }
+        }
+        let mut streams = tx.prepare_cached(UPSERT_STREAM)?;
+        for (stream, (offset, ts)) in &newest {
+            streams.execute(params![
+                stream,
+                units::offset_to_sql(*offset),
+                units::stream_deadline(*ts, history_ttl),
+                now_secs
+            ])?;
+        }
+    }
+    if clean_shutdown {
+        meta_set(&tx, "clean_shutdown", "1")?;
+    }
+    tx.commit()?;
+    Ok(newest.into_keys().map(str::to_owned).collect())
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
-    use crate::broker::sqlite::testing::TempDir;
+    use crate::broker::sqlite::testing::{TempDir, commit, history, history_at, touch};
+    use crate::broker::test_clock::T0;
 
     fn schema_objects(conn: &Connection) -> Vec<String> {
         let sql = "SELECT name FROM sqlite_schema WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%' ORDER BY name";
@@ -279,5 +353,115 @@ mod tests {
 
         assert_eq!(Some("e1".to_owned()), meta_get(&conn, "epoch").unwrap());
         assert_eq!(Some("0".to_owned()), meta_get(&conn, "clean_shutdown").unwrap());
+    }
+
+    fn history_rows(conn: &Connection) -> Vec<(String, i64, i64, String)> {
+        let sql = "SELECT stream, seq, ts, data FROM history ORDER BY stream, seq";
+        conn.prepare(sql)
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    fn stream_rows(conn: &Connection) -> Vec<(String, i64, i64)> {
+        let sql = "SELECT stream, max_seq, deadline FROM streams ORDER BY stream";
+        conn.prepare(sql)
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    fn session_rows(conn: &Connection) -> Vec<(String, Vec<u8>, i64)> {
+        let sql = "SELECT sid, data, expires_at_ms FROM sessions ORDER BY sid";
+        conn.prepare(sql)
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    #[test]
+    fn a_batch_writes_history_sessions_and_its_streams() {
+        let dir = TempDir::new();
+        let mut conn = open(&dir.file("cabby.db")).unwrap();
+        let ops = vec![
+            history("s", 1),
+            history("s", 2),
+            history_at("t", 1, T0 + 5),
+            commit("a", 10),
+            touch("a", 20),
+            touch("missing", 30),
+        ];
+
+        let touched = write_batch(&mut conn, &ops, 300, T0, false).unwrap();
+
+        assert_eq!(BTreeSet::from(["s".to_owned(), "t".to_owned()]), touched);
+        assert_eq!(
+            vec![
+                ("s".to_owned(), 1, T0, "m1".to_owned()),
+                ("s".to_owned(), 2, T0, "m2".to_owned()),
+                ("t".to_owned(), 1, T0 + 5, "m1".to_owned()),
+            ],
+            history_rows(&conn)
+        );
+        // Deadlines are ten history TTLs after each stream's newest message.
+        assert_eq!(vec![("s".to_owned(), 2, T0 + 3000), ("t".to_owned(), 1, T0 + 5 + 3000)], stream_rows(&conn));
+        // The commit, then its touch; a touch for an unknown session changes nothing.
+        assert_eq!(vec![("a".to_owned(), b"a".to_vec(), 20)], session_rows(&conn));
+        assert_eq!(None, meta_get(&conn, "clean_shutdown").unwrap());
+    }
+
+    #[test]
+    fn clean_shutdown_is_written_with_the_batch() {
+        let dir = TempDir::new();
+        let mut conn = open(&dir.file("cabby.db")).unwrap();
+
+        write_batch(&mut conn, &[history("s", 1)], 300, T0, true).unwrap();
+
+        assert_eq!(Some("1".to_owned()), meta_get(&conn, "clean_shutdown").unwrap());
+        assert_eq!(1, history_rows(&conn).len());
+    }
+
+    #[test]
+    fn a_failed_batch_leaves_nothing_behind() {
+        let dir = TempDir::new();
+        let path = dir.file("cabby.db");
+        let conn = open(&path).unwrap();
+        let mut read_only = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+
+        assert!(write_batch(&mut read_only, &[history("s", 1), commit("a", 1)], 300, T0, true).is_err());
+
+        assert!(history_rows(&conn).is_empty());
+        assert!(session_rows(&conn).is_empty());
+        assert_eq!(None, meta_get(&conn, "clean_shutdown").unwrap());
+    }
+
+    #[test]
+    fn a_stream_keeps_its_highest_offset_when_ops_arrive_out_of_order() {
+        let dir = TempDir::new();
+        let mut conn = open(&dir.file("cabby.db")).unwrap();
+
+        write_batch(&mut conn, &[history("s", 5)], 300, T0, false).unwrap();
+        write_batch(&mut conn, &[history("s", 4)], 300, T0, false).unwrap();
+
+        assert_eq!(vec![("s".to_owned(), 5, T0 + 3000)], stream_rows(&conn));
+    }
+
+    #[test]
+    fn a_stream_past_its_deadline_restarts_its_offsets() {
+        // The memory broker drops a stream ten TTLs after its last message;
+        // the next broadcast starts again at offset 1.
+        let dir = TempDir::new();
+        let mut conn = open(&dir.file("cabby.db")).unwrap();
+        write_batch(&mut conn, &[history_at("s", 9, T0)], 300, T0, false).unwrap();
+
+        write_batch(&mut conn, &[history_at("s", 1, T0 + 4000)], 300, T0 + 4000, false).unwrap();
+
+        assert_eq!(vec![("s".to_owned(), 1, T0 + 7000)], stream_rows(&conn));
     }
 }
