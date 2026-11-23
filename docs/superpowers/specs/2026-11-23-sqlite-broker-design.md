@@ -1,7 +1,7 @@
 # SQLite broker: stream history and sessions that survive restarts
 
-Status: approved design, 2026-11-23, revised the same day after a design review against
-`crates/cabby-core/src/broker.rs`. First of the "zero Redis" brokers; the PostgreSQL broker and
+Status: approved design, 2026-11-23, revised the same day after two design reviews against
+`crates/cabby-core/src/broker.rs` and `cli/runner.rs`. First of the "zero Redis" brokers; the PostgreSQL broker and
 pub/sub follow in their own spec.
 
 ## 1. Goal
@@ -68,8 +68,10 @@ and keeps fan-out at full speed. Two new pieces sit beside it.
   `SessionTouch { sid, expires_at_ms }`, `Epoch(String)`.
 - Every 50 ms, or as soon as 1,000 ops are queued, it writes one batch in a single transaction.
   Each batch also upserts `streams` for every stream it touched.
-- The queue is bounded at 100,000 ops. On overflow it drops the **oldest `History` ops** and counts
-  them; session ops are never dropped. Enqueueing never blocks the broadcast path.
+- The queue is strictly bounded at 100,000 ops, so memory stays bounded in every failure mode. On
+  overflow it drops the **oldest `History` op**; only if none is queued does it drop the oldest
+  `SessionTouch`, then the oldest `SessionCommit`. Every drop is counted. Enqueueing never blocks
+  the broadcast path.
 - Pruning runs every 30 s (section 4), using indexes, never full scans.
 
 **Loader:** runs once at startup, before Cabby accepts connections (section 5).
@@ -96,9 +98,8 @@ write-behind promise.
 
 Units are fixed in one place: history timestamps are **unix seconds**, matching
 `broker::Entry.timestamp` and `history_since`; session expiries are **unix milliseconds**,
-matching the memory broker's session expiration queue. Stream deadlines are stored in
-milliseconds and converted to the memory broker's seconds (`Memstream` deadline) in
-`restore_stream`. All conversions live in one module.
+matching the memory broker's session expiration queue. Stream deadlines are **unix seconds**,
+like `Memstream`'s deadline and `history.ts`. All conversions live in one module.
 
 ```sql
 CREATE TABLE meta (
@@ -111,7 +112,7 @@ CREATE TABLE meta (
 CREATE TABLE streams (
   stream      TEXT PRIMARY KEY,
   max_seq     INTEGER NOT NULL,
-  deadline_ms INTEGER NOT NULL
+  deadline    INTEGER NOT NULL   -- unix seconds
 ) WITHOUT ROWID;
 
 -- Rowid tables: payloads can be large, and SQLite advises against WITHOUT ROWID for wide rows.
@@ -136,7 +137,7 @@ Pruning (every 30 s, indexed):
 - `DELETE FROM history WHERE ts < now - history_ttl` (uses `history_ts`).
 - Per stream written since the last prune: delete rows with `seq <= max_seq - history_limit`
   (uses `history_stream_seq`).
-- `DELETE FROM streams WHERE deadline_ms < now`, and the same for `sessions` by `expires_at_ms`.
+- `DELETE FROM streams WHERE deadline < now_secs`, and `DELETE FROM sessions WHERE expires_at_ms < now_ms`.
 
 Schema version starts at 1. A newer Cabby migrates older files forward at startup. An older Cabby
 refuses to open a file whose version is newer than it knows, with a clear error; that is not
@@ -157,18 +158,27 @@ treated as corruption.
   3. **Epoch:** if `meta.clean_shutdown` is `'1'`, reuse the saved epoch. Otherwise (first start,
      or the previous run crashed) generate a new epoch. Either way, write `clean_shutdown = '0'`
      before accepting connections.
-  4. **Streams:** for each `streams` row still within its deadline, load history with
-     `ORDER BY seq DESC LIMIT history_limit`, stop at the first gap (`prev_seq != seq + 1`), and
-     keep only rows within `history_ttl`. Install the contiguous tail and the stream's `max_seq`
-     with `restore_stream`, so the next broadcast gets `max_seq + 1` even if every entry has
-     expired. Gaps can come from queue overflow; the memory broker's `filter_by_offset` assumes
-     contiguous offsets, so a gap must never be loaded.
+  4. **Streams:** for each `streams` row still within its deadline, walk its history with
+     `ORDER BY seq DESC LIMIT history_limit`, starting from `expected = max_seq`: accept a row only
+     while `seq == expected` (then `expected -= 1`) and it is within `history_ttl`; stop at the
+     first mismatch. If the newest stored row isn't `max_seq` (its op was dropped or lost), the
+     stream loads with no entries. Install the accepted rows and `max_seq` with `restore_stream`,
+     so the memory broker's invariant holds (no entries, or the newest entry's offset equals the
+     stream offset) and the next broadcast gets `max_seq + 1`. The memory broker's
+     `filter_by_offset` assumes contiguous offsets, so a gap is never loaded.
   5. **Sessions:** restore unexpired rows with `restore_session_with_deadline`.
   6. Log the result and start listening.
-- **Graceful shutdown:** stop accepting connections, drain the queue, write the final batch, run
-  `PRAGMA wal_checkpoint(TRUNCATE)` so the `.db` file is self-contained for backups and volume
-  snapshots, write `clean_shutdown = '1'`, close the database, release the lock. All within the
-  existing shutdown timeout.
+- **Graceful shutdown:** the runner already stops in the right order (`cli/runner.rs`
+  `Runner::shutdown`): the WebSocket server stops accepting connections, then `node.shutdown`
+  disconnects clients (their final `commit_session` calls happen there), then broadcasters, then
+  the broker. A test pins that order. The broker's shutdown then:
+  1. drains the queue and writes the final batch;
+  2. **only if that succeeded within the shutdown timeout**, writes `clean_shutdown = '1'` in the
+     same transaction as the final batch (if the flush fails or times out, e.g. disk full, it stays
+     `'0'` and the next start rotates the epoch);
+  3. runs `PRAGMA wal_checkpoint(TRUNCATE)`, so the `.db` file is self-contained for backups and
+     volume snapshots and no WAL frame is written after the truncate;
+  4. closes the database and releases the lock.
 - **Why the epoch rotates after a crash:** up to one batch (about 50 ms) may never reach disk.
   Reusing the epoch would hand those lost offsets to new messages, and a client that had seen the
   lost ones would skip the new ones silently. A new epoch makes reconnecting clients resync
@@ -196,7 +206,7 @@ The rule: live delivery never stops because of the disk.
   - `sqlite_queue_size` (gauge)
   - `sqlite_batch_write_ms` (gauge: duration of the last batch write)
   - `sqlite_write_errors_total` (counter)
-  - `sqlite_dropped_total` (counter: history ops dropped on queue overflow)
+  - `sqlite_dropped_total` (counter: ops dropped on queue overflow, labelled by kind)
 
 ## 8. Compatibility record
 
@@ -210,12 +220,13 @@ before.
 ## 9. Testing
 
 - **Unit tests:**
-  - batching by size and by time; queue overflow drops the oldest history ops, keeps session ops
-    and counts drops;
+  - batching by size and by time; queue overflow drops the oldest history op first, then session
+    touches, then session commits, never exceeds its bound, and counts every drop;
   - `handle_broadcast_recorded` returns the assigned offset and timestamp, and `None` for
     transient messages; concurrent broadcasts each get their own offset;
   - loader: empty file; history within and beyond limit and TTL; a gap in the middle loads only
-    the contiguous tail; expired sessions skipped; restored sessions keep their original expiry;
+    the contiguous tail; a stream whose newest row isn't `max_seq` loads empty with offset
+    `max_seq`; expired sessions skipped; restored sessions keep their original expiry;
   - a stream whose entries all expired, restarted within 10 × `history_ttl`, gives the next
     broadcast `max_seq + 1`;
   - epoch kept after a clean shutdown and rotated after an unclean one;
@@ -230,6 +241,10 @@ before.
   - its session restores without an RPC call;
   - after `kill -9`, the restart uses a new epoch and the client resyncs cleanly;
   - a second process on the same file exits with the lock error;
+  - a session committed while clients disconnect during shutdown is on disk after the restart
+    (pins the runner's shutdown order);
+  - a final flush that fails (read-only file at shutdown) leaves `clean_shutdown = '0'`, and the
+    next start rotates the epoch;
   - after a graceful shutdown there is no `-wal` file left behind.
 - **Benchmark:** throughput and latency with `--broker=sqlite` match `--broker=memory` within run
   noise (Linux benchmark box, existing harness).
