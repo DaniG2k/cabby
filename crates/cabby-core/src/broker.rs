@@ -603,6 +603,31 @@ impl Memory {
         self.inner.stream_or_create(name).restore(max_offset, deadline, entries);
         Ok(())
     }
+
+    /// Caches session state with an explicit expiry (unix milliseconds), as
+    /// loaded from storage.
+    pub fn restore_session_with_deadline(&self, sid: &str, data: Vec<u8>, expires_at_ms: i64) {
+        self.inner.cache_session(sid, data, expires_at_ms);
+    }
+
+    /// [`Broker::commit_session`] for serialized state; returns the expiry it
+    /// set (unix milliseconds).
+    pub fn commit_session_data(&self, sid: &str, data: Vec<u8>) -> i64 {
+        let deadline = self.inner.session_deadline();
+        self.inner.cache_session(sid, data, deadline);
+        deadline
+    }
+
+    /// [`Broker::touch_session`]; returns the new expiry (unix milliseconds), or
+    /// `None` when nothing is cached for `sid`.
+    pub fn touch_session_deadline(&self, sid: &str) -> Option<i64> {
+        let deadline = self.inner.session_deadline();
+        let mut guard = lock(&self.inner.sessions);
+        let st = &mut *guard;
+        let entry = st.entries.get(sid)?;
+        st.expiration.update(entry.expiration, deadline);
+        Some(deadline)
+    }
 }
 
 impl MemoryInner {
@@ -624,6 +649,25 @@ impl MemoryInner {
 
     fn now_millis(&self) -> i64 {
         unix_millis(self.clock.now())
+    }
+
+    /// When a session committed or touched now expires (unix milliseconds).
+    fn session_deadline(&self) -> i64 {
+        self.now_millis() + self.config.sessions_ttl * 1000
+    }
+
+    /// Caches `data` for `sid` until `deadline` (unix milliseconds).
+    fn cache_session(&self, sid: &str, data: Vec<u8>, deadline: i64) {
+        let mut guard = lock(&self.sessions);
+        let st = &mut *guard;
+        let expiration = match st.entries.get(sid) {
+            Some(entry) => {
+                st.expiration.update(entry.expiration, deadline);
+                entry.expiration
+            }
+            None => st.expiration.push_item(sid.to_owned(), deadline),
+        };
+        st.entries.insert(sid.to_owned(), SessionEntry { data, expiration });
     }
 
     fn expire(&self) {
@@ -790,17 +834,7 @@ impl Broker for Memory {
 
     fn commit_session(&self, sid: &str, session: &dyn Cacheable) -> Result<(), BrokerError> {
         let data = session.to_cache_entry()?;
-        let deadline = self.inner.now_millis() + self.inner.config.sessions_ttl * 1000;
-        let mut guard = lock(&self.inner.sessions);
-        let st = &mut *guard;
-        let expiration = match st.entries.get(sid) {
-            Some(entry) => {
-                st.expiration.update(entry.expiration, deadline);
-                entry.expiration
-            }
-            None => st.expiration.push_item(sid.to_owned(), deadline),
-        };
-        st.entries.insert(sid.to_owned(), SessionEntry { data, expiration });
+        self.commit_session_data(sid, data);
         Ok(())
     }
 
@@ -809,12 +843,7 @@ impl Broker for Memory {
     }
 
     fn touch_session(&self, sid: &str) -> Result<(), BrokerError> {
-        let deadline = self.inner.now_millis() + self.inner.config.sessions_ttl * 1000;
-        let mut guard = lock(&self.inner.sessions);
-        let st = &mut *guard;
-        if let Some(entry) = st.entries.get(sid) {
-            st.expiration.update(entry.expiration, deadline);
-        }
+        self.touch_session_deadline(sid);
         Ok(())
     }
 
@@ -1212,6 +1241,61 @@ mod tests {
         assert!(broker.restore_stream("unanchored", 4, 0, vec![e(2), e(3)]).is_err());
         assert!(broker.restore_stream("ok", 3, 0, vec![e(2), e(3)]).is_ok());
         assert_eq!(None, broker.history_since("gap", 0).unwrap(), "a refused stream is not created");
+    }
+
+    #[test]
+    fn memory_restored_session_keeps_its_original_expiry() {
+        let clock = TestClock::new();
+        let broker = Memory::new(None, None, &Config::new(), clock.clone());
+        // Expires 2 s from now, not sessions_ttl (300 s) from now.
+        broker.restore_session_with_deadline("sid", b"state".to_vec(), 1_700_000_002_000);
+        assert_eq!(Some(b"state".to_vec()), broker.restore_session("sid").unwrap());
+
+        clock.advance(Duration::from_millis(1_999));
+        broker.expire();
+        assert!(broker.restore_session("sid").unwrap().is_some(), "still cached 1 ms before its expiry");
+
+        clock.advance(Duration::from_millis(1));
+        broker.expire();
+        assert_eq!(None, broker.restore_session("sid").unwrap(), "expired at its original deadline");
+    }
+
+    #[test]
+    fn memory_session_commit_and_touch_report_their_expiry() {
+        let clock = TestClock::new();
+        let mut config = Config::new();
+        config.sessions_ttl = 10;
+        let broker = Memory::new(None, None, &config, clock.clone());
+
+        assert_eq!(None, broker.touch_session_deadline("sid"), "nothing cached yet");
+        assert_eq!(1_700_000_010_000, broker.commit_session_data("sid", b"a".to_vec()));
+        clock.advance(Duration::from_secs(3));
+        assert_eq!(Some(1_700_000_013_000), broker.touch_session_deadline("sid"));
+        assert_eq!(Some(b"a".to_vec()), broker.restore_session("sid").unwrap());
+    }
+
+    #[test]
+    fn memory_commit_and_touch_session_still_expire_after_the_ttl() {
+        struct State;
+        impl Cacheable for State {
+            fn to_cache_entry(&self) -> Result<Vec<u8>, BrokerError> {
+                Ok(b"state".to_vec())
+            }
+        }
+        let clock = TestClock::new();
+        let mut config = Config::new();
+        config.sessions_ttl = 1;
+        let broker = Memory::new(None, None, &config, clock.clone());
+
+        broker.commit_session("sid", &State).unwrap();
+        clock.advance(Duration::from_millis(600));
+        broker.touch_session("sid").unwrap();
+        clock.advance(Duration::from_millis(600));
+        broker.expire();
+        assert!(broker.restore_session("sid").unwrap().is_some(), "the touch moved the expiry");
+        clock.advance(Duration::from_millis(400));
+        broker.expire();
+        assert_eq!(None, broker.restore_session("sid").unwrap());
     }
 
     #[test]
