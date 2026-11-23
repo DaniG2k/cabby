@@ -46,6 +46,7 @@ const SSE: &str = "SERVER-SENT EVENTS:";
 const PUSHER: &str = "PUSHER:";
 const DS: &str = "DURABLE STREAMS:";
 const API: &str = "API:";
+const SQLITE: &str = "SQLITE:";
 
 /// The configuration being built plus upstream's local flag destinations.
 #[derive(Default)]
@@ -561,6 +562,7 @@ fn definitions(c: &Config) -> Vec<Flag> {
     flags.extend(ssl_flags());
     flags.extend(broadcast_flags(c));
     flags.extend(broker_flags(c));
+    flags.extend(sqlite_flags(c));
     flags.extend(redis_flags(c));
     flags.extend(redis_broadcast_flags(c));
     flags.extend(http_broadcast_flags(c));
@@ -715,6 +717,19 @@ fn broker_flags(c: &Config) -> Vec<Flag> {
                 s.c.broker.presence_ttl = v
             }),
         ],
+    )
+}
+
+/// The SQLite broker (Cabby only, D-065): `CABBY_SQLITE_PATH`, no `ANYCABLE_*` alias.
+fn sqlite_flags(c: &Config) -> Vec<Flag> {
+    with_defaults(
+        SQLITE,
+        vec![with_env(
+            str_flag("sqlite_path", &c.sqlite.path, "Database file for --broker=sqlite (Cabby only)", |s, v| {
+                s.c.sqlite.path = v
+            }),
+            &["CABBY_SQLITE_PATH"],
+        )],
     )
 }
 
@@ -1460,5 +1475,54 @@ mod tests {
         let tags = parse_tags("env:dev,rev:1.1");
         assert_eq!(tags.get("env").map(String::as_str), Some("dev"));
         assert_eq!(tags.get("rev").map(String::as_str), Some("1.1"));
+    }
+
+    #[test]
+    fn sqlite_path_from_the_flag_and_the_cabby_env_var() {
+        let (res, _) = run(&["--broker=sqlite", "--sqlite_path=/data/a.db"], &[]);
+        let c = res.unwrap().0;
+        assert_eq!(("sqlite", "/data/a.db"), (c.broker.adapter.as_str(), c.sqlite.path.as_str()));
+
+        let (res, _) = run(&[], &[("CABBY_SQLITE_PATH", "/data/b.db")]);
+        assert_eq!("/data/b.db", res.unwrap().0.sqlite.path);
+
+        let (res, _) = run(&["--sqlite_path=/data/c.db"], &[("CABBY_SQLITE_PATH", "/data/b.db")]);
+        assert_eq!("/data/c.db", res.unwrap().0.sqlite.path, "the command line wins");
+
+        let (res, _) = run(&[], &[("ANYCABLE_SQLITE_PATH", "/data/d.db")]);
+        assert_eq!("", res.unwrap().0.sqlite.path, "no ANYCABLE_* alias");
+    }
+
+    #[test]
+    fn sqlite_path_from_the_config_file_unless_overridden() {
+        let file = std::env::temp_dir().join(format!("cabby-sqlite-options-{}.toml", std::process::id()));
+        std::fs::write(&file, "[sqlite]\npath = \"/data/file.db\"\n").unwrap();
+        let path = file.to_str().unwrap();
+        let mut out = Vec::new();
+
+        let (c, _) =
+            new_config_from_cli_to(&["cabby", "--config-path", path], &EnvMap::new(), vec![], &mut out).unwrap();
+        assert_eq!("/data/file.db", c.sqlite.path);
+
+        let args = ["cabby", "--config-path", path, "--sqlite_path=/data/flag.db"];
+        let (c, _) = new_config_from_cli_to(&args, &EnvMap::new(), vec![], &mut out).unwrap();
+        assert_eq!("/data/flag.db", c.sqlite.path);
+        std::fs::remove_file(&file).unwrap();
+    }
+
+    #[test]
+    fn sqlite_path_shows_in_help_with_its_env_var() {
+        let (_, out) = run(&["--help"], &[]);
+        assert!(out.contains("SQLITE:"), "{out}");
+        assert!(out.contains("--sqlite_path value") && out.contains("[$CABBY_SQLITE_PATH]"), "{out}");
+    }
+
+    #[test]
+    fn explicit_sqlite_broker_survives_the_broker_preset() {
+        let (res, _) = run(&["--presets=broker", "--broker=sqlite", "--sqlite_path=/data/cabby.db"], &[]);
+        let mut c = res.unwrap().0;
+        assert_eq!(Some(vec!["broker".to_owned()]), c.user_presets);
+        c.load_presets(&EnvMap::new()).unwrap();
+        assert_eq!("sqlite", c.broker.adapter);
     }
 }
