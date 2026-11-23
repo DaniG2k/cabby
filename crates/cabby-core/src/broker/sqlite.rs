@@ -579,4 +579,33 @@ mod tests {
         );
         assert!(broker.supports_presence());
     }
+
+    #[test]
+    fn dropped_history_rotates_the_epoch_and_keeps_the_streams_offset() {
+        let dir = TempDir::new();
+        let clock = TestClock::new();
+        let mut options = SqliteOptions::new(dir.db());
+        options.queue_capacity = 2;
+        let broker =
+            SqliteBroker::open(None, None, &Config::new(), &options, clock.clone(), Arc::new(NoopObserver)).unwrap();
+        let epoch = broker.epoch();
+        // Not started, so the writer is stalled: loud's broadcasts push quiet's 1-3 out of the queue.
+        for data in ["q1", "q2", "q3"] {
+            broker.handle_broadcast(&msg("quiet", data, false)).unwrap();
+        }
+        for data in ["l1", "l2"] {
+            broker.handle_broadcast(&msg("loud", data, false)).unwrap();
+        }
+        assert!(!broker.shutdown_within(Duration::from_secs(5)), "not marked clean after dropping history");
+        drop(broker);
+
+        let broker = open(&dir, &clock);
+        assert_eq!(Previous::Unclean, broker.report().previous);
+        assert_ne!(epoch, broker.epoch(), "clients that saw quiet 1-3 must resync");
+        assert_eq!(Some(vec![]), broker.history_since("quiet", 0).unwrap(), "quiet loads empty at its offset");
+        assert_eq!(vec![(1, "l1".to_owned()), (2, "l2".to_owned())], history(&broker, "loud"));
+        broker.handle_broadcast(&msg("quiet", "q4", false)).unwrap();
+        assert_eq!(Some(4), broker.peak("quiet").unwrap().map(|m| m.offset), "the dropped offsets are not reused");
+        assert!(broker.shutdown_within(Duration::from_secs(5)));
+    }
 }

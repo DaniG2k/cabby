@@ -6,8 +6,14 @@
 //! incoming op counts as queued, so a history op arriving at a queue full of
 //! session ops is itself the one dropped. `push` returns the kind it dropped,
 //! so the broker counts every drop (spec §7).
+//!
+//! A dropped history op leaves a gap the file can't fill, so the queue also
+//! remembers that history was dropped during this run (the shutdown is then
+//! never marked clean, and the next start rotates the epoch) and each stream's
+//! highest dropped offset (still written to `streams.max_seq`, so the stream
+//! loads at its true offset).
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -42,6 +48,19 @@ impl WriteOp {
     }
 }
 
+/// Per stream, the highest offset and its timestamp (unix seconds).
+pub(crate) type StreamMaxima = BTreeMap<String, (u64, i64)>;
+
+/// Raises `stream`'s entry in `maxima` to `offset` (and `ts_secs`).
+pub(crate) fn raise(maxima: &mut StreamMaxima, stream: &str, offset: u64, ts_secs: i64) {
+    match maxima.get_mut(stream) {
+        Some(entry) => *entry = (entry.0.max(offset), entry.1.max(ts_secs)),
+        None => {
+            maxima.insert(stream.to_owned(), (offset, ts_secs));
+        }
+    }
+}
+
 /// Which kind goes first when the queue is full.
 const DROP_ORDER: [OpKind; 3] = [OpKind::History, OpKind::SessionTouch, OpKind::SessionCommit];
 
@@ -55,6 +74,10 @@ struct Lanes {
     next_seq: u64,
     /// Set by [`WriteQueue::close`]: the deadline of the final flush.
     closed: Option<Instant>,
+    /// A history op was dropped during this run.
+    history_dropped: bool,
+    /// The highest dropped offset per stream, not yet taken by the writer.
+    dropped_streams: StreamMaxima,
 }
 
 impl Lanes {
@@ -68,6 +91,14 @@ impl Lanes {
 
     fn len(&self) -> usize {
         self.history.len() + self.touches.len() + self.commits.len()
+    }
+
+    /// Remembers a dropped op (only history ops leave a gap).
+    fn record_drop(&mut self, op: &WriteOp) {
+        if let WriteOp::History { stream, offset, ts_secs, .. } = op {
+            self.history_dropped = true;
+            raise(&mut self.dropped_streams, stream, *offset, *ts_secs);
+        }
     }
 
     fn front_seq(&self, kind: OpKind) -> Option<u64> {
@@ -124,7 +155,8 @@ impl WriteQueue {
         let mut dropped = None;
         if lanes.len() > self.capacity {
             for kind in DROP_ORDER {
-                if lanes.lane(kind).pop_front().is_some() {
+                if let Some((_, op)) = lanes.lane(kind).pop_front() {
+                    lanes.record_drop(&op);
                     dropped = Some(kind);
                     break;
                 }
@@ -138,6 +170,16 @@ impl WriteQueue {
 
     pub(crate) fn len(&self) -> usize {
         lock(&self.lanes).len()
+    }
+
+    /// Whether a history op was dropped during this run.
+    pub(crate) fn history_dropped(&self) -> bool {
+        lock(&self.lanes).history_dropped
+    }
+
+    /// Takes the highest dropped offset per stream since the last call.
+    pub(crate) fn take_dropped_streams(&self) -> StreamMaxima {
+        std::mem::take(&mut lock(&self.lanes).dropped_streams)
     }
 
     /// Waits up to `wait` for a full batch (or for `close`), then takes up to
@@ -181,7 +223,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::broker::sqlite::testing::{commit, history, touch};
+    use crate::broker::sqlite::testing::{commit, history, history_at, touch};
+    use crate::broker::test_clock::T0;
 
     #[test]
     fn overflow_drops_history_then_touches_then_commits() {
@@ -292,5 +335,30 @@ mod tests {
         let started = Instant::now();
         q.pause(Duration::from_secs(10));
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn dropped_history_is_remembered_with_each_streams_highest_offset() {
+        let q = WriteQueue::new(1, 1000);
+        assert!(!q.history_dropped());
+        q.push(history_at("s", 1, T0));
+        q.push(history_at("s", 2, T0 + 1)); // drops s 1
+        q.push(history_at("t", 7, T0 + 2)); // drops s 2
+        q.push(commit("a", 1)); // drops t 7
+
+        assert!(q.history_dropped());
+        let expected = StreamMaxima::from([("s".to_owned(), (2, T0 + 1)), ("t".to_owned(), (7, T0 + 2))]);
+        assert_eq!(expected, q.take_dropped_streams());
+        assert!(q.take_dropped_streams().is_empty(), "taken once");
+        assert!(q.history_dropped(), "the flag stays set for the run");
+    }
+
+    #[test]
+    fn dropping_session_ops_is_not_dropped_history() {
+        let q = WriteQueue::new(1, 1000);
+        q.push(commit("a", 1));
+        q.push(touch("a", 2));
+        assert!(!q.history_dropped());
+        assert!(q.take_dropped_streams().is_empty());
     }
 }

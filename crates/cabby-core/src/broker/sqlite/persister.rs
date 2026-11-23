@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
 
-use super::queue::{WriteOp, WriteQueue};
+use super::queue::{self, StreamMaxima, WriteOp, WriteQueue};
 use super::store::{self, Touched};
 use super::{SqliteObserver, log, units};
 use crate::broker::{Clock, Config};
@@ -91,6 +91,8 @@ pub(super) struct Persister {
     pending: Vec<WriteOp>,
     /// Streams written since the last prune.
     touched: Touched,
+    /// Offsets of dropped history ops not written to `streams` yet.
+    dropped: StreamMaxima,
     last_prune: Instant,
     errors: ErrorLog,
 }
@@ -114,6 +116,7 @@ impl Persister {
             timing,
             pending: Vec::new(),
             touched: Touched::new(),
+            dropped: StreamMaxima::new(),
             last_prune: Instant::now(),
             errors: ErrorLog::new(timing.error_log_interval),
         }
@@ -137,7 +140,8 @@ impl Persister {
         } else {
             self.queue.pause(self.timing.flush_interval);
         }
-        if !self.pending.is_empty() {
+        self.take_dropped();
+        if !self.pending.is_empty() || !self.dropped.is_empty() {
             let ops = std::mem::take(&mut self.pending);
             if !self.write(&ops, false) {
                 self.pending = ops;
@@ -149,14 +153,22 @@ impl Persister {
         }
     }
 
-    /// One batch; true when it was written.
+    /// Merges the offsets of history ops the queue dropped since the last call.
+    fn take_dropped(&mut self) {
+        for (stream, (offset, ts)) in self.queue.take_dropped_streams() {
+            queue::raise(&mut self.dropped, &stream, offset, ts);
+        }
+    }
+
+    /// One batch, with the dropped offsets; true when it was written.
     fn write(&mut self, ops: &[WriteOp], clean_shutdown: bool) -> bool {
         let started = Instant::now();
         let now_secs = units::now_secs(self.clock.as_ref());
-        match store::write_batch(&mut self.db.conn, ops, self.history_ttl, now_secs, clean_shutdown) {
+        match store::write_batch(&mut self.db.conn, ops, &self.dropped, self.history_ttl, now_secs, clean_shutdown) {
             Ok(touched) => {
                 self.observer.batch_written(started.elapsed());
                 self.touched.extend(touched);
+                self.dropped.clear();
                 if self.errors.succeeded() {
                     log_info!(log(), "SQLite writes recovered", "path" => self.db.path.display().to_string());
                 }
@@ -191,25 +203,34 @@ impl Persister {
     }
 
     /// Writes everything still queued, marking the shutdown clean only if that
-    /// succeeds before `deadline`; then checkpoints the WAL, closes the
-    /// database and releases the lock. Returns whether it marked it clean.
+    /// succeeds before `deadline` and no history op was dropped during the
+    /// run; then checkpoints the WAL, closes the database and releases the
+    /// lock. Returns whether it marked it clean.
     pub(super) fn finish(mut self, deadline: Instant) -> bool {
         let mut ops = std::mem::take(&mut self.pending);
         ops.extend(self.queue.take_all());
-        let mut clean = false;
+        self.take_dropped();
+        // A dropped history op is a gap a client may have seen past: keep the
+        // file unclean so the next start rotates the epoch.
+        let complete = !self.queue.history_dropped();
+        let mut written = false;
         while Instant::now() < deadline {
             let left = deadline.saturating_duration_since(Instant::now());
             let _ = self.db.conn.busy_timeout(left.min(store::BUSY_TIMEOUT));
-            if self.write(&ops, true) {
-                clean = true;
+            if self.write(&ops, complete) {
+                written = true;
                 break;
             }
             std::thread::sleep(FINAL_RETRY.min(deadline.saturating_duration_since(Instant::now())));
         }
+        let clean = written && complete;
         let path = self.db.path.display().to_string();
-        if !clean {
+        if !written {
             log_warn!(log(), "the final SQLite write did not finish in time; the next start uses a new epoch",
                 "path" => path.clone(), "ops" => ops.len());
+        } else if !complete {
+            log_warn!(log(), "history writes were dropped during this run (the write queue was full); the next start uses a new epoch",
+                "path" => path.clone());
         }
         let Database { conn, lock, .. } = self.db;
         let _ = conn.busy_timeout(deadline.saturating_duration_since(Instant::now()));
