@@ -23,7 +23,7 @@ use crate::config::{Config, EnvMap};
 const DEFAULT_CONFIG_PATH: &str = "/etc/anycable/anycable.toml";
 const CURRENT_CONFIG_PATH: &str = "./anycable.toml";
 
-const SERVER: &str = "ANYCABLE-GO SERVER:";
+const SERVER: &str = "SERVER:";
 const SSL: &str = "SSL:";
 const BROADCAST: &str = "BROADCASTING:";
 const REDIS: &str = "REDIS:";
@@ -120,9 +120,9 @@ pub fn new_config_from_cli_to(
     flags::init_destinations(&flags, &mut state);
 
     let mut app = App {
-        name: "anycable-go".to_owned(),
-        version: crate::version::ANYCABLE_COMPAT.to_owned(),
-        usage: "AnyCable-Go, a real-time server for https://anycable.io".to_owned(),
+        name: "cabby".to_owned(),
+        version: crate::version::label(),
+        usage: "Cabby, a real-time server for Rails and beyond".to_owned(),
     };
 
     for opt in opts {
@@ -178,7 +178,9 @@ pub fn new_config_from_cli_to(
         return Ok((Config::default(), true));
     }
     if !app.version.is_empty() && parsed.bool(&flags, "version") {
-        emit(&format!("{}\n", app.version));
+        // `cabby 0.2.0 (AnyCable 1.6.21 compatible)` (D-059): the program name,
+        // then the version (an embedder's `CliOption::Version` keeps its text).
+        emit(&format!("{} {}\n", app.name, app.version));
         return Ok((Config::default(), true));
     }
 
@@ -217,12 +219,12 @@ pub fn new_config_from_cli_to(
 }
 
 const DEPRECATED_METRICS_LOG_INTERVAL: &str = "DEPRECATION WARNING: metrics_log_interval option is deprecated
-and will be deleted in the next major release of anycable-go.
+and will be deleted in a future release of Cabby.
 Use metrics_rotate_interval instead.\n";
 
 fn deprecated(option: &str, replacement: &str) -> String {
     format!(
-        "DEPRECATION WARNING: {option} option is deprecated\nand will be removed in the next major release of anycable-go.\n{replacement}\n"
+        "DEPRECATION WARNING: {option} option is deprecated\nand will be removed in a future release of Cabby.\n{replacement}\n"
     )
 }
 
@@ -1319,7 +1321,7 @@ mod tests {
     fn run(args: &[&str], env: &[(&str, &str)]) -> (Result<(Config, bool), CliError>, String) {
         let env: EnvMap = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         let mut out = Vec::new();
-        let mut full = vec!["anycable-go", "--ignore-config-path"];
+        let mut full = vec!["cabby", "--ignore-config-path"];
         full.extend_from_slice(args);
         let res = new_config_from_cli_to(&full, &env, vec![], &mut out);
         (res, String::from_utf8(out).unwrap())
@@ -1373,19 +1375,30 @@ mod tests {
         assert_eq!((c.server.host.as_str(), c.server.port), ("", 8080));
     }
 
+    /// Pins D-059: `--version`, `--help` and deprecation warnings name Cabby.
     #[test]
-    fn version_and_help_interrupt() {
+    fn deviation_d059_help_and_version_name_cabby() {
         let (res, out) = run(&["-v"], &[]);
         assert!(res.unwrap().1);
-        assert_eq!(out, "1.6.21\n");
+        assert_eq!(out, format!("cabby {} (AnyCable 1.6.21 compatible)\n", env!("CARGO_PKG_VERSION")));
         let (res, out) = run(&["--help"], &[]);
         assert!(res.unwrap().1);
+        assert!(
+            out.starts_with(
+                "NAME:\n   cabby - Cabby, a real-time server for Rails and beyond\n\nUSAGE:\n   cabby [global options]\n"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("\n   SERVER:\n\n"), "{out}");
         assert!(
             out.contains("   --port value              Server port (default: 8080) [$ANYCABLE_PORT, $PORT]\n"),
             "{out}"
         );
+        assert!(!out.to_lowercase().contains("anycable-go"), "{out}");
         let (res, _) = run(&["-h", "--help"], &[]);
         assert_eq!(res.unwrap_err().0, "Cannot use two forms of the same flag: h help");
+        let (_, out) = run(&["--turbo_rails_key=k"], &[]);
+        assert!(out.contains("and will be removed in a future release of Cabby.\n"), "{out}");
     }
 
     #[test]
