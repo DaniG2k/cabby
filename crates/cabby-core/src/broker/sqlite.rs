@@ -16,6 +16,7 @@ use std::sync::OnceLock;
 
 use crate::logger::Logger;
 
+mod queue;
 mod store;
 mod units;
 
@@ -30,6 +31,27 @@ fn log() -> &'static Logger {
 pub(crate) mod testing {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::queue::WriteOp;
+    use crate::broker::test_clock::T0;
+
+    /// A history op at the test clock's start.
+    pub(crate) fn history(stream: &str, offset: u64) -> WriteOp {
+        history_at(stream, offset, T0)
+    }
+
+    pub(crate) fn history_at(stream: &str, offset: u64, ts_secs: i64) -> WriteOp {
+        WriteOp::History { stream: stream.into(), offset, ts_secs, data: format!("m{offset}") }
+    }
+
+    /// A session commit whose data is the session ID's bytes.
+    pub(crate) fn commit(sid: &str, expires_at_ms: i64) -> WriteOp {
+        WriteOp::SessionCommit { sid: sid.into(), data: sid.as_bytes().to_vec(), expires_at_ms }
+    }
+
+    pub(crate) fn touch(sid: &str, expires_at_ms: i64) -> WriteOp {
+        WriteOp::SessionTouch { sid: sid.into(), expires_at_ms }
+    }
 
     /// A fresh directory under the system temp dir, removed on drop.
     pub(crate) struct TempDir(PathBuf);
