@@ -30,6 +30,7 @@ mod origin;
 mod ping_intervals;
 mod pusher;
 mod rpc_sessions;
+mod sqlite;
 mod sse;
 mod threads;
 
