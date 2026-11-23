@@ -85,7 +85,7 @@ fn negotiates_subprotocols_and_exchanges_messages() {
     assert_eq!(101, resp.status);
     assert_eq!(Some("s3pPLMBiTxaQ9kYGzzhZRbK+xOo="), resp.header("sec-websocket-accept"));
     assert_eq!(Some("actioncable-v1-json"), resp.header("sec-websocket-protocol"));
-    assert_eq!(Some(crate::telemetry::version().as_str()), resp.header("x-anycable-version"));
+    assert_eq!(Some(crate::version::ANYCABLE_COMPAT), resp.header("x-anycable-version"));
 
     let (conn, info) = session(&rx);
     assert_eq!("actioncable-v1-json", conn.subprotocol());

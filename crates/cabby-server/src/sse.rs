@@ -723,7 +723,7 @@ impl Handler {
                     h.insert(name, v);
                 }
             };
-            set(h, "x-anycable-version", &crate::telemetry::version());
+            set(h, "x-anycable-version", crate::version::ANYCABLE_COMPAT);
             if matches!(req.version(), http::Version::HTTP_10 | http::Version::HTTP_11 | http::Version::HTTP_09) {
                 // An endpoint MUST NOT generate an HTTP/2 message containing
                 // connection-specific header fields (RFC 7540).

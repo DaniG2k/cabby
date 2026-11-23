@@ -121,7 +121,7 @@ pub fn new_config_from_cli_to(
 
     let mut app = App {
         name: "anycable-go".to_owned(),
-        version: crate::telemetry::version(),
+        version: crate::version::ANYCABLE_COMPAT.to_owned(),
         usage: "AnyCable-Go, a real-time server for https://anycable.io".to_owned(),
     };
 

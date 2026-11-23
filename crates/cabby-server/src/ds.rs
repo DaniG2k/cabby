@@ -972,7 +972,7 @@ impl Handler {
                 return None;
             }
 
-            set_header(w.headers_mut(), "x-anycable-version", &crate::telemetry::version());
+            set_header(w.headers_mut(), "x-anycable-version", crate::version::ANYCABLE_COMPAT);
         }
         let status = |code: u16| lock_writer(w).write_header(code);
 
