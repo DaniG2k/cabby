@@ -10,6 +10,12 @@
 
 **Source of truth:** `docs/superpowers/specs/2026-11-23-sqlite-broker-design.md` (the approved spec). Section numbers below (§3, §5…) refer to it.
 
+
+> **Owner decisions (2026-11-23):**
+> - Final flush budget: the remaining shutdown time, with a 1-second floor (Task 17).
+> - Telemetry: none. `main` now includes the v0.1.0 release commits, so the binary's default runner has no telemetry option (D-058, proposed); Phase A removes the module. The `ANYCABLE_DISABLE_TELEMETRY=true` in the test commands below is harmless and can be dropped.
+> - Benchmark host and paths in Task 23 are private notes: scrub host aliases before pushing this branch.
+
 ---
 
 ## Ground rules for this branch
@@ -4314,7 +4320,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 17: Runner wiring, startup validation, metrics, shutdown budget
 
-The runner builds the default broker in `new_broker` (`cli/runner.rs:680-716`) and pushes it into the shutdown order after `node.shutdown` and the broadcasters (`runner.rs:539-548`: ws server, `node.shutdown`, broadcasters, broker, subscriber). Clients disconnecting in `node.shutdown` touch their sessions (`node/app.rs:1173-1176`), so those writes are queued before the broker's shutdown runs; Task 20 pins that through the binary. `CoreBroker` (`cli/adapters.rs:219-245`) calls `Broker::shutdown`, which has no deadline; the SQLite broker gets its own adapter that passes what is left of the shutdown context (`adapters.rs:80-106`, `ShutdownContext`, `remaining`), so the final write is bounded by `--shutdown_timeout` (§5 step 2).
+The runner builds the default broker in `new_broker` (`cli/runner.rs:680-716`) and pushes it into the shutdown order after `node.shutdown` and the broadcasters (`runner.rs:539-548`: ws server, `node.shutdown`, broadcasters, broker, subscriber). Clients disconnecting in `node.shutdown` touch their sessions (`node/app.rs:1173-1176`), so those writes are queued before the broker's shutdown runs; Task 20 pins that through the binary. `CoreBroker` (`cli/adapters.rs:219-245`) calls `Broker::shutdown`, which has no deadline; the SQLite broker gets its own adapter that passes what is left of the shutdown context (`adapters.rs:80-106`, `ShutdownContext`, `remaining`), so the final write is bounded by `--shutdown_timeout` (§5 step 2). **Owner decision:** the final write gets whatever is left of the shutdown context, but never less than **1 second** (`FINAL_FLUSH_FLOOR = Duration::from_secs(1)`; use `remaining.max(FINAL_FLUSH_FLOOR)`). If it still doesn't finish, `clean_shutdown` stays `'0'` and the next start rotates the epoch, which is the designed fallback. Add a unit test that a zero remaining budget still allows a 1 s flush.
 
 **Files:**
 - Create: `crates/cabby-server/src/cli/sqlite.rs`
