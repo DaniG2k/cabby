@@ -168,3 +168,31 @@ fn the_sqlite_broker_needs_a_database_path() {
         "{text}"
     );
 }
+
+/// regression-for: node/broker_integration_test.go#TestIntegrationRestore_Memory/Restore_session_connection_and_channels_state
+/// note: D-065: a start that fails after the database is open (here the WebSocket port is taken, exit 1) shuts the SQLite broker down cleanly, so the next start keeps the epoch.
+/// note: not_observable on Go: AnyCable rejects --broker=sqlite.
+#[test]
+fn a_failed_start_keeps_the_epoch() {
+    sq::rust_only();
+    let dir = DataDir::new("failed-start");
+    let db = dir.db();
+    let mut sut = sq::start(&db, &["--public"]);
+    let (mut client, _) = sq::connect(&sut, None);
+    sq::subscribe(&mut client, "start");
+    sq::broadcast(&sut, "start", "s1");
+    let epoch = sq::receive_message(&mut client, "s1")["epoch"].as_str().unwrap().to_owned();
+    sq::stop_gracefully(&mut sut);
+    drop(client);
+
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").expect("a port to take");
+    let port = format!("--port={}", taken.local_addr().unwrap().port());
+    let err = sq::try_start(&db, &["--public", &port]).err().expect("the server must not start on a taken port");
+    drop(taken);
+    assert_eq!(Some("1".to_owned()), sq::meta(&db, "clean_shutdown"), "after the failed start:\n{err:#}");
+
+    let mut sut = sq::start(&db, &["--public"]);
+    let line = format!("(epoch {epoch}, clean shutdown)");
+    assert!(sut.process.output().contains(&line), "no {line:?} in:\n{}", sut.process.output());
+    sq::stop_gracefully(&mut sut);
+}
