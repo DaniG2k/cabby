@@ -16,6 +16,7 @@ use std::sync::OnceLock;
 
 use crate::logger::Logger;
 
+mod files;
 mod queue;
 mod store;
 mod units;
