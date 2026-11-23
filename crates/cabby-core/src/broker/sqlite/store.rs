@@ -1,0 +1,283 @@
+//! The database file (spec §4): connection settings, schema and migrations,
+//! and the `meta` table.
+
+use std::path::Path;
+use std::time::Duration;
+
+use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension};
+
+/// How long a statement waits for a lock another connection holds.
+pub(super) const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Schema migrations: entry `i` takes a file from version `i` to `i + 1`, so
+/// the current version is `MIGRATIONS.len()`. Append new versions; never edit
+/// a released one.
+pub(super) const MIGRATIONS: &[&str] = &[SCHEMA_V1];
+
+/// `meta` holds `schema_version`, `epoch` and `clean_shutdown`. It exists in
+/// every version, so the version can be read before migrating.
+const CREATE_META: &str = "CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+) WITHOUT ROWID";
+
+/// Version 1: the spec §4 schema, plus `streams_deadline` so pruning streams
+/// by deadline uses an index.
+const SCHEMA_V1: &str = "
+-- One row per stream ever written, so a quiet stream keeps its offsets after
+-- its entries expire (the memory broker keeps a stream for 10 x history_ttl).
+CREATE TABLE streams (
+  stream   TEXT PRIMARY KEY,
+  max_seq  INTEGER NOT NULL,
+  deadline INTEGER NOT NULL   -- unix seconds
+) WITHOUT ROWID;
+CREATE INDEX streams_deadline ON streams (deadline);
+
+-- Rowid tables: payloads can be large.
+CREATE TABLE history (
+  stream TEXT    NOT NULL,
+  seq    INTEGER NOT NULL,  -- the stream offset ('offset' is an SQL keyword)
+  ts     INTEGER NOT NULL,  -- unix seconds
+  data   TEXT    NOT NULL
+);
+CREATE UNIQUE INDEX history_stream_seq ON history (stream, seq);
+CREATE INDEX history_ts ON history (ts);
+
+CREATE TABLE sessions (
+  sid           TEXT    PRIMARY KEY,
+  data          BLOB    NOT NULL,  -- the Cacheable bytes commit_session receives
+  expires_at_ms INTEGER NOT NULL   -- unix milliseconds
+);
+CREATE INDEX sessions_expires ON sessions (expires_at_ms);
+";
+
+/// A database failure, classified as spec §6 needs it.
+#[derive(Debug, thiserror::Error)]
+pub(super) enum StoreError {
+    /// `SQLITE_CORRUPT`, `SQLITE_NOTADB` or a failed `quick_check`: the only
+    /// errors for which the file is moved aside.
+    #[error("corrupt: {0}")]
+    Corrupt(String),
+    /// Written by a newer Cabby: refused, never moved aside.
+    #[error(
+        "schema version {found} is newer than this Cabby supports ({supported}); upgrade Cabby or move the file away"
+    )]
+    NewerSchema { found: i64, supported: i64 },
+    /// Any other SQLite error (busy, permissions, I/O, disk full…).
+    #[error("{0}")]
+    Sqlite(rusqlite::Error),
+    #[error("{0}")]
+    Other(String),
+}
+
+impl From<rusqlite::Error> for StoreError {
+    fn from(e: rusqlite::Error) -> Self {
+        match e.sqlite_error_code() {
+            Some(ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase) => StoreError::Corrupt(e.to_string()),
+            _ => StoreError::Sqlite(e),
+        }
+    }
+}
+
+/// Opens (creating if needed) the database: WAL, `synchronous=NORMAL`, a busy
+/// timeout, `quick_check`, then migrations up to the current version.
+pub(super) fn open(path: &Path) -> Result<Connection, StoreError> {
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let conn = Connection::open_with_flags(path, flags)?;
+    conn.busy_timeout(BUSY_TIMEOUT)?;
+    let mode: String = conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0))?;
+    if !mode.eq_ignore_ascii_case("wal") {
+        return Err(StoreError::Other(format!("journal_mode is {mode}, the SQLite broker needs WAL")));
+    }
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    quick_check(&conn)?;
+    migrate(&conn, MIGRATIONS)?;
+    Ok(conn)
+}
+
+/// `PRAGMA quick_check`: anything but a single `ok` row is corruption.
+pub(super) fn quick_check(conn: &Connection) -> Result<(), StoreError> {
+    let mut stmt = conn.prepare("PRAGMA quick_check")?;
+    let rows: Vec<String> = stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    if rows == ["ok"] { Ok(()) } else { Err(StoreError::Corrupt(format!("quick_check: {}", rows.join("; ")))) }
+}
+
+/// The stored schema version, 0 for a fresh file.
+pub(super) fn schema_version(conn: &Connection) -> Result<i64, StoreError> {
+    match meta_get(conn, "schema_version")? {
+        None => Ok(0),
+        Some(v) => v
+            .parse::<i64>()
+            .ok()
+            .filter(|v| *v >= 0)
+            .ok_or_else(|| StoreError::Corrupt(format!("invalid schema_version {v:?}"))),
+    }
+}
+
+/// Brings the file up to `migrations.len()`, one transaction per version;
+/// refuses a file whose version is newer.
+pub(super) fn migrate(conn: &Connection, migrations: &[&str]) -> Result<(), StoreError> {
+    conn.execute_batch(CREATE_META)?;
+    let supported = i64::try_from(migrations.len()).unwrap_or(i64::MAX);
+    let found = schema_version(conn)?;
+    if found > supported {
+        return Err(StoreError::NewerSchema { found, supported });
+    }
+    for (version, sql) in (1_i64..).zip(migrations).skip(usize::try_from(found).unwrap_or(0)) {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(sql)?;
+        meta_set(&tx, "schema_version", &version.to_string())?;
+        tx.commit()?;
+    }
+    Ok(())
+}
+
+pub(super) fn meta_get(conn: &Connection, key: &str) -> Result<Option<String>, StoreError> {
+    Ok(conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0)).optional()?)
+}
+
+pub(super) fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        [key, value],
+    )?;
+    Ok(())
+}
+
+/// Records the run's epoch and that it has not shut down cleanly yet, in one
+/// transaction, before Cabby accepts connections (spec §5 step 3).
+pub(super) fn mark_running(conn: &mut Connection, epoch: &str) -> Result<(), StoreError> {
+    let tx = conn.transaction()?;
+    meta_set(&tx, "epoch", epoch)?;
+    meta_set(&tx, "clean_shutdown", "0")?;
+    tx.commit()?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::broker::sqlite::testing::TempDir;
+
+    fn schema_objects(conn: &Connection) -> Vec<String> {
+        let sql = "SELECT name FROM sqlite_schema WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%' ORDER BY name";
+        conn.prepare(sql).unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+    }
+
+    #[test]
+    fn a_fresh_file_gets_the_current_schema_in_wal_mode() {
+        let dir = TempDir::new();
+        let conn = open(&dir.file("cabby.db")).unwrap();
+
+        assert_eq!(1, schema_version(&conn).unwrap());
+        assert_eq!(
+            vec![
+                "history",
+                "history_stream_seq",
+                "history_ts",
+                "meta",
+                "sessions",
+                "sessions_expires",
+                "streams",
+                "streams_deadline"
+            ],
+            schema_objects(&conn)
+        );
+        let mode: String = conn.pragma_query_value(None, "journal_mode", |r| r.get(0)).unwrap();
+        assert_eq!("wal", mode);
+        let synchronous: i64 = conn.pragma_query_value(None, "synchronous", |r| r.get(0)).unwrap();
+        assert_eq!(1, synchronous, "synchronous=NORMAL");
+    }
+
+    #[test]
+    fn reopening_keeps_the_data_and_the_version() {
+        let dir = TempDir::new();
+        let path = dir.file("cabby.db");
+        meta_set(&open(&path).unwrap(), "epoch", "abcd").unwrap();
+
+        let conn = open(&path).unwrap();
+        assert_eq!(Some("abcd".to_owned()), meta_get(&conn, "epoch").unwrap());
+        assert_eq!(1, schema_version(&conn).unwrap());
+    }
+
+    #[test]
+    fn migrations_run_forward_from_the_stored_version() {
+        let dir = TempDir::new();
+        let conn = open(&dir.file("cabby.db")).unwrap();
+        conn.execute("INSERT INTO streams (stream, max_seq, deadline) VALUES ('s', 3, 10)", []).unwrap();
+
+        migrate(&conn, &[SCHEMA_V1, "CREATE TABLE extra (x INTEGER)"]).unwrap();
+
+        assert_eq!(2, schema_version(&conn).unwrap());
+        assert!(schema_objects(&conn).contains(&"extra".to_owned()));
+        let max_seq: i64 = conn.query_row("SELECT max_seq FROM streams WHERE stream = 's'", [], |r| r.get(0)).unwrap();
+        assert_eq!(3, max_seq, "rows survive a migration");
+    }
+
+    #[test]
+    fn a_newer_schema_is_refused_and_not_treated_as_corruption() {
+        let dir = TempDir::new();
+        let path = dir.file("cabby.db");
+        meta_set(&open(&path).unwrap(), "schema_version", "99").unwrap();
+
+        match open(&path) {
+            Err(StoreError::NewerSchema { found: 99, supported: 1 }) => {}
+            other => panic!("expected NewerSchema, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_database_is_corrupt() {
+        let dir = TempDir::new();
+        let path = dir.file("cabby.db");
+        std::fs::write(&path, vec![0x42_u8; 8192]).unwrap();
+
+        assert!(matches!(open(&path), Err(StoreError::Corrupt(_))));
+    }
+
+    #[test]
+    fn a_damaged_page_is_corrupt() {
+        let dir = TempDir::new();
+        let path = dir.file("cabby.db");
+        {
+            let conn = open(&path).unwrap();
+            for i in 0..200 {
+                conn.execute(
+                    "INSERT INTO history (stream, seq, ts, data) VALUES ('s', ?1, 0, ?2)",
+                    (i, "x".repeat(100)),
+                )
+                .unwrap();
+            }
+        } // The last connection closes: the WAL is checkpointed into the file and removed.
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.len() > 3 * 4096, "several pages");
+        bytes[4096..3 * 4096].fill(0xFF);
+        std::fs::write(&path, bytes).unwrap();
+
+        assert!(matches!(open(&path), Err(StoreError::Corrupt(_))));
+    }
+
+    #[test]
+    fn only_corruption_codes_count_as_corrupt() {
+        use rusqlite::ffi;
+        let classify = |code| StoreError::from(rusqlite::Error::SqliteFailure(ffi::Error::new(code), None));
+
+        assert!(matches!(classify(ffi::SQLITE_CORRUPT), StoreError::Corrupt(_)));
+        assert!(matches!(classify(ffi::SQLITE_NOTADB), StoreError::Corrupt(_)));
+        for code in [ffi::SQLITE_BUSY, ffi::SQLITE_PERM, ffi::SQLITE_CANTOPEN, ffi::SQLITE_READONLY, ffi::SQLITE_FULL] {
+            assert!(matches!(classify(code), StoreError::Sqlite(_)), "code {code} is not corruption");
+        }
+    }
+
+    #[test]
+    fn mark_running_records_the_epoch_and_an_unclean_state() {
+        let dir = TempDir::new();
+        let mut conn = open(&dir.file("cabby.db")).unwrap();
+        meta_set(&conn, "clean_shutdown", "1").unwrap();
+
+        mark_running(&mut conn, "e1").unwrap();
+
+        assert_eq!(Some("e1".to_owned()), meta_get(&conn, "epoch").unwrap());
+        assert_eq!(Some("0".to_owned()), meta_get(&conn, "clean_shutdown").unwrap());
+    }
+}
