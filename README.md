@@ -79,7 +79,20 @@ subscriber. Several Cabby nodes can share broadcasts through Redis or NATS.
 
 ## Install
 
-Prebuilt binaries and a Docker image aren't available yet, so build from source. You need:
+- **Docker** (linux/amd64 and arm64):
+
+  ```sh
+  docker run --rm -p 8080:8080 -p 8090:8090 ghcr.io/danig2k/cabby:0.1.0 --norpc --public
+  ```
+- **Prebuilt binaries** for Linux (x86_64 and arm64, glibc 2.28 or newer) and macOS (Apple
+  silicon), with checksums, are on the
+  [releases page](https://github.com/DaniG2k/cabby-releases/releases).
+
+Step-by-step instructions and framework guides are at [docs.cabbyhq.com](https://docs.cabbyhq.com/install).
+
+### Build from source
+
+You need:
 
 - Rust 1.100 or newer, via [rustup](https://rustup.rs) (`rustup update stable`). Development uses
   the version pinned in [`rust-toolchain.toml`](rust-toolchain.toml).
