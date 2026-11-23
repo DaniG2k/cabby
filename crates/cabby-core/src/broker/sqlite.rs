@@ -13,10 +13,12 @@
 //! expiries unix milliseconds (`units`).
 
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use crate::logger::Logger;
 
 mod files;
+mod persister;
 mod queue;
 mod store;
 mod units;
@@ -27,13 +29,42 @@ fn log() -> &'static Logger {
     LOG.get_or_init(|| Logger::default().with("context", "broker").with("provider", "sqlite"))
 }
 
+/// Where the broker reports its write path; the server turns these into
+/// metrics (spec §7). Calls come from the broadcast path and the persister
+/// thread, so they must be cheap.
+pub trait SqliteObserver: Send + Sync {
+    /// Ops waiting to be written, after each write attempt.
+    fn queue_size(&self, ops: usize);
+    /// A batch was written in `took`.
+    fn batch_written(&self, took: Duration);
+    /// A batch write failed; the batch is kept and retried.
+    fn write_failed(&self);
+    /// An op of `kind` was dropped because the queue was full.
+    fn dropped(&self, kind: queue::OpKind);
+}
+
+/// Reports nothing.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopObserver;
+
+impl SqliteObserver for NoopObserver {
+    fn queue_size(&self, _ops: usize) {}
+    fn batch_written(&self, _took: Duration) {}
+    fn write_failed(&self) {}
+    fn dropped(&self, _kind: queue::OpKind) {}
+}
+
 /// Helpers shared by the module's tests.
 #[cfg(test)]
 pub(crate) mod testing {
     use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
-    use super::queue::WriteOp;
+    use super::SqliteObserver;
+    use super::queue::{OpKind, WriteOp};
+    use crate::broker::lock;
     use crate::broker::test_clock::T0;
 
     /// A history op at the test clock's start.
@@ -88,6 +119,51 @@ pub(crate) mod testing {
     impl Drop for TempDir {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Records what the broker reports.
+    #[derive(Default)]
+    pub(crate) struct Recording {
+        queue_sizes: Mutex<Vec<usize>>,
+        batches: Mutex<u64>,
+        failures: Mutex<u64>,
+        dropped: Mutex<Vec<OpKind>>,
+    }
+
+    impl Recording {
+        pub(crate) fn queue_sizes(&self) -> Vec<usize> {
+            lock(&self.queue_sizes).clone()
+        }
+
+        pub(crate) fn batches(&self) -> u64 {
+            *lock(&self.batches)
+        }
+
+        pub(crate) fn failures(&self) -> u64 {
+            *lock(&self.failures)
+        }
+
+        pub(crate) fn dropped(&self) -> Vec<OpKind> {
+            lock(&self.dropped).clone()
+        }
+    }
+
+    impl SqliteObserver for Recording {
+        fn queue_size(&self, ops: usize) {
+            lock(&self.queue_sizes).push(ops);
+        }
+
+        fn batch_written(&self, _took: Duration) {
+            *lock(&self.batches) += 1;
+        }
+
+        fn write_failed(&self) {
+            *lock(&self.failures) += 1;
+        }
+
+        fn dropped(&self, kind: OpKind) {
+            lock(&self.dropped).push(kind);
         }
     }
 }
