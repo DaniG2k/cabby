@@ -58,22 +58,23 @@ pub fn run(config: Config) -> Result<(), CliError> {
     let result = {
         let _guard = runtime.enter();
         set_command_pool_size(&config);
-        Runner::new(
-            config,
-            vec![
-                RunnerOption::Name("Cabby".into()),
-                RunnerOption::DefaultRpcController,
-                RunnerOption::DefaultBroker,
-                RunnerOption::DefaultSubscriber,
-                RunnerOption::DefaultBroadcaster,
-                RunnerOption::Telemetry(Vec::new()),
-            ],
-        )
-        .and_then(|mut runner| runner.run())
+        Runner::new(config, default_runner_options()).and_then(|mut runner| runner.run())
     };
     // Connections still open are dropped with the runtime; do not wait for them.
     runtime.shutdown_timeout(std::time::Duration::from_millis(100));
     result
+}
+
+/// The runner options of [`run`]: the default components and no telemetry
+/// (D-058, Cabby doesn't send usage telemetry).
+fn default_runner_options() -> Vec<RunnerOption> {
+    vec![
+        RunnerOption::Name("Cabby".into()),
+        RunnerOption::DefaultRpcController,
+        RunnerOption::DefaultBroker,
+        RunnerOption::DefaultSubscriber,
+        RunnerOption::DefaultBroadcaster,
+    ]
 }
 
 /// Sizes the node's command pool: twice the RPC concurrency and at least the
@@ -178,4 +179,15 @@ pub enum RunnerOption {
     DefaultBroadcaster,
     /// `WithTelemetry(props...)`: custom properties as key/value pairs.
     Telemetry(Vec<String>),
+}
+
+#[cfg(test)]
+mod tests {
+    /// Pins D-058 (proposed): the binary's runner never enables telemetry.
+    #[test]
+    fn default_runner_options_have_no_telemetry() {
+        let options = super::default_runner_options();
+        assert!(!options.iter().any(|o| matches!(o, super::RunnerOption::Telemetry(_))));
+        assert!(options.iter().any(|o| matches!(o, super::RunnerOption::DefaultBroadcaster)));
+    }
 }
