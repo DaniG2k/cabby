@@ -225,6 +225,64 @@ pub(super) fn write_batch(
     Ok(newest.into_keys().map(str::to_owned).collect())
 }
 
+/// History older than the TTL (index `history_ts`).
+pub(super) const PRUNE_BY_TTL: &str = "DELETE FROM history WHERE ts < ?1";
+/// One stream's entries beyond `history_limit`, measured from its stored
+/// newest offset (index `history_stream_seq`).
+pub(super) const PRUNE_BY_LIMIT: &str =
+    "DELETE FROM history WHERE stream = ?1 AND seq <= (SELECT max_seq - ?2 FROM streams WHERE stream = ?1)";
+/// Streams past their deadline (index `streams_deadline`).
+pub(super) const PRUNE_STREAMS: &str = "DELETE FROM streams WHERE deadline < ?1";
+/// Expired sessions (index `sessions_expires`).
+pub(super) const PRUNE_SESSIONS: &str = "DELETE FROM sessions WHERE expires_at_ms < ?1";
+/// Streams the memory broker would still keep (`Memory::expire` keeps
+/// `deadline >= now`).
+pub(super) const LOAD_STREAMS: &str = "SELECT stream, max_seq, deadline FROM streams WHERE deadline >= ?1";
+/// A stream's newest entries at or below its stored offset, newest first.
+pub(super) const LOAD_TAIL: &str =
+    "SELECT seq, ts, data FROM history WHERE stream = ?1 AND seq <= ?2 ORDER BY seq DESC LIMIT ?3";
+/// Sessions not yet expired (the memory broker expires at `deadline <= now`).
+pub(super) const LOAD_SESSIONS: &str = "SELECT sid, data, expires_at_ms FROM sessions WHERE expires_at_ms > ?1";
+
+/// What a prune pass removes, computed by the persister from its clock.
+pub(super) struct Prune<'a> {
+    /// History older than this (unix seconds) is expired.
+    pub(super) history_cutoff: i64,
+    /// Streams whose deadline is before this (unix seconds) are dropped.
+    pub(super) now_secs: i64,
+    /// Sessions expiring before this (unix milliseconds) are dropped.
+    pub(super) now_ms: i64,
+    pub(super) history_limit: i64,
+    /// Streams written since the last prune.
+    pub(super) streams: &'a Touched,
+}
+
+/// One prune pass, in one transaction.
+pub(super) fn prune(conn: &mut Connection, p: &Prune<'_>) -> Result<(), StoreError> {
+    let tx = conn.transaction()?;
+    tx.execute(PRUNE_BY_TTL, [p.history_cutoff])?;
+    {
+        let mut by_limit = tx.prepare_cached(PRUNE_BY_LIMIT)?;
+        for stream in p.streams {
+            by_limit.execute(params![stream, p.history_limit])?;
+        }
+    }
+    tx.execute(PRUNE_STREAMS, [p.now_secs])?;
+    tx.execute(PRUNE_SESSIONS, [p.now_ms])?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// `PRAGMA wal_checkpoint(TRUNCATE)`: copies the WAL into the database file
+/// and truncates it, so the file is self-contained for backups (spec §5).
+pub(super) fn checkpoint(conn: &Connection) -> Result<(), StoreError> {
+    let blocked: i64 = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))?;
+    if blocked != 0 {
+        return Err(StoreError::Other("the WAL checkpoint was blocked by another connection".into()));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -463,5 +521,89 @@ mod tests {
         write_batch(&mut conn, &[history_at("s", 1, T0 + 4000)], 300, T0 + 4000, false).unwrap();
 
         assert_eq!(vec![("s".to_owned(), 1, T0 + 7000)], stream_rows(&conn));
+    }
+
+    /// The `EXPLAIN QUERY PLAN` details of `sql`, one line per step.
+    fn plan(conn: &Connection, sql: &str, params: impl rusqlite::Params) -> String {
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        stmt.query_map(params, |r| r.get::<_, String>(3)).unwrap().map(Result::unwrap).collect::<Vec<_>>().join("\n")
+    }
+
+    #[test]
+    fn prune_and_load_statements_use_indexes() {
+        let dir = TempDir::new();
+        let conn = open(&dir.file("cabby.db")).unwrap();
+        let single: [(&str, &str); 5] = [
+            (PRUNE_BY_TTL, "history_ts"),
+            (PRUNE_STREAMS, "streams_deadline"),
+            (PRUNE_SESSIONS, "sessions_expires"),
+            (LOAD_STREAMS, "streams_deadline"),
+            (LOAD_SESSIONS, "sessions_expires"),
+        ];
+        let mut plans: Vec<(&str, &str, String)> =
+            single.iter().map(|(sql, index)| (*sql, *index, plan(&conn, sql, [0_i64]))).collect();
+        plans.push((PRUNE_BY_LIMIT, "history_stream_seq", plan(&conn, PRUNE_BY_LIMIT, params!["s", 2_i64])));
+        plans.push((LOAD_TAIL, "history_stream_seq", plan(&conn, LOAD_TAIL, params!["s", 9_i64, 100_i64])));
+
+        for (sql, index, plan) in plans {
+            assert!(plan.contains(&format!("INDEX {index}")), "{sql}\nuses {index}, plan:\n{plan}");
+            assert!(!plan.contains("SCAN "), "{sql}\nscans, plan:\n{plan}");
+            assert!(!plan.contains("TEMP B-TREE"), "{sql}\nsorts, plan:\n{plan}");
+        }
+    }
+
+    #[test]
+    fn pruning_drops_expired_history_entries_beyond_the_limit_stale_streams_and_expired_sessions() {
+        let dir = TempDir::new();
+        let mut conn = open(&dir.file("cabby.db")).unwrap();
+        let mut ops: Vec<WriteOp> = (1..=5).map(|offset| history("s", offset)).collect();
+        ops.extend([history_at("old", 1, T0 - 100), commit("live", (T0 + 1) * 1000), commit("gone", T0 * 1000 - 1)]);
+        write_batch(&mut conn, &ops, 300, T0, false).unwrap();
+        conn.execute("INSERT INTO streams (stream, max_seq, deadline) VALUES ('stale', 1, ?1)", [T0 - 1]).unwrap();
+
+        let streams = Touched::from(["s".to_owned()]);
+        let prune_at =
+            Prune { history_cutoff: T0 - 60, now_secs: T0, now_ms: T0 * 1000, history_limit: 2, streams: &streams };
+        prune(&mut conn, &prune_at).unwrap();
+
+        let history: Vec<(String, i64)> = history_rows(&conn).into_iter().map(|(s, seq, ..)| (s, seq)).collect();
+        assert_eq!(vec![("s".to_owned(), 4), ("s".to_owned(), 5)], history, "TTL and limit");
+        let streams: Vec<String> = stream_rows(&conn).into_iter().map(|(s, ..)| s).collect();
+        assert_eq!(vec!["old", "s"], streams, "the stale stream row is gone; 'old' is within its deadline");
+        let sessions: Vec<String> = session_rows(&conn).into_iter().map(|(sid, ..)| sid).collect();
+        assert_eq!(vec!["live"], sessions);
+    }
+
+    #[test]
+    fn pruning_by_limit_visits_only_the_streams_it_is_given() {
+        let dir = TempDir::new();
+        let mut conn = open(&dir.file("cabby.db")).unwrap();
+        let ops: Vec<WriteOp> = (1..=5).flat_map(|offset| [history("s", offset), history("t", offset)]).collect();
+        write_batch(&mut conn, &ops, 300, T0, false).unwrap();
+
+        let streams = Touched::from(["s".to_owned()]);
+        let prune_at =
+            Prune { history_cutoff: T0 - 60, now_secs: T0, now_ms: T0 * 1000, history_limit: 2, streams: &streams };
+        prune(&mut conn, &prune_at).unwrap();
+
+        let seqs = |stream: &str| -> Vec<i64> {
+            history_rows(&conn).into_iter().filter(|(s, ..)| s == stream).map(|(_, seq, ..)| seq).collect()
+        };
+        assert_eq!(vec![4, 5], seqs("s"));
+        assert_eq!(vec![1, 2, 3, 4, 5], seqs("t"));
+    }
+
+    #[test]
+    fn checkpoint_empties_the_wal() {
+        let dir = TempDir::new();
+        let path = dir.file("cabby.db");
+        let mut conn = open(&path).unwrap();
+        write_batch(&mut conn, &[history("s", 1)], 300, T0, false).unwrap();
+        let wal = dir.file("cabby.db-wal");
+        assert!(std::fs::metadata(&wal).unwrap().len() > 0);
+
+        checkpoint(&conn).unwrap();
+
+        assert_eq!(0, std::fs::metadata(&wal).unwrap().len());
     }
 }
