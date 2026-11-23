@@ -12,6 +12,7 @@ mod options;
 mod runner;
 mod session_options;
 mod signals;
+mod sqlite;
 
 pub use options::{new_config_from_cli, new_config_from_cli_to, parse_tags};
 pub use runner::{Embedded, Runner};
@@ -171,7 +172,7 @@ pub enum RunnerOption {
     DefaultSubscriber,
     /// `WithBroker`.
     Broker(BrokerFactory),
-    /// `WithDefaultBroker`: legacy, memory or NATS broker from the configuration.
+    /// `WithDefaultBroker`: legacy, memory, NATS or SQLite broker from the configuration.
     DefaultBroker,
     /// `WithBroadcasters`.
     Broadcasters(BroadcastersFactory),

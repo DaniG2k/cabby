@@ -688,6 +688,9 @@ impl Runner {
                 Ok((broker, node_broker))
             }
             Some(BrokerSource::Default) | None => {
+                if self.config.broker.adapter == "sqlite" {
+                    return self.new_sqlite_broker(node, subscriber.broadcaster.clone());
+                }
                 // Upstream `WithDefaultBroker`.
                 let br = subscriber.broadcaster.clone();
                 let c = &mut self.config;
@@ -713,6 +716,32 @@ impl Runner {
                 Ok((Arc::new(CoreBroker(inner.clone())), inner))
             }
         }
+    }
+
+    /// `--broker=sqlite` (Cabby only, D-065): the memory broker with a
+    /// write-behind SQLite copy, loaded before the server accepts connections.
+    fn new_sqlite_broker(
+        &self,
+        node: &Arc<Node>,
+        broadcaster: Arc<dyn core_broker::Broadcaster>,
+    ) -> Result<BrokerPair, CliError> {
+        let options = super::sqlite::sqlite_options(&self.config)?;
+        let observer = Arc::new(super::sqlite::MetricsObserver::new(self.metrics.clone() as Arc<dyn Instrumenter>));
+        let broker = Arc::new(
+            core_broker::SqliteBroker::open(
+                Some(broadcaster),
+                Some(node.clone() as Arc<dyn core_broker::Presenter>),
+                &self.config.broker,
+                &options,
+                Arc::new(core_broker::SystemClock),
+                observer,
+            )
+            .map_err(|e| CliError(e.message))?,
+        );
+        let runner: Arc<dyn Broker> =
+            Arc::new(super::sqlite::SqliteRunnerBroker { broker: broker.clone(), ctx: self.shutdown_ctx.clone() });
+        let node_broker: Arc<dyn core_broker::Broker> = broker;
+        Ok((runner, node_broker))
     }
 
     /// Upstream `WithDefaultBroadcaster`: one broadcaster per configured adapter.
