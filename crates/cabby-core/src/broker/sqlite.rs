@@ -12,12 +12,14 @@
 //! Units: history timestamps and stream deadlines are unix seconds, session
 //! expiries unix milliseconds (`units`).
 
+use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::logger::Logger;
 
 mod files;
+mod loader;
 mod persister;
 mod queue;
 mod store;
@@ -52,6 +54,25 @@ impl SqliteObserver for NoopObserver {
     fn batch_written(&self, _took: Duration) {}
     fn write_failed(&self) {}
     fn dropped(&self, _kind: queue::OpKind) {}
+}
+
+/// How long opening waits for another process to release the database (spec §5).
+pub const LOCK_TIMEOUT: Duration = Duration::from_secs(10);
+/// The write queue's bound (spec §3).
+pub const QUEUE_CAPACITY: usize = 100_000;
+
+/// Where the database lives and how the broker treats it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SqliteOptions {
+    pub path: PathBuf,
+    pub lock_timeout: Duration,
+    pub queue_capacity: usize,
+}
+
+impl SqliteOptions {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into(), lock_timeout: LOCK_TIMEOUT, queue_capacity: QUEUE_CAPACITY }
+    }
 }
 
 /// Helpers shared by the module's tests.
