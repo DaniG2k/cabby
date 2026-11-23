@@ -1,0 +1,4 @@
+#!/bin/sh
+# Cabby on the memory broker (history kept), the baseline of the SQLite broker comparison.
+# exec keeps the PID the harness samples.
+exec "$(dirname "$0")/../../target/release/cabby" "$@" --broker=memory
