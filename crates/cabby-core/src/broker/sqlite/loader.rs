@@ -188,7 +188,7 @@ mod tests {
 
     use super::*;
     use crate::broker::Broker;
-    use crate::broker::sqlite::queue::WriteOp;
+    use crate::broker::sqlite::queue::{StreamMaxima, WriteOp};
     use crate::broker::sqlite::testing::{TempDir, commit, history, history_at};
     use crate::broker::test_clock::{T0, TestClock};
 
@@ -196,7 +196,7 @@ mod tests {
     fn seed(db: &Path, history_ttl: i64, ops: &[WriteOp], meta: &[(&str, &str)]) {
         files::prepare_dir(db).unwrap();
         let mut conn = store::open(db).unwrap();
-        store::write_batch(&mut conn, ops, history_ttl, T0, false).unwrap();
+        store::write_batch(&mut conn, ops, &StreamMaxima::new(), history_ttl, T0, false).unwrap();
         for (key, value) in meta {
             store::meta_set(&conn, key, value).unwrap();
         }

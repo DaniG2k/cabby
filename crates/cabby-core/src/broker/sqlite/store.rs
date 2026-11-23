@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, params};
 
-use super::queue::WriteOp;
+use super::queue::{StreamMaxima, WriteOp};
 use super::units;
 
 /// How long a statement waits for a lock another connection holds.
@@ -176,19 +176,21 @@ const UPSERT_STREAM: &str = "INSERT INTO streams (stream, max_seq, deadline) VAL
     deadline = max(streams.deadline, excluded.deadline)";
 
 /// Writes `ops` in one transaction, in order, and upserts `streams` for every
-/// stream they wrote. With `clean_shutdown`, marks the shutdown clean in the
+/// stream they wrote and every stream in `dropped` (offsets whose history ops
+/// were dropped from the queue: the stream offset still moves past them). With `clean_shutdown`, marks the shutdown clean in the
 /// same transaction (spec §5). `now_secs` decides whether a stored stream row
 /// is stale. Nothing is written if any statement fails.
 pub(super) fn write_batch(
     conn: &mut Connection,
     ops: &[WriteOp],
+    dropped: &StreamMaxima,
     history_ttl: i64,
     now_secs: i64,
     clean_shutdown: bool,
 ) -> Result<Touched, StoreError> {
     let tx = conn.transaction()?;
     // The newest offset and timestamp of each stream in the batch.
-    let mut newest: BTreeMap<&str, (u64, i64)> = BTreeMap::new();
+    let mut newest: BTreeMap<&str, (u64, i64)> = dropped.iter().map(|(s, m)| (s.as_str(), *m)).collect();
     {
         let mut history = tx.prepare_cached(INSERT_HISTORY)?;
         let mut commit = tx.prepare_cached(UPSERT_SESSION)?;
@@ -456,7 +458,7 @@ mod tests {
             touch("missing", 30),
         ];
 
-        let touched = write_batch(&mut conn, &ops, 300, T0, false).unwrap();
+        let touched = write_batch(&mut conn, &ops, &StreamMaxima::new(), 300, T0, false).unwrap();
 
         assert_eq!(BTreeSet::from(["s".to_owned(), "t".to_owned()]), touched);
         assert_eq!(
@@ -479,7 +481,7 @@ mod tests {
         let dir = TempDir::new();
         let mut conn = open(&dir.file("cabby.db")).unwrap();
 
-        write_batch(&mut conn, &[history("s", 1)], 300, T0, true).unwrap();
+        write_batch(&mut conn, &[history("s", 1)], &StreamMaxima::new(), 300, T0, true).unwrap();
 
         assert_eq!(Some("1".to_owned()), meta_get(&conn, "clean_shutdown").unwrap());
         assert_eq!(1, history_rows(&conn).len());
@@ -492,7 +494,10 @@ mod tests {
         let conn = open(&path).unwrap();
         let mut read_only = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
 
-        assert!(write_batch(&mut read_only, &[history("s", 1), commit("a", 1)], 300, T0, true).is_err());
+        assert!(
+            write_batch(&mut read_only, &[history("s", 1), commit("a", 1)], &StreamMaxima::new(), 300, T0, true)
+                .is_err()
+        );
 
         assert!(history_rows(&conn).is_empty());
         assert!(session_rows(&conn).is_empty());
@@ -504,8 +509,8 @@ mod tests {
         let dir = TempDir::new();
         let mut conn = open(&dir.file("cabby.db")).unwrap();
 
-        write_batch(&mut conn, &[history("s", 5)], 300, T0, false).unwrap();
-        write_batch(&mut conn, &[history("s", 4)], 300, T0, false).unwrap();
+        write_batch(&mut conn, &[history("s", 5)], &StreamMaxima::new(), 300, T0, false).unwrap();
+        write_batch(&mut conn, &[history("s", 4)], &StreamMaxima::new(), 300, T0, false).unwrap();
 
         assert_eq!(vec![("s".to_owned(), 5, T0 + 3000)], stream_rows(&conn));
     }
@@ -516,9 +521,9 @@ mod tests {
         // the next broadcast starts again at offset 1.
         let dir = TempDir::new();
         let mut conn = open(&dir.file("cabby.db")).unwrap();
-        write_batch(&mut conn, &[history_at("s", 9, T0)], 300, T0, false).unwrap();
+        write_batch(&mut conn, &[history_at("s", 9, T0)], &StreamMaxima::new(), 300, T0, false).unwrap();
 
-        write_batch(&mut conn, &[history_at("s", 1, T0 + 4000)], 300, T0 + 4000, false).unwrap();
+        write_batch(&mut conn, &[history_at("s", 1, T0 + 4000)], &StreamMaxima::new(), 300, T0 + 4000, false).unwrap();
 
         assert_eq!(vec![("s".to_owned(), 1, T0 + 7000)], stream_rows(&conn));
     }
@@ -558,7 +563,7 @@ mod tests {
         let mut conn = open(&dir.file("cabby.db")).unwrap();
         let mut ops: Vec<WriteOp> = (1..=5).map(|offset| history("s", offset)).collect();
         ops.extend([history_at("old", 1, T0 - 100), commit("live", (T0 + 1) * 1000), commit("gone", T0 * 1000 - 1)]);
-        write_batch(&mut conn, &ops, 300, T0, false).unwrap();
+        write_batch(&mut conn, &ops, &StreamMaxima::new(), 300, T0, false).unwrap();
         conn.execute("INSERT INTO streams (stream, max_seq, deadline) VALUES ('stale', 1, ?1)", [T0 - 1]).unwrap();
 
         let streams = Touched::from(["s".to_owned()]);
@@ -579,7 +584,7 @@ mod tests {
         let dir = TempDir::new();
         let mut conn = open(&dir.file("cabby.db")).unwrap();
         let ops: Vec<WriteOp> = (1..=5).flat_map(|offset| [history("s", offset), history("t", offset)]).collect();
-        write_batch(&mut conn, &ops, 300, T0, false).unwrap();
+        write_batch(&mut conn, &ops, &StreamMaxima::new(), 300, T0, false).unwrap();
 
         let streams = Touched::from(["s".to_owned()]);
         let prune_at =
@@ -598,12 +603,25 @@ mod tests {
         let dir = TempDir::new();
         let path = dir.file("cabby.db");
         let mut conn = open(&path).unwrap();
-        write_batch(&mut conn, &[history("s", 1)], 300, T0, false).unwrap();
+        write_batch(&mut conn, &[history("s", 1)], &StreamMaxima::new(), 300, T0, false).unwrap();
         let wal = dir.file("cabby.db-wal");
         assert!(std::fs::metadata(&wal).unwrap().len() > 0);
 
         checkpoint(&conn).unwrap();
 
         assert_eq!(0, std::fs::metadata(&wal).unwrap().len());
+    }
+
+    #[test]
+    fn dropped_offsets_still_move_their_streams_offset() {
+        let dir = TempDir::new();
+        let mut conn = open(&dir.file("cabby.db")).unwrap();
+        let dropped = StreamMaxima::from([("s".to_owned(), (3, T0)), ("q".to_owned(), (2, T0 + 5))]);
+
+        let touched = write_batch(&mut conn, &[history("s", 1)], &dropped, 300, T0, false).unwrap();
+
+        assert_eq!(BTreeSet::from(["q".to_owned(), "s".to_owned()]), touched);
+        assert_eq!(vec![("q".to_owned(), 2, T0 + 5 + 3000), ("s".to_owned(), 3, T0 + 3000)], stream_rows(&conn));
+        assert_eq!(vec![("s".to_owned(), 1, T0, "m1".to_owned())], history_rows(&conn), "only written ops have rows");
     }
 }
