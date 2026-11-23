@@ -13,10 +13,21 @@
 //! expiries unix milliseconds (`units`).
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
+use serde_json::Value;
+
+use super::{Broadcaster, Broker, BrokerError, Cacheable, Clock, Config, Memory, PresenceInfoOptions, Presenter, lock};
+use crate::common::{PresenceEvent, PresenceInfo, RemoteCommandMessage, StreamMessage};
+use crate::log_warn;
 use crate::logger::Logger;
+use persister::{Persister, Timing};
+use queue::{WriteOp, WriteQueue};
+
+pub use loader::{LoadReport, Previous};
+pub use queue::OpKind;
 
 mod files;
 mod loader;
@@ -42,7 +53,7 @@ pub trait SqliteObserver: Send + Sync {
     /// A batch write failed; the batch is kept and retried.
     fn write_failed(&self);
     /// An op of `kind` was dropped because the queue was full.
-    fn dropped(&self, kind: queue::OpKind);
+    fn dropped(&self, kind: OpKind);
 }
 
 /// Reports nothing.
@@ -53,7 +64,7 @@ impl SqliteObserver for NoopObserver {
     fn queue_size(&self, _ops: usize) {}
     fn batch_written(&self, _took: Duration) {}
     fn write_failed(&self) {}
-    fn dropped(&self, _kind: queue::OpKind) {}
+    fn dropped(&self, _kind: OpKind) {}
 }
 
 /// How long opening waits for another process to release the database (spec §5).
@@ -72,6 +83,230 @@ pub struct SqliteOptions {
 impl SqliteOptions {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into(), lock_timeout: LOCK_TIMEOUT, queue_capacity: QUEUE_CAPACITY }
+    }
+}
+
+/// What `Broker::shutdown` gives the final write when no runner deadline
+/// applies (the default `shutdown_timeout`).
+pub const SHUTDOWN_BUDGET: Duration = Duration::from_secs(30);
+/// How long `shutdown_within` waits past its budget for the writer to close
+/// the file.
+const FINISH_GRACE: Duration = Duration::from_secs(1);
+
+/// The memory broker plus a write-behind SQLite copy (see the module docs).
+pub struct SqliteBroker {
+    memory: Memory,
+    config: Config,
+    path: PathBuf,
+    queue: Arc<WriteQueue>,
+    observer: Arc<dyn SqliteObserver>,
+    report: LoadReport,
+    writer: Mutex<Writer>,
+}
+
+enum Writer {
+    /// Loaded; the thread is not started yet.
+    Ready(Box<Persister>),
+    /// The thread runs and reports whether its final flush marked the shutdown clean.
+    Running(Receiver<bool>),
+    Stopped,
+}
+
+impl SqliteBroker {
+    /// Opens (creating if needed) the database at `options.path`, takes its
+    /// lock and loads it into a new memory broker. Errors name the path:
+    /// another process holds it, it can't be created or read, or its schema
+    /// is newer. A corrupt file is moved aside instead (spec §6).
+    pub fn open(
+        broadcaster: Option<Arc<dyn Broadcaster>>,
+        presenter: Option<Arc<dyn Presenter>>,
+        config: &Config,
+        options: &SqliteOptions,
+        clock: Arc<dyn Clock>,
+        observer: Arc<dyn SqliteObserver>,
+    ) -> Result<Self, BrokerError> {
+        let memory = Memory::new(broadcaster, presenter, config, clock.clone());
+        let loaded = loader::load(&memory, config, options, clock.as_ref())?;
+        let queue = Arc::new(WriteQueue::new(options.queue_capacity, persister::BATCH_SIZE));
+        let persister = Persister::new(loaded.db, queue.clone(), config, clock, observer.clone(), Timing::standard());
+        Ok(Self {
+            memory,
+            config: config.clone(),
+            path: options.path.clone(),
+            queue,
+            observer,
+            report: loaded.report,
+            writer: Mutex::new(Writer::Ready(Box::new(persister))),
+        })
+    }
+
+    /// What `open` restored.
+    pub fn report(&self) -> &LoadReport {
+        &self.report
+    }
+
+    pub fn epoch(&self) -> String {
+        self.memory.epoch()
+    }
+
+    /// Stops the broker: the writer writes everything still queued and marks
+    /// the shutdown clean if that finishes within `budget`, then checkpoints,
+    /// closes the database and releases the lock. Returns whether the shutdown
+    /// was marked clean (false for a second call).
+    pub fn shutdown_within(&self, budget: Duration) -> bool {
+        let _ = Broker::shutdown(&self.memory);
+        let deadline = Instant::now() + budget;
+        self.queue.close(deadline);
+        match std::mem::replace(&mut *lock(&self.writer), Writer::Stopped) {
+            Writer::Stopped => false,
+            Writer::Ready(persister) => persister.finish(deadline),
+            Writer::Running(done) => match done.recv_timeout(budget + FINISH_GRACE) {
+                Ok(clean) => clean,
+                Err(_) => {
+                    log_warn!(log(), &format!("the SQLite writer did not finish within {} s; the next start uses a new epoch",
+                        budget.as_secs()), "path" => self.path.display().to_string());
+                    false
+                }
+            },
+        }
+    }
+
+    fn enqueue(&self, op: WriteOp) {
+        if let Some(kind) = self.queue.push(op) {
+            self.observer.dropped(kind);
+        }
+    }
+}
+
+impl Drop for SqliteBroker {
+    /// Without `shutdown` (a failed startup, a test), the writer stops at once,
+    /// as after a crash: nothing more is written and the next start rotates
+    /// the epoch.
+    fn drop(&mut self) {
+        self.queue.close(Instant::now());
+    }
+}
+
+impl Broker for SqliteBroker {
+    /// Starts the memory broker's expiration loop and the writer thread.
+    fn start(&self) -> Result<(), BrokerError> {
+        let mut writer = lock(&self.writer);
+        let persister = match std::mem::replace(&mut *writer, Writer::Stopped) {
+            Writer::Ready(persister) => persister,
+            other => {
+                *writer = other;
+                return Ok(());
+            }
+        };
+        Broker::start(&self.memory)?;
+        let (done, finished) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("cabby-sqlite".into())
+            .spawn(move || {
+                let _ = done.send(persister.run());
+            })
+            .map_err(|e| BrokerError { message: format!("failed to start the SQLite writer: {e}") })?;
+        *writer = Writer::Running(finished);
+        Ok(())
+    }
+
+    fn shutdown(&self) -> Result<(), BrokerError> {
+        self.shutdown_within(SHUTDOWN_BUDGET);
+        Ok(())
+    }
+
+    fn announce(&self) -> String {
+        let c = &self.config;
+        format!(
+            "Using SQLite broker: {} (epoch: {}, history limit: {}, history ttl: {}s, sessions ttl: {}s, presence ttl: {}s)",
+            self.path.display(),
+            self.memory.epoch(),
+            c.history_limit,
+            c.history_ttl,
+            c.sessions_ttl,
+            c.presence_ttl,
+        )
+    }
+
+    fn handle_broadcast(&self, msg: &StreamMessage) -> Result<(), BrokerError> {
+        if let Some(recorded) = self.memory.handle_broadcast_recorded(msg)? {
+            self.enqueue(WriteOp::History {
+                stream: msg.stream.clone(),
+                offset: recorded.offset,
+                ts_secs: recorded.timestamp,
+                data: msg.data.clone(),
+            });
+        }
+        Ok(())
+    }
+
+    fn handle_command(&self, msg: &RemoteCommandMessage) -> Result<(), BrokerError> {
+        self.memory.handle_command(msg)
+    }
+
+    fn subscribe(&self, stream: &str) -> String {
+        self.memory.subscribe(stream)
+    }
+
+    fn unsubscribe(&self, stream: &str) -> String {
+        self.memory.unsubscribe(stream)
+    }
+
+    fn history_from(&self, stream: &str, epoch: &str, offset: u64) -> Result<Vec<StreamMessage>, BrokerError> {
+        self.memory.history_from(stream, epoch, offset)
+    }
+
+    fn history_since(&self, stream: &str, ts: i64) -> Result<Option<Vec<StreamMessage>>, BrokerError> {
+        self.memory.history_since(stream, ts)
+    }
+
+    fn commit_session(&self, sid: &str, session: &dyn Cacheable) -> Result<(), BrokerError> {
+        let data = session.to_cache_entry()?;
+        let expires_at_ms = self.memory.commit_session_data(sid, data.clone());
+        self.enqueue(WriteOp::SessionCommit { sid: sid.to_owned(), data, expires_at_ms });
+        Ok(())
+    }
+
+    fn restore_session(&self, sid: &str) -> Result<Option<Vec<u8>>, BrokerError> {
+        self.memory.restore_session(sid)
+    }
+
+    fn touch_session(&self, sid: &str) -> Result<(), BrokerError> {
+        if let Some(expires_at_ms) = self.memory.touch_session_deadline(sid) {
+            self.enqueue(WriteOp::SessionTouch { sid: sid.to_owned(), expires_at_ms });
+        }
+        Ok(())
+    }
+
+    /// Presence lives in memory only: every connection drops on restart (spec §2).
+    fn supports_presence(&self) -> bool {
+        self.memory.supports_presence()
+    }
+
+    fn presence_add(
+        &self,
+        stream: &str,
+        sid: &str,
+        pid: &str,
+        info: Value,
+    ) -> Result<Option<PresenceEvent>, BrokerError> {
+        self.memory.presence_add(stream, sid, pid, info)
+    }
+
+    fn presence_remove(&self, stream: &str, sid: &str) -> Result<Option<PresenceEvent>, BrokerError> {
+        self.memory.presence_remove(stream, sid)
+    }
+
+    fn presence_info(&self, stream: &str, opts: Option<&PresenceInfoOptions>) -> Result<PresenceInfo, BrokerError> {
+        self.memory.presence_info(stream, opts)
+    }
+
+    fn touch_presence(&self, sid: &str) -> Result<(), BrokerError> {
+        self.memory.touch_presence(sid)
+    }
+
+    fn peak(&self, stream: &str) -> Result<Option<StreamMessage>, BrokerError> {
+        self.memory.peak(stream)
     }
 }
 
@@ -186,5 +421,162 @@ pub(crate) mod testing {
         fn dropped(&self, kind: OpKind) {
             lock(&self.dropped).push(kind);
         }
+    }
+
+    /// Session state for `commit_session`.
+    pub(crate) struct Bytes(pub(crate) Vec<u8>);
+
+    impl crate::broker::Cacheable for Bytes {
+        fn to_cache_entry(&self) -> Result<Vec<u8>, crate::broker::BrokerError> {
+            Ok(self.0.clone())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testing::{Bytes, Recording, TempDir};
+    use super::*;
+    use crate::broker::test_clock::{T0, TestClock};
+    use crate::common::StreamMessageMetadata;
+
+    fn msg(stream: &str, data: &str, transient: bool) -> StreamMessage {
+        StreamMessage {
+            stream: stream.into(),
+            data: data.into(),
+            meta: transient.then(|| StreamMessageMetadata { transient: true, ..Default::default() }),
+            ..Default::default()
+        }
+    }
+
+    fn open(dir: &TempDir, clock: &Arc<TestClock>) -> SqliteBroker {
+        SqliteBroker::open(
+            None,
+            None,
+            &Config::new(),
+            &SqliteOptions::new(dir.db()),
+            clock.clone(),
+            Arc::new(NoopObserver),
+        )
+        .unwrap()
+    }
+
+    fn history(broker: &SqliteBroker, stream: &str) -> Vec<(u64, String)> {
+        broker.history_since(stream, 0).unwrap().unwrap_or_default().into_iter().map(|m| (m.offset, m.data)).collect()
+    }
+
+    #[test]
+    fn a_graceful_restart_restores_history_offsets_sessions_and_the_epoch() {
+        let dir = TempDir::new();
+        let clock = TestClock::new();
+        let broker = open(&dir, &clock);
+        broker.start().unwrap();
+        let epoch = broker.epoch();
+        for data in ["a", "b", "c"] {
+            broker.handle_broadcast(&msg("s", data, false)).unwrap();
+        }
+        broker.handle_broadcast(&msg("s", "transient", true)).unwrap();
+        broker.commit_session("sid", &Bytes(b"state".to_vec())).unwrap();
+        assert!(broker.shutdown_within(Duration::from_secs(5)), "marked clean");
+        assert!(!files::sibling(&dir.db(), "-wal").exists(), "no WAL left after a graceful shutdown");
+        drop(broker);
+
+        let broker = open(&dir, &clock);
+        assert_eq!(epoch, broker.epoch());
+        assert_eq!(Previous::Clean, broker.report().previous);
+        let expected: Vec<(u64, String)> = vec![(1, "a".into()), (2, "b".into()), (3, "c".into())];
+        assert_eq!(expected, history(&broker, "s"), "transient broadcasts are not persisted");
+        assert_eq!(2, broker.history_from("s", &epoch, 1).unwrap().len(), "resumable by offset");
+        assert_eq!(Some(b"state".to_vec()), broker.restore_session("sid").unwrap());
+        broker.start().unwrap();
+        broker.handle_broadcast(&msg("s", "d", false)).unwrap();
+        assert_eq!(Some(4), broker.peak("s").unwrap().map(|m| m.offset));
+        assert!(broker.shutdown_within(Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn a_session_touch_reaches_the_file_with_its_new_expiry() {
+        let dir = TempDir::new();
+        let clock = TestClock::new();
+        let broker = open(&dir, &clock);
+        broker.start().unwrap();
+        broker.commit_session("sid", &Bytes(b"state".to_vec())).unwrap();
+        clock.advance(Duration::from_secs(5));
+        broker.touch_session("sid").unwrap();
+        broker.touch_session("unknown").unwrap();
+        assert!(broker.shutdown_within(Duration::from_secs(5)));
+        drop(broker);
+
+        let conn = store::open(&dir.db()).unwrap();
+        let expiry: i64 =
+            conn.query_row("SELECT expires_at_ms FROM sessions WHERE sid = 'sid'", [], |r| r.get(0)).unwrap();
+        assert_eq!((T0 + 5) * 1000 + 300_000, expiry);
+        let rows: i64 = conn.query_row("SELECT count(*) FROM sessions", [], |r| r.get(0)).unwrap();
+        assert_eq!(1, rows, "a touch for an unknown session writes nothing");
+    }
+
+    #[test]
+    fn dropping_the_broker_without_shutdown_rotates_the_epoch() {
+        let dir = TempDir::new();
+        let clock = TestClock::new();
+        let broker = open(&dir, &clock);
+        broker.start().unwrap();
+        let epoch = broker.epoch();
+        drop(broker);
+
+        // Waits (up to LOCK_TIMEOUT) for the old writer to release the lock.
+        let broker = open(&dir, &clock);
+        assert_ne!(epoch, broker.epoch());
+        assert_eq!(Previous::Unclean, broker.report().previous);
+    }
+
+    #[test]
+    fn a_shutdown_without_start_still_writes_and_marks_it_clean() {
+        let dir = TempDir::new();
+        let clock = TestClock::new();
+        let broker = open(&dir, &clock);
+        broker.handle_broadcast(&msg("s", "a", false)).unwrap();
+
+        assert!(broker.shutdown_within(Duration::from_secs(5)));
+        assert!(!broker.shutdown_within(Duration::from_secs(5)), "a second shutdown does nothing");
+        drop(broker);
+
+        let broker = open(&dir, &clock);
+        assert_eq!(Previous::Clean, broker.report().previous);
+        assert_eq!(vec![(1, "a".to_owned())], history(&broker, "s"));
+    }
+
+    #[test]
+    fn queue_overflow_is_reported_to_the_observer() {
+        let dir = TempDir::new();
+        let observer = Arc::new(Recording::default());
+        let mut options = SqliteOptions::new(dir.db());
+        options.queue_capacity = 2;
+        let broker =
+            SqliteBroker::open(None, None, &Config::new(), &options, TestClock::new(), observer.clone()).unwrap();
+
+        // Not started: nothing drains the queue.
+        broker.commit_session("a", &Bytes(b"a".to_vec())).unwrap();
+        broker.handle_broadcast(&msg("s", "x", false)).unwrap();
+        broker.handle_broadcast(&msg("s", "y", false)).unwrap();
+        broker.touch_session("a").unwrap();
+
+        assert_eq!(vec![OpKind::History, OpKind::History], observer.dropped());
+        assert_eq!(2, broker.history_since("s", 0).unwrap().unwrap_or_default().len(), "live history is unaffected");
+    }
+
+    #[test]
+    fn announce_names_the_file_and_the_settings() {
+        let dir = TempDir::new();
+        let broker = open(&dir, &TestClock::new());
+        assert_eq!(
+            format!(
+                "Using SQLite broker: {} (epoch: {}, history limit: 100, history ttl: 300s, sessions ttl: 300s, presence ttl: 15s)",
+                dir.db().display(),
+                broker.epoch()
+            ),
+            broker.announce()
+        );
+        assert!(broker.supports_presence());
     }
 }

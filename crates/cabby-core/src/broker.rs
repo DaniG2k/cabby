@@ -980,10 +980,12 @@ mod nats;
 
 pub use nats::{JETSTREAM_READY_TIMEOUT, Nats};
 
-// Wired up in Task 14 of docs/superpowers/plans/2026-11-23-sqlite-broker.md;
-// until then only its tests use it.
-#[allow(dead_code)]
 mod sqlite;
+
+pub use sqlite::{
+    LOCK_TIMEOUT, LoadReport, NoopObserver, OpKind, Previous, QUEUE_CAPACITY, SHUTDOWN_BUDGET, SqliteBroker,
+    SqliteObserver, SqliteOptions,
+};
 
 /// Broker without history, presence or session cache: every call goes straight
 /// to the broadcaster (upstream `broker.NewLegacyBroker(broadcaster)`, used by
