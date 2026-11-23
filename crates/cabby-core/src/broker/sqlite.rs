@@ -727,4 +727,41 @@ mod tests {
 
         assert_eq!(vec![OpKind::History, OpKind::SessionCommit], observer.dropped());
     }
+
+    #[test]
+    fn concurrent_broadcasts_across_streams_restart_contiguous_at_their_live_offsets() {
+        let dir = TempDir::new();
+        let clock = TestClock::new();
+        let broker = open(&dir, &clock);
+        broker.start().unwrap();
+        let streams = ["a", "b", "c"];
+        std::thread::scope(|s| {
+            for worker in 0..4 {
+                let broker = &broker;
+                s.spawn(move || {
+                    for i in 0..150 {
+                        let stream = streams[(worker + i) % streams.len()];
+                        broker.handle_broadcast(&msg(stream, &format!("{worker}-{i}"), false)).unwrap();
+                    }
+                });
+            }
+        });
+        let live: Vec<u64> = streams.iter().map(|s| broker.peak(s).unwrap().unwrap().offset).collect();
+        let tails: Vec<Vec<(u64, String)>> = streams.iter().map(|s| history(&broker, s)).collect();
+        assert_eq!(600, live.iter().sum::<u64>());
+        assert!(broker.shutdown_within(Duration::from_secs(5)));
+        drop(broker);
+
+        let broker = open(&dir, &clock);
+        assert_eq!(Previous::Clean, broker.report().previous);
+        for ((stream, live), tail) in streams.iter().zip(&live).zip(&tails) {
+            let restored = history(&broker, stream);
+            assert_eq!(tail, &restored, "{stream}: the restored tail is the live one");
+            let offsets: Vec<u64> = restored.iter().map(|(o, _)| *o).collect();
+            let expected: Vec<u64> = (live + 1 - offsets.len() as u64..=*live).collect();
+            assert_eq!(expected, offsets, "{stream}: contiguous up to its live offset");
+            assert_eq!(Some(*live), broker.peak(stream).unwrap().map(|m| m.offset));
+        }
+        assert!(broker.shutdown_within(Duration::from_secs(5)));
+    }
 }
