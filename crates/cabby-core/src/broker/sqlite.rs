@@ -706,4 +706,25 @@ mod tests {
         broker.start().unwrap();
         assert_eq!(Ending::Clean, broker.stop(Duration::from_secs(5)));
     }
+
+    #[test]
+    fn broadcasts_after_shutdown_are_counted_as_dropped() {
+        let dir = TempDir::new();
+        let observer = Arc::new(Recording::default());
+        let broker = SqliteBroker::open(
+            None,
+            None,
+            &Config::new(),
+            &SqliteOptions::new(dir.db()),
+            TestClock::new(),
+            observer.clone(),
+        )
+        .unwrap();
+        assert!(broker.shutdown_within(Duration::from_secs(5)));
+
+        broker.handle_broadcast(&msg("s", "late", false)).unwrap();
+        broker.commit_session("sid", &Bytes(b"late".to_vec())).unwrap();
+
+        assert_eq!(vec![OpKind::History, OpKind::SessionCommit], observer.dropped());
+    }
 }

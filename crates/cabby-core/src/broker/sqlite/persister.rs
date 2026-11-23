@@ -230,8 +230,17 @@ impl Persister {
             }
             std::thread::sleep(FINAL_RETRY.min(deadline.saturating_duration_since(Instant::now())));
         }
-        let clean = written && complete;
+        let mut clean = written && complete;
         let path = self.db.path.display().to_string();
+        if clean && self.queue.history_dropped() {
+            // A history op arrived (and was dropped) after the final write was
+            // decided: take the clean mark back.
+            clean = false;
+            if let Err(e) = store::meta_set(&self.db.conn, "clean_shutdown", "0") {
+                log_warn!(log(), "failed to take back the clean SQLite shutdown mark", "path" => path.clone(),
+                    "error" => e.to_string());
+            }
+        }
         if !written {
             log_warn!(log(), "the final SQLite write did not finish in time; the next start uses a new epoch",
                 "path" => path.clone(), "ops" => ops.len());
@@ -472,5 +481,25 @@ mod tests {
 
         assert!(writer.join().unwrap(), "marked clean");
         assert_eq!(1, history_count(&dir));
+    }
+
+    #[test]
+    fn a_history_op_after_close_leaves_the_shutdown_unclean() {
+        let dir = TempDir::new();
+        let queue = Arc::new(WriteQueue::new(100, 1000));
+        let observer = Arc::new(Recording::default());
+        let conn = store::open(&dir.file("cabby.db")).unwrap();
+        let p = persister(&dir, conn, &queue, &observer, &Config::new(), timing(Duration::from_millis(10)));
+        queue.push(history("s", 1));
+        queue.close(Instant::now() + Duration::from_secs(5));
+        queue.push(history("s", 2));
+
+        assert!(!p.finish(Instant::now() + Duration::from_secs(5)));
+
+        assert_eq!(1, history_count(&dir), "what was queued before the close is written");
+        let path = dir.file("cabby.db");
+        assert_eq!(vec![2], query_i64s(&path, "SELECT max_seq FROM streams"), "the late offset still counts");
+        let conn = store::open(&path).unwrap();
+        assert_eq!(None, store::meta_get(&conn, "clean_shutdown").unwrap());
     }
 }

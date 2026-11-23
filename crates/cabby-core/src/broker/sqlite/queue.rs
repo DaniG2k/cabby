@@ -18,6 +18,7 @@ use std::sync::{Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use crate::broker::lock;
+use crate::log_warn;
 
 /// One write for the database.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,8 +75,10 @@ struct Lanes {
     next_seq: u64,
     /// Set by [`WriteQueue::close`]: the deadline of the final flush.
     closed: Option<Instant>,
-    /// A history op was dropped during this run.
+    /// A history op was dropped during this run (on overflow or after close).
     history_dropped: bool,
+    /// The first op pushed after close was logged.
+    late_logged: bool,
     /// The highest dropped offset per stream, not yet taken by the writer.
     dropped_streams: StreamMaxima,
     /// Wakeups sent by `push` (tests check they stay rare).
@@ -146,11 +149,19 @@ impl WriteQueue {
     }
 
     /// Adds `op` without blocking; returns the kind of the op dropped to stay
-    /// within capacity, if any. Ignored once closed.
+    /// within capacity, if any. Once closed, `op` itself is dropped (and
+    /// returned as such, the first time with a warning).
     pub(crate) fn push(&self, op: WriteOp) -> Option<OpKind> {
         let mut lanes = lock(&self.lanes);
         if lanes.closed.is_some() {
-            return None;
+            lanes.record_drop(&op);
+            let first = !std::mem::replace(&mut lanes.late_logged, true);
+            drop(lanes);
+            if first {
+                log_warn!(super::log(), "a write arrived after the SQLite broker shut down and is not persisted",
+                    "kind" => format!("{:?}", op.kind()));
+            }
+            return Some(op.kind());
         }
         let before = lanes.len();
         let seq = lanes.next_seq;
@@ -339,7 +350,7 @@ mod tests {
 
         assert_eq!(1, taker.join().unwrap().len());
         assert_eq!(Some(deadline), q.closed(), "the first deadline wins");
-        assert_eq!(None, q.push(history("s", 2)));
+        assert_eq!(Some(OpKind::History), q.push(history("s", 2)), "dropped, and reported");
         assert_eq!(0, q.len());
     }
 
@@ -405,5 +416,16 @@ mod tests {
             q.push(history("s", offset));
         }
         assert_eq!(1, q.notifies());
+    }
+
+    #[test]
+    fn ops_after_close_are_dropped_reported_and_history_counts_as_dropped() {
+        let q = WriteQueue::new(100, 1000);
+        q.close(Instant::now());
+        assert_eq!(Some(OpKind::SessionCommit), q.push(commit("a", 1)));
+        assert!(!q.history_dropped(), "a late session op leaves no gap in the history");
+        assert_eq!(Some(OpKind::History), q.push(history_at("s", 4, T0)));
+        assert!(q.history_dropped());
+        assert_eq!(StreamMaxima::from([("s".to_owned(), (4, T0))]), q.take_dropped_streams());
     }
 }
