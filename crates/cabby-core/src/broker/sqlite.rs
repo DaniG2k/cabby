@@ -16,6 +16,7 @@ use std::sync::OnceLock;
 
 use crate::logger::Logger;
 
+mod store;
 mod units;
 
 /// The broker's logger (`context=broker provider=sqlite`).
