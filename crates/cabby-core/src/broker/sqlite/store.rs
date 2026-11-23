@@ -149,13 +149,17 @@ pub(super) fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<(), 
 }
 
 /// Records the run's epoch and that it has not shut down cleanly yet, in one
-/// transaction, before Cabby accepts connections (spec §5 step 3).
+/// transaction, before Cabby accepts connections (spec §5 step 3). It must be
+/// durable: with WAL and `synchronous=NORMAL` a commit isn't synced, and a
+/// power cut that lost `clean_shutdown = '0'` would let the next start reuse
+/// the epoch. So it checkpoints right away, which syncs the WAL and then the
+/// database file.
 pub(super) fn mark_running(conn: &mut Connection, epoch: &str) -> Result<(), StoreError> {
     let tx = conn.transaction()?;
     meta_set(&tx, "epoch", epoch)?;
     meta_set(&tx, "clean_shutdown", "0")?;
     tx.commit()?;
-    Ok(())
+    checkpoint(conn)
 }
 
 /// The streams a batch wrote (pruning by limit visits only these).
@@ -623,5 +627,24 @@ mod tests {
         assert_eq!(BTreeSet::from(["q".to_owned(), "s".to_owned()]), touched);
         assert_eq!(vec![("q".to_owned(), 2, T0 + 5 + 3000), ("s".to_owned(), 3, T0 + 3000)], stream_rows(&conn));
         assert_eq!(vec![("s".to_owned(), 1, T0, "m1".to_owned())], history_rows(&conn), "only written ops have rows");
+    }
+
+    #[test]
+    fn mark_running_reaches_the_database_file_itself() {
+        // WAL with synchronous=NORMAL doesn't sync commits; mark_running
+        // checkpoints, so the state is in the (synced) database file, not
+        // only in the WAL.
+        let dir = TempDir::new();
+        let path = dir.file("cabby.db");
+        let mut conn = open(&path).unwrap();
+        meta_set(&conn, "clean_shutdown", "1").unwrap();
+
+        mark_running(&mut conn, "e1").unwrap();
+
+        let copy = dir.file("copy.db");
+        std::fs::copy(&path, &copy).unwrap();
+        let copy = Connection::open(&copy).unwrap();
+        assert_eq!(Some("e1".to_owned()), meta_get(&copy, "epoch").unwrap());
+        assert_eq!(Some("0".to_owned()), meta_get(&copy, "clean_shutdown").unwrap());
     }
 }
