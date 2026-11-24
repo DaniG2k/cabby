@@ -29,7 +29,8 @@ LABEL org.opencontainers.image.title="Cabby" \
       org.opencontainers.image.version="${VERSION}"
 COPY --chmod=0755 dist/linux-${TARGETARCH}/cabby dist/linux-${TARGETARCH}/cabby-healthcheck /usr/local/bin/
 COPY LICENSE THIRD_PARTY_LICENSES.md /usr/share/doc/cabby/
-COPY --from=data --chown=65532:65532 /out/var/lib/cabby /var/lib/cabby
+# Copy the parent's contents, so the directory keeps its 0700 mode.
+COPY --from=data --chown=65532:65532 /out/var/lib/ /var/lib/
 # localhost (the default) is unreachable from outside the container. The
 # defaults use the ANYCABLE_* names, as in 0.1.0, so -e CABBY_HOST=... (read
 # first) and -e ANYCABLE_HOST=... both override them.
