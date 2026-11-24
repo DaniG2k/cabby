@@ -23,13 +23,23 @@ in Cabby (deviations D-070 and D-071 in [`compat/deviations.md`](../compat/devia
   the broadcaster and the broker take are transaction-level, so they alone would work with
   transaction pooling.)
 - A role that can create tables in the schema, or the tables created beforehand (see
-  [Creating the tables yourself](#creating-the-tables-yourself)).
+  [Creating the tables yourself](#creating-the-tables-yourself)). With
+  `--postgres_auto_migrate` (the default) Cabby creates all six tables whichever Postgres
+  adapters are on, and creates the schema first if it doesn't exist, which needs the `CREATE`
+  privilege on the database. Since PostgreSQL 15 only the owner of the `public` schema (by
+  default the database owner) may create tables in it: a role that doesn't own it needs
+  `GRANT CREATE ON SCHEMA public TO <role>`, or a schema of its own
+  (`--postgres_schema=cabby` with `CREATE SCHEMA cabby AUTHORIZATION <role>`).
 
 Each node opens up to 10 connections with all three adapters: one `LISTEN` connection and two
 command connections for pub/sub, one `LISTEN` connection and one claim connection for the
 broadcaster, four command connections and one maintenance connection for the broker (plus one
 for a moment at startup, for the migration). Size
-`max_connections` (or the PgBouncer pool) for your node count.
+`max_connections` (or the PgBouncer pool) for your node count. Each connection sets
+`application_name`, so `pg_stat_activity` shows what it is for: `cabby pubsub <channel>`,
+`cabby pubsub-listen <channel>`, `cabby broadcast <channel>`, `cabby broadcast-listen <channel>`,
+`cabby broker <channel>`, `cabby broker-maintenance <channel>` and `cabby migrate` (with
+`<channel>` the `--postgres_channel` value; at most 63 bytes are kept).
 
 ## Quick start
 
@@ -159,7 +169,9 @@ inserted while a node was reconnecting is not left behind.
   backoff of at most 5 seconds, for as long as it takes: no row is dropped because of a broker
   error. Errors are logged at the 1st, 2nd, 4th, 8th, ... failure in a row and counted in
   `postgres_broadcast_retries_total`. A row that is not JSON is deleted and logged without
-  reaching the broker.
+  reaching the broker. A row that is JSON but not a broadcast (for example `data` as an object
+  instead of a string) is logged as `failed to parse pubsub message ... error="invalid
+  publication format"` and deleted too; nothing is retried for it.
 - **Duplicates** can happen: rows already handed to the broker are handed again after a node
   crashes mid-batch, after its claim connection is lost or its commit fails (the transaction
   rolls back), and when a row holding an array of messages fails partway (the messages before
@@ -172,6 +184,15 @@ inserted while a node was reconnecting is not left behind.
   second later.
 - **Transactional.** The row and its notification only exist once the transaction commits. A
   transaction that rolls back broadcasts nothing.
+
+When Cabby's role owns the tables and the app connects as another role, the app's role needs to
+be allowed to insert into the outbox (the trigger and `pg_notify` need nothing more):
+
+```sql
+GRANT USAGE ON SCHEMA public TO app;
+GRANT INSERT ON public.cabby_broadcasts TO app;
+GRANT USAGE ON SEQUENCE public.cabby_broadcasts_id_seq TO app;
+```
 
 ### From Rails (ActiveRecord)
 
@@ -224,7 +245,8 @@ node resumes its session and catches up on what it missed.
   so a large backlog is cleared over a few passes.
 - **Errors.** When Postgres is unreachable, broadcasts fail (logged and counted; they are not
   delivered without an offset) and session recovery falls back to a new session, as with the NATS
-  broker.
+  broker. An HTTP broadcast then answers `501`, the status the HTTP broadcaster gives for any
+  broker failure.
 - **Presence** is not supported with `--broker=postgres` (as with `--broker=nats`).
 
 ### `UNLOGGED` tables
