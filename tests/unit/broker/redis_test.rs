@@ -705,3 +705,114 @@ fn a_stalled_redis_times_out() {
     assert_eq!(1, metrics.counter("redis_broker_errors_total").unwrap().value());
     drop(listener);
 }
+
+/// Accepts connections, keeps them open and never answers; counts them.
+struct SilentRedis {
+    url: String,
+    accepted: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl SilentRedis {
+    fn start() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let url = format!("redis://{}", listener.local_addr().expect("addr"));
+        let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = accepted.clone();
+        thread::spawn(move || {
+            let mut held = Vec::new();
+            for conn in listener.incoming().flatten() {
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                held.push(conn);
+            }
+        });
+        Self { url, accepted }
+    }
+
+    fn accepted(&self) -> usize {
+        self.accepted.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// regression-for: broker/nats_test.go#TestNATSBroker_Sessions
+/// note: Deviation D-069: concurrent operations on a Redis that doesn't answer share one connection attempt; after the timeout, operations fail at once for a short back-off (about 1 s) instead of waiting the full timeout again; not_observable on Go: AnyCable rejects --broker=redis.
+#[test]
+fn concurrent_callers_share_one_connection_attempt_and_then_fail_fast() {
+    rb::rust_only();
+    let redis = SilentRedis::start();
+    let metrics = rb::metrics();
+    let options = rb::RedisBrokerConfig { key_prefix: "silent".into(), timeout: 1 };
+    let broker = rb::try_new_broker(&redis.url, &Config::new(), &options, None, Some(metrics.clone())).expect("broker");
+
+    let started = Instant::now();
+    thread::scope(|s| {
+        for i in 0..8 {
+            let broker = &broker;
+            s.spawn(move || {
+                let e = broker.handle_broadcast(&msg("test", &format!("m{i}"))).unwrap_err();
+                assert!(e.message.ends_with("cause: operation timed out after 1s"), "{e}");
+            });
+        }
+    });
+    assert!(started.elapsed() < Duration::from_secs(4), "took {:?}", started.elapsed());
+    assert_eq!(1, redis.accepted(), "one connection attempt for all callers");
+
+    let fast = Instant::now();
+    let e = broker.history_since("test", 0).unwrap_err();
+    assert!(fast.elapsed() < Duration::from_millis(500), "took {:?}", fast.elapsed());
+    assert!(e.message.ends_with("cause: Redis is unavailable after a failure; retrying after a short back-off"), "{e}");
+    assert_eq!(1, redis.accepted(), "no new attempt during the back-off");
+    assert_eq!(8, metrics.counter("redis_broker_timeouts_total").unwrap().value());
+    assert_eq!(9, metrics.counter("redis_broker_errors_total").unwrap().value());
+
+    eventually("a new attempt after the back-off", || {
+        let _ = broker.history_since("test", 0);
+        redis.accepted() == 2
+    });
+}
+
+/// regression-for: broker/nats_test.go#TestNATSBroker_Sessions
+/// note: Deviation D-069: an established connection that stops answering fails the operation after the broker timeout (timeouts_total), and the broker reconnects after the back-off; the stall is a fault proxy that holds all traffic; not_observable on Go: AnyCable rejects --broker=redis.
+#[test]
+fn a_stall_on_an_established_connection_times_out() {
+    rb::rust_only();
+    let scope = scope();
+    let proxy = cabby_testkit::fault_proxy::FaultProxy::start(services::redis().addr());
+    let metrics = rb::metrics();
+    let options = rb::RedisBrokerConfig { timeout: 1, ..rb::options(&scope) };
+    let broker =
+        rb::try_new_broker(&scope.url_via(proxy.addr()), &Config::new(), &options, None, Some(metrics.clone()))
+            .expect("broker");
+    broker.start().expect("start");
+    broker.handle_broadcast(&msg("test", "a")).expect("broadcast");
+
+    proxy.freeze();
+    let started = Instant::now();
+    let e = broker.handle_broadcast(&msg("test", "b")).unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(3), "took {:?}", started.elapsed());
+    assert!(e.message.ends_with("cause: operation timed out after 1s"), "{e}");
+    assert_eq!(1, metrics.counter("redis_broker_timeouts_total").unwrap().value());
+    proxy.thaw();
+
+    eventually("the broker works again", || broker.handle_broadcast(&msg("test", "c")).is_ok());
+    assert_eq!(1, metrics.counter("redis_broker_reconnects_total").unwrap().value());
+}
+
+/// regression-for: broker/nats_test.go#TestNATSBroker_Sessions
+/// note: Deviation D-069: a killed connection is noticed by the next operation, which (being a read) runs again on a new connection; each incident counts one reconnect; not_observable on Go: AnyCable rejects --broker=redis.
+#[test]
+fn each_killed_connection_counts_one_reconnect() {
+    rb::rust_only();
+    let scope = scope();
+    let metrics = rb::metrics();
+    let broker = rb::try_new_broker(&scope.url(), &Config::new(), &rb::options(&scope), None, Some(metrics.clone()))
+        .expect("broker");
+    broker.start().expect("start");
+    broker.handle_broadcast(&msg("test", "a")).expect("broadcast");
+
+    for kill in 1..=2 {
+        scope.command(&["CLIENT", "KILL", "USER", scope.user()]).expect("CLIENT KILL");
+        assert_eq!(1, broker.history_since("test", 0).expect("history").unwrap_or_default().len(), "kill {kill}");
+        assert_eq!(kill, metrics.counter("redis_broker_reconnects_total").unwrap().value());
+    }
+    assert_eq!(0, metrics.counter("redis_broker_errors_total").unwrap().value());
+}

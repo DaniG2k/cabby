@@ -410,6 +410,9 @@ enum Call {
 enum Failure {
     Closed,
     Timeout(Duration),
+    /// A recent attempt failed; the broker waits a moment before the next.
+    Unavailable,
+    Connect(String),
     Redis(redis::RedisError),
     Reply(BrokerError),
 }
@@ -419,15 +422,42 @@ impl std::fmt::Display for Failure {
         match self {
             Failure::Closed => f.write_str("Redis broker is shut down"),
             Failure::Timeout(d) => write!(f, "operation timed out after {}s", d.as_secs()),
+            Failure::Unavailable => {
+                f.write_str("Redis is unavailable after a failure; retrying after a short back-off")
+            }
+            Failure::Connect(e) => write!(f, "{e}"),
             Failure::Redis(e) => write!(f, "{e}"),
             Failure::Reply(e) => write!(f, "{e}"),
         }
     }
 }
 
+/// How long operations fail at once after a timeout or a failed connection
+/// attempt, instead of each waiting the full timeout again.
+const BACKOFF: Duration = Duration::from_secs(1);
+
+/// Errors of a node that can't take writes now (a demoted master, a replica
+/// loading its data or cut off from its master): Redis ran nothing.
+fn ran_nothing(e: &redis::RedisError) -> bool {
+    matches!(e.code(), Some("READONLY" | "LOADING" | "MASTERDOWN"))
+}
+
 /// Whether the connection should be opened again after `e`.
 fn is_connection_error(e: &redis::RedisError) -> bool {
-    e.is_io_error() || e.is_timeout() || e.is_connection_dropped() || e.is_unrecoverable_error()
+    e.is_io_error() || e.is_connection_dropped() || e.is_unrecoverable_error() || ran_nothing(e)
+}
+
+type Connecting = futures_util::future::Shared<futures_util::future::BoxFuture<'static, Result<Commands, String>>>;
+
+/// The broker's connection. One connection attempt at a time, shared by the
+/// operations waiting for it; every connection has a generation, so a
+/// failure only drops the connection it happened on.
+enum Slot {
+    Idle,
+    Connecting(u64, Connecting),
+    Ready(u64, Commands),
+    /// Operations fail at once until then (see [`BACKOFF`]).
+    BackingOff(Instant),
 }
 
 /// State shared with the operations running on the Redis runtime.
@@ -435,9 +465,10 @@ struct Inner {
     spec: ConnectSpec,
     keys: Keys,
     timeout: Duration,
-    conn: Mutex<Option<Commands>>,
-    /// Whether a connection was opened before (later ones are reconnects).
-    connected: AtomicBool,
+    slot: Mutex<Slot>,
+    generation: AtomicU64,
+    /// A connection was lost or failed since the last one opened.
+    lost: AtomicBool,
     /// `SCRIPT LOAD` digests by [`Lua::index`]; unknown ones are sent with `EVAL`.
     digests: [OnceLock<String>; 2],
     metrics: Option<Arc<dyn Instrumenter>>,
@@ -479,21 +510,82 @@ impl Inner {
         }
     }
 
-    async fn connection(&self) -> redis::RedisResult<Commands> {
-        let existing = lock(&self.conn).clone();
-        if let Some(c) = existing {
-            return Ok(c);
+    /// The current connection, or the one being opened (opening one when
+    /// there is none); `used` records its generation for [`Inner::back_off`].
+    async fn connection(&self, used: &AtomicU64) -> Result<(u64, Commands), Failure> {
+        let (generation, attempt) = {
+            let mut slot = lock(&self.slot);
+            match &*slot {
+                Slot::Ready(g, c) => {
+                    used.store(*g, Ordering::SeqCst);
+                    return Ok((*g, c.clone()));
+                }
+                Slot::BackingOff(until) if Instant::now() < *until => return Err(Failure::Unavailable),
+                Slot::Connecting(g, attempt) => (*g, attempt.clone()),
+                Slot::Idle | Slot::BackingOff(_) => {
+                    let g = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+                    let spec = self.spec.clone();
+                    // No response timeout on the connection: the operation
+                    // timeout bounds every wait.
+                    let attempt: Connecting =
+                        futures_util::FutureExt::shared(futures_util::FutureExt::boxed(async move {
+                            spec.commands(None).await.map_err(|e| e.to_string())
+                        }));
+                    *slot = Slot::Connecting(g, attempt.clone());
+                    (g, attempt)
+                }
+            }
+        };
+        used.store(generation, Ordering::SeqCst);
+        let opened = attempt.await;
+        let mut slot = lock(&self.slot);
+        let current = matches!(&*slot, Slot::Connecting(g, _) if *g == generation);
+        match opened {
+            Ok(c) => {
+                if current {
+                    *slot = Slot::Ready(generation, c.clone());
+                    if self.lost.swap(false, Ordering::SeqCst) {
+                        self.count(METRIC_RECONNECTS);
+                    }
+                }
+                Ok((generation, c))
+            }
+            Err(e) => {
+                if current {
+                    *slot = Slot::BackingOff(Instant::now() + BACKOFF);
+                    self.lost.store(true, Ordering::SeqCst);
+                }
+                Err(Failure::Connect(e))
+            }
         }
-        let c = self.spec.commands(Some(self.timeout)).await?;
-        if self.connected.swap(true, Ordering::SeqCst) {
-            self.count(METRIC_RECONNECTS);
-        }
-        *lock(&self.conn) = Some(c.clone());
-        Ok(c)
     }
 
-    fn forget_connection(&self) {
-        lock(&self.conn).take();
+    /// Drops connection `generation` after a connection error; the next
+    /// operation opens a new one.
+    fn forget(&self, generation: u64) {
+        let mut slot = lock(&self.slot);
+        if matches!(&*slot, Slot::Ready(g, _) if *g == generation) {
+            *slot = Slot::Idle;
+            self.lost.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// After a timeout on connection `generation` (or its attempt): it is
+    /// not used again, and operations fail at once for [`BACKOFF`].
+    fn back_off(&self, generation: u64) {
+        let mut slot = lock(&self.slot);
+        let stalled = match &*slot {
+            Slot::Ready(g, _) | Slot::Connecting(g, _) => *g == generation,
+            Slot::Idle | Slot::BackingOff(_) => false,
+        };
+        if stalled {
+            *slot = Slot::BackingOff(Instant::now() + BACKOFF);
+            self.lost.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn close(&self) {
+        *lock(&self.slot) = Slot::Idle;
     }
 
     /// Runs one call, falling back to `EVAL` when Redis doesn't know the script.
@@ -530,22 +622,29 @@ impl Inner {
         Ok(out)
     }
 
-    /// Runs the calls, on a new connection when there is none. Idempotent
-    /// calls are tried once more on a new connection after a connection error.
-    async fn exec(self: Arc<Self>, calls: Vec<Call>, idempotent: bool) -> redis::RedisResult<Vec<Value>> {
+    /// Runs the calls. After a connection error the connection is dropped,
+    /// and the calls run once more on a new one when that is safe: they are
+    /// idempotent, or Redis ran nothing (see [`ran_nothing`]).
+    async fn exec(
+        self: Arc<Self>,
+        calls: Vec<Call>,
+        idempotent: bool,
+        used: Arc<AtomicU64>,
+    ) -> Result<Vec<Value>, Failure> {
         let mut retried = false;
         loop {
-            let mut conn = self.connection().await?;
+            let (generation, mut conn) = self.connection(&used).await?;
             match self.exec_on(&mut conn, &calls).await {
+                Err(e) if e.is_timeout() => return Err(Failure::Timeout(self.timeout)),
                 Err(e) if is_connection_error(&e) => {
-                    self.forget_connection();
-                    if idempotent && !retried {
+                    self.forget(generation);
+                    if !retried && (idempotent || ran_nothing(&e)) {
                         retried = true;
                         continue;
                     }
-                    return Err(e);
+                    return Err(Failure::Redis(e));
                 }
-                other => return other,
+                other => return other.map_err(Failure::Redis),
             }
         }
     }
@@ -604,8 +703,9 @@ impl RedisBroker {
                 spec,
                 keys: Keys::new(&options.key_prefix),
                 timeout: Duration::from_secs(u64::try_from(options.timeout).unwrap_or(1)),
-                conn: Mutex::new(None),
-                connected: AtomicBool::new(false),
+                slot: Mutex::new(Slot::Idle),
+                generation: AtomicU64::new(0),
+                lost: AtomicBool::new(false),
                 digests: Default::default(),
                 metrics,
                 closed: AtomicBool::new(false),
@@ -626,20 +726,24 @@ impl RedisBroker {
         }
         let timeout = inner.timeout;
         let expected = calls.len();
-        let task = inner.clone().exec(calls, idempotent);
+        let used = Arc::new(AtomicU64::new(0));
+        let task = inner.clone().exec(calls, idempotent, used.clone());
         let result = connect::wait_on(timeout + REPORT_GRACE, async move { tokio::time::timeout(timeout, task).await });
+        let result = match result {
+            Some(Ok(result)) => result,
+            Some(Err(_)) | None => Err(Failure::Timeout(timeout)),
+        };
         match result {
-            Some(Ok(Ok(values))) if values.len() == expected => Ok(values),
-            Some(Ok(Ok(values))) => {
+            Ok(values) if values.len() == expected => Ok(values),
+            Ok(values) => {
                 Err(Failure::Reply(err(format!("expected {expected} replies from Redis, got {}", values.len()))))
             }
-            Some(Ok(Err(e))) => Err(Failure::Redis(e)),
-            Some(Err(_)) | None => {
-                // A connection that doesn't answer is not used again.
-                inner.forget_connection();
+            Err(Failure::Timeout(d)) => {
+                inner.back_off(used.load(Ordering::SeqCst));
                 inner.count(METRIC_TIMEOUTS);
-                Err(Failure::Timeout(timeout))
+                Err(Failure::Timeout(d))
             }
+            Err(f) => Err(f),
         }
     }
 
@@ -760,7 +864,7 @@ impl Broker for RedisBroker {
 
     fn shutdown(&self) -> Result<(), BrokerError> {
         self.inner.closed.store(true, Ordering::SeqCst);
-        self.inner.forget_connection();
+        self.inner.close();
         log_debug!(log(), "Redis broker is shut down");
         Ok(())
     }
@@ -996,6 +1100,33 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn server_error(resp: &str) -> redis::RedisError {
+        match redis::parse_redis_value(resp.as_bytes()).unwrap() {
+            Value::ServerError(e) => e.into(),
+            other => panic!("not an error: {other:?}"),
+        }
+    }
+
+    /// A node that can't take writes now (a demoted master, a replica still
+    /// loading or cut off from its master) ran nothing: the broker connects
+    /// again and retries, even a broadcast.
+    #[test]
+    fn unavailable_nodes_are_connection_errors_that_ran_nothing() {
+        for resp in [
+            "-READONLY You can't write against a read only replica. script: b8a6, on @user_script:27.\r\n",
+            "-LOADING Redis is loading the dataset in memory\r\n",
+            "-MASTERDOWN Link with MASTER is down and replica-serve-stale-data is set to 'no'.\r\n",
+        ] {
+            let e = server_error(resp);
+            assert!(is_connection_error(&e), "{e}");
+            assert!(ran_nothing(&e), "{e}");
+        }
+        let e = server_error("-ERR Error running script\r\n");
+        assert!(!is_connection_error(&e) && !ran_nothing(&e), "{e}");
+        let io = redis::RedisError::from(std::io::Error::from(std::io::ErrorKind::ConnectionReset));
+        assert!(is_connection_error(&io) && !ran_nothing(&io));
     }
 
     #[test]
