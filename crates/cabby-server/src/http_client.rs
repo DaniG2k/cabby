@@ -1,4 +1,4 @@
-//! A small pooling HTTP/1.1 client for one origin (HTTP RPC, telemetry).
+//! A small pooling HTTP/1.1 client for one origin (HTTP RPC).
 //!
 //! Behaves like the Go `http.Transport` the upstream services use: keep-alive
 //! connections are reused (LIFO) and kept idle up to `max_idle` and

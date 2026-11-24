@@ -20,7 +20,8 @@
       "pass": 914
     },
     "rust": {
-      "pass": 923
+      "pass": 922,
+      "retired": 1
     },
     "rust_only": {
       "cases": 93
@@ -22542,7 +22543,7 @@
       ],
       "translation_status": "reviewed",
       "reference_status": "not_observable",
-      "rust_status": "pass",
+      "rust_status": "retired",
       "evidence": [
         "compat/baseline/go-unit-mrb.jsonl"
       ]

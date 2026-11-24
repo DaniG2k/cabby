@@ -1,4 +1,4 @@
-//! Client-side TLS for outgoing connections (RPC over gRPC and HTTP, telemetry).
+//! Client-side TLS for outgoing connections (RPC over gRPC and HTTP).
 //!
 //! Mirrors upstream `rpc.Config.TLSConfig`: a custom root CA (a file path or PEM
 //! contents) or the system roots, optional verification, TLS 1.2 at least.

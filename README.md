@@ -9,10 +9,10 @@ connections so your app doesn't have to. It is an [AnyCable](https://github.com/
 server written in Rust: the same client protocols, the same RPC contract with your app, and the
 same CLI flags, environment variables and configuration file as the Go server it is ported from.
 
-> Cabby passes its full compatibility suite end to end: Action Cable and Pusher clients, SSE,
-> durable streams, Redis, NATS and mruby. Every finding from an
-> [independent review](docs/review/2026-11-fable-review.md) is fixed with a regression test, and
-> the [benchmarks](#benchmarks) come with the scripts to rerun them.
+> Cabby passes its compatibility suite end to end (all but the telemetry case, retired by
+> design): Action Cable and Pusher clients, SSE, durable streams, Redis, NATS and mruby. Every
+> finding from an [independent review](docs/review/2026-11-fable-review.md) is fixed with a
+> regression test, and the [benchmarks](#benchmarks) come with the scripts to rerun them.
 
 ## Why Cabby
 
@@ -331,7 +331,8 @@ Cabby is a port of AnyCable's open-source Go server at the commit pinned in
 1.6.21). It was built tests-first: the whole upstream test corpus, 923 cases (Go unit tests,
 Benchi, go-mruby, feature tests and the AnyT conformance suite), was translated to Rust and
 verified against the Go server before any Cabby code was written. 914 cases are verified against
-Go; 9 test behavior Go can't expose and run against Cabby only. All 923 pass against Cabby
+Go; 9 test behavior Go can't expose and run against Cabby only. 922 pass against Cabby; 1 is
+retired by design (telemetry, D-058)
 ([`compat/test-map.json`](compat/test-map.json), summarized by `cargo xtask report`).
 
 Until Cabby has its own documentation, the [AnyCable server docs](https://docs.anycable.io) describe

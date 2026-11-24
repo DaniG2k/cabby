@@ -17,7 +17,8 @@
 //! --rpc_impl=http`, auth and public streams off). [`ServerTuning`] maps to the
 //! matching node flags; `extra_args` come last. The metrics endpoint shares the
 //! main port unless another one is given. The environment is cleared of
-//! `ANYCABLE_*` variables, telemetry is disabled (`ANYCABLE_DISABLE_TELEMETRY`) and
+//! `ANYCABLE_*` variables, telemetry is disabled for the Go server
+//! (`ANYCABLE_DISABLE_TELEMETRY`; Cabby has none, D-058) and
 //! [`ServerConfig::env`] is added.
 //!
 //! With [`ServerConfig::pusher`] set, the server also gets the Pusher app flags

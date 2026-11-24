@@ -20,6 +20,5 @@ pub mod redis;
 pub mod rpc;
 pub mod server;
 pub mod sse;
-pub mod telemetry;
 pub mod version;
 pub mod ws;

@@ -9,7 +9,7 @@ tests run against the Go reference.
 
 Status: implemented. All 58 translated cases (`go_mruby`, `mrb`) and the
 `features/mruby_printers` scenario pass on Cabby; the CLI start line reports
-` (with mruby 1.2.0 (2015-11-17))` and telemetry reports mruby support, as upstream.
+` (with mruby 1.2.0 (2015-11-17))`, as upstream.
 
 ## What upstream links
 

@@ -73,15 +73,15 @@ D-056's dropped deep messages.
 
 Go call sites: every `Debug`/`Info`/`Warn`/`Error` call in the packages Cabby ports
 (test files, mocks, `cmd/`, `etc/`, `gobench/` and vendored code excluded): **308**.
-Matched: **304** (same message, level and attributes; a deviation ID in the status marks
-a recorded difference in an attribute value). Not applicable: **4**.
+Matched: **298** (same message, level and attributes; a deviation ID in the status marks
+a recorded difference in an attribute value). Not applicable: **10** (6 of them removed with telemetry, D-058).
 
 | Package | Go call sites | Matched | Not applicable |
 |---|---|---|---|
 | api | 8 | 8 | 0 |
 | broadcast | 29 | 29 | 0 |
 | broker | 19 | 19 | 0 |
-| cli | 25 | 25 | 0 |
+| cli | 25 | 24 | 1 |
 | config | 1 | 1 | 0 |
 | ds | 22 | 21 | 1 |
 | enats | 9 | 9 | 0 |
@@ -96,7 +96,7 @@ a recorded difference in an attribute value). Not applicable: **4**.
 | server | 2 | 2 | 0 |
 | sse | 9 | 9 | 0 |
 | streams | 4 | 4 | 0 |
-| telemetry | 6 | 5 | 1 |
+| telemetry | 6 | 0 | 6 |
 | ws | 5 | 5 | 0 |
 
 Line numbers refer to the pinned Go commit and to Cabby at the time of writing; Cabby
@@ -171,7 +171,7 @@ call sites are found by the message text (`grep -rn '"<message>"' crates`).
 | `cli/cli.go:253` | INF | `Handle health requests at %s%s` | `crates/cabby-server/src/cli/runner.rs:352` | matched |  |
 | `cli/cli.go:256` | INF | `Handle SSE requests at %s%s` | `crates/cabby-server/src/cli/runner.rs:355` | matched |  |
 | `cli/cli.go:273` | INF | `Handle Durable Streams requests at %s%s` | `crates/cabby-server/src/cli/runner.rs:367` | matched |  |
-| `cli/cli.go:331` | INF | `r.log.With("context", "telemetry").Info(tracker.Announce())` | `cabby-server/src/cli/runner.rs` (telemetry announce, `context=telemetry`) | matched |  |
+| `cli/cli.go:331` | INF | `r.log.With("context", "telemetry").Info(tracker.Announce())` | — | n/a | removed with telemetry (D-058) |
 | `cli/cli.go:350` | INF | `r.log.Info(appBroker.Announce())` | `cabby-server/src/cli/runner.rs` (broker announce) | matched |  |
 | `cli/cli.go:376` | INF | `Embedded NATS server started: %s%s` | `crates/cabby-server/src/cli/runner.rs:517` | matched |  |
 | `cli/cli.go:441` | DBG | `🔧 🔧 🔧 Debug mode is on 🔧 🔧 🔧` | `crates/cabby-server/src/cli/runner.rs:584` | matched |  |
@@ -401,12 +401,12 @@ call sites are found by the message text (`grep -rn '"<message>"' crates`).
 | `streams/controller.go:74` | DBG | `subscribed verified` | `crates/cabby-core/src/streams.rs:261` | matched |  |
 | `streams/controller.go:76` | DBG | `` | `cabby-core/src/streams.rs` (empty-message record) | matched |  |
 | `streams/controller.go:135` | DBG | `unsigned` | `crates/cabby-core/src/streams.rs:212` | matched |  |
-| `telemetry/telemetry.go:131` | DBG | `send telemetry event` | `crates/cabby-server/src/telemetry.rs:398` | matched |  |
-| `telemetry/telemetry.go:145` | DBG | `failed to marshal telemetry payload` | — | n/a | Cabby's JSON encoding of the payload cannot fail |
-| `telemetry/telemetry.go:164` | DBG | `timed out to send telemetry data` | `crates/cabby-server/src/telemetry.rs:415` | matched |  |
-| `telemetry/telemetry.go:168` | DBG | `failed to perform telemetry request` | `crates/cabby-server/src/telemetry.rs:416` | matched |  |
-| `telemetry/telemetry.go:175` | DBG | `telemetry authenticated failed` | `crates/cabby-server/src/telemetry.rs:417` | matched |  |
-| `telemetry/telemetry.go:180` | DBG | `telemetry request failed` | `crates/cabby-server/src/telemetry.rs:419` | matched |  |
+| `telemetry/telemetry.go:131` | DBG | `send telemetry event` | — | n/a | removed with telemetry (D-058) |
+| `telemetry/telemetry.go:145` | DBG | `failed to marshal telemetry payload` | — | n/a | removed with telemetry (D-058) |
+| `telemetry/telemetry.go:164` | DBG | `timed out to send telemetry data` | — | n/a | removed with telemetry (D-058) |
+| `telemetry/telemetry.go:168` | DBG | `failed to perform telemetry request` | — | n/a | removed with telemetry (D-058) |
+| `telemetry/telemetry.go:175` | DBG | `telemetry authenticated failed` | — | n/a | removed with telemetry (D-058) |
+| `telemetry/telemetry.go:180` | DBG | `telemetry request failed` | — | n/a | removed with telemetry (D-058) |
 | `ws/handler.go:31` | DBG | `WebSocket connection upgrade failed` | `crates/cabby-server/src/ws/handler.rs:123`, `crates/cabby-server/src/ws/handler.rs:188` | matched |  |
 | `ws/handler.go:52` | DBG | `no subprotocol negotiated` | `crates/cabby-server/src/ws/handler.rs:203` | matched |  |
 | `ws/handler.go:57` | DBG | `WebSocket session established` | `crates/cabby-server/src/ws/handler.rs:209` | matched |  |

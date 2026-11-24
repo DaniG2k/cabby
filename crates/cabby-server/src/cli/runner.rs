@@ -90,7 +90,6 @@ pub struct Runner {
     subscriber_factory: Option<SubscriberSource>,
     broker_factory: Option<BrokerSource>,
     broadcasters_factory: Option<BroadcastersSource>,
-    telemetry: Option<crate::telemetry::Config>,
     metrics: Arc<Metrics>,
     shutdownables: Vec<Arc<dyn Shutdownable>>,
     shutdown_ctx: ShutdownContext,
@@ -136,7 +135,6 @@ impl Runner {
             subscriber_factory: None,
             broker_factory: None,
             broadcasters_factory: None,
-            telemetry: None,
             metrics: Arc::new(Metrics::new(Vec::new(), 0)),
             shutdownables: Vec::new(),
             shutdown_ctx: ShutdownContext::new(timeout),
@@ -169,7 +167,6 @@ impl Runner {
                     self.broadcasters_factory = Some(BroadcastersSource::Custom(factory));
                 }
                 RunnerOption::DefaultBroadcaster => self.broadcasters_factory = Some(BroadcastersSource::Default),
-                RunnerOption::Telemetry(props) => self.set_telemetry(props)?,
             }
         }
 
@@ -250,27 +247,6 @@ impl Runner {
             return Err(illegal_argument("Broker has been already assigned"));
         }
         self.broker_factory = Some(source);
-        Ok(())
-    }
-
-    /// Upstream `WithTelemetry(props...)`.
-    fn set_telemetry(&mut self, props: Vec<String>) -> Result<(), CliError> {
-        let env = crate::telemetry::ProcessEnv;
-        if crate::telemetry::EnvSource::var(&env, "ANYCABLE_DISABLE_TELEMETRY").as_deref() == Some("true") {
-            self.telemetry = None;
-            return Ok(());
-        }
-        let mut config = crate::telemetry::Config::new(&env);
-        if let Some(url) = crate::telemetry::EnvSource::var(&env, "ANYCABLE_TELEMETRY_URL").filter(|u| !u.is_empty()) {
-            config.endpoint = url;
-        }
-        if !props.len().is_multiple_of(2) {
-            return Err(illegal_argument("telemetry properties should be passed as pairs of key and value"));
-        }
-        for pair in props.chunks(2) {
-            config.custom_props.insert(pair[0].clone(), pair[1].clone());
-        }
-        self.telemetry = Some(config);
         Ok(())
     }
 
@@ -481,28 +457,6 @@ impl Runner {
             let (n, ctx) = (node.clone(), self.shutdown_ctx.clone());
             vec![Arc::new(ShutdownFn(move || n.shutdown(&ctx.get()).map_err(|e| CliError(e.0))))]
         };
-
-        if let Some(tconfig) = &self.telemetry {
-            let tracker = Arc::new(crate::telemetry::Tracker::new(
-                metrics.clone(),
-                &crate::telemetry::AppConfig::from_config(&self.config),
-                tconfig,
-                Arc::new(crate::telemetry::ProcessEnv),
-                std::env::args().collect(),
-            ));
-            if tracker.enabled() {
-                crate::metrics::log(
-                    Level::Info,
-                    &tracker.announce(),
-                    &[Attr::new("context", LogValue::String("telemetry".into()))],
-                );
-                let collector = tracker.clone();
-                self.runtime.spawn(async move { collector.collect().await });
-                let runtime = self.runtime.clone();
-                self.shutdownables
-                    .push(Arc::new(ShutdownFn(move || block_on(&runtime, tracker.shutdown()).map_err(CliError))));
-            }
-        }
 
         let subscriber = self.new_subscriber(&node).map_err(|e| decorate(e, "couldn't configure pub/sub"))?;
 

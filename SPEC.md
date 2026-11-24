@@ -1,6 +1,6 @@
 # Cabby: tests-first AnyCable Rust port specification
 
-Status: M0–M7 benchmarks done: all 923 upstream cases pass; general review fixed; three-way, Pusher-protocol and AnyCable issue 265 soak benchmarks in the README. All §11 owner requests done.
+Status: M0–M7 benchmarks done: 922 of 923 upstream cases pass and 1 is retired by design (telemetry, D-058); general review fixed; three-way, Pusher-protocol and AnyCable issue 265 soak benchmarks in the README. All §11 owner requests done.
 Prepared: 2026-11-17. Progress: `cargo xtask report`; baseline evidence: `compat/baseline/README.md`.
 Project name: **Cabby**. Directory and planned binary: `cabby` (an independent AnyCable-compatible implementation).
 
