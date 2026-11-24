@@ -17,8 +17,9 @@
 //!   an offset past the latest one with the memory broker's error texts. Each
 //!   read is one statement, so it sees one consistent snapshot.
 //! - **Epoch.** The first node to start inserts a random epoch into
-//!   `<prefix>meta` (`ON CONFLICT DO NOTHING`) and every node reads it back,
-//!   so all nodes share it. Reads and writes return the current epoch with
+//!   `<prefix>meta`; the others get the stored one from the same statement
+//!   (`ON CONFLICT DO UPDATE ... RETURNING`), so all nodes share it, even
+//!   when they create it at the same moment. Reads and writes return the current epoch with
 //!   their results and a background task checks it every second: when the
 //!   row is gone (an `UNLOGGED` table emptied by a database crash), a new
 //!   epoch is created and clients resynchronize.
@@ -129,9 +130,12 @@ impl Sql {
             from: state("seq > $4"),
             since: state("ts_sec >= $4"),
             epoch_get: format!("SELECT value FROM {meta} WHERE key = 'epoch'"),
+            // DO UPDATE (to the same value) returns the row even when another
+            // node inserted it concurrently: DO NOTHING would return nothing,
+            // and a read in the same statement can't see that insert.
             epoch_ensure: format!(
-                "WITH ins AS (INSERT INTO {meta} (key, value) VALUES ('epoch', $1) ON CONFLICT (key) DO NOTHING RETURNING value) \
-                 SELECT value FROM ins UNION ALL SELECT value FROM {meta} WHERE key = 'epoch' LIMIT 1"
+                "INSERT INTO {meta} AS m (key, value) VALUES ('epoch', $1) \
+                 ON CONFLICT (key) DO UPDATE SET value = m.value RETURNING value"
             ),
             commit: format!(
                 "INSERT INTO {sessions} (sid, data, expires_at_ms) VALUES ($1, $2, {NOW_MS} + $3) \

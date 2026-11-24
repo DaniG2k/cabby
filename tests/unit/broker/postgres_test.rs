@@ -416,3 +416,31 @@ fn deviation_d071_postgres_missing_tables_fail_the_start_without_auto_migrate() 
     scope.migrate();
     broker.start().expect("start once the tables exist");
 }
+
+/// regression-for: broker/nats_test.go#TestNATSBroker_Epoch
+/// note: Deviation D-071: two nodes that find the epoch row missing at the same moment both create-or-read it in one statement and agree on the result (repeated many times).
+#[test]
+fn deviation_d071_postgres_concurrent_epoch_creation_agrees() {
+    let scope = scope();
+    let a = broker(&scope, &new_config(), None);
+    let b = self::broker(&scope, &new_config(), None);
+    let delete = format!("DELETE FROM {} WHERE key = 'epoch'", scope.table("meta"));
+    for i in 0..50 {
+        scope.execute(&delete);
+        let barrier = std::sync::Barrier::new(2);
+        let (ea, eb) = thread::scope(|s| {
+            let ha = s.spawn(|| {
+                barrier.wait();
+                a.refresh_epoch()
+            });
+            let hb = s.spawn(|| {
+                barrier.wait();
+                b.refresh_epoch()
+            });
+            (ha.join().unwrap(), hb.join().unwrap())
+        });
+        let (ea, eb) =
+            (ea.unwrap_or_else(|e| panic!("round {i}: {e}")), eb.unwrap_or_else(|e| panic!("round {i}: {e}")));
+        assert_eq!(ea, eb, "round {i}");
+    }
+}
