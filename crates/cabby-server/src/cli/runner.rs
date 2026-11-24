@@ -320,6 +320,10 @@ impl Runner {
             crate::metrics::log(level, &message, &attrs);
         }
 
+        if let Some(warning) = redis_broadcast_warning(&self.config) {
+            crate::metrics::log(Level::Warn, &warning, &[Attr::new("context", LogValue::String("config".into()))]);
+        }
+
         if self.config.public_mode {
             crate::metrics::log(Level::Warn, "Server is running in the public mode", &[]);
         }
@@ -889,6 +893,22 @@ fn default_rpc_controller() -> ControllerFactory {
     })
 }
 
+/// A warning when a Redis URL is configured (after presets) but no broadcast
+/// adapter reads from Redis: the release image defaults to HTTP-only
+/// broadcasts, so an AnyCable set-up that broadcasts through Redis would
+/// silently receive nothing.
+fn redis_broadcast_warning(c: &Config) -> Option<String> {
+    let redis_configured = c.redis.url != Config::new().redis.url;
+    let redis_broadcasts = c.broadcast_adapters.iter().any(|a| a == "redis" || a == "redisx");
+    if !redis_configured || redis_broadcasts {
+        return None;
+    }
+    let adapters = if c.broadcast_adapters == ["http"] { "HTTP".to_owned() } else { c.broadcast_adapters.join(",") };
+    Some(format!(
+        "Redis is configured but broadcasts are {adapters} only; set CABBY_BROADCAST_ADAPTER to add redis or redisx"
+    ))
+}
+
 /// The log record of a start-up note (D-060, D-061). An environment conflict
 /// names both variables and never their values, which may be secrets.
 fn note_record(note: &StartupNote) -> (Level, String, Vec<Attr>) {
@@ -1013,5 +1033,33 @@ mod tests {
         assert_eq!(level, Level::Warn);
         assert_eq!(message, "both CABBY_SECRET and ANYCABLE_SECRET are set; using CABBY_SECRET");
         assert_eq!(attrs, vec![Attr::new("context", LogValue::String("config".into()))]);
+    }
+
+    /// A Redis URL without a Redis broadcast adapter is reported once: the
+    /// release image defaults to HTTP-only broadcasts.
+    #[test]
+    fn redis_without_a_redis_broadcast_adapter_is_reported() {
+        let config = |url: &str, adapters: &[&str]| {
+            let mut c = Config::new();
+            c.redis.url = url.to_owned();
+            c.broadcast_adapters = adapters.iter().map(|a| (*a).to_owned()).collect();
+            c
+        };
+        let default_url = Config::new().redis.url;
+        assert_eq!(redis_broadcast_warning(&config(&default_url, &["http"])), None);
+        assert_eq!(redis_broadcast_warning(&config("redis://redis:6379", &["http", "redis"])), None);
+        assert_eq!(redis_broadcast_warning(&config("redis://redis:6379", &["redisx"])), None);
+        assert_eq!(
+            redis_broadcast_warning(&config("redis://redis:6379", &["http"])).as_deref(),
+            Some(
+                "Redis is configured but broadcasts are HTTP only; set CABBY_BROADCAST_ADAPTER to add redis or redisx"
+            )
+        );
+        assert_eq!(
+            redis_broadcast_warning(&config("redis://redis:6379", &["http", "nats"])).as_deref(),
+            Some(
+                "Redis is configured but broadcasts are http,nats only; set CABBY_BROADCAST_ADAPTER to add redis or redisx"
+            )
+        );
     }
 }

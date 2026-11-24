@@ -30,9 +30,10 @@ The default broadcast adapters are `http,redis`, so a standalone binary needs
 docker run --rm -p 8080:8080 -p 8090:8090 ghcr.io/danig2k/cabby:@VERSION@ --norpc --public
 ```
 
-The image listens on `0.0.0.0` and uses the HTTP broadcast adapter, so it runs without Redis. It
+The image listens on `0.0.0.0` and takes broadcasts over HTTP only, so it runs without Redis. It
 runs as a non-root user and has a health check. Configure it with flags or `CABBY_*` environment
-variables (`-e`).
+variables (`-e`; the `ANYCABLE_*` names work too). To broadcast through Redis, set
+`CABBY_BROADCAST_ADAPTER` or `ANYCABLE_BROADCAST_ADAPTER` to include `redis` or `redisx`.
 
 ### Try it
 

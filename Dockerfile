@@ -22,12 +22,15 @@ LABEL org.opencontainers.image.title="Cabby" \
       org.opencontainers.image.version="${VERSION}"
 COPY --chmod=0755 dist/linux-${TARGETARCH}/cabby dist/linux-${TARGETARCH}/cabby-healthcheck /usr/local/bin/
 COPY LICENSE THIRD_PARTY_LICENSES.md /usr/share/doc/cabby/
-# localhost (the default) is unreachable from outside the container. Set
-# CABBY_HOST, not ANYCABLE_HOST, to change it: CABBY_* wins (D-061).
-ENV CABBY_HOST=0.0.0.0
+# localhost (the default) is unreachable from outside the container. The
+# defaults use the ANYCABLE_* names, as in 0.1.0, so -e CABBY_HOST=... (read
+# first) and -e ANYCABLE_HOST=... both override them.
+ENV ANYCABLE_HOST=0.0.0.0
 # The default broadcast adapters are http,redis; http alone lets the container
-# run without Redis. Override with -e CABBY_BROADCAST_ADAPTER=... or the flag.
-ENV CABBY_BROADCAST_ADAPTER=http
+# run without Redis. Override with -e CABBY_BROADCAST_ADAPTER=...,
+# -e ANYCABLE_BROADCAST_ADAPTER=... or the flag; with a Redis URL and HTTP-only
+# broadcasts, Cabby logs a warning at startup.
+ENV ANYCABLE_BROADCAST_ADAPTER=http
 # 8080: WebSocket, SSE and /health. 8090: HTTP broadcasts when no secret is set;
 # with a secret, set CABBY_HTTP_BROADCAST_PORT=8090 to keep broadcasts off the
 # public port.

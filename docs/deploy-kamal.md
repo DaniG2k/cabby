@@ -64,8 +64,10 @@ The log has a line like `Accept broadcast requests at http://…:8090/_broadcast
   accessory through `kamal-proxy` with a `proxy:` block; check yours.
 - The image has a Docker health check (`cabby-healthcheck`, `GET /health` on the main port). It
   reads the port from `CABBY_PORT`, so change the port with that variable rather than `--port`.
-- To change the listen address, set `CABBY_HOST` (the image sets it to `0.0.0.0`), not
-  `ANYCABLE_HOST`: `CABBY_*` wins.
+- The image defaults to `ANYCABLE_HOST=0.0.0.0` and `ANYCABLE_BROADCAST_ADAPTER=http`; the
+  snippet's `CABBY_BROADCAST_ADAPTER` overrides the second (Cabby logs that both are set, which
+  is expected). To broadcast through Redis instead, set it to `http,redisx,redis` and add
+  `CABBY_REDIS_URL`.
 - The image is public: no `docker login` is needed on your hosts.
 - `compat/scripts/release.sh` checks this set-up against every release image: with
   `CABBY_SECRET`, `CABBY_HTTP_BROADCAST_PORT=8090` and a broadcast key, an authorized

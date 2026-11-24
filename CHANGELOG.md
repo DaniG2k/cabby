@@ -22,6 +22,9 @@ before.
 - `CABBY_*` environment variables, read before `ANYCABLE_*`, with one warning per setting
   when both are set to different values (D-061). `CABBY_NATS_SERVER_BIN` names the
   `nats-server` executable for embedded NATS (`CABBY_NATS_SERVER` still works).
+- A startup warning when a Redis URL is set but no broadcast adapter reads from Redis (the
+  Docker image takes broadcasts over HTTP only unless `CABBY_BROADCAST_ADAPTER` or
+  `ANYCABLE_BROADCAST_ADAPTER` says otherwise).
 - A built-in health check in the Docker image (`cabby-healthcheck`, `GET /health` on the
   main port).
 - `THIRD_PARTY_LICENSES.md` in every archive and in the image (`/usr/share/doc/cabby/`).
@@ -32,9 +35,6 @@ before.
   and `--help` and deprecation warnings name Cabby (D-059). Scripts that parse the version
   output need updating.
 - `--help` lists the `CABBY_*` names; the `ANYCABLE_*` names still work (D-061).
-- The Docker image sets `CABBY_HOST=0.0.0.0` and `CABBY_BROADCAST_ADAPTER=http` instead of
-  their `ANYCABLE_*` names. Override them with `CABBY_HOST` and `CABBY_BROADCAST_ADAPTER`: an
-  `ANYCABLE_*` value loses to the image's `CABBY_*` one, with a warning.
 - mruby is a cargo feature, off by default and not in release builds. `--metrics_log_formatter`
   needs a build with `--features mruby`, and otherwise stops with an error that says so (D-062).
 

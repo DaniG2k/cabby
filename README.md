@@ -84,8 +84,10 @@ subscriber. Several Cabby nodes can share broadcasts through Redis or NATS.
   docker run --rm -p 8080:8080 -p 8090:8090 ghcr.io/danig2k/cabby:0.2.0 --norpc --public
   ```
 
-  The image listens on `0.0.0.0`, uses HTTP broadcasting, runs as a non-root user and has a
-  health check. Configure it with flags or `CABBY_*` variables.
+  The image listens on `0.0.0.0` and takes broadcasts over HTTP only, so it runs without Redis.
+  It runs as a non-root user and has a health check. Configure it with flags or `CABBY_*`
+  variables (`ANYCABLE_*` works too). To broadcast through Redis, set
+  `CABBY_BROADCAST_ADAPTER` (or `ANYCABLE_BROADCAST_ADAPTER`) to include `redis` or `redisx`.
 - **Prebuilt binaries** for Linux (x86_64 and arm64, glibc 2.28 or newer) and macOS (Apple
   silicon), with checksums, are on the
   [releases page](https://github.com/DaniG2k/cabby-releases/releases). Each archive holds
@@ -347,8 +349,12 @@ AnyCable Pro features are out of scope.
 
 ### Migrating from AnyCable
 
-Swap the `anycable-go` binary (or image) for `cabby`; your `anycable.toml`, `ANYCABLE_*`
-variables and flags keep working, and `anycable-rails` and your channels need no changes. Rename
+Swap the `anycable-go` binary for `cabby`; your `anycable.toml`, `ANYCABLE_*` variables and
+flags keep working, and `anycable-rails` and your channels need no changes. The image
+(`ghcr.io/danig2k/cabby`) differs from a plain binary in two defaults: it listens on `0.0.0.0` and
+takes broadcasts over HTTP only. If your app broadcasts through Redis, set
+`CABBY_BROADCAST_ADAPTER` or `ANYCABLE_BROADCAST_ADAPTER` (for example `http,redisx,redis`);
+Cabby warns at startup when a Redis URL is set but no broadcast adapter uses it. Rename
 to `cabby.toml` and `CABBY_*` when convenient ([`docs/configuration.md`](docs/configuration.md)).
 Two things look different: `cabby --version` prints `cabby 0.2.0 (AnyCable 1.6.21 compatible)`
 instead of `1.6.21`, and Cabby sends no telemetry. The `x-anycable-version` header still says

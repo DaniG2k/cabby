@@ -79,6 +79,16 @@ executable for embedded NATS; it is the only server variable that isn't a flag. 
 harness uses `CABBY_TEST_*`, `CABBY_BENCH_*`, `CABBY_BACKEND` and `CABBY_GO_*`; no flag reads
 those names.
 
+## The Docker image's defaults
+
+The image (`ghcr.io/danig2k/cabby`) sets two defaults with the `ANYCABLE_*` names:
+`ANYCABLE_HOST=0.0.0.0` (so it can be reached from outside the container) and
+`ANYCABLE_BROADCAST_ADAPTER=http` (so it runs without Redis). Override either with `-e` and
+either name, `CABBY_*` or `ANYCABLE_*`, or with the flag. A `CABBY_*` override also logs the
+conflict warning above, which is expected here. If a Redis URL is set but no broadcast adapter
+reads from Redis, Cabby logs `WRN Redis is configured but broadcasts are HTTP only; set
+CABBY_BROADCAST_ADAPTER to add redis or redisx`.
+
 ## Migrating from AnyCable
 
 Nothing has to change: an `anycable.toml` and `ANYCABLE_*` variables keep working. When
