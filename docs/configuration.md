@@ -93,7 +93,15 @@ The image (`ghcr.io/danig2k/cabby`) sets two defaults with the `ANYCABLE_*` name
 either name, `CABBY_*` or `ANYCABLE_*`, or with the flag. A `CABBY_*` override also logs the
 conflict warning above, which is expected here. If a Redis URL is set but no broadcast adapter
 reads from Redis, Cabby logs `WRN Redis is configured but broadcasts are HTTP only; set
-CABBY_BROADCAST_ADAPTER to add redis or redisx`.
+CABBY_BROADCAST_ADAPTER to add redis or redisx`. With the Redis broker (`--broker=redis`), which
+stores history in Redis but doesn't read broadcasts from it, the warning is `WRN broadcasts are
+HTTP only; the Redis broker does not read broadcasts from Redis (set CABBY_BROADCAST_ADAPTER to
+add redisx)`.
+
+With a broker that keeps history (`memory`, `sqlite`, `nats`, `redis`), broadcasts through the
+`redis` (PUBLISH) and `nats` adapters are delivered live but not stored in history, as in the
+AnyCable server; Cabby logs `WRN broadcasts through the redis adapter are delivered live and not
+stored in history; use http or redisx to keep history` (naming the adapters in use).
 
 ## Migrating from AnyCable
 

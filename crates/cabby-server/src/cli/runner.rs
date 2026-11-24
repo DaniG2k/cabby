@@ -322,7 +322,9 @@ impl Runner {
             crate::metrics::log(level, &message, &attrs);
         }
 
-        if let Some(warning) = redis_broadcast_warning(&self.config) {
+        for warning in
+            [redis_broadcast_warning(&self.config), live_only_broadcast_warning(&self.config)].into_iter().flatten()
+        {
             crate::metrics::log(Level::Warn, &warning, &[Attr::new("context", LogValue::String("config".into()))]);
         }
 
@@ -909,16 +911,44 @@ fn default_rpc_controller() -> ControllerFactory {
 /// A warning when a Redis URL is configured (after presets) but no broadcast
 /// adapter reads from Redis: the release image defaults to HTTP-only
 /// broadcasts, so an AnyCable set-up that broadcasts through Redis would
-/// silently receive nothing. The Redis broker explains a Redis URL by itself.
+/// silently receive nothing. With the Redis broker (D-069), Redis is used
+/// whatever the URL, and the warning says that the broker does not read
+/// broadcasts.
 fn redis_broadcast_warning(c: &Config) -> Option<String> {
-    let redis_configured = c.redis.url != Config::new().redis.url;
+    let redis_broker = c.broker.adapter == "redis";
+    let redis_configured = redis_broker || c.redis.url != Config::new().redis.url;
     let redis_broadcasts = c.broadcast_adapters.iter().any(|a| a == "redis" || a == "redisx");
-    if !redis_configured || redis_broadcasts || c.broker.adapter == "redis" {
+    if !redis_configured || redis_broadcasts {
         return None;
     }
     let adapters = if c.broadcast_adapters == ["http"] { "HTTP".to_owned() } else { c.broadcast_adapters.join(",") };
+    if redis_broker {
+        return Some(format!(
+            "broadcasts are {adapters} only; the Redis broker does not read broadcasts from Redis (set CABBY_BROADCAST_ADAPTER to add redisx)"
+        ));
+    }
     Some(format!(
         "Redis is configured but broadcasts are {adapters} only; set CABBY_BROADCAST_ADAPTER to add redis or redisx"
+    ))
+}
+
+/// A warning when a broker that keeps history runs with broadcast adapters
+/// whose messages skip it (D-069): the legacy `redis` (PUBLISH) and `nats`
+/// adapters deliver to the node directly, as upstream does, so their
+/// messages are delivered live but not stored in history.
+fn live_only_broadcast_warning(c: &Config) -> Option<String> {
+    if !matches!(c.broker.adapter.as_str(), "memory" | "sqlite" | "nats" | "redis") {
+        return None;
+    }
+    let live: Vec<&str> =
+        ["redis", "nats"].into_iter().filter(|a| c.broadcast_adapters.iter().any(|b| b == a)).collect();
+    let adapters = match live.as_slice() {
+        [] => return None,
+        [one] => format!("the {one} adapter"),
+        many => format!("the {} adapters", many.join(" and ")),
+    };
+    Some(format!(
+        "broadcasts through {adapters} are delivered live and not stored in history; use http or redisx to keep history"
     ))
 }
 
@@ -1139,9 +1169,17 @@ mod tests {
         assert_eq!(redis_broadcast_warning(&config(&default_url, &["http"])), None);
         assert_eq!(redis_broadcast_warning(&config("redis://redis:6379", &["http", "redis"])), None);
         assert_eq!(redis_broadcast_warning(&config("redis://redis:6379", &["redisx"])), None);
-        let mut redis_broker = config("redis://redis:6379", &["http"]);
+        let mut redis_broker = config(&default_url, &["http"]);
         redis_broker.broker.adapter = "redis".to_owned();
-        assert_eq!(redis_broadcast_warning(&redis_broker), None, "the Redis broker uses the URL");
+        assert_eq!(
+            redis_broadcast_warning(&redis_broker).as_deref(),
+            Some(
+                "broadcasts are HTTP only; the Redis broker does not read broadcasts from Redis (set CABBY_BROADCAST_ADAPTER to add redisx)"
+            ),
+            "Pins D-069"
+        );
+        redis_broker.broadcast_adapters = vec!["http".to_owned(), "redisx".to_owned()];
+        assert_eq!(redis_broadcast_warning(&redis_broker), None);
         assert_eq!(
             redis_broadcast_warning(&config("redis://redis:6379", &["http"])).as_deref(),
             Some(
@@ -1152,6 +1190,37 @@ mod tests {
             redis_broadcast_warning(&config("redis://redis:6379", &["http", "nats"])).as_deref(),
             Some(
                 "Redis is configured but broadcasts are http,nats only; set CABBY_BROADCAST_ADAPTER to add redis or redisx"
+            )
+        );
+    }
+
+    /// Pins D-069: with a broker that keeps history, broadcasts through the
+    /// legacy `redis` and `nats` adapters are delivered live only (as
+    /// upstream), which the server says at startup.
+    #[test]
+    fn live_only_broadcast_adapters_with_a_history_broker_are_reported() {
+        let config = |broker: &str, adapters: &[&str]| {
+            let mut c = Config::new();
+            c.broker.adapter = broker.to_owned();
+            c.broadcast_adapters = adapters.iter().map(|a| (*a).to_owned()).collect();
+            c
+        };
+        assert_eq!(live_only_broadcast_warning(&config("", &["http", "redis"])), None, "no history");
+        assert_eq!(live_only_broadcast_warning(&config("none", &["redis"])), None);
+        assert_eq!(live_only_broadcast_warning(&config("memory", &["http", "redisx"])), None);
+        assert_eq!(
+            live_only_broadcast_warning(&config("memory", &["http", "redis"])).as_deref(),
+            Some(
+                "broadcasts through the redis adapter are delivered live and not stored in history; use http or redisx to keep history"
+            )
+        );
+        for broker in ["sqlite", "nats", "redis"] {
+            assert!(live_only_broadcast_warning(&config(broker, &["redis"])).is_some(), "{broker}");
+        }
+        assert_eq!(
+            live_only_broadcast_warning(&config("nats", &["http", "redis", "nats"])).as_deref(),
+            Some(
+                "broadcasts through the redis and nats adapters are delivered live and not stored in history; use http or redisx to keep history"
             )
         );
     }

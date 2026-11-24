@@ -360,7 +360,8 @@ flags keep working, and `anycable-rails` and your channels need no changes. The 
 (`ghcr.io/danig2k/cabby`) differs from a plain binary in two defaults: it listens on `0.0.0.0` and
 takes broadcasts over HTTP only. If your app broadcasts through Redis, set
 `CABBY_BROADCAST_ADAPTER` or `ANYCABLE_BROADCAST_ADAPTER` (for example `http,redisx,redis`);
-Cabby warns at startup when a Redis URL is set but no broadcast adapter uses it. Rename
+Cabby warns at startup when a Redis URL is set but no broadcast adapter uses it (with
+`--broker=redis`, whenever no broadcast adapter reads from Redis). Rename
 to `cabby.toml` and `CABBY_*` when convenient ([`docs/configuration.md`](docs/configuration.md)).
 Two things look different: `cabby --version` prints `cabby 0.2.0 (AnyCable 1.6.21 compatible)`
 instead of `1.6.21`, and Cabby sends no telemetry. The `x-anycable-version` header still says
