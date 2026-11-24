@@ -7,9 +7,11 @@ with the `mrb` Go build tag on Linux and macOS. This document records the embedd
 (SPEC §3), how the translated tests map Go mechanics to Rust invariants, and how those
 tests run against the Go reference.
 
-Status: implemented. All 58 translated cases (`go_mruby`, `mrb`) and the
-`features/mruby_printers` scenario pass on Cabby; the CLI start line reports
-` (with mruby 1.2.0 (2015-11-17))`, as upstream.
+Status: implemented, behind the cargo feature `mruby`, which is off by default and not in
+release builds (D-062). All 58 translated cases (`go_mruby`, `mrb`) and the
+`features/mruby_printers` scenario pass on Cabby (the test crates enable the feature); with it,
+the CLI start line reports ` (with mruby 1.2.0 (2015-11-17))`, as upstream. Without it,
+`--metrics_log_formatter` stops the server with an error that names the feature.
 
 ## What upstream links
 

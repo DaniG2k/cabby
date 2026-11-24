@@ -312,7 +312,17 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
     let root = root();
     let sut_bin = match backend {
         Backend::Rust => {
-            sh(Command::new("cargo").args(["build", "--quiet", "-p", "cabby-server", "--bin", "cabby"]))?;
+            // The translated mruby cases need the feature (D-062: off by default).
+            sh(Command::new("cargo").args([
+                "build",
+                "--quiet",
+                "-p",
+                "cabby-server",
+                "--bin",
+                "cabby",
+                "--features",
+                "mruby",
+            ]))?;
             root.join("target/debug/cabby")
         }
         Backend::Go => {

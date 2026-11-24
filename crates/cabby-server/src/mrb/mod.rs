@@ -49,7 +49,7 @@ fn expect_ok<T>(r: Result<T, cabby_mruby_sys::Raised>, what: &str) -> T {
     r.unwrap_or_else(|e| panic!("mruby {what} raised: {}", e.message))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mruby"))]
 mod tests {
     //! Behavior where go-mruby reads freed or unchecked memory, aborts or
     //! crashes (deviation D-032 in compat/deviations.md).

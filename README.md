@@ -101,14 +101,14 @@ You need:
 - `protoc`, the Protocol Buffers compiler, for the gRPC bindings (`brew install protobuf` or
   `apt install protobuf-compiler`).
 - A C compiler (Xcode Command Line Tools on macOS, `build-essential` on Debian and Ubuntu). The
-  TLS library compiles some C, and so does the bundled mruby.
+  TLS library compiles some C, and so does mruby if you enable it.
 
 ```sh
 cargo install --locked --git https://github.com/DaniG2k/cabby cabby-server
 ```
 
-This puts the `cabby` binary in `~/.cargo/bin`. To leave out mruby scripting (and its C build),
-add `--no-default-features`.
+This puts the `cabby` binary in `~/.cargo/bin`. mruby scripting for custom metrics output is off
+by default; add `--features mruby` to build it in ([`docs/mruby.md`](docs/mruby.md)).
 
 ## Quick start
 
@@ -393,7 +393,7 @@ affiliated with the AnyCable project or Evil Martians.
 Cabby statically links a C dependency: mruby 1.2.0 (MIT, © mruby developers) with the mruby-env
 gem (MIT, © Internet Initiative Japan Inc.), vendored in
 [`crates/cabby-mruby-sys`](crates/cabby-mruby-sys) for the optional mruby scripting feature (cargo
-feature `mruby`, on by default on Linux and macOS). Their notices are
+feature `mruby`, off by default and not in release builds). Their notices are
 `compat/licenses/mruby-MITL` and `compat/licenses/mruby-env-LICENSE`; the binding's API is modeled
 on go-mruby (see [`docs/mruby.md`](docs/mruby.md)).
 
