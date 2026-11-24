@@ -234,12 +234,12 @@ fn deviation_d071_postgres_peak_reports_latest_position() {
 
 /// regression-for: broker/nats_test.go#TestNATSBroker_Sessions
 /// regression-for: broker/memory_test.go#TestMemory_RestoreSession
-/// note: Deviation D-071: sessions are shared by every node and expire after sessions_ttl on the database clock; touch extends them.
+/// note: Deviation D-071: sessions are shared by every node and expire after sessions_ttl on the database clock (3 s here, expiry observed by polling); touch extends them.
 #[test]
 fn deviation_d071_postgres_sessions() {
     let scope = scope();
     let mut config = new_config();
-    config.sessions_ttl = 1;
+    config.sessions_ttl = 3;
 
     let broker = broker(&scope, &config, None);
     broker.commit_session("test123", &TestCacheable("cache-me".into())).expect("commit");
@@ -248,24 +248,37 @@ fn deviation_d071_postgres_sessions() {
     let restored = another_broker.restore_session("test123").expect("restore");
     assert_eq!(Some(b"cache-me".to_vec()), restored, "Expected to restore session data");
 
-    let_server_ttl_elapse(Duration::from_secs(2));
-    assert_eq!(None, broker.restore_session("test123").expect("restore"));
+    // Expiry, observed by polling (the database clock decides).
+    wait_until_restored_is_none(&broker, "test123");
 
     broker.commit_session("test345", &TestCacheable("cache-me-again".into())).expect("commit");
     assert_eq!(Some(b"cache-me-again".to_vec()), another_broker.restore_session("test345").expect("restore"));
 
-    let_server_ttl_elapse(Duration::from_millis(500));
-    broker.touch_session("test345").expect("touch");
-    let_server_ttl_elapse(Duration::from_millis(500));
-    assert_eq!(Some(b"cache-me-again".to_vec()), another_broker.restore_session("test345").expect("restore"));
-
+    // Touched 1 s in: it expires 3 s after the touch, so 1 s after its original
+    // expiry it is still there.
     let_server_ttl_elapse(Duration::from_secs(1));
-    assert_eq!(None, another_broker.restore_session("test345").expect("restore"));
+    broker.touch_session("test345").expect("touch");
+    let_server_ttl_elapse(Duration::from_secs(2));
+    assert_eq!(
+        Some(b"cache-me-again".to_vec()),
+        another_broker.restore_session("test345").expect("restore"),
+        "the touch extended it"
+    );
+    wait_until_restored_is_none(&another_broker, "test345");
 
     // Touching an expired or unknown session is not an error and revives nothing.
     broker.touch_session("test345").expect("touch");
     broker.touch_session("missing").expect("touch");
     assert_eq!(None, another_broker.restore_session("test345").expect("restore"));
+}
+
+/// Polls until `sid` no longer restores (at most 10 s).
+fn wait_until_restored_is_none(broker: &PostgresBroker, sid: &str) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while broker.restore_session(sid).expect("restore").is_some() {
+        assert!(std::time::Instant::now() < deadline, "{sid} did not expire");
+        thread::sleep(Duration::from_millis(100));
+    }
 }
 
 /// regression-for: broker/nats_test.go#TestNATSBroker_Epoch
