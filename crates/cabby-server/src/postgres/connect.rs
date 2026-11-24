@@ -410,7 +410,17 @@ pub(crate) fn verification(mode: SslMode, tls_verify: bool) -> Verify {
 }
 
 /// Builds the rustls client configuration (ring, TLS 1.2+).
-pub(crate) fn tls_config(verify: Verify, ca_path: &str) -> Result<ClientConfig, String> {
+/// The CA file to verify with and the setting it came from: the flag first,
+/// else `sslrootcert` from the URL; `None` for the system roots
+/// (`sslrootcert=system` means them too, as in libpq).
+pub(crate) fn ca_file(c: &PostgresConfig, sslrootcert: Option<&str>) -> Option<(String, &'static str)> {
+    if !c.tls_ca_cert_path.is_empty() {
+        return Some((c.tls_ca_cert_path.clone(), "--postgres_tls_ca_cert_path"));
+    }
+    sslrootcert.filter(|p| !p.is_empty() && *p != "system").map(|p| (p.to_owned(), "sslrootcert in --postgres_url"))
+}
+
+pub(crate) fn tls_config(verify: Verify, ca: Option<(String, &'static str)>) -> Result<ClientConfig, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let builder = ClientConfig::builder_with_provider(provider.clone())
         .with_protocol_versions(&[&rustls::version::TLS12, &rustls::version::TLS13])
@@ -421,8 +431,8 @@ pub(crate) fn tls_config(verify: Verify, ca_path: &str) -> Result<ClientConfig, 
             .with_custom_certificate_verifier(Arc::new(NoVerification))
             .with_no_client_auth());
     }
-    let native = if ca_path.is_empty() { rustls_native_certs::load_native_certs().certs } else { Vec::new() };
-    let roots = roots(native, ca_path)?;
+    let native = if ca.is_none() { rustls_native_certs::load_native_certs().certs } else { Vec::new() };
+    let roots = roots(native, ca.as_ref().map(|(path, from)| (path.as_str(), *from)))?;
     let webpki = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider)
         .build()
         .map_err(|e| format!("failed to build the TLS verifier: {e}"))?;
@@ -433,12 +443,12 @@ pub(crate) fn tls_config(verify: Verify, ca_path: &str) -> Result<ClientConfig, 
     Ok(builder.dangerous().with_custom_certificate_verifier(verifier).with_no_client_auth())
 }
 
-/// The CA certificates to verify the server with: the file at `ca_path`, or
-/// else the system roots (`native`). None at all is an error naming the
-/// settings that fix it.
-fn roots(native: Vec<CertificateDer<'static>>, ca_path: &str) -> Result<RootCertStore, String> {
+/// The CA certificates to verify the server with: the file `ca` (its path
+/// and the setting it came from), or else the system roots (`native`). None
+/// at all is an error naming the settings that fix it.
+fn roots(native: Vec<CertificateDer<'static>>, ca: Option<(&str, &str)>) -> Result<RootCertStore, String> {
     let mut roots = RootCertStore::empty();
-    if ca_path.is_empty() {
+    let Some((ca_path, from)) = ca else {
         for cert in native {
             let _ = roots.add(cert);
         }
@@ -448,12 +458,11 @@ fn roots(native: Vec<CertificateDer<'static>>, ca_path: &str) -> Result<RootCert
                 .to_owned());
         }
         return Ok(roots);
-    }
-    let pem =
-        std::fs::read(ca_path).map_err(|e| format!("failed to read --postgres_tls_ca_cert_path {ca_path:?}: {e}"))?;
+    };
+    let pem = std::fs::read(ca_path).map_err(|e| format!("failed to read {from} {ca_path:?}: {e}"))?;
     let added = CertificateDer::pem_slice_iter(&pem).flatten().filter(|c| roots.add(c.clone()).is_ok()).count();
     if added == 0 {
-        return Err(format!("no CA certificate found in --postgres_tls_ca_cert_path {ca_path:?}"));
+        return Err(format!("no CA certificate found in {from} {ca_path:?}"));
     }
     Ok(roots)
 }
@@ -562,16 +571,11 @@ impl ConnectSpec {
             ));
         }
         let (parsed, config) = parse(c.url.trim())?;
-        let ca_path = if c.tls_ca_cert_path.is_empty() {
-            parsed.sslrootcert.unwrap_or_default()
-        } else {
-            c.tls_ca_cert_path.clone()
-        };
         let tls = if parsed.sslmode == SslMode::Disable {
             // Never used: the connection is plain.
-            tls_config(Verify::None, "")?
+            tls_config(Verify::None, None)?
         } else {
-            tls_config(verification(parsed.sslmode, c.tls_verify), &ca_path)?
+            tls_config(verification(parsed.sslmode, c.tls_verify), ca_file(c, parsed.sslrootcert.as_deref()))?
         };
         Ok(Self { description: describe(&config), config, tls: MakeRustlsConnect::new(tls), keepalive: c.keepalive() })
     }
@@ -1393,8 +1397,28 @@ mod tests {
     }
 
     #[test]
+    fn ca_errors_name_where_the_path_came_from() {
+        let mut c = PostgresConfig::new();
+        c.url = "postgres://db/app?sslmode=verify-full&sslrootcert=/nonexistent/url-ca.pem".into();
+        let err = ConnectSpec::from_config(&c, "--pubsub=postgres").err().unwrap();
+        assert!(err.contains("sslrootcert in --postgres_url") && err.contains("/nonexistent/url-ca.pem"), "{err}");
+
+        c.tls_ca_cert_path = "/nonexistent/flag-ca.pem".into();
+        let err = ConnectSpec::from_config(&c, "--pubsub=postgres").err().unwrap();
+        assert!(err.contains("--postgres_tls_ca_cert_path") && err.contains("/nonexistent/flag-ca.pem"), "{err}");
+    }
+
+    #[test]
+    fn sslrootcert_system_means_the_system_roots() {
+        let p = parse_url("postgres://db/app?sslmode=verify-full&sslrootcert=system").unwrap();
+        assert_eq!(None, ca_file(&PostgresConfig::new(), p.sslrootcert.as_deref()).map(|(path, _)| path));
+        let p = parse_url("host=db sslrootcert=system").unwrap();
+        assert_eq!(None, ca_file(&PostgresConfig::new(), p.sslrootcert.as_deref()).map(|(path, _)| path));
+    }
+
+    #[test]
     fn missing_system_roots_name_the_settings() {
-        let err = roots(Vec::new(), "").err().unwrap();
+        let err = roots(Vec::new(), None).err().unwrap();
         assert!(err.contains("--postgres_tls_ca_cert_path") && err.contains("--postgres_tls_verify=false"), "{err}");
     }
 
