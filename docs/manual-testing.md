@@ -13,8 +13,8 @@ WebSocket client in `examples/` (`mise exec node@26 -- node …` uses the Node t
 cargo build --release -p cabby-server
 ```
 
-The binary is `target/release/cabby`. `target/release/cabby --help` lists the same flags and
-`ANYCABLE_*` environment variables as AnyCable.
+The binary is `target/release/cabby`. `target/release/cabby --help` lists the same flags as
+AnyCable, with `CABBY_*` environment variables (`ANYCABLE_*` works too).
 
 ## 2. Start Cabby (terminal A)
 
@@ -31,7 +31,7 @@ target/release/cabby --public --broadcast_adapter=http --http_broadcast_port=808
 You should see, among others (times are in your local time zone):
 
 ```text
-INF Starting Cabby 0.1.0 (AnyCable 1.6.21 compatible) (with mruby 1.2.0 (2015-11-17)) (pid: …, open file limit: …, gomaxprocs: …)
+INF Starting Cabby 0.2.0 (AnyCable 1.6.21 compatible) (pid: …, open file limit: …, gomaxprocs: …)
 WRN Server is running in the public mode
 INF Accept broadcast requests at http://localhost:8080/_broadcast (no authorization)
 INF Handle WebSocket connections at http://localhost:8080/cable
@@ -142,8 +142,8 @@ and the server exits with status 0.
 
 ## Next steps
 
-- **With a Rails app:** run Cabby in place of `anycable-go` (same flags and `ANYCABLE_*`
-  variables; drop `--public`). `anycable-rails` and your channels need no changes.
+- **With a Rails app:** run Cabby in place of `anycable-go` (same flags; `CABBY_*` or
+  `ANYCABLE_*` variables; drop `--public`). `anycable-rails` and your channels need no changes.
 - **The full compatibility suite:** `cargo xtask test --backend rust` (needs
   `eval "$(compat/scripts/services.sh start)"` for Redis and NATS).
 - **Benchmarks:** see the README and `compat/scripts/bench-compare.sh`.

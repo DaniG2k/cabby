@@ -2,8 +2,9 @@
 //!
 //! The binary is `SUT_BIN`, or by backend: `target/debug/cabby` (Rust) and
 //! `target/reference-bin/anycable-go` (Go, built by `cargo xtask reference-build`).
-//! Both receive the same AnyCable CLI flags. Every listener gets an isolated port
-//! and the environment is cleared of `ANYCABLE_*` variables.
+//! Both receive the same AnyCable CLI flags. Every listener gets an isolated port,
+//! and the server inherits no `CABBY_*`, `ANYCABLE_*`, `PORT` or `REDIS_URL`
+//! variable apart from [`KEPT_VARS`] and `CABBY_TEST_*` ([`scrub_env`], D-064).
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -18,6 +19,9 @@ use crate::process::Supervised;
 use crate::{Backend, backend, workspace_root};
 
 const START_DEADLINE: Duration = Duration::from_secs(20);
+
+pub use cabby_bench::server_env::{KEPT_VARS, scrub_env, scrubbed};
+
 const IO_DEADLINE: Duration = Duration::from_secs(5);
 
 pub fn sut_binary() -> PathBuf {
@@ -49,15 +53,18 @@ pub struct SutOptions {
     /// configured (upstream `test-conformance-http`/`-embedded`); without a key
     /// it is a fixed port, so turn this off only together with a key.
     pub separate_broadcast_port: bool,
-    /// Pass host and ports as `ANYCABLE_HOST`/`ANYCABLE_PORT`/
-    /// `ANYCABLE_HTTP_BROADCAST_PORT` instead of flags (settings entirely from
+    /// Pass host and ports as `<env_prefix>HOST`/`<env_prefix>PORT`/
+    /// `<env_prefix>HTTP_BROADCAST_PORT` instead of flags (settings entirely from
     /// the environment, like the upstream embedded target).
     pub via_env: bool,
+    /// The prefix of the variables `via_env` sets: `ANYCABLE_` (the default,
+    /// which both servers read) or `CABBY_` (Cabby only, D-061).
+    pub env_prefix: &'static str,
 }
 
 impl Default for SutOptions {
     fn default() -> Self {
-        Self { separate_broadcast_port: true, via_env: false }
+        Self { separate_broadcast_port: true, via_env: false, env_prefix: "ANYCABLE_" }
     }
 }
 
@@ -91,17 +98,14 @@ impl Sut {
         let port = free_port();
         let broadcast_port = if options.separate_broadcast_port { free_port() } else { port };
         let mut cmd = Command::new(sut_binary());
-        for (k, _) in std::env::vars() {
-            if k.starts_with("ANYCABLE_") {
-                cmd.env_remove(k);
-            }
-        }
+        scrub_env(&mut cmd);
         cmd.env("ANYCABLE_DISABLE_TELEMETRY", "true");
         cmd.envs(env.iter().copied());
         if options.via_env {
-            cmd.env("ANYCABLE_HOST", "127.0.0.1").env("ANYCABLE_PORT", port.to_string());
+            let prefix = options.env_prefix;
+            cmd.env(format!("{prefix}HOST"), "127.0.0.1").env(format!("{prefix}PORT"), port.to_string());
             if options.separate_broadcast_port {
-                cmd.env("ANYCABLE_HTTP_BROADCAST_PORT", broadcast_port.to_string());
+                cmd.env(format!("{prefix}HTTP_BROADCAST_PORT"), broadcast_port.to_string());
             }
         } else {
             cmd.arg("--host=127.0.0.1").arg(format!("--port={port}"));
@@ -155,5 +159,28 @@ pub fn handshake_status(addr: SocketAddr, path: &str, headers: &[(&str, &str)]) 
     match code {
         Some(c) => Ok(c),
         None => bail!("malformed status line {line:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pins D-064: servers under test inherit no server configuration.
+    #[test]
+    fn server_config_variables_are_scrubbed() {
+        let vars = [
+            "ANYCABLE_PORT",
+            "CABBY_PORT",
+            "CABBY_REDIS_URL",
+            "CABBY_BACKEND",
+            "CABBY_NATS_SERVER",
+            "CABBY_NATS_SERVER_BIN",
+            "CABBY_TEST_REDIS_URL",
+            "PATH",
+            "PORT",
+        ];
+        assert_eq!(scrubbed(vars), vec!["ANYCABLE_PORT", "CABBY_PORT", "CABBY_REDIS_URL", "CABBY_BACKEND", "PORT"]);
+        assert_eq!(scrubbed(["REDIS_URL", "HOME"]), vec!["REDIS_URL"]);
     }
 }

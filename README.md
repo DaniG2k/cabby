@@ -6,13 +6,14 @@
 
 Cabby is a real-time server for Rails apps (and other backends) that holds your WebSocket
 connections so your app doesn't have to. It is an [AnyCable](https://github.com/anycable/anycable)-compatible
-server written in Rust: the same client protocols, the same RPC contract with your app, and the
-same CLI flags, environment variables and configuration file as the Go server it is ported from.
+server written in Rust: the same client protocols and the same RPC contract with your app as the
+Go server it is ported from, and it still reads that server's CLI flags, `ANYCABLE_*` environment
+variables and `anycable.toml`.
 
-> Cabby passes its full compatibility suite end to end: Action Cable and Pusher clients, SSE,
-> durable streams, Redis, NATS and mruby. Every finding from an
-> [independent review](docs/review/2026-11-fable-review.md) is fixed with a regression test, and
-> the [benchmarks](#benchmarks) come with the scripts to rerun them.
+> Cabby passes its compatibility suite end to end (all but the telemetry case, retired by
+> design): Action Cable and Pusher clients, SSE, durable streams, Redis, NATS and mruby. Every
+> finding from an [independent review](docs/review/2026-11-fable-review.md) is fixed with a
+> regression test, and the [benchmarks](#benchmarks) come with the scripts to rerun them.
 
 ## Why Cabby
 
@@ -56,7 +57,7 @@ subscriber. Several Cabby nodes can share broadcasts through Redis or NATS.
 
 - Action Cable protocol (`actioncable-v1-json`) and its extended version with stream history
 - RPC to your app over HTTP or gRPC
-- Broadcasting via HTTP, Redis (pub/sub or streams) and NATS; multi-node pub/sub via Redis or NATS
+- Broadcasting via HTTP, Redis streams and NATS; multi-node pub/sub via Redis or NATS
 - Reliable streams: history and session recovery after a reconnect
 - SQLite broker (`--broker=sqlite --sqlite_path=/var/lib/cabby/cabby.db`): stream history,
   offsets and sessions survive a graceful restart of a single node, with no Redis or NATS. After
@@ -66,10 +67,6 @@ subscriber. Several Cabby nodes can share broadcasts through Redis or NATS.
 - Server-Sent Events
 - Pusher protocol compatibility, including the Pusher REST API for broadcasts
 - Durable Streams: HTTP catch-up, long polling and SSE
-- Embedded NATS (`--embed_nats`), run as a supervised `nats-server` child process. Cabby looks for
-  `CABBY_NATS_SERVER`, then `nats-server` next to the `cabby` binary, then on `PATH`; until there
-  are release builds, install `nats-server` yourself ([`docs/enats.md`](docs/enats.md))
-- mruby scripting for custom metrics output (cargo feature `mruby`, [`docs/mruby.md`](docs/mruby.md))
 - Prometheus metrics and log lines named as in the Go server, so existing dashboards and alerts
   keep working
 
@@ -84,11 +81,22 @@ subscriber. Several Cabby nodes can share broadcasts through Redis or NATS.
 - **Docker** (linux/amd64 and arm64):
 
   ```sh
-  docker run --rm -p 8080:8080 -p 8090:8090 ghcr.io/danig2k/cabby:0.1.0 --norpc --public
+  docker run --rm -p 8080:8080 -p 8090:8090 ghcr.io/danig2k/cabby:0.2.0 --norpc --public
   ```
+
+  The image listens on `0.0.0.0` and takes broadcasts over HTTP only, so it runs without Redis.
+  It runs as a non-root user and has a health check. Configure it with flags or `CABBY_*`
+  variables (`ANYCABLE_*` works too). To broadcast through Redis, set
+  `CABBY_BROADCAST_ADAPTER` (or `ANYCABLE_BROADCAST_ADAPTER`) to include `redis` or `redisx`.
+  The health check reads the port and the health path from `CABBY_PORT` and `CABBY_HEALTH_PATH`
+  (or their `ANYCABLE_*` forms) and can't see the `--port` and `--health-path` flags: change
+  them with the variables.
 - **Prebuilt binaries** for Linux (x86_64 and arm64, glibc 2.28 or newer) and macOS (Apple
   silicon), with checksums, are on the
-  [releases page](https://github.com/DaniG2k/cabby-releases/releases).
+  [releases page](https://github.com/DaniG2k/cabby-releases/releases). Each archive holds
+  `cabby` and its license notices at the top level.
+- **Kamal:** run Cabby as an accessory next to your app; see
+  [`docs/deploy-kamal.md`](docs/deploy-kamal.md).
 
 Step-by-step instructions and framework guides are at [docs.cabbyhq.com](https://docs.cabbyhq.com/install).
 
@@ -101,14 +109,14 @@ You need:
 - `protoc`, the Protocol Buffers compiler, for the gRPC bindings (`brew install protobuf` or
   `apt install protobuf-compiler`).
 - A C compiler (Xcode Command Line Tools on macOS, `build-essential` on Debian and Ubuntu). The
-  TLS library compiles some C, and so does the bundled mruby.
+  TLS library compiles some C, and so does mruby if you enable it.
 
 ```sh
 cargo install --locked --git https://github.com/DaniG2k/cabby cabby-server
 ```
 
-This puts the `cabby` binary in `~/.cargo/bin`. To leave out mruby scripting (and its C build),
-add `--no-default-features`.
+This puts the `cabby` binary in `~/.cargo/bin`. mruby scripting for custom metrics output is off
+by default; add `--features mruby` to build it in ([`docs/mruby.md`](docs/mruby.md)).
 
 ## Quick start
 
@@ -145,8 +153,10 @@ broadcast one, and your JavaScript client at `ws://localhost:8080/cable`. To use
 run the gem's RPC server (`bundle exec anycable`) and leave out `--rpc_host` (it defaults to
 `localhost:50051`).
 
-Every flag has an `ANYCABLE_*` environment variable, and `--config-path` reads a TOML file.
-`cabby --help` lists them all.
+Every flag has a `CABBY_*` environment variable (`ANYCABLE_*` also works), and Cabby reads
+`cabby.toml` (or `anycable.toml`) from the working directory or `/etc/cabby`. `cabby --help` lists
+the flags; [`docs/configuration.md`](docs/configuration.md) explains the search order and
+precedence.
 
 ## Benchmarks
 
@@ -331,13 +341,41 @@ Cabby is a port of AnyCable's open-source Go server at the commit pinned in
 1.6.21). It was built tests-first: the whole upstream test corpus, 923 cases (Go unit tests,
 Benchi, go-mruby, feature tests and the AnyT conformance suite), was translated to Rust and
 verified against the Go server before any Cabby code was written. 914 cases are verified against
-Go; 9 test behavior Go can't expose and run against Cabby only. All 923 pass against Cabby
+Go; 9 test behavior Go can't expose and run against Cabby only. 922 pass against Cabby; 1 is
+retired by design (telemetry, D-058)
 ([`compat/test-map.json`](compat/test-map.json), summarized by `cargo xtask report`).
 
 Until Cabby has its own documentation, the [AnyCable server docs](https://docs.anycable.io) describe
 its configuration and features. Intended differences from the Go server, such as Redis 6 or
 later for pub/sub, are recorded in [`compat/deviations.md`](compat/deviations.md), most with a pinning test.
 AnyCable Pro features are out of scope.
+
+### Migrating from AnyCable
+
+Swap the `anycable-go` binary for `cabby`; your `anycable.toml`, `ANYCABLE_*` variables and
+flags keep working, and `anycable-rails` and your channels need no changes. The image
+(`ghcr.io/danig2k/cabby`) differs from a plain binary in two defaults: it listens on `0.0.0.0` and
+takes broadcasts over HTTP only. If your app broadcasts through Redis, set
+`CABBY_BROADCAST_ADAPTER` or `ANYCABLE_BROADCAST_ADAPTER` (for example `http,redisx,redis`);
+Cabby warns at startup when a Redis URL is set but no broadcast adapter uses it. Rename
+to `cabby.toml` and `CABBY_*` when convenient ([`docs/configuration.md`](docs/configuration.md)).
+Two things look different: `cabby --version` prints `cabby 0.2.0 (AnyCable 1.6.21 compatible)`
+instead of `1.6.21`, and Cabby sends no telemetry. The `x-anycable-version` header still says
+`1.6.21`.
+
+### Supported for compatibility
+
+These features work, are covered by the translated tests, and stay supported so that existing
+AnyCable deployments can switch without changes. For new setups, prefer the alternative in the
+last column.
+
+| Feature | What it does | For new setups |
+|---|---|---|
+| Embedded NATS (`--embed_nats`) | Runs a `nats-server` as a supervised child process ([`docs/enats.md`](docs/enats.md)). You install `nats-server` yourself; release artifacts don't include it | an external NATS server (`--nats_servers`), for example the official `nats` image |
+| CableReady streams (`--cable_ready`) | Verifies signed CableReady stream names | Turbo Streams (`--turbo_streams`) or signed streams |
+| Legacy Redis pub/sub broadcasting (`--broadcast_adapter=redis`) | Takes broadcasts from a Redis pub/sub channel | `http` or `redisx` (Redis streams) broadcasting |
+| StatsD metrics (`--statsd_host`) | Sends metrics to a StatsD server | Prometheus (`--metrics_http`) |
+| mruby metrics formatters (`--metrics_log_formatter`) | Formats metrics log lines with a Ruby script ([`docs/mruby.md`](docs/mruby.md)). A build feature, off by default and not in release builds | Prometheus, or the default log format |
 
 ## Layout
 
@@ -356,25 +394,32 @@ docs/                  contributor guides, benchmark results, reviews
 
 ## Development
 
-Toolchains are pinned in `mise.toml` (Rust 1.100.0 and protoc). Redis and NATS run in Docker.
-Tests that restart NATS need a `nats-server` binary: set `CABBY_NATS_SERVER_BIN`, or have Go on
-`PATH` and the test kit builds the pinned version.
+Toolchains are pinned in `mise.toml` (Rust 1.100.0 and protoc). Redis and NATS run in Docker;
+`services.sh` exports their addresses as `CABBY_TEST_*`. Tests that restart NATS need a
+`nats-server` binary: set `CABBY_NATS_SERVER_BIN`, or have Go on `PATH` and the test kit builds
+the pinned version. The test crates build `cabby-server` with the `mruby` feature; a plain
+`cargo build -p cabby-server` leaves it out.
 
 ```sh
 mise install
-eval "$(compat/scripts/services.sh start)"   # Redis + NATS for integration tests
+eval "$(compat/scripts/services.sh start)"   # Redis + NATS for integration tests (CABBY_TEST_*)
 cargo xtask test --backend rust         # translated tests against Cabby
 cargo xtask report --by-package
+compat/scripts/check-deps.sh            # dependency licenses and bans (cargo-deny)
 ```
 
-The Go reference server is built and tested in CI. To run it locally, add Go 1.27.3 to
-`mise.toml` (see the comment there), then:
+The Go reference server needs Go 1.27.3 (`mise exec go@1.27.3 -- …`, as below):
 
 ```sh
 cargo xtask reference-checkout          # pinned upstream into compat/reference
 cargo xtask reference-build             # Go reference binary + test bridge
 cargo xtask test --backend go           # translated tests against Go: must pass
 ```
+
+When you add or re-annotate a test under `tests/`, record the manifest with Go:
+`mise exec go@1.27.3 -- cargo xtask inventory`, then `cargo xtask test --backend go --record` and
+`--backend rust --record` (a filter limits both to the new test). Releases are built locally with
+`compat/scripts/release.sh` ([`docs/releasing.md`](docs/releasing.md)).
 
 See [`docs/implementing.md`](docs/implementing.md) and
 [`docs/translating-tests.md`](docs/translating-tests.md).
@@ -389,13 +434,15 @@ derive from AnyCable, AnyT (MIT, © palkan) and go-mruby (MIT, © Mitchell Hashi
 are in [`compat/licenses/`](compat/licenses/). Cabby is an independent implementation, not
 affiliated with the AnyCable project or Evil Martians.
 
-Cabby statically links a C dependency: mruby 1.2.0 (MIT, © mruby developers) with the mruby-env
-gem (MIT, © Internet Initiative Japan Inc.), vendored in
-[`crates/cabby-mruby-sys`](crates/cabby-mruby-sys) for the optional mruby scripting feature (cargo
-feature `mruby`, on by default on Linux and macOS). Their notices are
+Cabby statically links SQLite (public domain), whose C source the `libsqlite3-sys` crate bundles,
+for the SQLite broker; its notice is `compat/licenses/sqlite-PUBLIC-DOMAIN`. With the optional
+mruby scripting feature (cargo feature `mruby`, off by default and not in release builds) it also
+links mruby 1.2.0 (MIT, © mruby developers) with the mruby-env gem (MIT, © Internet Initiative
+Japan Inc.), vendored in [`crates/cabby-mruby-sys`](crates/cabby-mruby-sys). Their notices are
 `compat/licenses/mruby-MITL` and `compat/licenses/mruby-env-LICENSE`; the binding's API is modeled
 on go-mruby (see [`docs/mruby.md`](docs/mruby.md)).
 
 Embedded NATS runs the separate `nats-server` binary (Apache-2.0, © The NATS Authors), which
-Cabby does not include. Release artifacts that bundle `nats-server` next to `cabby`, as
-[`docs/enats.md`](docs/enats.md) suggests, must ship its Apache-2.0 license notice with it.
+Cabby does not include: release archives and the Docker image contain neither `nats-server` nor
+mruby. Every archive and image ships `THIRD_PARTY_LICENSES.md`, the licenses of the Rust crates
+in the binary plus the notices above.

@@ -1,4 +1,4 @@
-//! Files around the database (spec §2, §3, §6): the parent directory (mode
+//! Files around the database: the parent directory (mode
 //! 0700), the database file (0600), the lock file and moving a corrupt
 //! database aside.
 
@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 pub(super) const DIR_MODE: u32 = 0o700;
 pub(super) const FILE_MODE: u32 = 0o600;
-/// How often a held lock is tried again (spec §5 step 1).
+/// How often a held lock is tried again.
 const LOCK_RETRY: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]

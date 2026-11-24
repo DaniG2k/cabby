@@ -1,5 +1,5 @@
 //! The SQLite broker in the runner (Cabby only, deviation D-065): startup
-//! validation, its metrics (spec §7), and a shutdown step that gives the final
+//! validation, its metrics, and a shutdown step that gives the final
 //! write what is left of the shutdown timeout, but at least one second.
 
 use std::sync::Arc;
@@ -22,8 +22,9 @@ pub(super) const DROPPED_SESSION_TOUCH: &str = "sqlite_dropped_session_touch_tot
 pub(super) const DROPPED_SESSION_COMMIT: &str = "sqlite_dropped_session_commit_total";
 
 /// The least time the final write gets, even when the shutdown timeout is
-/// already used up (owner decision for spec §5 step 2). If it still doesn't
-/// finish, the file stays unclean and the next start rotates the epoch.
+/// already used up, so a slow shutdown still gets one try at a clean file. If
+/// it still doesn't finish, the file stays unclean and the next start rotates
+/// the epoch.
 pub(super) const FINAL_FLUSH_FLOOR: Duration = Duration::from_secs(1);
 
 /// The final write's budget: what is left of the shutdown timeout, at least

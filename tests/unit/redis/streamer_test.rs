@@ -1,6 +1,6 @@
 //! upstream file: redis/streamer_test.go
 //!
-//! Real Redis at `CABBY_REDIS_URL` (required; upstream skips without Redis).
+//! Real Redis at `CABBY_TEST_REDIS_URL` (required; upstream skips without Redis).
 //! Upstream uses the fixed stream `__test__` (destroying group `__tg__` in
 //! `init`); here the stream is unique per test, so no cleanup of earlier runs is
 //! needed. Test-side publishing and consumer counting use the testkit's own

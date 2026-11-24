@@ -22,6 +22,9 @@ enum Msg {
     Print(HashMap<String, u64>),
 }
 
+/// Why `--metrics_log_formatter` fails in a build without the `mruby` feature (D-062).
+pub const NO_MRUBY: &str = "--metrics_log_formatter needs mruby, and this cabby was built without it (build with --features mruby; see docs/mruby.md)";
+
 /// Upstream `RubyPrinter`.
 pub struct RubyPrinter {
     path: String,
@@ -36,10 +39,10 @@ impl std::fmt::Debug for RubyPrinter {
 
 impl RubyPrinter {
     /// Upstream `NewCustomPrinter`: fails only when mruby is not compiled in
-    /// (`unsupported`, as upstream without the `mrb` build tag).
+    /// (upstream says `unsupported`; Cabby names the feature, D-062).
     pub fn new(path: &str) -> Result<RubyPrinter, MetricsError> {
         if !mrb::supported() {
-            return Err(MetricsError("unsupported".into()));
+            return Err(MetricsError(NO_MRUBY.into()));
         }
         Ok(RubyPrinter { path: path.to_owned(), tx: Mutex::new(None) })
     }
@@ -149,11 +152,9 @@ mod tests {
     /// each print fails cleanly. Before the mruby binding unwound and checked
     /// what a raise leaves behind, such a formatter crashed the process after
     /// about 1,400 to 4,200 prints (review finding M4).
+    #[cfg(feature = "mruby")]
     #[test]
     fn a_formatter_that_always_raises_survives_10000_prints() {
-        if !mrb::supported() {
-            return;
-        }
         let path = std::env::temp_dir().join(format!("cabby-raising-formatter-{}.rb", std::process::id()));
         std::fs::write(
             &path,
@@ -194,5 +195,17 @@ mod tests {
         let e = module.call("call", &[mrb::Value::Mrb(data)]).expect_err("raises");
         assert_eq!(e.message, "bad k");
         assert!(e.file.ends_with(".rb") && e.line == 3, "{}:{}", e.file, e.line);
+    }
+
+    /// Pins D-062: without the `mruby` feature, the formatter's error names the
+    /// feature. Runs only in a build without mruby (`cargo test -p cabby-server`).
+    #[cfg(not(feature = "mruby"))]
+    #[test]
+    fn deviation_d062_formatter_without_mruby_names_the_feature() {
+        let e = RubyPrinter::new("formatter.rb").expect_err("no mruby in this build");
+        assert_eq!(
+            e.0,
+            "--metrics_log_formatter needs mruby, and this cabby was built without it (build with --features mruby; see docs/mruby.md)"
+        );
     }
 }

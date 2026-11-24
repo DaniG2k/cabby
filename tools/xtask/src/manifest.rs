@@ -75,7 +75,8 @@ pub struct Case {
     pub translation_status: String,
     /// Translated Rust cases against Go: unverified | pass | upstream_failure | upstream_skip | not_observable
     pub reference_status: String,
-    /// Translated Rust cases against Cabby: pending | fail | pass
+    /// Translated Rust cases against Cabby: pending | fail | pass | retired
+    /// (`retired`: removed by an implemented deviation, D-063)
     pub rust_status: String,
     #[serde(default)]
     pub evidence: Vec<String>,
@@ -142,7 +143,7 @@ pub fn report_with(by_package: bool) -> Result<()> {
     report_summary()?;
     if by_package {
         let m = load()?;
-        let mut rows: BTreeMap<String, [usize; 6]> = BTreeMap::new();
+        let mut rows: BTreeMap<String, [usize; 7]> = BTreeMap::new();
         for c in &m.cases {
             let r = rows.entry(package_of(c)).or_default();
             r[0] += 1;
@@ -151,13 +152,14 @@ pub fn report_with(by_package: bool) -> Result<()> {
             r[3] += usize::from(c.reference_status == "pass");
             r[4] += usize::from(c.reference_status == "not_observable");
             r[5] += usize::from(c.rust_status == "pass");
+            r[6] += usize::from(c.rust_status == "retired");
         }
         println!(
-            "\n  {:44} {:>6} {:>10} {:>8} {:>6} {:>7} {:>9}",
-            "package", "cases", "translated", "reviewed", "go", "not_obs", "rust_pass"
+            "\n  {:44} {:>6} {:>10} {:>8} {:>6} {:>7} {:>9} {:>7}",
+            "package", "cases", "translated", "reviewed", "go", "not_obs", "rust_pass", "retired"
         );
         for (k, r) in rows {
-            println!("  {k:44} {:>6} {:>10} {:>8} {:>6} {:>7} {:>9}", r[0], r[1], r[2], r[3], r[4], r[5]);
+            println!("  {k:44} {:>6} {:>10} {:>8} {:>6} {:>7} {:>9} {:>7}", r[0], r[1], r[2], r[3], r[4], r[5], r[6]);
         }
     }
     Ok(())

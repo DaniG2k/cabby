@@ -23,10 +23,16 @@ jobs:
       - name: Toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - run: cargo fmt --all -- --check
+      # mruby on: the test crates enable it, and feature unification applies.
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # mruby off: the default and release build (D-062). Keep `-p cabby-server`
+      # alone here, or unification turns mruby back on.
+      - run: cargo clippy -p cabby-server --all-targets -- -D warnings
       # Every crate's unit tests, including the cabby-server deviation pins,
       # and the mruby binding's memory-safety regression tests.
       - run: cargo test --workspace --lib --bins
+      # cabby-server without mruby: runs the D-062 pin.
+      - run: cargo test -p cabby-server --lib --bins
       - run: cargo test -p cabby-mruby-sys --tests
       - run: cargo xtask check-inputs
       - run: cargo xtask reference-checkout

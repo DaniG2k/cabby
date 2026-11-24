@@ -1119,10 +1119,17 @@ mod tests {
         NatsConfig { servers: format!("nats://127.0.0.1:{port}"), ..NatsConfig::new() }
     }
 
-    /// The test-services `nats-server` (built by the test kit), if present.
+    /// The `nats-server` for these tests: `CABBY_NATS_SERVER_BIN`, then
+    /// `CABBY_NATS_SERVER` (as the server reads them), else the test-services
+    /// binary (built by the test kit), if present.
     fn nats_server_binary() -> Option<std::path::PathBuf> {
         let built = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-services/nats-server");
-        std::env::var_os("CABBY_NATS_SERVER").map(std::path::PathBuf::from).or(Some(built)).filter(|p| p.is_file())
+        ["CABBY_NATS_SERVER_BIN", "CABBY_NATS_SERVER"]
+            .iter()
+            .find_map(|k| std::env::var_os(k).filter(|p| !p.is_empty()))
+            .map(std::path::PathBuf::from)
+            .or(Some(built))
+            .filter(|p| p.is_file())
     }
 
     /// Before JetStream is initialized (here: never started), operations that

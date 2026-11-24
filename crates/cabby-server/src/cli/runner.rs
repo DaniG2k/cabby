@@ -33,7 +33,7 @@ use super::{
     BroadcastHandler, Broadcaster, BroadcastersFactory, Broker, BrokerFactory, CliError, ControllerFactory, LogSink,
     RunnerOption, Shutdownable, Subscriber, SubscriberFactory, SubscriberHandler,
 };
-use crate::config::{Config, EnvMap};
+use crate::config::{Config, EnvMap, StartupNote};
 use crate::metrics::{Instrumenter, Metrics, StatsdWriter};
 use crate::node::{DisconnectQueue, Disconnector, Node, NodeOption, NoopDisconnectQueue, NullController};
 use crate::rpc::Context;
@@ -90,7 +90,6 @@ pub struct Runner {
     subscriber_factory: Option<SubscriberSource>,
     broker_factory: Option<BrokerSource>,
     broadcasters_factory: Option<BroadcastersSource>,
-    telemetry: Option<crate::telemetry::Config>,
     metrics: Arc<Metrics>,
     shutdownables: Vec<Arc<dyn Shutdownable>>,
     shutdown_ctx: ShutdownContext,
@@ -136,7 +135,6 @@ impl Runner {
             subscriber_factory: None,
             broker_factory: None,
             broadcasters_factory: None,
-            telemetry: None,
             metrics: Arc::new(Metrics::new(Vec::new(), 0)),
             shutdownables: Vec::new(),
             shutdown_ctx: ShutdownContext::new(timeout),
@@ -169,7 +167,6 @@ impl Runner {
                     self.broadcasters_factory = Some(BroadcastersSource::Custom(factory));
                 }
                 RunnerOption::DefaultBroadcaster => self.broadcasters_factory = Some(BroadcastersSource::Default),
-                RunnerOption::Telemetry(props) => self.set_telemetry(props)?,
             }
         }
 
@@ -253,27 +250,6 @@ impl Runner {
         Ok(())
     }
 
-    /// Upstream `WithTelemetry(props...)`.
-    fn set_telemetry(&mut self, props: Vec<String>) -> Result<(), CliError> {
-        let env = crate::telemetry::ProcessEnv;
-        if crate::telemetry::EnvSource::var(&env, "ANYCABLE_DISABLE_TELEMETRY").as_deref() == Some("true") {
-            self.telemetry = None;
-            return Ok(());
-        }
-        let mut config = crate::telemetry::Config::new(&env);
-        if let Some(url) = crate::telemetry::EnvSource::var(&env, "ANYCABLE_TELEMETRY_URL").filter(|u| !u.is_empty()) {
-            config.endpoint = url;
-        }
-        if !props.len().is_multiple_of(2) {
-            return Err(illegal_argument("telemetry properties should be passed as pairs of key and value"));
-        }
-        for pair in props.chunks(2) {
-            config.custom_props.insert(pair[0].clone(), pair[1].clone());
-        }
-        self.telemetry = Some(config);
-        Ok(())
-    }
-
     fn init_metrics(&self) -> Result<Metrics, crate::metrics::MetricsError> {
         let config = crate::metrics::Config::from(&self.config.metrics);
         let m = Metrics::from_config_with_server_host(&config, &self.config.server.host)?;
@@ -338,6 +314,14 @@ impl Runner {
                     &[],
                 );
             }
+        }
+        for note in &self.config.startup_notes {
+            let (level, message, attrs) = note_record(note);
+            crate::metrics::log(level, &message, &attrs);
+        }
+
+        if let Some(warning) = redis_broadcast_warning(&self.config) {
+            crate::metrics::log(Level::Warn, &warning, &[Attr::new("context", LogValue::String("config".into()))]);
         }
 
         if self.config.public_mode {
@@ -481,28 +465,6 @@ impl Runner {
             let (n, ctx) = (node.clone(), self.shutdown_ctx.clone());
             vec![Arc::new(ShutdownFn(move || n.shutdown(&ctx.get()).map_err(|e| CliError(e.0))))]
         };
-
-        if let Some(tconfig) = &self.telemetry {
-            let tracker = Arc::new(crate::telemetry::Tracker::new(
-                metrics.clone(),
-                &crate::telemetry::AppConfig::from_config(&self.config),
-                tconfig,
-                Arc::new(crate::telemetry::ProcessEnv),
-                std::env::args().collect(),
-            ));
-            if tracker.enabled() {
-                crate::metrics::log(
-                    Level::Info,
-                    &tracker.announce(),
-                    &[Attr::new("context", LogValue::String("telemetry".into()))],
-                );
-                let collector = tracker.clone();
-                self.runtime.spawn(async move { collector.collect().await });
-                let runtime = self.runtime.clone();
-                self.shutdownables
-                    .push(Arc::new(ShutdownFn(move || block_on(&runtime, tracker.shutdown()).map_err(CliError))));
-            }
-        }
 
         let subscriber = self.new_subscriber(&node).map_err(|e| decorate(e, "couldn't configure pub/sub"))?;
 
@@ -931,6 +893,42 @@ fn default_rpc_controller() -> ControllerFactory {
     })
 }
 
+/// A warning when a Redis URL is configured (after presets) but no broadcast
+/// adapter reads from Redis: the release image defaults to HTTP-only
+/// broadcasts, so an AnyCable set-up that broadcasts through Redis would
+/// silently receive nothing.
+fn redis_broadcast_warning(c: &Config) -> Option<String> {
+    let redis_configured = c.redis.url != Config::new().redis.url;
+    let redis_broadcasts = c.broadcast_adapters.iter().any(|a| a == "redis" || a == "redisx");
+    if !redis_configured || redis_broadcasts {
+        return None;
+    }
+    let adapters = if c.broadcast_adapters == ["http"] { "HTTP".to_owned() } else { c.broadcast_adapters.join(",") };
+    Some(format!(
+        "Redis is configured but broadcasts are {adapters} only; set CABBY_BROADCAST_ADAPTER to add redis or redisx"
+    ))
+}
+
+/// The log record of a start-up note (D-060, D-061). An environment conflict
+/// names both variables and never their values, which may be secrets.
+fn note_record(note: &StartupNote) -> (Level, String, Vec<Attr>) {
+    let context = Attr::new("context", LogValue::String("config".into()));
+    match note {
+        StartupNote::IgnoredConfigFile { path, used } => (
+            Level::Debug,
+            "configuration file ignored".to_owned(),
+            vec![
+                Attr::new("path", LogValue::String(path.clone())),
+                Attr::new("used", LogValue::String(used.clone())),
+                context,
+            ],
+        ),
+        StartupNote::EnvConflict { cabby, anycable } => {
+            (Level::Warn, format!("both {cabby} and {anycable} are set; using {cabby}"), vec![context])
+        }
+    }
+}
+
 /// Upstream `initMRuby`: the mruby version suffix of the start line, e.g.
 /// ` (with mruby 1.2.0 (2015-11-17))`; empty without mruby support.
 fn mruby_support() -> String {
@@ -1002,5 +1000,66 @@ impl Embedded {
             shutdownable.shutdown()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pins D-060: an ignored configuration file is logged at debug level.
+    #[test]
+    fn startup_notes_are_logged() {
+        let (level, message, attrs) = note_record(&StartupNote::IgnoredConfigFile {
+            path: "./anycable.toml".into(),
+            used: "/etc/cabby/cabby.toml".into(),
+        });
+        assert_eq!((level, message.as_str()), (Level::Debug, "configuration file ignored"));
+        assert_eq!(
+            attrs,
+            vec![
+                Attr::new("path", LogValue::String("./anycable.toml".into())),
+                Attr::new("used", LogValue::String("/etc/cabby/cabby.toml".into())),
+                Attr::new("context", LogValue::String("config".into())),
+            ]
+        );
+    }
+
+    /// Pins D-061: a conflict names both variables and never their values.
+    #[test]
+    fn env_conflicts_are_warnings_without_values() {
+        let (level, message, attrs) =
+            note_record(&StartupNote::EnvConflict { cabby: "CABBY_SECRET".into(), anycable: "ANYCABLE_SECRET".into() });
+        assert_eq!(level, Level::Warn);
+        assert_eq!(message, "both CABBY_SECRET and ANYCABLE_SECRET are set; using CABBY_SECRET");
+        assert_eq!(attrs, vec![Attr::new("context", LogValue::String("config".into()))]);
+    }
+
+    /// A Redis URL without a Redis broadcast adapter is reported once: the
+    /// release image defaults to HTTP-only broadcasts.
+    #[test]
+    fn redis_without_a_redis_broadcast_adapter_is_reported() {
+        let config = |url: &str, adapters: &[&str]| {
+            let mut c = Config::new();
+            c.redis.url = url.to_owned();
+            c.broadcast_adapters = adapters.iter().map(|a| (*a).to_owned()).collect();
+            c
+        };
+        let default_url = Config::new().redis.url;
+        assert_eq!(redis_broadcast_warning(&config(&default_url, &["http"])), None);
+        assert_eq!(redis_broadcast_warning(&config("redis://redis:6379", &["http", "redis"])), None);
+        assert_eq!(redis_broadcast_warning(&config("redis://redis:6379", &["redisx"])), None);
+        assert_eq!(
+            redis_broadcast_warning(&config("redis://redis:6379", &["http"])).as_deref(),
+            Some(
+                "Redis is configured but broadcasts are HTTP only; set CABBY_BROADCAST_ADAPTER to add redis or redisx"
+            )
+        );
+        assert_eq!(
+            redis_broadcast_warning(&config("redis://redis:6379", &["http", "nats"])).as_deref(),
+            Some(
+                "Redis is configured but broadcasts are http,nats only; set CABBY_BROADCAST_ADAPTER to add redis or redisx"
+            )
+        );
     }
 }

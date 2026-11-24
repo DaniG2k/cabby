@@ -1,4 +1,4 @@
-//! Startup (spec §5, §6, §7): the lock, opening and checking the file, the
+//! Startup: the lock, opening and checking the file, the
 //! epoch, and loading streams and sessions into the memory broker before
 //! Cabby accepts connections.
 
@@ -28,7 +28,7 @@ pub enum Previous {
     Corrupt(PathBuf),
 }
 
-/// What the loader restored (spec §7's startup line).
+/// What the loader restored (the startup line).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadReport {
     pub messages: usize,
@@ -89,7 +89,7 @@ pub(super) fn load(
     })?;
 
     // Corruption can show at open (quick_check) or only while reading; either
-    // way the file is moved aside once and a new one started (spec §6).
+    // way the file is moved aside once and a new one started.
     // Nothing reaches the memory broker until the whole file was read.
     let (mut conn, mut moved) = match open_file(path) {
         Ok(conn) => (conn, None),

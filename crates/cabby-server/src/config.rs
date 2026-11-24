@@ -200,6 +200,20 @@ pub struct Config {
     pub config_file_path: Option<PathBuf>,
     /// Configuration file keys that match no setting (dotted paths).
     pub unknown_config_keys: Vec<String>,
+    /// Start-up messages found while the configuration is parsed, before the
+    /// logger exists; the runner logs them (D-060, D-061). Never written to a
+    /// configuration file.
+    pub startup_notes: Vec<StartupNote>,
+}
+
+/// A start-up message recorded while parsing (see [`Config::startup_notes`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartupNote {
+    /// `path` exists but ranks below the configuration file in use (D-060).
+    IgnoredConfigFile { path: String, used: String },
+    /// `CABBY_<X>` and `ANYCABLE_<X>` are both set, to different values; the
+    /// `CABBY_*` value is used (D-061). Values are never recorded.
+    EnvConflict { cabby: String, anycable: String },
 }
 
 // Untagged upstream fields decode by their Go names (case-insensitively);
@@ -532,7 +546,7 @@ impl Config {
             self.broadcast_adapters = vec!["http".to_owned()];
         }
 
-        if let Some(rpc_name) = env.get("ANYCABLE_FLY_RPC_APP_NAME")
+        if let Some(rpc_name) = env.get("CABBY_FLY_RPC_APP_NAME").or_else(|| env.get("ANYCABLE_FLY_RPC_APP_NAME"))
             && self.rpc.host == defaults.rpc.host
         {
             self.rpc.host = format!("dns:///{region}.{rpc_name}.internal:50051");
@@ -604,6 +618,25 @@ mod tests {
         assert!(id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
     }
 
+    /// Pins D-061: the Fly preset reads `CABBY_FLY_RPC_APP_NAME`, then
+    /// `ANYCABLE_FLY_RPC_APP_NAME`.
+    #[test]
+    fn deviation_d061_fly_rpc_app_name() {
+        let rpc_host = |extra: &[(&str, &str)]| {
+            let env: EnvMap = [("FLY_APP_NAME", "app"), ("FLY_ALLOC_ID", "1234"), ("FLY_REGION", "ams")]
+                .iter()
+                .chain(extra)
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect();
+            let mut c = Config::new();
+            c.load_presets(&env).expect("presets");
+            c.rpc.host
+        };
+        let both = [("CABBY_FLY_RPC_APP_NAME", "rpc-a"), ("ANYCABLE_FLY_RPC_APP_NAME", "rpc-b")];
+        assert_eq!(rpc_host(&both), "dns:///ams.rpc-a.internal:50051");
+        assert_eq!(rpc_host(&[("ANYCABLE_FLY_RPC_APP_NAME", "rpc-b")]), "dns:///ams.rpc-b.internal:50051");
+    }
+
     #[test]
     fn atoi_errors_match_go() {
         assert_eq!(go_atoi("42"), Ok(42));
@@ -634,7 +667,7 @@ mod tests {
         assert_eq!("/data/cabby.db", back.sqlite.path);
     }
 
-    /// Pins spec §2: `--presets=broker` only fills in a default broker.
+    /// Pins D-065: `--presets=broker` only fills in a default broker.
     #[test]
     fn broker_preset_keeps_an_explicit_sqlite_broker() {
         let mut c = Config::new();

@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "cabby-bench"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "futures-util",
@@ -241,7 +241,7 @@ dependencies = [
 
 [[package]]
 name = "cabby-compat"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64",
  "cabby-bench",
@@ -258,7 +258,7 @@ dependencies = [
 
 [[package]]
 name = "cabby-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-nats",
  "base64",
@@ -281,14 +281,14 @@ dependencies = [
 
 [[package]]
 name = "cabby-mruby-sys"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "cabby-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arc-swap",
  "async-nats",
@@ -322,7 +322,7 @@ dependencies = [
 
 [[package]]
 name = "cabby-testkit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -2329,7 +2329,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "cabby-core",

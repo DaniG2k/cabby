@@ -109,7 +109,43 @@ pub fn check_inputs() -> Result<()> {
         count += 1;
     }
     println!("vendored mruby matches SHA256SUMS ({count} files)");
+
+    let hits = forbidden_strings(&root().join("crates"))?;
+    if !hits.is_empty() {
+        bail!("telemetry strings under crates/ (D-058):\n{}", hits.join("\n"));
+    }
+    println!("no telemetry strings under crates/ (D-058)");
     Ok(())
+}
+
+/// Strings that must not appear in Cabby's sources: D-058 removed telemetry, and
+/// nothing may post to AnyCable's telemetry service again.
+const FORBIDDEN_IN_CRATES: &[&str] = &["telemetry.anycable.io", "ANYCABLEPLUS_APP_NAME"];
+
+/// `path:line: string` for every forbidden string in the `.rs` and `.toml` files under `dir`.
+fn forbidden_strings(dir: &Path) -> Result<Vec<String>> {
+    let mut hits = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for entry in std::fs::read_dir(&d).with_context(|| format!("reading {}", d.display()))? {
+            let path = entry?.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !path.extension().is_some_and(|x| x == "rs" || x == "toml") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+            for (i, line) in text.lines().enumerate() {
+                for s in FORBIDDEN_IN_CRATES.iter().filter(|s| line.contains(*s)) {
+                    hits.push(format!("{}:{}: {s}", path.display(), i + 1));
+                }
+            }
+        }
+    }
+    hits.sort();
+    Ok(hits)
 }
 
 /// Pinned in compat/upstream.lock ([images] ruby_2_7).
@@ -140,4 +176,22 @@ pub fn build_mruby() -> Result<()> {
     let sum = sha256_file(&lib)?;
     println!("built libmruby.a (sha256 {sum})");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forbidden_strings_are_found() {
+        let dir = std::env::temp_dir().join(format!("cabby-xtask-forbidden-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).expect("temp dir");
+        std::fs::write(dir.join("src/clean.rs"), "const URL: &str = \"https://example.com\";\n").expect("write");
+        std::fs::write(dir.join("src/dirty.rs"), "// a\nconst URL: &str = \"https://telemetry.anycable.io\";\n")
+            .expect("write");
+        std::fs::write(dir.join("notes.md"), "telemetry.anycable.io\n").expect("write");
+        let hits = forbidden_strings(&dir).expect("scan");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(hits, vec![format!("{}:2: telemetry.anycable.io", dir.join("src/dirty.rs").display())]);
+    }
 }

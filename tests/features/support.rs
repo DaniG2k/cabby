@@ -79,17 +79,13 @@ pub struct Output {
 }
 
 /// `run :name, cmd, env:, clean_env: true`: runs the SUT binary to completion
-/// with every `ANYCABLE_*` variable removed (nothing injected),
+/// with the server configuration of the test process removed ([`cabby_testkit::sut::scrub_env`]; nothing injected),
 /// within [`RUN_TIMEOUT`], draining both pipes concurrently (see
 /// compat/baseline/README.md on the runner's pipe deadlock). A pending marker
 /// from the Rust stub is re-raised.
 pub fn run_sut(args: &[&str], env: &[(&str, &str)], dir: &std::path::Path) -> Output {
     let mut cmd = Command::new(sut_binary());
-    for (k, _) in std::env::vars() {
-        if k.starts_with("ANYCABLE_") {
-            cmd.env_remove(k);
-        }
-    }
+    cabby_testkit::sut::scrub_env(&mut cmd);
     cmd.envs(env.iter().copied()).args(args).current_dir(dir);
     let mut child = cmd
         .stdin(Stdio::null())

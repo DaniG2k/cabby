@@ -2,7 +2,7 @@
 //!
 //! Upstream starts an embedded NATS server (`enats.NewService`) on the default
 //! port. Embedded NATS is a separate milestone (SPEC.md §3), so these tests use
-//! an external server: the shared one at `CABBY_NATS_URL` (with unique subjects
+//! an external server: the shared one at `CABBY_TEST_NATS_URL` (with unique subjects
 //! per test) and, for the restart test, a private `nats-server` process.
 //! Subscription readiness is read from the server's monitoring endpoint
 //! (`/subsz`) instead of subscriber internals plus a 100 ms sleep.

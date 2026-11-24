@@ -1,4 +1,4 @@
-//! The writer thread (spec §3, §5, §6).
+//! The writer thread.
 //!
 //! Live delivery never waits for the disk: a failing disk only fills the
 //! bounded queue (which then drops history first) and the log (the first
@@ -17,7 +17,7 @@ use super::{SqliteObserver, log, units};
 use crate::broker::{Clock, Config};
 use crate::{log_error, log_info, log_warn};
 
-/// A batch is written as soon as this many ops are queued (spec §3).
+/// A batch is written as soon as this many ops are queued.
 pub(super) const BATCH_SIZE: usize = 1_000;
 /// Pause between attempts of the final write.
 const FINAL_RETRY: Duration = Duration::from_millis(100);
@@ -29,7 +29,7 @@ pub(super) struct Database {
     pub(super) path: PathBuf,
 }
 
-/// The persister's intervals (spec §3, §6), fixed in production.
+/// The persister's intervals, fixed in production.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Timing {
     /// A partial batch is written after this long.

@@ -87,6 +87,31 @@ When behavior is **externally observable** (HTTP status, WebSocket frames, CLI o
 consider a `tests/conformance/` scenario using `cabby_testkit::sut::Sut`, linked with
 `/// external-for:`.
 
+## Retiring a translated case
+
+A translated case can be retired only for a deliberate product decision that has an implemented
+deviation, never because a case is hard to pass. The first one is the telemetry test (D-058).
+Deleting the test doesn't work: `cargo xtask inventory` rediscovers the upstream case and resets it
+to `unreviewed`/`pending`.
+
+1. Record the deviation, implement it and move it to "Implemented in Cabby" in
+   `compat/deviations.md`.
+2. Make every **Rust arm** of the case's facade panic with the marker, naming the deviation:
+
+   ```rust
+   Backend::Rust => panic!("retired: D-058: Cabby has no telemetry"),
+   ```
+
+   If the facade re-exported Cabby types that no longer exist, give it local types with the same
+   fields. The translated test body and the Go arms stay byte-for-byte unchanged.
+3. Run `cargo xtask test --backend rust --record`. The runner records `rust_status: retired` only
+   if the case was `pass` and the deviation is implemented. Without `--record`, a newly retired case
+   is an error.
+
+A retired case must stay retired: any other outcome is a `RETIRED` error, and the marker on the
+Go backend is a `RETIRED-ON-GO` error. `cargo xtask report --by-package` lists retired cases in
+their own column.
+
 ## Ruby scenarios (AnyT, features)
 
 AnyT scenarios live in `tests/conformance/anyt_*.rs`: bodies in `anyt_core.rs` / `anyt_ext.rs`,

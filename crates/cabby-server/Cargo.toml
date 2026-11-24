@@ -11,10 +11,18 @@ license.workspace = true
 name = "cabby"
 path = "src/main.rs"
 
+# The container image's HEALTHCHECK (distroless has no shell or curl).
+[[bin]]
+name = "cabby-healthcheck"
+path = "src/bin/cabby-healthcheck.rs"
+
 [features]
-default = ["mruby"]
-# Embedded mruby scripting (upstream's `mrb` build tag): builds the vendored
-# mruby 1.2.0 on Linux and macOS. Without it `mrb::supported()` is false.
+default = []
+# Embedded mruby scripting (upstream's `mrb` build tag), off by default and in
+# release builds (D-062): builds the vendored mruby 1.2.0 on Linux and macOS.
+# Without it `mrb::supported()` is false and `--metrics_log_formatter` fails.
+# The test crates enable it, so `cargo build --workspace` has it through feature
+# unification: build releases with `-p cabby-server`.
 mruby = ["cabby-mruby-sys/vendored"]
 
 [dependencies]

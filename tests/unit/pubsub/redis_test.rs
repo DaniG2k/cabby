@@ -1,6 +1,6 @@
 //! upstream file: pubsub/redis_test.go
 //!
-//! Real Redis at `CABBY_REDIS_URL` (required; upstream skips without Redis).
+//! Real Redis at `CABBY_TEST_REDIS_URL` (required; upstream skips without Redis).
 //! Each test uses its own channel prefix and ACL user (see
 //! `cabby_testkit::services`), so channel names are `<prefix>:<upstream name>`.
 //! Upstream also sets the unexported, test-only `trackingEvents` flag for its

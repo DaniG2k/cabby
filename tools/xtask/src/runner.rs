@@ -15,11 +15,16 @@
 //! * against Go, every case must keep its recorded reference status (`pass`,
 //!   `not_observable`, `upstream_failure`); a change is an error until
 //!   recorded with `--record`.
+//! * a Rust facade arm that panics with `retired: D-NNN: …` retires its case
+//!   (`rust_status: retired`, D-063): only a recorded `pass` may become
+//!   `retired`, only under `--record`, and only when D-NNN is listed under
+//!   "Implemented in Cabby" in `compat/deviations.md`; a retired case must stay
+//!   retired, and the marker is an error on the Go backend.
 //!
 //! `--record` only updates cases whose tests all ran in that invocation, so a
 //! filtered run never promotes a case from a partial result.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -45,10 +50,77 @@ enum Outcome {
     NotObservable,
     /// An `/// issue:` test failed on Go: the upstream defect it pins.
     UpstreamFailure,
+    /// A Rust facade arm panicked with `retired: D-NNN: <reason>`: a product
+    /// decision recorded as deviation D-NNN removed the behavior (D-063).
+    Retired(u16),
 }
 
 /// Marker used by Go facade arms for behavior the reference cannot expose.
 pub const NOT_OBSERVABLE: &str = "not_observable:";
+
+/// Marker used by Rust facade arms for a case retired by a deviation (D-063):
+/// `retired: D-058: Cabby has no telemetry`.
+pub const RETIRED: &str = "retired: D-";
+
+/// The deviation number after a `retired: D-NNN` marker in a failure section.
+fn retired_id(text: &str) -> Option<u16> {
+    let rest = &text[text.find(RETIRED)? + RETIRED.len()..];
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    if digits.len() == 3 { digits.parse().ok() } else { None }
+}
+
+/// Deviation numbers listed under "## Implemented in Cabby" in `compat/deviations.md`.
+fn implemented_deviations(markdown: &str) -> BTreeSet<u16> {
+    let mut in_section = false;
+    let mut ids = BTreeSet::new();
+    for line in markdown.lines() {
+        if let Some(heading) = line.strip_prefix("## ") {
+            in_section = heading.starts_with("Implemented in Cabby");
+            continue;
+        }
+        if in_section
+            && let Some(id) = line.strip_prefix("| D-").and_then(|r| r.split(' ').next()).and_then(|n| n.parse().ok())
+        {
+            ids.insert(id);
+        }
+    }
+    ids
+}
+
+/// An error for a marker the backend may not report: `not_observable:` belongs
+/// to Go facade arms, `retired:` to Rust facade arms.
+fn marker_error(backend: Backend, o: Outcome) -> Option<(&'static str, &'static str)> {
+    match (backend, o) {
+        (Backend::Rust, Outcome::NotObservable) => {
+            Some(("NOT-OBSERVABLE-ON-RUST", "only Go facade arms may use this marker"))
+        }
+        (Backend::Go, Outcome::Retired(_)) => Some(("RETIRED-ON-GO", "only Rust facade arms may use this marker")),
+        _ => None,
+    }
+}
+
+/// The `retired` rules on the Rust backend (D-063). `None`: neither the outcome
+/// nor the recorded status is `retired`, so the ordinary rules apply.
+/// `Some(Ok(true))`: record `retired`; `Some(Ok(false))`: nothing changes;
+/// `Some(Err(why))`: a compatibility error.
+fn retired_rule(recorded: &str, o: Outcome, implemented: &BTreeSet<u16>, record: bool) -> Option<Result<bool, String>> {
+    let not_implemented =
+        |id: u16| format!("retired by D-{id:03}, which is not under \"Implemented in Cabby\" in compat/deviations.md");
+    match (recorded, o) {
+        ("retired", Outcome::Retired(id)) if !implemented.contains(&id) => Some(Err(not_implemented(id))),
+        ("retired", Outcome::Retired(_)) => Some(Ok(false)),
+        ("retired", other) => {
+            Some(Err(format!("recorded retired, now {}; a retired case stays retired", status_str(other))))
+        }
+        ("pass", Outcome::Retired(id)) if !implemented.contains(&id) => Some(Err(not_implemented(id))),
+        ("pass", Outcome::Retired(_)) if record => Some(Ok(true)),
+        ("pass", Outcome::Retired(id)) => Some(Err(format!("retired by D-{id:03}; review and record with --record"))),
+        (_, Outcome::Retired(id)) => {
+            Some(Err(format!("retired by D-{id:03}, but only a recorded pass may be retired")))
+        }
+        _ => None,
+    }
+}
 
 /// (test target name, executable path)
 fn test_binaries() -> Result<Vec<(String, String)>> {
@@ -188,6 +260,8 @@ fn parse(output: &str) -> BTreeMap<String, Outcome> {
                 results.insert(name, Outcome::Pending);
             } else if text.contains(&format!("not implemented: {NOT_OBSERVABLE}")) {
                 results.insert(name, Outcome::NotObservable);
+            } else if let Some(id) = retired_id(&text) {
+                results.insert(name, Outcome::Retired(id));
             }
         }
     }
@@ -201,12 +275,15 @@ fn status_str(o: Outcome) -> &'static str {
         Outcome::Fail | Outcome::Ignored => "fail",
         Outcome::NotObservable => "not_observable",
         Outcome::UpstreamFailure => "upstream_failure",
+        Outcome::Retired(_) => "retired",
     }
 }
 
 fn combine(outcomes: &[Outcome]) -> Outcome {
     if outcomes.iter().any(|o| matches!(o, Outcome::Fail | Outcome::Ignored)) {
         Outcome::Fail
+    } else if let Some(retired) = outcomes.iter().find(|o| matches!(o, Outcome::Retired(_))) {
+        *retired
     } else if outcomes.contains(&Outcome::NotObservable) {
         Outcome::NotObservable
     } else if outcomes.contains(&Outcome::UpstreamFailure) {
@@ -236,7 +313,17 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
     let root = root();
     let sut_bin = match backend {
         Backend::Rust => {
-            sh(Command::new("cargo").args(["build", "--quiet", "-p", "cabby-server", "--bin", "cabby"]))?;
+            // The translated mruby cases need the feature (D-062: off by default).
+            sh(Command::new("cargo").args([
+                "build",
+                "--quiet",
+                "-p",
+                "cabby-server",
+                "--bin",
+                "cabby",
+                "--features",
+                "mruby",
+            ]))?;
             root.join("target/debug/cabby")
         }
         Backend::Go => {
@@ -289,14 +376,17 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
             if o == Outcome::Ignored {
                 errors.push(format!("IGNORED {name}::{t}: ignore attributes are not allowed"));
             }
-            if o == Outcome::NotObservable && backend == Backend::Rust {
-                errors.push(format!("NOT-OBSERVABLE-ON-RUST {name}::{t}: only Go facade arms may use this marker"));
+            if let Some((kind, why)) = marker_error(backend, o) {
+                errors.push(format!("{kind} {name}::{t}: {why}"));
             }
             results.insert(format!("{name}::{t}"), o);
         }
     }
 
     let mut m = manifest::load()?;
+    let implemented = implemented_deviations(
+        &std::fs::read_to_string(root.join("compat/deviations.md")).context("reading compat/deviations.md")?,
+    );
     let mapped: std::collections::HashSet<String> = m
         .cases
         .iter()
@@ -359,6 +449,11 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
                     *ref_status = now.into();
                 }
             }
+            Backend::Rust if let Some(rule) = retired_rule(rust_status, o, &implemented, record) => match rule {
+                Ok(true) if complete => *rust_status = "retired".into(),
+                Ok(_) => {}
+                Err(why) => errors.push(format!("RETIRED {label}: {why}")),
+            },
             Backend::Rust => match (rust_status.as_str(), o) {
                 ("pass", Outcome::Pass) | ("pending", Outcome::Pending) => {}
                 ("pass", _) => errors.push(format!("REGRESSION {label}: recorded pass, now {}", status_str(o))),
@@ -398,6 +493,7 @@ pub fn run(backend: Backend, record: bool, filter: Option<&str>) -> Result<()> {
             Outcome::Ignored => "ignored",
             Outcome::NotObservable => "not_observable",
             Outcome::UpstreamFailure => "upstream_failure",
+            Outcome::Retired(_) => "retired",
         })
         .or_default() += 1;
         acc
@@ -507,5 +603,51 @@ test result: FAILED. 1 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out
         assert_eq!(combine(&[Pass, Pending]), Pending);
         assert_eq!(combine(&[Pending, Fail]), Fail);
         assert_eq!(combine(&[Ignored]), Fail);
+        assert_eq!(combine(&[Retired(58), Retired(58)]), Retired(58));
+        assert_eq!(combine(&[Pass, Retired(58)]), Retired(58));
+        assert_eq!(combine(&[Retired(58), Fail]), Fail);
+    }
+
+    #[test]
+    fn retired_marker_is_recognized() {
+        let out = "test t::boot_event ... FAILED\n\nfailures:\n\n---- t::boot_event stdout ----\n\nthread 't::boot_event' panicked at crates/cabby-testkit/src/reference/telemetry.rs:46:26:\nretired: D-058: Cabby has no telemetry\n\nfailures:\n    t::boot_event\n";
+        assert_eq!(parse(out)["t::boot_event"], Outcome::Retired(58));
+        // Only a three-digit deviation number counts.
+        assert_eq!(retired_id("retired: D-58: short"), None);
+        assert_eq!(retired_id("retired: D-0581: long"), None);
+        assert_eq!(status_str(Outcome::Retired(58)), "retired");
+    }
+
+    #[test]
+    fn retired_needs_an_implemented_deviation() {
+        let md = "## Adopted: test tooling\n\n| D-001 | a |\n\n## Implemented in Cabby\n\n| ID | Area |\n|---|---|\n| D-058 | Usage telemetry | x |\n\n## Proposed (not implemented yet)\n\n| D-059 | CLI identity | x |\n";
+        let implemented = implemented_deviations(md);
+        assert_eq!(implemented, BTreeSet::from([58]));
+        assert_eq!(retired_rule("pass", Outcome::Retired(58), &implemented, true), Some(Ok(true)));
+        let err = retired_rule("pass", Outcome::Retired(59), &implemented, true).unwrap().unwrap_err();
+        assert!(err.contains("D-059, which is not under \"Implemented in Cabby\""), "{err}");
+    }
+
+    #[test]
+    fn retired_cases_change_only_from_a_recorded_pass_and_never_back() {
+        let implemented = BTreeSet::from([58]);
+        let rule = |recorded, o, record| retired_rule(recorded, o, &implemented, record);
+        assert_eq!(rule("retired", Outcome::Retired(58), false), Some(Ok(false)));
+        // A recorded retirement is checked again on every run: its deviation must
+        // still be implemented.
+        let err = rule("retired", Outcome::Retired(59), false).unwrap().unwrap_err();
+        assert!(err.contains("D-059, which is not under \"Implemented in Cabby\""), "{err}");
+        assert!(rule("retired", Outcome::Pass, true).unwrap().is_err());
+        assert!(rule("pass", Outcome::Retired(58), false).unwrap().is_err());
+        assert!(rule("pending", Outcome::Retired(58), true).unwrap().is_err());
+        assert_eq!(rule("pass", Outcome::Pass, true), None);
+    }
+
+    #[test]
+    fn markers_belong_to_one_backend() {
+        assert!(marker_error(Backend::Go, Outcome::Retired(58)).is_some());
+        assert!(marker_error(Backend::Rust, Outcome::NotObservable).is_some());
+        assert_eq!(marker_error(Backend::Rust, Outcome::Retired(58)), None);
+        assert_eq!(marker_error(Backend::Go, Outcome::NotObservable), None);
     }
 }

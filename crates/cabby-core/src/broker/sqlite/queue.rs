@@ -1,11 +1,11 @@
-//! The bounded write queue between the broker and the persister thread (spec §3).
+//! The bounded write queue between the broker and the persister thread.
 //!
 //! Enqueueing never blocks the broadcast path. When the queue would hold more
 //! than `capacity` ops, it drops the oldest history op; only if none is
 //! queued, the oldest session touch, then the oldest session commit. The
 //! incoming op counts as queued, so a history op arriving at a queue full of
 //! session ops is itself the one dropped. `push` returns the kind it dropped,
-//! so the broker counts every drop (spec §7).
+//! so the broker counts every drop.
 //!
 //! A dropped history op leaves a gap the file can't fill, so the queue also
 //! remembers that history was dropped during this run (the shutdown is then

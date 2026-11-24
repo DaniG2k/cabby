@@ -131,17 +131,44 @@ impl Flag {
         let usage = format!("{}{default}", self.usage);
 
         let mut line = format!("{}\t{}", names.join(", "), usage.trim());
-        if !self.env_vars.is_empty() {
-            line.push_str(&format!(" [${}]", self.env_vars.join(", $")));
+        // Help lists Cabby's names and the unprefixed aliases; the `ANYCABLE_*`
+        // fallback is explained once, in the footer (D-061).
+        let shown: Vec<&str> =
+            self.env_vars.iter().map(String::as_str).filter(|v| !v.starts_with(ANYCABLE_PREFIX)).collect();
+        if !shown.is_empty() {
+            line.push_str(&format!(" [${}]", shown.join(", $")));
         }
         line
     }
 }
 
-/// Builds the upstream environment variable name of a flag (`nameToEnvVarName`):
-/// `ANYCABLE_` plus the name upper-cased, `-` and `_` both becoming `_`.
+const CABBY_PREFIX: &str = "CABBY_";
+const ANYCABLE_PREFIX: &str = "ANYCABLE_";
+
+/// The environment variable name of a flag (upstream `nameToEnvVarName`, with
+/// Cabby's prefix, D-061): `CABBY_` plus the name upper-cased, `-` and `_` both
+/// becoming `_`.
 pub(crate) fn env_var_name(name: &str) -> String {
-    format!("ANYCABLE_{}", name.replace('-', "_").to_uppercase())
+    format!("{CABBY_PREFIX}{}", name.replace('-', "_").to_uppercase())
+}
+
+/// Every prefixed variable of a flag, in precedence order: `CABBY_<NAME>`, then
+/// upstream's `ANYCABLE_<NAME>` (D-061).
+pub(crate) fn env_var_names(name: &str) -> Vec<String> {
+    let cabby = env_var_name(name);
+    let anycable = format!("{ANYCABLE_PREFIX}{}", &cabby[CABBY_PREFIX.len()..]);
+    vec![cabby, anycable]
+}
+
+/// The two prefixed names among `vars` when both are set to different values
+/// in `env` (D-061). The `CABBY_*` value wins; the caller notes the conflict.
+pub(crate) fn env_conflict(vars: &[String], env: &crate::config::EnvMap) -> Option<(String, String)> {
+    let cabby = vars.iter().find(|v| v.starts_with(CABBY_PREFIX))?;
+    let anycable = vars.iter().find(|v| v.starts_with(ANYCABLE_PREFIX))?;
+    match (env.get(cabby), env.get(anycable)) {
+        (Some(a), Some(b)) if a != b => Some((cabby.clone(), anycable.clone())),
+        _ => None,
+    }
 }
 
 /// The application (urfave `cli.App`) settings that show in help and version output.
@@ -149,6 +176,8 @@ pub(crate) struct App {
     pub name: String,
     pub version: String,
     pub usage: String,
+    /// A line printed after the options (empty: none).
+    pub footer: String,
 }
 
 impl App {
@@ -193,7 +222,13 @@ impl App {
         }
         out.push('\n');
 
-        tabwrite(&out)
+        let mut text = tabwrite(&out);
+        if !self.footer.is_empty() {
+            text.push('\n');
+            text.push_str(&self.footer);
+            text.push('\n');
+        }
+        text
     }
 }
 
@@ -372,6 +407,9 @@ pub(crate) struct Parsed {
     pub on_cli: Vec<bool>,
     /// Set through the environment (urfave `HasBeenSet`).
     pub from_env: Vec<bool>,
+    /// Flags whose `CABBY_*` and `ANYCABLE_*` variables are set to different
+    /// values, as `(flag index, cabby, anycable)` (D-061).
+    pub env_conflicts: Vec<(usize, String, String)>,
 }
 
 impl Parsed {
@@ -407,12 +445,17 @@ fn write_plain(state: &mut State, flag: &Flag, v: &Val) {
 /// urfave `Flag.Apply` for every flag in order: environment values, then the
 /// initial value of plain destinations. Returns the first environment error.
 pub(crate) fn apply_env(flags: &[Flag], env: &crate::config::EnvMap, state: &mut State) -> Result<Parsed, String> {
-    let mut parsed =
-        Parsed { values: Vec::with_capacity(flags.len()), on_cli: vec![false; flags.len()], from_env: Vec::new() };
+    let mut parsed = Parsed {
+        values: Vec::with_capacity(flags.len()),
+        on_cli: vec![false; flags.len()],
+        from_env: Vec::new(),
+        env_conflicts: Vec::new(),
+    };
 
-    for flag in flags {
+    for (i, flag) in flags.iter().enumerate() {
         let mut value = flag.default.clone();
         let mut from_env = false;
+        parsed.env_conflicts.extend(env_conflict(&flag.env_vars, env).map(|(c, a)| (i, c, a)));
 
         let found = flag.env_vars.iter().find_map(|k| env.get(k.trim()).map(|v| (k, v)));
         if let Some((key, raw)) = found {
@@ -629,10 +672,25 @@ mod tests {
         assert_eq!(parse_uint("18446744073709551616"), Err(NumError::Range));
     }
 
+    /// Pins D-061: `CABBY_<NAME>` first, then upstream's `ANYCABLE_<NAME>`.
     #[test]
-    fn env_var_names_follow_upstream() {
-        assert_eq!(env_var_name("max-conn"), "ANYCABLE_MAX_CONN");
-        assert_eq!(env_var_name("redis_url"), "ANYCABLE_REDIS_URL");
+    fn deviation_d061_env_var_names() {
+        assert_eq!(env_var_name("max-conn"), "CABBY_MAX_CONN");
+        assert_eq!(env_var_names("redis_url"), vec!["CABBY_REDIS_URL", "ANYCABLE_REDIS_URL"]);
+    }
+
+    #[test]
+    fn env_conflicts_need_two_different_prefixed_values() {
+        let vars = env_var_names("secret");
+        let env = |pairs: &[(&str, &str)]| -> crate::config::EnvMap {
+            pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect()
+        };
+        let both = env(&[("CABBY_SECRET", "a"), ("ANYCABLE_SECRET", "b")]);
+        assert_eq!(env_conflict(&vars, &both), Some(("CABBY_SECRET".into(), "ANYCABLE_SECRET".into())));
+        assert_eq!(env_conflict(&vars, &env(&[("CABBY_SECRET", "a"), ("ANYCABLE_SECRET", "a")])), None);
+        assert_eq!(env_conflict(&vars, &env(&[("ANYCABLE_SECRET", "b")])), None);
+        let port = vec!["CABBY_PORT".to_owned(), "ANYCABLE_PORT".to_owned(), "PORT".to_owned()];
+        assert_eq!(env_conflict(&port, &env(&[("CABBY_PORT", "1"), ("PORT", "2")])), None);
     }
 
     #[test]

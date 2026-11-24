@@ -1,4 +1,4 @@
-//! Every unit conversion of the SQLite broker (spec §4). History timestamps
+//! Every unit conversion of the SQLite broker. History timestamps
 //! and stream deadlines are unix seconds, as `Entry::timestamp` and the memory
 //! broker's stream deadline; session expiries are unix milliseconds, as the
 //! memory broker's session expiration queue. Offsets are `u64` in memory and

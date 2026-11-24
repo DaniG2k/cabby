@@ -1,6 +1,6 @@
 //! upstream file: broadcast/redis_test.go
 //!
-//! Real Redis at `CABBY_REDIS_URL` (required; upstream skips without Redis).
+//! Real Redis at `CABBY_TEST_REDIS_URL` (required; upstream skips without Redis).
 //! Upstream uses the default stream `__anycable__` (destroying group `bx` in
 //! `init`) and publishes/counts consumers through the broadcaster's unexported
 //! streamer client. Here the stream is unique per test, the test publishes with

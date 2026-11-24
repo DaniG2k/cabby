@@ -4,9 +4,9 @@
 //! Upstream Go tests skip when Redis is absent; here a missing or unreachable
 //! service panics with a message naming the variable to set:
 //!
-//! * `CABBY_REDIS_URL`, e.g. `redis://127.0.0.1:6379/`;
-//! * `CABBY_NATS_URL`, e.g. `nats://127.0.0.1:4222`, and
-//!   `CABBY_NATS_MONITOR_URL` (the server's `-m` HTTP monitoring endpoint, e.g.
+//! * `CABBY_TEST_REDIS_URL`, e.g. `redis://127.0.0.1:6379/`;
+//! * `CABBY_TEST_NATS_URL`, e.g. `nats://127.0.0.1:4222`, and
+//!   `CABBY_TEST_NATS_MONITOR_URL` (the server's `-m` HTTP monitoring endpoint, e.g.
 //!   `http://127.0.0.1:8222`), which is how subscription readiness is observed.
 //!
 //! Every test works in its own scope: unique key/channel/subject prefixes, and
@@ -182,7 +182,7 @@ impl RespConn {
     }
 }
 
-/// The Redis server named by `CABBY_REDIS_URL`.
+/// The Redis server named by `CABBY_TEST_REDIS_URL`.
 pub struct RedisService {
     addr: SocketAddr,
     host_port: String,
@@ -190,17 +190,17 @@ pub struct RedisService {
     db: i64,
 }
 
-/// The shared Redis service. Panics if `CABBY_REDIS_URL` is unset, malformed, or
+/// The shared Redis service. Panics if `CABBY_TEST_REDIS_URL` is unset, malformed, or
 /// the server does not answer `PING`.
 pub fn redis() -> &'static RedisService {
     static R: OnceLock<RedisService> = OnceLock::new();
     R.get_or_init(|| {
-        let url = required_env("CABBY_REDIS_URL", "Redis server");
-        let svc = RedisService::parse(&url).unwrap_or_else(|e| panic!("CABBY_REDIS_URL={url:?}: {e:#}"));
+        let url = required_env("CABBY_TEST_REDIS_URL", "Redis server");
+        let svc = RedisService::parse(&url).unwrap_or_else(|e| panic!("CABBY_TEST_REDIS_URL={url:?}: {e:#}"));
         let pong = svc
             .admin()
             .and_then(|mut c| c.ok(&["PING"]))
-            .unwrap_or_else(|e| panic!("Redis at CABBY_REDIS_URL={url:?} is unreachable: {e:#}"));
+            .unwrap_or_else(|e| panic!("Redis at CABBY_TEST_REDIS_URL={url:?} is unreachable: {e:#}"));
         assert_eq!(pong, Resp::Simple("PONG".into()), "unexpected PING reply from {url}");
         svc
     })
@@ -428,7 +428,7 @@ fn parse_nats_addr(url: &str) -> Result<SocketAddr> {
     hp.to_socket_addrs()?.next().ok_or_else(|| anyhow!("cannot resolve {hp}"))
 }
 
-/// The NATS server named by `CABBY_NATS_URL` / `CABBY_NATS_MONITOR_URL`.
+/// The NATS server named by `CABBY_TEST_NATS_URL` / `CABBY_TEST_NATS_MONITOR_URL`.
 pub struct NatsService {
     pub url: String,
     pub monitor: NatsMonitor,
@@ -439,17 +439,17 @@ pub struct NatsService {
 pub fn nats() -> &'static NatsService {
     static N: OnceLock<NatsService> = OnceLock::new();
     N.get_or_init(|| {
-        let url = required_env("CABBY_NATS_URL", "NATS server");
-        let murl = required_env("CABBY_NATS_MONITOR_URL", "NATS server monitoring endpoint (nats-server -m)");
-        let addr = parse_nats_addr(&url).unwrap_or_else(|e| panic!("CABBY_NATS_URL={url:?}: {e:#}"));
+        let url = required_env("CABBY_TEST_NATS_URL", "NATS server");
+        let murl = required_env("CABBY_TEST_NATS_MONITOR_URL", "NATS server monitoring endpoint (nats-server -m)");
+        let addr = parse_nats_addr(&url).unwrap_or_else(|e| panic!("CABBY_TEST_NATS_URL={url:?}: {e:#}"));
         TcpStream::connect_timeout(&addr, IO_DEADLINE)
-            .unwrap_or_else(|e| panic!("NATS at CABBY_NATS_URL={url:?} is unreachable: {e}"));
+            .unwrap_or_else(|e| panic!("NATS at CABBY_TEST_NATS_URL={url:?} is unreachable: {e}"));
         let monitor = NatsMonitor::new(
-            parse_http_addr(&murl).unwrap_or_else(|e| panic!("CABBY_NATS_MONITOR_URL={murl:?}: {e:#}")),
+            parse_http_addr(&murl).unwrap_or_else(|e| panic!("CABBY_TEST_NATS_MONITOR_URL={murl:?}: {e:#}")),
         );
-        monitor
-            .get("/varz")
-            .unwrap_or_else(|e| panic!("NATS monitoring at CABBY_NATS_MONITOR_URL={murl:?} is unreachable: {e:#}"));
+        monitor.get("/varz").unwrap_or_else(|e| {
+            panic!("NATS monitoring at CABBY_TEST_NATS_MONITOR_URL={murl:?} is unreachable: {e:#}")
+        });
         NatsService { url, monitor }
     })
 }

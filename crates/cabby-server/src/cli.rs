@@ -8,13 +8,15 @@ use crate::config::Config;
 
 mod adapters;
 mod flags;
+/// Go `strconv.ParseInt(s, 0, 64)`, as the CLI parses integer settings.
+pub(crate) use flags::parse_int as parse_go_int;
 mod options;
 mod runner;
 mod session_options;
 mod signals;
 mod sqlite;
 
-pub use options::{new_config_from_cli, new_config_from_cli_to, parse_tags};
+pub use options::{ConfigSearch, new_config_from_cli, new_config_from_cli_to, new_config_from_cli_with, parse_tags};
 pub use runner::{Embedded, Runner};
 pub use session_options::{
     ACTION_CABLE_V1_EXT_JSON, ACTION_CABLE_V1_JSON, action_cable_protocols, is_extended_action_cable_protocol,
@@ -66,8 +68,7 @@ pub fn run(config: Config) -> Result<(), CliError> {
     result
 }
 
-/// The runner options of [`run`]: the default components and no telemetry
-/// (D-058, Cabby doesn't send usage telemetry).
+/// The runner options of [`run`]: the default components.
 fn default_runner_options() -> Vec<RunnerOption> {
     vec![
         RunnerOption::Name("Cabby".into()),
@@ -178,17 +179,4 @@ pub enum RunnerOption {
     Broadcasters(BroadcastersFactory),
     /// `WithDefaultBroadcaster`: the configured broadcast adapters.
     DefaultBroadcaster,
-    /// `WithTelemetry(props...)`: custom properties as key/value pairs.
-    Telemetry(Vec<String>),
-}
-
-#[cfg(test)]
-mod tests {
-    /// Pins D-058 (proposed): the binary's runner never enables telemetry.
-    #[test]
-    fn default_runner_options_have_no_telemetry() {
-        let options = super::default_runner_options();
-        assert!(!options.iter().any(|o| matches!(o, super::RunnerOption::Telemetry(_))));
-        assert!(options.iter().any(|o| matches!(o, super::RunnerOption::DefaultBroadcaster)));
-    }
 }
