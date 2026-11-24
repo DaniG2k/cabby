@@ -180,6 +180,8 @@ pub(crate) struct HttpError {
     pub message: String,
     /// The TLS handshake failed.
     pub tls: bool,
+    /// The server answered with a body over the response size limit.
+    pub too_large: bool,
 }
 
 /// A response with its whole body.
@@ -271,6 +273,7 @@ impl HttpClient {
                         self.origin.url(path)
                     ),
                     tls: false,
+                    too_large: false,
                 })
             }),
         }
@@ -300,7 +303,7 @@ impl HttpClient {
     }
 
     fn error(&self, path: &str, cause: &str, tls: bool) -> HttpError {
-        HttpError { message: format!("Post {:?}: {cause}", self.origin.url(path)), tls }
+        HttpError { message: format!("Post {:?}: {cause}", self.origin.url(path)), tls, too_large: false }
     }
 
     async fn exchange(
@@ -344,11 +347,8 @@ impl HttpClient {
         let body = match Limited::new(response.into_body(), self.max_response_bytes).collect().await {
             Ok(collected) => collected.to_bytes(),
             Err(e) if e.is::<LengthLimitError>() => {
-                return Err(self.error(
-                    path,
-                    &format!("response body exceeds limit of {} bytes", self.max_response_bytes),
-                    false,
-                ));
+                let cause = format!("response body exceeds limit of {} bytes", self.max_response_bytes);
+                return Err(HttpError { too_large: true, ..self.error(path, &cause, false) });
             }
             Err(e) => return Err(self.error(path, &e.to_string(), false)),
         };
@@ -510,7 +510,7 @@ mod idle_tests {
 }
 
 #[cfg(test)]
-mod dial_error_tests {
+pub(crate) mod dial_error_tests {
     #[test]
     fn refused_connects_read_like_go() {
         if cfg!(target_os = "linux") {
@@ -582,28 +582,80 @@ mod dial_error_tests {
         assert_no_credentials("the request error's Debug", &format!("{err:?}"));
     }
 
-    /// Pins D-068: HTTP RPC responses exceeding the configured limit fail
-    /// instead of buffering unboundedly into memory.
-    #[tokio::test]
-    async fn deviation_d068_response_body_exceeding_limit_fails() {
+    /// A server answering every request on every connection with `response`.
+    pub(crate) async fn serve_forever(response: Vec<u8>) -> std::net::SocketAddr {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::net::TcpListener;
 
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
-            let (mut sock, _) = listener.accept().await.unwrap();
-            let mut buf = [0u8; 1024];
-            let _ = sock.read(&mut buf).await;
-            let body = "x".repeat(64);
-            let resp = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len());
-            let _ = sock.write_all(resp.as_bytes()).await;
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let response = response.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 4096];
+                    let mut seen = Vec::new();
+                    loop {
+                        let n = sock.read(&mut buf).await.unwrap_or(0);
+                        if n == 0 {
+                            return;
+                        }
+                        seen.extend_from_slice(&buf[..n]);
+                        while let Some(end) = seen.windows(4).position(|w| w == b"\r\n\r\n") {
+                            seen.drain(..end + 4);
+                            if sock.write_all(&response).await.is_err() {
+                                return;
+                            }
+                        }
+                    }
+                });
+            }
         });
+        addr
+    }
 
+    pub(crate) fn with_length(body: &[u8]) -> Vec<u8> {
+        let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len()).into_bytes();
+        r.extend_from_slice(body);
+        r
+    }
+
+    fn chunked(chunks: &[&[u8]]) -> Vec<u8> {
+        let mut r = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+        for c in chunks {
+            r.extend_from_slice(format!("{:x}\r\n", c.len()).as_bytes());
+            r.extend_from_slice(c);
+            r.extend_from_slice(b"\r\n");
+        }
+        r.extend_from_slice(b"0\r\n\r\n");
+        r
+    }
+
+    async fn post_to(addr: std::net::SocketAddr, limit: usize) -> Result<super::HttpResponse, super::HttpError> {
         let origin = super::Origin::parse(&format!("http://{addr}")).unwrap();
         let client = super::HttpClient::new(origin, None, 1, std::time::Duration::from_secs(5), None)
-            .with_max_response_bytes(16);
-        let err = client.post("connect", &[], bytes::Bytes::new()).await.unwrap_err();
+            .with_max_response_bytes(limit);
+        client.post("connect", &[], bytes::Bytes::new()).await
+    }
+
+    /// Pins D-068: HTTP RPC responses exceeding the configured limit fail
+    /// instead of being buffered whole.
+    #[tokio::test]
+    async fn deviation_d068_response_body_exceeding_limit_fails() {
+        let at_limit = serve_forever(with_length(&[b'x'; 16])).await;
+        let response = post_to(at_limit, 16).await.expect("a body of exactly the limit");
+        assert_eq!(&[b'x'; 16][..], &response.body[..]);
+
+        let over = serve_forever(with_length(&[b'x'; 17])).await;
+        let err = post_to(over, 16).await.unwrap_err();
         assert!(err.message.contains("response body exceeds limit of 16 bytes"), "{}", err.message);
+        assert!(err.too_large && !err.tls, "{err:?}");
+
+        let chunked_at_limit = serve_forever(chunked(&[&[b'x'; 10], &[b'x'; 6]])).await;
+        assert_eq!(16, post_to(chunked_at_limit, 16).await.expect("chunked, at the limit").body.len());
+
+        let chunked_over = serve_forever(chunked(&[&[b'x'; 10], &[b'x'; 10]])).await;
+        let err = post_to(chunked_over, 16).await.unwrap_err();
+        assert!(err.message.contains("response body exceeds limit of 16 bytes"), "{}", err.message);
+        assert!(err.too_large, "{err:?}");
     }
 }

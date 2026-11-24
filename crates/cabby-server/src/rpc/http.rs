@@ -7,7 +7,9 @@
 //! and every metadata pair as an `X-Anycable-Meta-<key>` header. Response
 //! statuses map to gRPC codes: 401 Unauthenticated, 400/422 InvalidArgument,
 //! other non-200 Unknown; transport errors are DeadlineExceeded when the context
-//! is done, Unauthenticated for TLS failures, Unavailable otherwise.
+//! is done, Unauthenticated for TLS failures, Unavailable otherwise. A response
+//! body over `rpc.max_recv_size` (16 MiB by default) is Unknown, not retried,
+//! and counts as a success for the circuit breaker (D-068).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -279,6 +281,12 @@ impl HttpService {
             Err(Some(err)) if err.tls || err.message.contains("tls:") => {
                 return Err(ClientError::status(Code::Unauthenticated, err.message));
             }
+            // The application answered, with too much: final, and a success
+            // for the breaker.
+            Err(Some(err)) if err.too_large => {
+                cb.success = true;
+                return Err(ClientError::status(Code::Unknown, err.message));
+            }
             Err(Some(err)) => return Err(ClientError::status(Code::Unavailable, err.message)),
         };
         cb.success = true;
@@ -431,5 +439,53 @@ mod tests {
         b.done(g, false);
         assert_eq!(CbState::Open, b.current(Instant::now()));
         assert_eq!(Err("circuit breaker is open"), b.allow());
+    }
+
+    fn service(addr: std::net::SocketAddr, max_recv_size: i64) -> HttpService {
+        let mut config = Config::new();
+        config.host = format!("http://{addr}");
+        config.max_recv_size = max_recv_size;
+        HttpService::new(&config).expect("a service")
+    }
+
+    /// Pins D-068: `rpc.max_recv_size` bounds HTTP RPC responses: a body of
+    /// exactly the limit is decoded, one byte more fails.
+    #[tokio::test]
+    async fn deviation_d068_max_recv_size_bounds_http_rpc_responses() {
+        use crate::http_client::dial_error_tests::{serve_forever, with_length};
+
+        let body = br#"{"status":1}    "#; // 16 bytes
+        let addr = serve_forever(with_length(body)).await;
+        let ok: protos::CommandResponse =
+            service(addr, 16).perform(&Context::default(), "command", b"{}".to_vec()).await.expect("at the limit");
+        assert_eq!(1, ok.status);
+
+        let err = service(addr, 15)
+            .perform::<protos::CommandResponse>(&Context::default(), "command", b"{}".to_vec())
+            .await
+            .expect_err("over the limit");
+        assert!(err.to_string().contains("response body exceeds limit of 15 bytes"), "{err}");
+
+        let default: protos::CommandResponse =
+            service(addr, 0).perform(&Context::default(), "command", b"{}".to_vec()).await.expect("16 MiB by default");
+        assert_eq!(1, default.status);
+    }
+
+    /// An oversized response is not retried (its code is neither Unavailable
+    /// nor ResourceExhausted) and counts as a success for the circuit breaker:
+    /// the application answered.
+    #[tokio::test]
+    async fn an_oversized_response_is_final_and_keeps_the_breaker_closed() {
+        use crate::http_client::dial_error_tests::{serve_forever, with_length};
+
+        let addr = serve_forever(with_length(&[b' '; 64])).await;
+        let service = service(addr, 16);
+        for _ in 0..20 {
+            match service.perform::<protos::CommandResponse>(&Context::default(), "command", b"{}".to_vec()).await {
+                Err(ClientError::Status(status)) => assert_eq!(Code::Unknown, status.code, "{}", status.message),
+                other => panic!("expected a status error, got {other:?}"),
+            }
+        }
+        assert!(!service.breaker_open(), "20 oversized responses leave the breaker closed");
     }
 }
