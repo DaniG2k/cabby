@@ -1,7 +1,9 @@
 //! `cabby-healthcheck`: a health probe for container images that have no shell
 //! or curl. It sends `GET <health path>` to `127.0.0.1:<port>` and succeeds on a
-//! 200 response. The port and the path come from the variables the server's
-//! `--port` and `--health-path` flags read.
+//! 200 response; when the server serves TLS (`ssl_cert` and `ssl_key` set), it
+//! only checks that the port accepts connections. The port, the path and the TLS
+//! settings come from the variables the server's flags read (`CABBY_*`, then
+//! `ANYCABLE_*`); the probe can't see command-line flags.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -11,13 +13,34 @@ use std::time::Duration;
 pub const TIMEOUT: Duration = Duration::from_secs(2);
 
 /// The server port: the first of `CABBY_PORT`, `ANYCABLE_PORT` and `PORT` that
-/// is set, else 8080. An empty value keeps 8080, as it does for the server.
+/// is set, else 8080, parsed as the server parses it (Go `strconv.ParseInt` with
+/// base prefixes and underscores). An empty value keeps 8080, as it does for the
+/// server.
 pub fn port(get: impl Fn(&str) -> Option<String>) -> Result<u16, String> {
     match ["CABBY_PORT", "ANYCABLE_PORT", "PORT"].iter().find_map(|k| get(k).map(|v| (k, v))) {
         None => Ok(8080),
         Some((_, v)) if v.is_empty() => Ok(8080),
-        Some((k, v)) => v.parse().map_err(|_| format!("{k}={v:?} is not a port number")),
+        Some((k, v)) => crate::cli::parse_go_int(&v)
+            .ok()
+            .and_then(|n| u16::try_from(n).ok())
+            .ok_or_else(|| format!("{k}={v:?} is not a port number")),
     }
+}
+
+/// The first of `CABBY_<name>` and `ANYCABLE_<name>` that is set (an empty
+/// value counts as set, as for the server), else empty.
+fn setting(get: &impl Fn(&str) -> Option<String>, name: &str) -> String {
+    get(&format!("CABBY_{name}")).or_else(|| get(&format!("ANYCABLE_{name}"))).unwrap_or_default()
+}
+
+/// Whether the server serves TLS: both `ssl_cert` and `ssl_key` are set.
+pub fn tls(get: impl Fn(&str) -> Option<String>) -> bool {
+    !setting(&get, "SSL_CERT").is_empty() && !setting(&get, "SSL_KEY").is_empty()
+}
+
+/// Connects to `addr`; `Ok(())` when the port accepts the connection.
+pub fn connect(addr: SocketAddr) -> Result<(), String> {
+    TcpStream::connect_timeout(&addr, TIMEOUT).map(drop).map_err(|e| format!("connecting to {addr}: {e}"))
 }
 
 /// The health path: `CABBY_HEALTH_PATH`, then `ANYCABLE_HEALTH_PATH`, else `/health`.
@@ -56,8 +79,8 @@ pub fn probe(addr: SocketAddr, path: &str) -> Result<(), String> {
 
 /// The whole probe, with `get` reading the environment.
 pub fn run(get: impl Fn(&str) -> Option<String>) -> Result<(), String> {
-    let port = port(&get)?;
-    probe(SocketAddr::from(([127, 0, 0, 1], port)), &health_path(&get))
+    let addr = SocketAddr::from(([127, 0, 0, 1], port(&get)?));
+    if tls(&get) { connect(addr) } else { probe(addr, &health_path(&get)) }
 }
 
 #[cfg(test)]
@@ -78,9 +101,33 @@ mod tests {
         assert_eq!(port(env(&[("CABBY_PORT", "9000"), ("ANYCABLE_PORT", "8081")])), Ok(9000));
         assert_eq!(port(env(&[("CABBY_PORT", "")])), Ok(8080));
         assert_eq!(port(env(&[("CABBY_PORT", "x")])), Err("CABBY_PORT=\"x\" is not a port number".to_owned()));
+        // The server's integer syntax (Go `strconv.ParseInt(s, 0, 64)`).
+        assert_eq!(port(env(&[("CABBY_PORT", "0x1F90")])), Ok(8080));
+        assert_eq!(port(env(&[("CABBY_PORT", "+8_080")])), Ok(8080));
+        assert_eq!(port(env(&[("CABBY_PORT", "70000")])), Err("CABBY_PORT=\"70000\" is not a port number".to_owned()));
         assert_eq!(health_path(env(&[])), "/health");
         assert_eq!(health_path(env(&[("ANYCABLE_HEALTH_PATH", "/up")])), "/up");
         assert_eq!(health_path(env(&[("CABBY_HEALTH_PATH", "/ok"), ("ANYCABLE_HEALTH_PATH", "/up")])), "/ok");
+    }
+
+    #[test]
+    fn tls_is_configured_like_the_server() {
+        assert!(!tls(env(&[])));
+        assert!(!tls(env(&[("CABBY_SSL_CERT", "/c.pem")])));
+        assert!(tls(env(&[("CABBY_SSL_CERT", "/c.pem"), ("CABBY_SSL_KEY", "/k.pem")])));
+        assert!(tls(env(&[("ANYCABLE_SSL_CERT", "/c.pem"), ("ANYCABLE_SSL_KEY", "/k.pem")])));
+        // An empty CABBY_* value counts as set, as for the server.
+        assert!(!tls(env(&[("CABBY_SSL_CERT", ""), ("ANYCABLE_SSL_CERT", "/c.pem"), ("ANYCABLE_SSL_KEY", "/k.pem")])));
+    }
+
+    /// With TLS the probe only connects: it can't speak HTTPS without a TLS stack.
+    #[test]
+    fn with_tls_a_connection_is_healthy() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        assert_eq!(connect(addr), Ok(()));
+        drop(listener);
+        assert!(connect(addr).expect_err("nothing listens").starts_with("connecting to "));
     }
 
     /// A one-shot server answering with `status_line`; the handle yields the

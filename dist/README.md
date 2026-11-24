@@ -33,7 +33,10 @@ docker run --rm -p 8080:8080 -p 8090:8090 ghcr.io/danig2k/cabby:@VERSION@ --norp
 The image listens on `0.0.0.0` and takes broadcasts over HTTP only, so it runs without Redis. It
 runs as a non-root user and has a health check. Configure it with flags or `CABBY_*` environment
 variables (`-e`; the `ANYCABLE_*` names work too). To broadcast through Redis, set
-`CABBY_BROADCAST_ADAPTER` or `ANYCABLE_BROADCAST_ADAPTER` to include `redis` or `redisx`.
+`CABBY_BROADCAST_ADAPTER` or `ANYCABLE_BROADCAST_ADAPTER` to include `redis` or `redisx`. The
+health check reads the port and the health path from `CABBY_PORT` and `CABBY_HEALTH_PATH` (or
+their `ANYCABLE_*` forms) and can't see the `--port` and `--health-path` flags: change them with
+the variables.
 
 ### Try it
 

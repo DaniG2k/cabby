@@ -88,6 +88,9 @@ subscriber. Several Cabby nodes can share broadcasts through Redis or NATS.
   It runs as a non-root user and has a health check. Configure it with flags or `CABBY_*`
   variables (`ANYCABLE_*` works too). To broadcast through Redis, set
   `CABBY_BROADCAST_ADAPTER` (or `ANYCABLE_BROADCAST_ADAPTER`) to include `redis` or `redisx`.
+  The health check reads the port and the health path from `CABBY_PORT` and `CABBY_HEALTH_PATH`
+  (or their `ANYCABLE_*` forms) and can't see the `--port` and `--health-path` flags: change
+  them with the variables.
 - **Prebuilt binaries** for Linux (x86_64 and arm64, glibc 2.28 or newer) and macOS (Apple
   silicon), with checksums, are on the
   [releases page](https://github.com/DaniG2k/cabby-releases/releases). Each archive holds

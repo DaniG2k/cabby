@@ -8,6 +8,8 @@ use crate::config::Config;
 
 mod adapters;
 mod flags;
+/// Go `strconv.ParseInt(s, 0, 64)`, as the CLI parses integer settings.
+pub(crate) use flags::parse_int as parse_go_int;
 mod options;
 mod runner;
 mod session_options;

@@ -46,9 +46,9 @@ ENV ANYCABLE_BROADCAST_ADAPTER=http
 EXPOSE 8080 8090
 USER nonroot
 # cabby-healthcheck reads the port and the health path from the same variables
-# as the server (CABBY_PORT, ANYCABLE_PORT, PORT; CABBY_HEALTH_PATH). It can't
-# see flags: change the port or the health path with those variables, not with
-# --port or --health-path.
+# as the server (CABBY_PORT, ANYCABLE_PORT, PORT; CABBY_HEALTH_PATH), and only
+# connects when TLS is configured (CABBY_SSL_CERT and CABBY_SSL_KEY). It can't
+# see flags: change these settings with the variables, not with flags.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
   CMD ["/usr/local/bin/cabby-healthcheck"]
 ENTRYPOINT ["/usr/local/bin/cabby"]
