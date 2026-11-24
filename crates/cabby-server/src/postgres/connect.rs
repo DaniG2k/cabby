@@ -773,6 +773,16 @@ fn sync_sql(desired: &BTreeSet<String>, confirmed: &BTreeSet<String>) -> String 
     sql
 }
 
+/// The statements bringing the connection to the desired channels, and the
+/// desired set they reach. Channels about to be unlistened leave `confirmed`
+/// first, so nothing waits on a channel while its `UNLISTEN` is in flight.
+fn begin_sync(st: &mut ListenState) -> (String, BTreeSet<String>) {
+    let sql = sync_sql(&st.desired, &st.confirmed);
+    let desired = st.desired.clone();
+    st.confirmed.retain(|c| desired.contains(c));
+    (sql, desired)
+}
+
 async fn listen_loop(
     spec: Arc<ConnectSpec>,
     app: String,
@@ -853,10 +863,7 @@ async fn serve(
     let mut announced = false;
     let mut next_ping = keepalive.map(|k| tokio::time::Instant::now() + k);
     loop {
-        let (sql, desired) = {
-            let st = shared.lock();
-            (sync_sql(&st.desired, &st.confirmed), st.desired.clone())
-        };
+        let (sql, desired) = begin_sync(&mut shared.lock());
         if !sql.is_empty() {
             match tokio::time::timeout(QUERY_TIMEOUT, client.batch_execute(&sql)).await {
                 Ok(Ok(())) => {}
@@ -991,6 +998,20 @@ mod tests {
         let desired: BTreeSet<String> = ["a_1".to_owned(), "a_cmd".to_owned()].into();
         let confirmed: BTreeSet<String> = ["a_2".to_owned(), "a_cmd".to_owned()].into();
         assert_eq!("LISTEN \"a_1\";UNLISTEN \"a_2\";", sync_sql(&desired, &confirmed));
+    }
+
+    #[test]
+    fn unlistened_channels_leave_confirmed_before_the_unlisten_is_sent() {
+        let mut st = ListenState {
+            desired: ["a".to_owned()].into(),
+            confirmed: ["a".to_owned(), "b".to_owned()].into(),
+            connected: true,
+        };
+        let (sql, desired) = begin_sync(&mut st);
+        assert_eq!("UNLISTEN \"b\";", sql);
+        let only_a: BTreeSet<String> = ["a".to_owned()].into();
+        assert_eq!(only_a, st.confirmed, "b is no longer reported as listened to");
+        assert_eq!(only_a, desired);
     }
 
     #[test]
