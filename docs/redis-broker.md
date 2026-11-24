@@ -26,8 +26,9 @@ default 300).
 Only broadcasts that go through the broker are stored in history: those received over HTTP
 (`http`) and from Redis Streams (`redisx`). The legacy `redis` (PUBLISH) and `nats` broadcast
 adapters deliver messages to the node directly, as in the AnyCable server: clients get them
-live, but they are not stored and can't be caught up on. Cabby logs a warning at startup when a
-history broker runs with those adapters:
+live, but they are not stored and can't be caught up on. Cabby logs a warning at startup when you
+set the broadcast adapters to include them with a history broker (with the default list or a
+preset's, the line is logged at debug level):
 
 ```text
 WRN broadcasts through the redis adapter are delivered live and not stored in history; use http or redisx to keep history
@@ -116,9 +117,19 @@ whenever its offsets could repeat:
   `master_replid`, after which the newest writes may be missing). The first broadcast after the
   change gives the stream its new epoch; every node uses it from then on.
 
-Every history entry records its epoch, and only entries of the stream's current epoch are
-served. A client asking for history with an older epoch gets `unknown epoch` and resyncs, so a
-reused offset is never taken for one it has already seen. `redis_broker_epoch_rotations_total`
+`master_replid` also changes in cases that lose nothing: when a master frees its replication
+backlog (no replicas for `repl-backlog-ttl`), and when a Redis Cluster slot moves to another
+node. The streams concerned get a new epoch at their next broadcast, and their clients resync
+once.
+
+Every history entry records its epoch. A client asking for history from a position
+(`history_from`) gets only entries of the stream's current epoch; with an older epoch it gets
+`unknown epoch` and resyncs, so a reused offset is never taken for one it has already seen.
+Between an instance change and the stream's next broadcast, every position in the stream gets
+`unknown epoch`, even one at or below the offset the snapshot brought back: the messages after
+it may be lost, and the client resyncs instead of confirming an incomplete history. History
+since a time (`history_since`) returns every kept message, each with the epoch it was written
+in. `redis_broker_epoch_rotations_total`
 counts the streams that got a new epoch because their state was lost while their history stayed
 or because their Redis instance changed; Cabby logs a warning about it at most once a minute. A
 stream lost entirely looks like a new one.
@@ -126,9 +137,12 @@ stream lost entirely looks like a new one.
 If only a stream's history is lost (evicted), the stream keeps its epoch and offset: a client
 behind the remaining history gets `requested offset couldn't be found` and resyncs.
 
-Streams are checked one by one, at their next broadcast. A stream whose state survived a
-restart intact keeps serving its history until it is written to again, and gets its new epoch
-then.
+Streams are checked one by one: at their next broadcast, which gives them the new epoch, and at
+every positional read. On a connection to a single node (standalone or Sentinel), Cabby reads
+the instance (`INFO server`, `INFO replication`) when it connects and at most once a second
+while it is in use, and passes it to the scripts; on a Redis Cluster connection, the scripts
+read it on the node that holds the stream. If Redis reports no `run_id` or `master_replid`,
+Cabby logs a warning at startup: restart and failover detection is then off.
 
 ## Presence
 
@@ -144,18 +158,21 @@ answer in time:
 - a broadcast fails with an error and is not delivered; the error is logged. A broadcast that
   timed out may still have been stored, if Redis ran it after the timeout. A `redisx`
   broadcast that fails is not acknowledged, so it is delivered again later: it may then be
-  stored twice, with two offsets;
+  stored twice, with two offsets. Each broadcast carries a token, so a resend of the same
+  broadcast by the Redis Cluster client (after a dropped connection) is stored once;
 - history reads fail, so a reconnecting client resyncs;
 - session commits, restores and touches fail; a client whose session can't be restored is
   authenticated again, as a new session;
 - after a connection error, reads and session calls are tried once more on a new connection;
   broadcasts are not, since their offset may already have been assigned. A node that can't
-  take writes (`READONLY`, `LOADING`, `MASTERDOWN`: a demoted master, a replica that is loading
-  or cut off from its master) has run nothing, so every operation, broadcasts included, is
-  tried once more on a new connection;
+  take writes (`READONLY`, `LOADING`, `MASTERDOWN`, also in Redis 6.2's `ERR Error running
+  script ... -READONLY ...` form: a demoted master, a replica that is loading or cut off from
+  its master) has run nothing, so every operation, broadcasts included, is tried once more on a
+  new connection; if that one answers the same, the back-off below starts;
 - operations wait for one connection attempt at a time. After a timeout or a failed attempt,
   they fail at once for about a second (`Redis is unavailable after a failure; retrying after a
-  short back-off`) instead of each waiting the full timeout again.
+  short back-off`) instead of each waiting the full timeout again. These failures are logged at
+  most once a second, with the number not logged since; the metrics count each one.
 
 At startup, Cabby connects and loads the scripts. If that fails within the timeout, the server
 stops with `failed to start broker, cause: failed to start the Redis broker, cause: ...`.
