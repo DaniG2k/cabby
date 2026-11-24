@@ -307,8 +307,17 @@ fn deviation_d057_batch_events_are_broadcast() {
     let body = br#"{"batch":[{"name":"e1","channel":"chat-1","data":"{\"n\":1}"},{"name":"e2","channel":"chat-2","data":"{\"n\":2}"}]}"#;
     let target = signed_target(&app.conf, "POST", "/apps/my-test-id/batch_events", Some(body));
     assert_eq!((200, "{}".to_owned()), app.api("POST", &target, body));
-    assert_eq!(r#"{"event":"e1","data":"{\"n\":1}","channel":"chat-1"}"#, recv(&mut a));
-    assert_eq!(r#"{"event":"e2","data":"{\"n\":2}","channel":"chat-2"}"#, recv(&mut a));
+    // Each event reaches its own stream; streams aren't ordered with respect to
+    // each other, so the two deliveries may arrive in either order.
+    let mut got = [recv(&mut a), recv(&mut a)];
+    got.sort();
+    assert_eq!(
+        [
+            r#"{"event":"e1","data":"{\"n\":1}","channel":"chat-1"}"#.to_owned(),
+            r#"{"event":"e2","data":"{\"n\":2}","channel":"chat-2"}"#.to_owned()
+        ],
+        got
+    );
 
     let events: Vec<String> = (0..11).map(|i| format!(r#"{{"name":"e","channel":"chat-1","data":"{i}"}}"#)).collect();
     let big = format!(r#"{{"batch":[{}]}}"#, events.join(","));
