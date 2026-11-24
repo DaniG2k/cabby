@@ -10,18 +10,25 @@
 //! listens to the commands channel, and `subscribe` once the stream's shard
 //! is listened to, so there is nothing left to wait for on the server.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use cabby_core::common::StreamMessage;
+use cabby_server::postgres::pubsub::ListenProbe;
 use cabby_server::postgres::{Metrics, PostgresConfig, SHARDS, shard};
+use cabby_testkit::fault_proxy::FaultProxy;
 use cabby_testkit::postgres::{PgScope, rust_only};
 use cabby_testkit::reference::pubsub::{Subscriber, TestHandler};
 
 use super::subscriber_test::{self as shared, Harness, ShutdownGuard};
 
+/// Bound for every wait on the subscribers.
+const WAIT: Duration = Duration::from_secs(10);
+
 struct Postgres {
     scope: PgScope,
     config: PostgresConfig,
+    probes: Mutex<Vec<ListenProbe>>,
 }
 
 impl Postgres {
@@ -29,13 +36,25 @@ impl Postgres {
         rust_only();
         let scope = PgScope::new("pubsub");
         let config = scope.config();
-        Postgres { scope, config }
+        Postgres { scope, config, probes: Mutex::new(Vec::new()) }
+    }
+
+    /// A subscriber with its own metrics; its probe joins the harness's.
+    fn subscriber_with(&self, handler: &TestHandler, config: &PostgresConfig, metrics: Metrics) -> Subscriber {
+        let (s, probe) = Subscriber::postgres(handler, config, metrics).expect("PostgresSubscriber::new");
+        self.probes.lock().unwrap().push(probe);
+        s
+    }
+
+    /// Waits until every subscriber subscribed to `stream` listens to its shard.
+    fn wait(&self, stream: &str) {
+        self.wait_subscriptions(stream, 1).expect("LISTEN");
     }
 }
 
 impl Harness for Postgres {
     fn subscriber(&self, handler: &TestHandler) -> Subscriber {
-        Subscriber::postgres(handler, &self.config, Metrics::none()).expect("PostgresSubscriber::new")
+        self.subscriber_with(handler, &self.config, Metrics::none())
     }
 
     fn stream(&self, name: &str) -> String {
@@ -46,8 +65,18 @@ impl Harness for Postgres {
         format!("{}_cmd", self.config.channel)
     }
 
-    fn wait_subscriptions(&self, _channel: &str, _count: usize) -> Result<(), String> {
-        Ok(())
+    /// Waits on each subscriber's probe: the commands channel for
+    /// `internal`, the stream's shard otherwise (subscribers not subscribed
+    /// to it have nothing to wait for; delivery is filtered locally, so an
+    /// unsubscribe needs no wait either).
+    fn wait_subscriptions(&self, channel: &str, _count: usize) -> Result<(), String> {
+        let probes = self.probes.lock().unwrap().clone();
+        let ready = if channel == self.internal() {
+            probes.iter().all(|p| p.wait_ready(WAIT))
+        } else {
+            probes.iter().all(|p| p.wait_stream(channel, WAIT))
+        };
+        if ready { Ok(()) } else { Err(format!("{channel} is not listened to within {WAIT:?}")) }
     }
 }
 
@@ -117,6 +146,8 @@ fn deviation_d070_postgres_shards_deliver_only_subscribed_streams() {
     let (a, b) = same_shard_pair();
     s1.0.subscribe(&a);
     s2.0.subscribe(&b);
+    h.wait(&a);
+    h.wait(&b);
 
     s2.0.broadcast(&msg(&b, "for-b"));
     s2.0.broadcast(&msg(&a, "for-a"));
@@ -138,12 +169,13 @@ fn deviation_d070_postgres_large_payloads_spill_over() {
     let registry = Arc::new(cabby_server::metrics::Metrics::new(Vec::new(), 0));
     let metrics = Metrics::register(registry.clone());
     let (handler, other_handler) = (TestHandler::new(), TestHandler::new());
-    let s1 = ShutdownGuard(Subscriber::postgres(&handler, &h.config, metrics.clone()).expect("new"));
-    let s2 = ShutdownGuard(Subscriber::postgres(&other_handler, &h.config, metrics).expect("new"));
+    let s1 = ShutdownGuard(h.subscriber_with(&handler, &h.config, metrics.clone()));
+    let s2 = ShutdownGuard(h.subscriber_with(&other_handler, &h.config, metrics));
     s1.0.start().expect("start");
     s2.0.start().expect("start");
     s1.0.subscribe("big");
     s2.0.subscribe("big");
+    h.wait("big");
 
     let data = format!("{{\"text\":\"{}\"}}", "x".repeat(10 * 1024));
     s1.0.broadcast(&msg("big", &data));
@@ -169,10 +201,10 @@ fn deviation_d070_postgres_reconnects_and_listens_again() {
     let h = Postgres::new();
     let registry = Arc::new(cabby_server::metrics::Metrics::new(Vec::new(), 0));
     let handler = TestHandler::new();
-    let subscriber =
-        ShutdownGuard(Subscriber::postgres(&handler, &h.config, Metrics::register(registry.clone())).expect("new"));
+    let subscriber = ShutdownGuard(h.subscriber_with(&handler, &h.config, Metrics::register(registry.clone())));
     subscriber.0.start().expect("start");
     subscriber.0.subscribe("reconnectos");
+    h.wait("reconnectos");
 
     subscriber.0.broadcast(&msg("reconnectos", "2022"));
     assert_eq!("2022", handler.receive().expect("message").data);
@@ -182,6 +214,7 @@ fn deviation_d070_postgres_reconnects_and_listens_again() {
     assert_eq!(1, old.len(), "one LISTEN connection: {old:?}");
     assert_eq!(1, h.scope.terminate(&app));
     h.scope.wait_listening_again(&app, &old);
+    h.wait("reconnectos");
 
     subscriber.0.broadcast(&msg("reconnectos", "2023"));
     assert_eq!("2023", handler.receive().expect("message after the reconnect").data);
@@ -206,11 +239,11 @@ fn deviation_d070_postgres_listen_reconnects_back_off_when_connections_keep_drop
     config.keepalive_interval = 0;
     let registry = Arc::new(cabby_server::metrics::Metrics::new(Vec::new(), 0));
     let handler = TestHandler::new();
-    let subscriber =
-        ShutdownGuard(Subscriber::postgres(&handler, &config, Metrics::register(registry.clone())).expect("new"));
+    let subscriber = ShutdownGuard(h.subscriber_with(&handler, &config, Metrics::register(registry.clone())));
     subscriber.0.start().expect("start");
 
-    std::thread::sleep(std::time::Duration::from_secs(6));
+    // An observation window, not a synchronization: count reconnects in 6 s.
+    std::thread::sleep(Duration::from_secs(6));
     let reconnects = registry.counter("postgres_reconnects_total").expect("reconnects metric").value();
     assert!((1..=4).contains(&reconnects), "{reconnects} reconnects in 6 s");
 }
@@ -224,6 +257,7 @@ fn deviation_d070_postgres_spilled_and_inline_messages_keep_their_order() {
     let s = ShutdownGuard(h.subscriber(&handler));
     s.0.start().expect("start");
     s.0.subscribe("order");
+    h.wait("order");
     s.0.broadcast(&msg("order", "warm-up"));
     assert_eq!("warm-up", handler.receive().expect("message").data);
 
@@ -238,4 +272,105 @@ fn deviation_d070_postgres_spilled_and_inline_messages_keep_their_order() {
     }
     let received: Vec<String> = sent.iter().map(|_| handler.receive().expect("message").data).collect();
     assert!(received == sent, "out of order: {:?}", received.iter().map(|d| &d[..d.len().min(12)]).collect::<Vec<_>>());
+}
+
+/// Starts a subscriber whose connections go through `proxy`.
+fn proxied(h: &Postgres, proxy: &FaultProxy, handler: &TestHandler, metrics: Metrics) -> ShutdownGuard {
+    let mut config = h.config.clone();
+    config.url = h.scope.url_via(proxy.addr());
+    let s = ShutdownGuard(h.subscriber_with(handler, &config, metrics));
+    s.0.start().expect("start");
+    s
+}
+
+/// regression-for: pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast
+/// note: Deviation D-070: subscribe and unsubscribe only queue the LISTEN/UNLISTEN for the LISTEN connection and return, so a stalled connection holds no caller (nor the broker's stream tracker) back; the probe sees the shard listened to once the connection answers again.
+#[test]
+fn deviation_d070_postgres_subscribe_does_not_wait_for_the_server() {
+    let h = Postgres::new();
+    let proxy = FaultProxy::start(h.scope.addr());
+    let handler = TestHandler::new();
+    let s = proxied(&h, &proxy, &handler, Metrics::none());
+
+    proxy.freeze();
+    let started = std::time::Instant::now();
+    for i in 0..SHARDS * 2 {
+        s.0.subscribe(&format!("frozen-{i}"));
+    }
+    s.0.unsubscribe("frozen-0");
+    assert!(started.elapsed() < Duration::from_millis(500), "subscribe waited: {:?}", started.elapsed());
+    proxy.thaw();
+
+    h.wait("frozen-1");
+    s.0.broadcast(&msg("frozen-1", "live"));
+    assert_eq!("live", handler.receive().expect("message").data);
+}
+
+/// regression-for: pubsub/redis_test.go#TestRedisReconnect
+/// note: Deviation D-070: a LISTEN connection that stops answering (a black-holed TCP connection) fails its SELECT 1 heartbeat within the keepalive interval and is replaced; messages flow again once the network is back.
+#[test]
+fn deviation_d070_postgres_heartbeat_timeout_replaces_a_silent_connection() {
+    let h = Postgres::new();
+    let proxy = FaultProxy::start(h.scope.addr());
+    let registry = Arc::new(cabby_server::metrics::Metrics::new(Vec::new(), 0));
+    let handler = TestHandler::new();
+    let s = proxied(&h, &proxy, &handler, Metrics::register(registry.clone()));
+    s.0.subscribe("beat");
+    h.wait("beat");
+
+    proxy.freeze();
+    let errors = || registry.counter("postgres_errors_total").map_or(0, |c| c.value());
+    let deadline = std::time::Instant::now() + WAIT;
+    while errors() == 0 {
+        assert!(std::time::Instant::now() < deadline, "the heartbeat did not time out");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    proxy.thaw();
+
+    let deadline = std::time::Instant::now() + WAIT * 2;
+    while registry.counter("postgres_reconnects_total").map_or(0, |c| c.value()) == 0 {
+        assert!(std::time::Instant::now() < deadline, "no reconnect");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    h.wait("beat");
+    s.0.broadcast(&msg("beat", "after"));
+    assert_eq!("after", handler.receive().expect("message after the reconnect").data);
+}
+
+/// regression-for: pubsub/redis_test.go#TestRedisCommon/Broadcast
+/// note: Deviation D-070: a notification whose overflow row is gone (expired after 60 s, or deleted) is skipped with a warning; later messages are delivered.
+#[test]
+fn deviation_d070_postgres_an_expired_overflow_row_is_skipped() {
+    let h = Postgres::new();
+    let handler = TestHandler::new();
+    let s = ShutdownGuard(h.subscriber(&handler));
+    s.0.start().expect("start");
+    s.0.subscribe("gone");
+    h.wait("gone");
+
+    let channel = format!("{}_{}", h.config.channel, shard("gone"));
+    h.scope.notify(&channel, "{\"t\":\"ref\",\"id\":987654321}");
+    s.0.broadcast(&msg("gone", "next"));
+    assert_eq!("next", handler.receive().expect("the message after the missing row").data);
+    assert!(handler.receive().is_none());
+}
+
+/// regression-for: pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast_-_Unsubscribe_-_Broadcast
+/// note: Deviation D-070: of two streams in one shard, the one unsubscribed is no longer delivered while the other still is (the shard stays listened to).
+#[test]
+fn deviation_d070_postgres_unsubscribing_one_stream_of_a_shard_keeps_the_other() {
+    let h = Postgres::new();
+    let handler = TestHandler::new();
+    let s = ShutdownGuard(h.subscriber(&handler));
+    s.0.start().expect("start");
+    let (a, b) = same_shard_pair();
+    s.0.subscribe(&a);
+    s.0.subscribe(&b);
+    h.wait(&a);
+    s.0.unsubscribe(&b);
+
+    s.0.broadcast(&msg(&b, "dropped"));
+    s.0.broadcast(&msg(&a, "kept"));
+    assert_eq!("kept", handler.receive().expect("message").data);
+    assert!(handler.receive().is_none(), "the unsubscribed stream is not delivered");
 }

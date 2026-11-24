@@ -97,7 +97,9 @@ for, or give the CA with `--postgres_tls_ca_cert_path`.
 Each node publishes with `NOTIFY` and listens with `LISTEN` on a dedicated connection. Streams
 are hashed into 16 channels (`cabby_internal_0` to `cabby_internal_15`); a node listens to a
 channel while one of its clients is subscribed to a stream hashed into it, and delivers only the
-streams it has subscribers for. Remote commands (disconnects through the API, for example) use
+streams it has subscribers for. Subscribing doesn't wait for the server: the `LISTEN` for a new
+channel is sent right away, and a message published before it takes effect (usually a few
+milliseconds) reaches the node's clients through history, as with Redis pub/sub. Remote commands (disconnects through the API, for example) use
 `cabby_internal_cmd`, which every node listens to.
 
 `NOTIFY` payloads must stay under 8000 bytes. A message larger than 7500 bytes (after its

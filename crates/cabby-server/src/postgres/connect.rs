@@ -699,44 +699,9 @@ impl Listener {
         }
     }
 
-    /// Waits up to `timeout` until `channel` is listened to; returns at once
-    /// (false) while the connection is down, as the reconnect listens again.
-    pub fn wait_listening(&self, channel: &str, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
-        blocking(|| {
-            let mut st = self.shared.lock();
-            loop {
-                if st.confirmed.contains(channel) {
-                    return true;
-                }
-                if !st.connected || !st.desired.contains(channel) {
-                    return false;
-                }
-                let now = Instant::now();
-                if now >= deadline {
-                    return false;
-                }
-                st = self.shared.changed.wait_timeout(st, deadline - now).unwrap_or_else(PoisonError::into_inner).0;
-            }
-        })
-    }
-
-    /// Waits up to `timeout` until connected with every channel listened to.
-    pub fn wait_ready(&self, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
-        blocking(|| {
-            let mut st = self.shared.lock();
-            loop {
-                if st.connected && st.confirmed == st.desired {
-                    return true;
-                }
-                let now = Instant::now();
-                if now >= deadline {
-                    return false;
-                }
-                st = self.shared.changed.wait_timeout(st, deadline - now).unwrap_or_else(PoisonError::into_inner).0;
-            }
-        })
+    /// A handle to wait on the connection's state without holding any lock.
+    pub fn waiter(&self) -> ListenWaiter {
+        ListenWaiter(self.shared.clone())
     }
 
     pub fn shutdown(&self) {
@@ -747,6 +712,52 @@ impl Listener {
 impl Drop for Listener {
     fn drop(&mut self) {
         self.stop.cancel();
+    }
+}
+
+/// Waits for a [`Listener`]'s state (cheap to clone; holds no lock).
+#[derive(Clone)]
+pub(crate) struct ListenWaiter(Arc<ListenShared>);
+
+impl ListenWaiter {
+    /// Waits up to `timeout` until `channel` is listened to (across
+    /// reconnects); false at once when it is not wanted.
+    pub fn wait_listening(&self, channel: &str, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        blocking(|| {
+            let mut st = self.0.lock();
+            loop {
+                if st.confirmed.contains(channel) {
+                    return true;
+                }
+                if !st.desired.contains(channel) {
+                    return false;
+                }
+                let now = Instant::now();
+                if now >= deadline {
+                    return false;
+                }
+                st = self.0.changed.wait_timeout(st, deadline - now).unwrap_or_else(PoisonError::into_inner).0;
+            }
+        })
+    }
+
+    /// Waits up to `timeout` until connected with every channel listened to.
+    pub fn wait_ready(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        blocking(|| {
+            let mut st = self.0.lock();
+            loop {
+                if st.connected && st.confirmed == st.desired {
+                    return true;
+                }
+                let now = Instant::now();
+                if now >= deadline {
+                    return false;
+                }
+                st = self.0.changed.wait_timeout(st, deadline - now).unwrap_or_else(PoisonError::into_inner).0;
+            }
+        })
     }
 }
 

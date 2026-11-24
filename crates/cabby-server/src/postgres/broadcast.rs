@@ -390,10 +390,12 @@ impl Broadcaster for PostgresBroadcaster {
             self.metrics.clone(),
             self.log.clone(),
         );
-        if !listener.wait_ready(START_WAIT) {
+        let waiter = listener.waiter();
+        *running = Some(Running { listener, stop, claimer });
+        drop(running);
+        if !waiter.wait_ready(START_WAIT) {
             log_warn!(self.log, "LISTEN connection is not ready yet; retrying in the background");
         }
-        *running = Some(Running { listener, stop, claimer });
         Ok(())
     }
 

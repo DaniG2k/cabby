@@ -240,6 +240,28 @@ impl PgScope {
         PgSession(connect())
     }
 
+    /// The test server's `host:port`.
+    pub fn addr(&self) -> std::net::SocketAddr {
+        let url = url();
+        let rest = url.split_once("://").map_or(url.as_str(), |(_, r)| r);
+        let host_port = rest.rsplit_once('@').map_or(rest, |(_, h)| h);
+        let host_port = host_port.split(['/', '?']).next().unwrap_or(host_port);
+        std::net::ToSocketAddrs::to_socket_addrs(host_port)
+            .expect("resolving the test server")
+            .next()
+            .expect("an address")
+    }
+
+    /// The test URL pointing at `addr` (a proxy) instead.
+    pub fn url_via(&self, addr: std::net::SocketAddr) -> String {
+        let url = url();
+        let (scheme, rest) = url.split_once("://").expect("a URL");
+        let (user, host_and_rest) = rest.rsplit_once('@').map_or(("", rest), |(u, h)| (u, h));
+        let tail = host_and_rest.find(['/', '?']).map_or("", |i| &host_and_rest[i..]);
+        let user = if user.is_empty() { String::new() } else { format!("{user}@") };
+        format!("{scheme}://{user}{addr}{tail}")
+    }
+
     /// The name of a pub/sub `LISTEN` connection in this scope.
     pub fn pubsub_listener(&self) -> String {
         format!("cabby pubsub-listen {}", self.channel)

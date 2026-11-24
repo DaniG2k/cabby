@@ -49,8 +49,6 @@ const MAX_BATCH: usize = 64;
 const OVERFLOW_TTL_SECS: i64 = 60;
 /// How often expired overflow rows are deleted.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
-/// How long `subscribe` waits for a new shard's `LISTEN` (while connected).
-const SUBSCRIBE_WAIT: Duration = Duration::from_secs(2);
 /// How long `start` waits for the `LISTEN` connection.
 const START_WAIT: Duration = Duration::from_secs(10);
 /// Command connections for publishing and reading spilled payloads.
@@ -131,10 +129,48 @@ pub struct PostgresSubscriber {
     metrics: Metrics,
     log: Logger,
     subscriptions: Arc<Mutex<Subscriptions>>,
-    running: Mutex<Option<Running>>,
+    running: Arc<Mutex<Option<Running>>>,
+}
+
+/// Waits until a subscriber listens to a stream's shard, without holding any
+/// of its locks (tests, and callers that need a subscription to be live).
+#[derive(Clone)]
+pub struct ListenProbe {
+    names: Names,
+    subscriptions: Arc<Mutex<Subscriptions>>,
+    running: Arc<Mutex<Option<Running>>>,
+}
+
+impl ListenProbe {
+    fn waiter(&self) -> Option<connect::ListenWaiter> {
+        self.running.lock().unwrap_or_else(PoisonError::into_inner).as_ref().map(|r| r.listener.waiter())
+    }
+
+    /// Waits up to `timeout` until `stream`'s shard is listened to; true at
+    /// once when `stream` is not subscribed.
+    pub fn wait_stream(&self, stream: &str, timeout: Duration) -> bool {
+        if !self.subscriptions.lock().unwrap_or_else(PoisonError::into_inner).streams.contains(stream) {
+            return true;
+        }
+        self.waiter().is_some_and(|w| w.wait_listening(&self.names.stream_channel(stream), timeout))
+    }
+
+    /// Waits up to `timeout` until every wanted channel is listened to.
+    pub fn wait_ready(&self, timeout: Duration) -> bool {
+        self.waiter().is_some_and(|w| w.wait_ready(timeout))
+    }
 }
 
 impl PostgresSubscriber {
+    /// A [`ListenProbe`] for this subscriber.
+    pub fn probe(&self) -> ListenProbe {
+        ListenProbe {
+            names: self.names.clone(),
+            subscriptions: self.subscriptions.clone(),
+            running: self.running.clone(),
+        }
+    }
+
     pub fn new(node: Arc<dyn Handler>, config: &PostgresConfig, metrics: Metrics) -> Result<Self, PubSubError> {
         let names = Names::from_config(config).map_err(PubSubError)?;
         let spec = ConnectSpec::from_config(config, "--pubsub=postgres").map_err(PubSubError)?;
@@ -146,7 +182,7 @@ impl PostgresSubscriber {
             metrics,
             log: super::logger("pubsub"),
             subscriptions: Arc::new(Mutex::new(Subscriptions::default())),
-            running: Mutex::new(None),
+            running: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -168,8 +204,7 @@ impl PostgresSubscriber {
     }
 
     /// The channels to listen to: commands plus every shard in use.
-    fn channels(&self) -> Vec<String> {
-        let subs = self.subs();
+    fn channels(&self, subs: &Subscriptions) -> Vec<String> {
         let mut out = vec![self.names.command_channel()];
         out.extend((0..SHARDS).filter(|i| subs.shards[*i] > 0).map(|i| self.names.shard_channel(i)));
         out
@@ -371,6 +406,10 @@ impl Subscriber for PostgresSubscriber {
         )
         .map_err(|e| PubSubError(format!("failed to prepare the Postgres schema, cause: {}", e.0)))?;
 
+        // Lock order: subscriptions, then running (as in `subscribe`), so a
+        // subscription made while starting is either in the initial channels
+        // or listened to once `running` is set.
+        let subs = self.subs();
         let mut running = self.running();
         if running.is_some() {
             return Ok(());
@@ -417,15 +456,18 @@ impl Subscriber for PostgresSubscriber {
         let listener = Listener::start(
             self.spec.clone(),
             &format!("cabby pubsub-listen {}", self.names.channel),
-            self.channels(),
+            self.channels(&subs),
             Arc::new(Forward(ntx)),
             self.metrics.clone(),
             self.log.clone(),
         );
-        if !listener.wait_ready(START_WAIT) {
+        let waiter = listener.waiter();
+        *running = Some(Running { listener, tx, stop });
+        drop(running);
+        drop(subs);
+        if !waiter.wait_ready(START_WAIT) {
             log_warn!(self.log, "LISTEN connection is not ready yet; retrying in the background");
         }
-        *running = Some(Running { listener, tx, stop });
         Ok(())
     }
 
@@ -449,41 +491,36 @@ impl Subscriber for PostgresSubscriber {
         self.publish(self.names.command_channel(), Published::Command(cmd), envelope);
     }
 
+    /// Registers the stream and, for a shard's first stream, asks the
+    /// `LISTEN` connection to listen to it; does not wait for the server
+    /// (see [`PostgresSubscriber::probe`]), so no lock is held for long.
     fn subscribe(&self, stream: &str) {
-        let channel = {
-            let mut subs = self.subs();
-            if !subs.streams.insert(stream.to_owned()) {
-                return;
-            }
-            let i = shard(stream);
-            subs.shards[i] += 1;
-            (subs.shards[i] == 1).then(|| self.names.shard_channel(i))
-        };
+        let mut subs = self.subs();
+        if !subs.streams.insert(stream.to_owned()) {
+            return;
+        }
         log_debug!(self.log, "subscribing", "channel" => stream);
-        let Some(channel) = channel else { return };
-        let running = self.running();
-        if let Some(r) = running.as_ref() {
-            r.listener.listen(&channel);
-            // Messages published once `subscribe` returns are received.
-            r.listener.wait_listening(&channel, SUBSCRIBE_WAIT);
+        let i = shard(stream);
+        subs.shards[i] += 1;
+        if subs.shards[i] == 1
+            && let Some(r) = self.running().as_ref()
+        {
+            r.listener.listen(&self.names.shard_channel(i));
         }
     }
 
     fn unsubscribe(&self, stream: &str) {
-        let channel = {
-            let mut subs = self.subs();
-            if !subs.streams.remove(stream) {
-                return;
-            }
-            let i = shard(stream);
-            subs.shards[i] -= 1;
-            (subs.shards[i] == 0).then(|| self.names.shard_channel(i))
-        };
+        let mut subs = self.subs();
+        if !subs.streams.remove(stream) {
+            return;
+        }
         log_debug!(self.log, "unsubscribing", "channel" => stream);
-        if let Some(channel) = channel
+        let i = shard(stream);
+        subs.shards[i] -= 1;
+        if subs.shards[i] == 0
             && let Some(r) = self.running().as_ref()
         {
-            r.listener.unlisten(&channel);
+            r.listener.unlisten(&self.names.shard_channel(i));
         }
     }
 
