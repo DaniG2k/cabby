@@ -152,11 +152,9 @@ mod tests {
     /// each print fails cleanly. Before the mruby binding unwound and checked
     /// what a raise leaves behind, such a formatter crashed the process after
     /// about 1,400 to 4,200 prints (review finding M4).
+    #[cfg(feature = "mruby")]
     #[test]
     fn a_formatter_that_always_raises_survives_10000_prints() {
-        if !mrb::supported() {
-            return;
-        }
         let path = std::env::temp_dir().join(format!("cabby-raising-formatter-{}.rb", std::process::id()));
         std::fs::write(
             &path,
