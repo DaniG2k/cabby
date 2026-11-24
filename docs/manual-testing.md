@@ -31,7 +31,7 @@ target/release/cabby --public --broadcast_adapter=http --http_broadcast_port=808
 You should see, among others (times are in your local time zone):
 
 ```text
-INF Starting Cabby 0.2.0 (AnyCable 1.6.21 compatible) (pid: …, open file limit: …, gomaxprocs: …)
+INF Starting Cabby 0.3.0 (AnyCable 1.6.21 compatible) (pid: …, open file limit: …, gomaxprocs: …)
 WRN Server is running in the public mode
 INF Accept broadcast requests at http://localhost:8080/_broadcast (no authorization)
 INF Handle WebSocket connections at http://localhost:8080/cable

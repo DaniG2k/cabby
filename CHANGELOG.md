@@ -8,7 +8,12 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-24
+
+Cabby 0.3.0 adds multi-node history and session recovery without NATS: a Redis broker for
+deployments that already run Redis, and PostgreSQL pub/sub, broadcasting and a broker for apps
+that already run Postgres. It stays compatible with AnyCable server 1.6.21; two changes need
+attention when upgrading (see "Changed").
 
 ### Added
 
@@ -23,12 +28,13 @@ Differences from the AnyCable Go server are listed by ID in
   temporary copy in SQLite's temp directory and for the WAL next to the file; if it fails,
   Cabby logs a warning and uses the file unconverted.
 - The Redis broker (`--broker=redis`): stream history and sessions shared by several nodes
-  through Redis ([`docs/redis-broker.md`](docs/redis-broker.md), D-069).
+  through Redis ([guide](https://docs.cabbyhq.com/redis), D-069).
 - PostgreSQL pub/sub and broadcasting (`--pubsub=postgres`, `--broadcast_adapter=postgres`):
   several nodes share broadcasts through the app's Postgres, and the app can broadcast by
-  inserting into an outbox table inside its own transactions (`docs/postgres.md`).
+  inserting into an outbox table inside its own transactions
+  ([guide](https://docs.cabbyhq.com/postgres), D-070).
 - The PostgreSQL broker (`--broker=postgres`): stream history, offsets and session recovery
-  shared by every node.
+  shared by every node ([guide](https://docs.cabbyhq.com/postgres), D-071).
 
 ### Changed
 

@@ -88,7 +88,7 @@ subscriber. Several Cabby nodes can share broadcasts through Redis, NATS or Post
 - **Docker** (linux/amd64 and arm64):
 
   ```sh
-  docker run --rm -p 8080:8080 -p 8090:8090 ghcr.io/danig2k/cabby:0.2.0 --norpc --public
+  docker run --rm -p 8080:8080 -p 8090:8090 ghcr.io/danig2k/cabby:0.3.0 --norpc --public
   ```
 
   The image listens on `0.0.0.0` and takes broadcasts over HTTP only, so it runs without Redis.
@@ -384,7 +384,7 @@ takes broadcasts over HTTP only. If your app broadcasts through Redis, set
 Cabby warns at startup when a Redis URL is set but no broadcast adapter uses it (with
 `--broker=redis`, whenever no broadcast adapter reads from Redis). Rename
 to `cabby.toml` and `CABBY_*` when convenient ([`docs/configuration.md`](docs/configuration.md)).
-Two things look different: `cabby --version` prints `cabby 0.2.0 (AnyCable 1.6.21 compatible)`
+Two things look different: `cabby --version` prints `cabby 0.3.0 (AnyCable 1.6.21 compatible)`
 instead of `1.6.21`, and Cabby sends no telemetry. The `x-anycable-version` header still says
 `1.6.21`.
 
