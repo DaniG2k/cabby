@@ -408,3 +408,15 @@ fn deviation_d070_postgres_a_notification_burst_does_not_stall_listen() {
     assert_eq!(0, count("postgres_reconnects_total"), "no reconnect");
     assert_eq!(20000, delivered + count("postgres_dropped_total"), "delivered {delivered}");
 }
+
+/// regression-for: pubsub/redis_test.go#TestRedisCommon/Broadcast
+/// note: Deviation D-070: start opens the publish connection (and prepares its statements) before it returns, as it does the LISTEN connection, so the first broadcast after start doesn't wait for a connection.
+#[test]
+fn deviation_d070_postgres_start_opens_the_publish_connection() {
+    let h = Postgres::new();
+    let handler = TestHandler::new();
+    let s = ShutdownGuard(h.subscriber(&handler));
+    s.0.start().expect("start");
+    let publishers = h.scope.pids(&format!("cabby pubsub {}", h.config.channel));
+    assert_eq!(1, publishers.len(), "one publish connection open when start returns: {publishers:?}");
+}

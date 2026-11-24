@@ -423,14 +423,36 @@ impl Subscriber for PostgresSubscriber {
         );
         let overflow = self.names.table(OVERFLOW);
 
+        let notify_sql = "SELECT pg_notify($1, $2)".to_owned();
+        let spill_sql = format!(
+            "WITH o AS (INSERT INTO {overflow} (payload, expires_at) VALUES ($2, NOW() + INTERVAL '{OVERFLOW_TTL_SECS} seconds') RETURNING id) \
+             SELECT pg_notify($1, '{{\"t\":\"ref\",\"id\":' || id || '}}') FROM o"
+        );
+        // The publish connection opens now, alongside the LISTEN connection, so
+        // the first broadcast doesn't wait for a connection.
+        let warm_up = {
+            let (pool, notify_sql, spill_sql) = (pool.clone(), notify_sql.clone(), spill_sql.clone());
+            connect::runtime().spawn(async move {
+                let deadline = tokio::time::Instant::now() + START_WAIT;
+                let conn = pool.get(deadline).await?;
+                let prepared = tokio::time::timeout_at(deadline, async {
+                    conn.prepare(&notify_sql).await?;
+                    conn.prepare(&spill_sql).await
+                })
+                .await;
+                match prepared {
+                    Ok(Ok(_)) => Ok(()),
+                    Ok(Err(e)) => Err(PgError::from(e)),
+                    Err(_) => Err(PgError("timed out".into())),
+                }
+            })
+        };
+
         let (tx, rx) = mpsc::channel(QUEUE_CAPACITY);
         connect::runtime().spawn(publish_loop(
             pool.clone(),
-            "SELECT pg_notify($1, $2)".to_owned(),
-            format!(
-                "WITH o AS (INSERT INTO {overflow} (payload, expires_at) VALUES ($2, NOW() + INTERVAL '{OVERFLOW_TTL_SECS} seconds') RETURNING id) \
-                 SELECT pg_notify($1, '{{\"t\":\"ref\",\"id\":' || id || '}}') FROM o"
-            ),
+            notify_sql,
+            spill_sql,
             rx,
             self.metrics.clone(),
             self.log.clone(),
@@ -467,6 +489,13 @@ impl Subscriber for PostgresSubscriber {
         drop(subs);
         if !waiter.wait_ready(START_WAIT) {
             log_warn!(self.log, "LISTEN connection is not ready yet; retrying in the background");
+        }
+        match connect::block_on(warm_up) {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                log_warn!(self.log, "publish connection is not ready yet; connecting on the first broadcast", "error" => e.0);
+            }
+            Err(_) => log_warn!(self.log, "publish connection is not ready yet; connecting on the first broadcast"),
         }
         Ok(())
     }
