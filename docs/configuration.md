@@ -37,7 +37,9 @@ loaded; the others are ignored, and with `--debug` Cabby logs each one:
 Every flag `--<name>` reads `CABBY_<NAME>`, then `ANYCABLE_<NAME>` (the name upper-cased, `-`
 becoming `_`). `--port` also reads `PORT`, and `--redis_url` also reads `REDIS_URL`, after both
 prefixed names. The first variable that is set wins, and a flag on the command line beats all of
-them.
+them. An empty value counts as set and hides the names after it: `CABBY_SECRET=` means an empty
+secret whatever `ANYCABLE_SECRET` says, an empty number keeps the default, and an empty boolean
+means `false`.
 
 | Flag | Variables, in order |
 |---|---|
@@ -66,7 +68,8 @@ warning per setting, naming the variables but never their values:
 WRN both CABBY_SECRET and ANYCABLE_SECRET are set; using CABBY_SECRET context=config
 ```
 
-Equal values, and unprefixed aliases such as `PORT`, never warn. A warning usually means a
+Equal values, unprefixed aliases such as `PORT`, and settings given as a flag on the command line
+(which overrides both variables) never warn. A warning usually means a
 half-finished migration: remove the `ANYCABLE_*` variable.
 
 `--help` lists only the `CABBY_*` names and the unprefixed aliases, and ends with a reminder that

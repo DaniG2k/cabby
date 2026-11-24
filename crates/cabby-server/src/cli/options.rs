@@ -234,10 +234,12 @@ pub fn new_config_from_cli_with(
     let non_flag_conflicts = NON_FLAG_ENV
         .iter()
         .filter_map(|name| env_conflict(&[format!("CABBY_{name}"), format!("ANYCABLE_{name}")], env));
+    // A flag on the command line overrides both variables: no conflict to note.
     let env_notes: Vec<StartupNote> = parsed
         .env_conflicts
         .iter()
-        .cloned()
+        .filter(|(i, _, _)| !parsed.on_cli[*i])
+        .map(|(_, cabby, anycable)| (cabby.clone(), anycable.clone()))
         .chain(non_flag_conflicts)
         .map(|(cabby, anycable)| StartupNote::EnvConflict { cabby, anycable })
         .collect();
@@ -1659,9 +1661,13 @@ mod tests {
         let (res, _) = run(&[], &[("CABBY_FILTER_LOGS", "false"), ("ANYCABLE_FILTER_LOGS", "true")]);
         assert_eq!(res.unwrap().0.startup_notes, vec![conflict("FILTER_LOGS")]);
 
-        // The command line still wins over the environment.
+        // The command line still wins over the environment, and then neither
+        // variable is used: nothing to note.
         let (res, _) = run(&["--port=4"], &[("CABBY_PORT", "1")]);
         assert_eq!(res.unwrap().0.server.port, 4);
+        let (res, _) = run(&["--port=4"], &[("CABBY_PORT", "1"), ("ANYCABLE_PORT", "2")]);
+        let c = res.unwrap().0;
+        assert_eq!((c.server.port, c.startup_notes.len()), (4, 0));
 
         // Values may be secrets: notes never carry them.
         let (res, _) = run(&[], &[("CABBY_SECRET", "cabby-secret-1"), ("ANYCABLE_SECRET", "anycable-secret-2")]);

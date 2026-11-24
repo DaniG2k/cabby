@@ -408,8 +408,8 @@ pub(crate) struct Parsed {
     /// Set through the environment (urfave `HasBeenSet`).
     pub from_env: Vec<bool>,
     /// Flags whose `CABBY_*` and `ANYCABLE_*` variables are set to different
-    /// values, as `(cabby, anycable)` names (D-061).
-    pub env_conflicts: Vec<(String, String)>,
+    /// values, as `(flag index, cabby, anycable)` (D-061).
+    pub env_conflicts: Vec<(usize, String, String)>,
 }
 
 impl Parsed {
@@ -452,10 +452,10 @@ pub(crate) fn apply_env(flags: &[Flag], env: &crate::config::EnvMap, state: &mut
         env_conflicts: Vec::new(),
     };
 
-    for flag in flags {
+    for (i, flag) in flags.iter().enumerate() {
         let mut value = flag.default.clone();
         let mut from_env = false;
-        parsed.env_conflicts.extend(env_conflict(&flag.env_vars, env));
+        parsed.env_conflicts.extend(env_conflict(&flag.env_vars, env).map(|(c, a)| (i, c, a)));
 
         let found = flag.env_vars.iter().find_map(|k| env.get(k.trim()).map(|v| (k, v)));
         if let Some((key, raw)) = found {
