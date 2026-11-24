@@ -3,12 +3,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, params};
 
 use super::queue::{StreamMaxima, WriteOp};
-use super::units;
+use super::{log, units};
+use crate::{log_info, log_warn};
 
 /// How long a statement waits for a lock another connection holds.
 pub(super) const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -83,9 +84,9 @@ impl From<rusqlite::Error> for StoreError {
     }
 }
 
-/// Opens (creating if needed) the database: incremental auto-vacuum for fresh
-/// files, WAL, `synchronous=NORMAL`, a busy timeout, `quick_check`, then
-/// migrations up to the current version.
+/// Opens (creating if needed) the database: incremental auto-vacuum (set on
+/// fresh files, converted once on older ones), WAL, `synchronous=NORMAL`, a
+/// busy timeout, `quick_check`, then migrations up to the current version.
 pub(super) fn open(path: &Path) -> Result<Connection, StoreError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let conn = Connection::open_with_flags(path, flags)?;
@@ -100,8 +101,31 @@ pub(super) fn open(path: &Path) -> Result<Connection, StoreError> {
     }
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     quick_check(&conn)?;
+    match convert_to_incremental_auto_vacuum(&conn) {
+        Ok(None) => {}
+        Ok(Some((before, after))) => log_info!(log(), "converted the SQLite database to incremental auto-vacuum",
+            "path" => path.display().to_string(), "pages_before" => before, "pages_after" => after),
+        // The file works without it; the next start tries again.
+        Err(e) => log_warn!(log(), "failed to convert the SQLite database to incremental auto-vacuum",
+            "path" => path.display().to_string(), "error" => e.to_string()),
+    }
     migrate(&conn, MIGRATIONS)?;
     Ok(conn)
+}
+
+/// Switches a non-empty file that has no auto-vacuum (files written before
+/// Cabby set it) to `auto_vacuum=INCREMENTAL`, which takes a full `VACUUM`.
+/// Returns the page counts before and after, or `None` when there was
+/// nothing to convert.
+pub(super) fn convert_to_incremental_auto_vacuum(conn: &Connection) -> Result<Option<(i64, i64)>, StoreError> {
+    let auto_vacuum: i64 = conn.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;
+    let before: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0))?;
+    if auto_vacuum != 0 || before == 0 {
+        return Ok(None);
+    }
+    conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL; VACUUM;")?;
+    let after: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0))?;
+    Ok(Some((before, after)))
 }
 
 /// `PRAGMA quick_check`: anything but a single `ok` row is corruption.
@@ -273,11 +297,7 @@ pub(super) struct Prune<'a> {
     pub(super) streams: &'a Touched,
 }
 
-/// Pages reclaimed per periodic prune pass (~1 MiB at default 4 KiB page size).
-const PRUNE_VACUUM_PAGES: u32 = 256;
-
-/// One prune pass, in one transaction, followed by bounded incremental vacuum
-/// so deleted history/sessions return disk space to the OS.
+/// One prune pass, in one transaction.
 pub(super) fn prune(conn: &mut Connection, p: &Prune<'_>) -> Result<(), StoreError> {
     let tx = conn.transaction()?;
     tx.execute(PRUNE_BY_TTL, [p.history_cutoff])?;
@@ -290,18 +310,28 @@ pub(super) fn prune(conn: &mut Connection, p: &Prune<'_>) -> Result<(), StoreErr
     tx.execute(PRUNE_STREAMS, [p.now_secs])?;
     tx.execute(PRUNE_SESSIONS, [p.now_ms])?;
     tx.commit()?;
-    incremental_vacuum(conn, Some(PRUNE_VACUUM_PAGES))?;
     Ok(())
 }
 
-/// Reclaims freed pages (`PRAGMA incremental_vacuum`). A no-op on files that
-/// were created without `auto_vacuum = INCREMENTAL`.
-pub(super) fn incremental_vacuum(conn: &Connection, pages: Option<u32>) -> Result<(), StoreError> {
-    match pages {
-        Some(n) => conn.execute_batch(&format!("PRAGMA incremental_vacuum({n})"))?,
-        None => conn.execute_batch("PRAGMA incremental_vacuum")?,
+/// Returns free pages to the file system (`PRAGMA incremental_vacuum`): at
+/// most `pages` (all of them when `None`), and none once `deadline` has
+/// passed. Each step of the pragma frees one page. Returns how many it freed.
+pub(super) fn incremental_vacuum(
+    conn: &Connection,
+    pages: Option<u32>,
+    deadline: Option<Instant>,
+) -> Result<u64, StoreError> {
+    let sql = match pages {
+        Some(n) => format!("PRAGMA incremental_vacuum({n})"),
+        None => "PRAGMA incremental_vacuum".to_owned(),
+    };
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query([])?;
+    let mut freed = 0;
+    while deadline.is_none_or(|d| Instant::now() < d) && rows.next()?.is_some() {
+        freed += 1;
     }
-    Ok(())
+    Ok(freed)
 }
 
 /// `PRAGMA wal_checkpoint(TRUNCATE)`: copies the WAL into the database file
@@ -687,23 +717,120 @@ mod tests {
         }
     }
 
-    #[test]
-    fn pruning_reclaims_freed_pages_via_incremental_vacuum() {
-        let dir = TempDir::new();
-        let path = dir.file("cabby.db");
-        let mut conn = open(&path).unwrap();
+    fn pragma_i64(conn: &Connection, name: &str) -> i64 {
+        conn.pragma_query_value(None, name, |r| r.get(0)).unwrap()
+    }
+
+    /// Writes `n` expired history entries of 4 KiB each to stream `s`.
+    fn write_expired_history(conn: &mut Connection, n: u64) {
         let payload = "x".repeat(4096);
-        let ops: Vec<WriteOp> = (1..=80)
+        let ops: Vec<WriteOp> = (1..=n)
             .map(|offset| WriteOp::History { stream: "s".into(), offset, ts_secs: T0 - 1000, data: payload.clone() })
             .collect();
-        write_batch(&mut conn, &ops, &StreamMaxima::new(), 300, T0, false).unwrap();
-        let pages_before: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0)).unwrap();
+        write_batch(conn, &ops, &StreamMaxima::new(), 300, T0, false).unwrap();
+    }
+
+    #[test]
+    fn pruning_then_vacuuming_returns_the_freed_pages() {
+        let dir = TempDir::new();
+        let mut conn = open(&dir.file("cabby.db")).unwrap();
+        write_expired_history(&mut conn, 80);
+        let pages_before = pragma_i64(&conn, "page_count");
         assert!(pages_before > 40, "pages_before={pages_before}");
 
         let touched = Touched::from(["s".to_owned()]);
         let p = Prune { history_cutoff: T0, now_secs: T0, now_ms: T0 * 1000, history_limit: 100, streams: &touched };
         prune(&mut conn, &p).unwrap();
-        let pages_after: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0)).unwrap();
-        assert!(pages_after < pages_before, "expected page count to shrink: {pages_before} -> {pages_after}");
+        let freed = pragma_i64(&conn, "freelist_count");
+        assert!(freed > 40 && freed < 256, "freed={freed}");
+        assert_eq!(u64::try_from(freed).unwrap(), incremental_vacuum(&conn, Some(256), None).unwrap());
+
+        assert_eq!(0, pragma_i64(&conn, "freelist_count"));
+        assert_eq!(pages_before - freed, pragma_i64(&conn, "page_count"));
+    }
+
+    #[test]
+    fn incremental_vacuum_frees_the_requested_number_of_pages() {
+        let dir = TempDir::new();
+        let mut conn = open(&dir.file("cabby.db")).unwrap();
+        write_expired_history(&mut conn, 80);
+        conn.execute("DELETE FROM history", []).unwrap();
+        let free = pragma_i64(&conn, "freelist_count");
+        assert!(free > 20, "free={free}");
+
+        assert_eq!(10, incremental_vacuum(&conn, Some(10), None).unwrap());
+        assert_eq!(free - 10, pragma_i64(&conn, "freelist_count"));
+
+        assert_eq!(u64::try_from(free - 10).unwrap(), incremental_vacuum(&conn, None, None).unwrap());
+        assert_eq!(0, pragma_i64(&conn, "freelist_count"));
+    }
+
+    #[test]
+    fn incremental_vacuum_stops_at_its_deadline() {
+        let dir = TempDir::new();
+        let mut conn = open(&dir.file("cabby.db")).unwrap();
+        write_expired_history(&mut conn, 80);
+        conn.execute("DELETE FROM history", []).unwrap();
+        let free = pragma_i64(&conn, "freelist_count");
+
+        assert_eq!(0, incremental_vacuum(&conn, None, Some(Instant::now())).unwrap());
+        assert_eq!(free, pragma_i64(&conn, "freelist_count"), "a passed deadline frees nothing");
+
+        let later = Instant::now() + Duration::from_secs(60);
+        assert_eq!(u64::try_from(free).unwrap(), incremental_vacuum(&conn, None, Some(later)).unwrap());
+        assert_eq!(0, pragma_i64(&conn, "freelist_count"));
+    }
+
+    #[test]
+    fn a_file_without_auto_vacuum_is_converted_once_at_open() {
+        let dir = TempDir::new();
+        let path = dir.file("cabby.db");
+        {
+            // A file written before Cabby set auto_vacuum: the SQLite default (NONE), in WAL mode.
+            let conn = Connection::open(&path).unwrap();
+            let _: String = conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0)).unwrap();
+            migrate(&conn, MIGRATIONS).unwrap();
+            let mut conn = conn;
+            write_expired_history(&mut conn, 40);
+            conn.execute("DELETE FROM history WHERE seq > 20", []).unwrap();
+            meta_set(&conn, "epoch", "abcd").unwrap();
+            assert_eq!(0, pragma_i64(&conn, "auto_vacuum"));
+        }
+        let conn = Connection::open(&path).unwrap();
+        let pages_before = pragma_i64(&conn, "page_count");
+        assert!(pragma_i64(&conn, "freelist_count") > 0);
+
+        let converted = convert_to_incremental_auto_vacuum(&conn).unwrap();
+
+        let pages_after = pragma_i64(&conn, "page_count");
+        assert_eq!(Some((pages_before, pages_after)), converted);
+        assert!(pages_after < pages_before, "{pages_before} -> {pages_after}");
+        assert_eq!(2, pragma_i64(&conn, "auto_vacuum"), "auto_vacuum=INCREMENTAL");
+        assert_eq!(None, convert_to_incremental_auto_vacuum(&conn).unwrap(), "converted only once");
+        drop(conn);
+
+        let conn = open(&path).unwrap();
+        assert_eq!(2, pragma_i64(&conn, "auto_vacuum"));
+        let mode: String = conn.pragma_query_value(None, "journal_mode", |r| r.get(0)).unwrap();
+        assert_eq!("wal", mode);
+        assert_eq!(Some("abcd".to_owned()), meta_get(&conn, "epoch").unwrap(), "data survives");
+        let rows: i64 = conn.query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0)).unwrap();
+        assert_eq!(20, rows);
+    }
+
+    #[test]
+    fn open_converts_a_file_without_auto_vacuum() {
+        let dir = TempDir::new();
+        let path = dir.file("cabby.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            let _: String = conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0)).unwrap();
+            migrate(&conn, MIGRATIONS).unwrap();
+            assert_eq!(0, pragma_i64(&conn, "auto_vacuum"));
+        }
+
+        let conn = open(&path).unwrap();
+
+        assert_eq!(2, pragma_i64(&conn, "auto_vacuum"));
     }
 }

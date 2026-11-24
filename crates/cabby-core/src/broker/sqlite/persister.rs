@@ -19,6 +19,9 @@ use crate::{log_error, log_info, log_warn};
 
 /// A batch is written as soon as this many ops are queued.
 pub(super) const BATCH_SIZE: usize = 1_000;
+/// Free pages returned to the file system after each prune (1 MiB at the
+/// default 4 KiB page size).
+const PRUNE_VACUUM_PAGES: u32 = 256;
 /// Pause between attempts of the final write.
 const FINAL_RETRY: Duration = Duration::from_millis(100);
 
@@ -205,7 +208,14 @@ impl Persister {
         };
         match store::prune(&mut self.db.conn, &prune) {
             Ok(()) => self.touched.clear(),
-            Err(e) => log_warn!(log(), "failed to prune the SQLite database", "error" => e.to_string()),
+            Err(e) => {
+                log_warn!(log(), "failed to prune the SQLite database", "error" => e.to_string());
+                return;
+            }
+        }
+        // The prune is committed whatever happens here.
+        if let Err(e) = store::incremental_vacuum(&self.db.conn, Some(PRUNE_VACUUM_PAGES), None) {
+            log_warn!(log(), "failed to return free SQLite pages to the file system", "error" => e.to_string());
         }
     }
 
@@ -250,7 +260,11 @@ impl Persister {
         }
         let Database { conn, lock, .. } = self.db;
         let _ = conn.busy_timeout(deadline.saturating_duration_since(Instant::now()));
-        let _ = store::incremental_vacuum(&conn, None);
+        // Only what fits in the shutdown budget.
+        if let Err(e) = store::incremental_vacuum(&conn, None, Some(deadline)) {
+            log_warn!(log(), "failed to return free SQLite pages to the file system", "path" => path.clone(),
+                "error" => e.to_string());
+        }
         if let Err(e) = store::checkpoint(&conn) {
             log_warn!(log(), "failed to checkpoint the SQLite WAL", "path" => path.clone(), "error" => e.to_string());
         }
@@ -267,6 +281,7 @@ mod tests {
     use std::path::Path;
 
     use rusqlite::OpenFlags;
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
 
     use super::*;
     use crate::broker::sqlite::testing::{Recording, TempDir, history};
@@ -413,6 +428,33 @@ mod tests {
         p.tick();
 
         assert_eq!(vec![4, 5], query_i64s(&dir.file("cabby.db"), "SELECT seq FROM history ORDER BY seq"));
+    }
+
+    #[test]
+    fn a_failed_vacuum_after_a_committed_prune_still_clears_the_touched_streams() {
+        let dir = TempDir::new();
+        let mut config = Config::new();
+        config.history_limit = 2;
+        let mut t = timing(Duration::from_millis(10));
+        t.prune_interval = Duration::ZERO;
+        let queue = Arc::new(WriteQueue::new(100, 5));
+        let observer = Arc::new(Recording::default());
+        let mut conn = store::open(&dir.file("cabby.db")).unwrap();
+        conn.authorizer(Some(|ctx: AuthContext<'_>| match ctx.action {
+            AuthAction::Pragma { pragma_name: "incremental_vacuum", .. } => Authorization::Deny,
+            _ => Authorization::Allow,
+        }))
+        .unwrap();
+        let mut p = persister(&dir, conn, &queue, &observer, &config, t);
+        assert!(store::incremental_vacuum(&p.db.conn, None, None).is_err(), "the vacuum fails");
+        for offset in 1..=5 {
+            queue.push(history("s", offset));
+        }
+
+        p.tick();
+
+        assert_eq!(vec![4, 5], query_i64s(&dir.file("cabby.db"), "SELECT seq FROM history ORDER BY seq"));
+        assert!(p.touched.is_empty(), "the committed prune clears the touched streams");
     }
 
     #[test]

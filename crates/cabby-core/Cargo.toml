@@ -26,6 +26,10 @@ tonic-prost.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 
+[dev-dependencies]
+# The authorizer hook lets tests make one statement fail.
+rusqlite = { workspace = true, features = ["hooks"] }
+
 [build-dependencies]
 tonic-prost-build.workspace = true
 
