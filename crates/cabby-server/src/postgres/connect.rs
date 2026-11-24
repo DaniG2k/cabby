@@ -176,44 +176,143 @@ fn tokio_sslmode(m: SslMode) -> &'static str {
 
 /// Takes `sslmode` and `sslrootcert` out of a URI (`postgres://...?...`) or
 /// a key/value string, as tokio-postgres doesn't know `verify-ca`,
-/// `verify-full` or `sslrootcert`.
+/// `verify-full` or `sslrootcert`; everything else is left to tokio-postgres's
+/// own parser. In a URI, the user name and password are percent-encoded
+/// again, so a literal `?`, `/` or `@` in a password parses.
 pub(crate) fn parse_url(url: &str) -> Result<ParsedUrl, String> {
     let mut sslmode = SslMode::Prefer;
     let mut sslrootcert = None;
-    let is_uri = url.starts_with("postgres://") || url.starts_with("postgresql://");
-    let conninfo = if is_uri {
-        let (base, query) = match url.split_once('?') {
+    let conninfo = if let Some(scheme_end) =
+        ["postgres://", "postgresql://"].iter().find_map(|p| url.starts_with(p).then_some(p.len()))
+    {
+        let (scheme, rest) = url.split_at(scheme_end);
+        let (userinfo, hostpart) = split_userinfo(rest);
+        let (base, query) = match hostpart.split_once('?') {
             Some((b, q)) => (b, Some(q)),
-            None => (url, None),
+            None => (hostpart, None),
         };
         let mut kept = Vec::new();
         for pair in query.unwrap_or("").split('&').filter(|p| !p.is_empty()) {
             let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
             match k {
-                "sslmode" => sslmode = parse_sslmode(v)?,
+                "sslmode" => sslmode = parse_sslmode(&percent_decode(v))?,
                 "sslrootcert" => sslrootcert = Some(percent_decode(v)),
-                _ => kept.push(pair),
+                _ => kept.push(pair.to_owned()),
             }
         }
-        kept.push(match sslmode {
-            SslMode::Disable => "sslmode=disable",
-            SslMode::Prefer => "sslmode=prefer",
-            _ => "sslmode=require",
+        kept.push(format!("sslmode={}", tokio_sslmode(sslmode)));
+        let userinfo = userinfo.map(|u| {
+            let (user, password) = match u.split_once(':') {
+                Some((user, password)) => (user, Some(password)),
+                None => (u, None),
+            };
+            match password {
+                Some(p) => format!("{}:{}@", encode_userinfo(user), encode_userinfo(p)),
+                None => format!("{}@", encode_userinfo(user)),
+            }
         });
-        format!("{base}?{}", kept.join("&"))
+        format!("{scheme}{}{base}?{}", userinfo.unwrap_or_default(), kept.join("&"))
     } else {
         let mut kept = Vec::new();
-        for token in url.split_whitespace() {
-            match token.split_once('=') {
-                Some(("sslmode", v)) => sslmode = parse_sslmode(v.trim_matches('\''))?,
-                Some(("sslrootcert", v)) => sslrootcert = Some(v.trim_matches('\'').to_owned()),
-                _ => kept.push(token.to_owned()),
+        for (key, value, raw) in key_values(url)? {
+            match key.as_str() {
+                "sslmode" => sslmode = parse_sslmode(&value)?,
+                "sslrootcert" => sslrootcert = Some(value),
+                _ => kept.push(raw),
             }
         }
         kept.push(format!("sslmode={}", tokio_sslmode(sslmode)));
         kept.join(" ")
     };
     Ok(ParsedUrl { conninfo, sslmode, sslrootcert })
+}
+
+/// Splits `[userinfo@]host...`: the user info ends at the last `@` before
+/// the first `/` or `?` that follows the first `@`, so `@`, `/` and `?` in a
+/// password are kept in it.
+fn split_userinfo(rest: &str) -> (Option<&str>, &str) {
+    let Some(first_at) = rest.find('@') else { return (None, rest) };
+    let end = rest[first_at..].find(['/', '?']).map_or(rest.len(), |i| first_at + i);
+    let at = rest[..end].rfind('@').unwrap_or(first_at);
+    (Some(&rest[..at]), &rest[at + 1..])
+}
+
+/// Percent-encodes what a URI's user info can't hold literally; `%XX`
+/// sequences already encoded are kept.
+fn encode_userinfo(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    for (i, &b) in bytes.iter().enumerate() {
+        let encoded = b == b'%' && bytes.get(i + 1..i + 3).is_some_and(|h| h.iter().all(u8::is_ascii_hexdigit));
+        if b.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=".contains(&b) || encoded {
+            out.push(char::from(b));
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// The `key=value` pairs of a libpq key/value string: (key, unquoted value,
+/// the pair as written). Values may be single-quoted, with `\'` and `\\`
+/// escapes; spaces around `=` are allowed.
+fn key_values(s: &str) -> Result<Vec<(String, String, String)>, String> {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    let skip_ws = |i: &mut usize| {
+        while *i < chars.len() && chars[*i].is_whitespace() {
+            *i += 1;
+        }
+    };
+    loop {
+        skip_ws(&mut i);
+        if i >= chars.len() {
+            return Ok(out);
+        }
+        let start = i;
+        while i < chars.len() && chars[i] != '=' && !chars[i].is_whitespace() {
+            i += 1;
+        }
+        let key: String = chars[start..i].iter().collect();
+        skip_ws(&mut i);
+        if i >= chars.len() || chars[i] != '=' {
+            return Err(format!("missing \"=\" after {key:?}"));
+        }
+        i += 1;
+        skip_ws(&mut i);
+        let mut value = String::new();
+        if i < chars.len() && chars[i] == '\'' {
+            i += 1;
+            loop {
+                match chars.get(i) {
+                    None => return Err(format!("unterminated quoted value of {key:?}")),
+                    Some('\'') => {
+                        i += 1;
+                        break;
+                    }
+                    Some('\\') if i + 1 < chars.len() => {
+                        value.push(chars[i + 1]);
+                        i += 2;
+                    }
+                    Some(c) => {
+                        value.push(*c);
+                        i += 1;
+                    }
+                }
+            }
+        } else {
+            while i < chars.len() && !chars[i].is_whitespace() {
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    i += 1;
+                }
+                value.push(chars[i]);
+                i += 1;
+            }
+        }
+        let raw: String = chars[start..i].iter().collect();
+        out.push((key, value, raw));
+    }
 }
 
 fn percent_decode(s: &str) -> String {
@@ -258,19 +357,8 @@ pub(crate) fn tls_config(verify: Verify, ca_path: &str) -> Result<ClientConfig, 
             .with_custom_certificate_verifier(Arc::new(NoVerification))
             .with_no_client_auth());
     }
-    let mut roots = RootCertStore::empty();
-    if ca_path.is_empty() {
-        for cert in rustls_native_certs::load_native_certs().certs {
-            let _ = roots.add(cert);
-        }
-    } else {
-        let pem = std::fs::read(ca_path)
-            .map_err(|e| format!("failed to read --postgres_tls_ca_cert_path {ca_path:?}: {e}"))?;
-        let added = CertificateDer::pem_slice_iter(&pem).flatten().filter(|c| roots.add(c.clone()).is_ok()).count();
-        if added == 0 {
-            return Err(format!("no CA certificate found in --postgres_tls_ca_cert_path {ca_path:?}"));
-        }
-    }
+    let native = if ca_path.is_empty() { rustls_native_certs::load_native_certs().certs } else { Vec::new() };
+    let roots = roots(native, ca_path)?;
     let webpki = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider)
         .build()
         .map_err(|e| format!("failed to build the TLS verifier: {e}"))?;
@@ -279,6 +367,31 @@ pub(crate) fn tls_config(verify: Verify, ca_path: &str) -> Result<ClientConfig, 
         _ => webpki,
     };
     Ok(builder.dangerous().with_custom_certificate_verifier(verifier).with_no_client_auth())
+}
+
+/// The CA certificates to verify the server with: the file at `ca_path`, or
+/// else the system roots (`native`). None at all is an error naming the
+/// settings that fix it.
+fn roots(native: Vec<CertificateDer<'static>>, ca_path: &str) -> Result<RootCertStore, String> {
+    let mut roots = RootCertStore::empty();
+    if ca_path.is_empty() {
+        for cert in native {
+            let _ = roots.add(cert);
+        }
+        if roots.is_empty() {
+            return Err("no system CA certificates found to verify the Postgres server: set \
+                        --postgres_tls_ca_cert_path, or --postgres_tls_verify=false, or use sslmode=disable"
+                .to_owned());
+        }
+        return Ok(roots);
+    }
+    let pem =
+        std::fs::read(ca_path).map_err(|e| format!("failed to read --postgres_tls_ca_cert_path {ca_path:?}: {e}"))?;
+    let added = CertificateDer::pem_slice_iter(&pem).flatten().filter(|c| roots.add(c.clone()).is_ok()).count();
+    if added == 0 {
+        return Err(format!("no CA certificate found in --postgres_tls_ca_cert_path {ca_path:?}"));
+    }
+    Ok(roots)
 }
 
 /// `sslmode=verify-ca`: the chain must verify; the host name is not checked.
@@ -971,6 +1084,37 @@ mod tests {
         assert_eq!("host=db user=u password=p dbname=app sslmode=require", p.conninfo);
     }
 
+    fn parsed(url: &str) -> (SslMode, tokio_postgres::Config) {
+        let p = parse_url(url).unwrap_or_else(|e| panic!("{url}: {e}"));
+        let config = p.conninfo.parse().unwrap_or_else(|e| panic!("{url}: {e}"));
+        (p.sslmode, config)
+    }
+
+    #[test]
+    fn passwords_with_reserved_characters_parse() {
+        let (mode, c) = parsed("postgres://u:pa?ss/w@rd@db:5432/app?sslmode=verify-full");
+        assert_eq!(SslMode::VerifyFull, mode);
+        assert_eq!(Some("u"), c.get_user());
+        assert_eq!(Some(&b"pa?ss/w@rd"[..]), c.get_password());
+        assert_eq!("db:5432/app", describe(&c));
+
+        let (mode, c) = parsed("postgres://u:p%40ss@db/app");
+        assert_eq!(SslMode::Prefer, mode);
+        assert_eq!(Some(&b"p@ss"[..]), c.get_password());
+    }
+
+    #[test]
+    fn quoted_key_value_strings_parse() {
+        let (mode, c) = parsed(
+            r"host=db password='with space \'quote\'' dbname = app sslmode='verify-ca' sslrootcert='/etc/my ca.pem'",
+        );
+        assert_eq!(SslMode::VerifyCa, mode);
+        assert_eq!(Some(&b"with space 'quote'"[..]), c.get_password());
+        assert_eq!(Some("app"), c.get_dbname());
+        let p = parse_url(r"host=db sslrootcert='/etc/my ca.pem'").unwrap();
+        assert_eq!(Some("/etc/my ca.pem".to_owned()), p.sslrootcert);
+    }
+
     #[test]
     fn verification_is_secure_by_default() {
         assert_eq!(Verify::Full, verification(SslMode::Require, true));
@@ -1024,6 +1168,20 @@ mod tests {
         c.tls_ca_cert_path = "/nonexistent/ca.pem".into();
         let err = ConnectSpec::from_config(&c, "--pubsub=postgres").err().unwrap();
         assert!(err.contains("--postgres_tls_ca_cert_path"), "{err}");
+    }
+
+    #[test]
+    fn missing_system_roots_name_the_settings() {
+        let err = roots(Vec::new(), "").err().unwrap();
+        assert!(err.contains("--postgres_tls_ca_cert_path") && err.contains("--postgres_tls_verify=false"), "{err}");
+    }
+
+    #[test]
+    fn sslmode_disable_needs_no_roots() {
+        let mut c = PostgresConfig::new();
+        c.url = "postgres://db/app?sslmode=disable".into();
+        c.tls_ca_cert_path = "/nonexistent/ca.pem".into();
+        assert!(ConnectSpec::from_config(&c, "--pubsub=postgres").is_ok(), "no TLS: no CA is read");
     }
 
     #[test]
