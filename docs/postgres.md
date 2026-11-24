@@ -106,7 +106,8 @@ row's ID; receivers read it from there. A node deletes expired rows every 30 sec
 
 The `LISTEN` connection is checked with `SELECT 1` every `--postgres_keepalive_interval`, so a
 connection that died without closing is noticed. After any failure Cabby reconnects with backoff
-(250 ms, then about 2, 4, 8, ... seconds, at most 30 s) and listens again to every channel. Messages published
+(250 ms, then about 2, 4, 8, ... seconds, at most 30 s; the delays start over once a
+connection has stayed up for 30 s) and listens again to every channel. Messages published
 while a node is disconnected don't reach it; with `--broker=postgres` (or any broker with
 history) clients catch up from history when they resubscribe or reconnect.
 

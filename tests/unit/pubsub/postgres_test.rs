@@ -193,3 +193,24 @@ fn deviation_d070_postgres_reconnects_and_listens_again() {
     assert_eq!("disconnect", handler.receive_command().expect("command after the reconnect").command);
     assert_eq!(1, registry.counter("postgres_reconnects_total").expect("reconnects metric").value());
 }
+
+/// regression-for: pubsub/redis_test.go#TestRedisReconnect
+/// note: Deviation D-070: when the server keeps closing the LISTEN connection right after it connects (here a role with idle_session_timeout = 200ms), reconnects back off (250 ms, then about 2 s, 4 s, ...) instead of looping; the backoff resets only after a connection stayed up for 30 s.
+#[test]
+fn deviation_d070_postgres_listen_reconnects_back_off_when_connections_keep_dropping() {
+    let h = Postgres::new();
+    h.scope.migrate();
+    let mut config = h.config.clone();
+    config.url = h.scope.role_url(&[("idle_session_timeout", "200ms")]);
+    config.auto_migrate = false;
+    config.keepalive_interval = 0;
+    let registry = Arc::new(cabby_server::metrics::Metrics::new(Vec::new(), 0));
+    let handler = TestHandler::new();
+    let subscriber =
+        ShutdownGuard(Subscriber::postgres(&handler, &config, Metrics::register(registry.clone())).expect("new"));
+    subscriber.0.start().expect("start");
+
+    std::thread::sleep(std::time::Duration::from_secs(6));
+    let reconnects = registry.counter("postgres_reconnects_total").expect("reconnects metric").value();
+    assert!((1..=4).contains(&reconnects), "{reconnects} reconnects in 6 s");
+}

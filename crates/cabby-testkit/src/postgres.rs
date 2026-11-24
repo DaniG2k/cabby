@@ -71,6 +71,7 @@ pub struct PgScope {
     pub schema: String,
     pub channel: String,
     client: std::sync::Arc<Client>,
+    roles: std::sync::Mutex<Vec<String>>,
 }
 
 /// A plain connection to the test server.
@@ -90,7 +91,12 @@ impl PgScope {
         let nanos =
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
         let id = format!("{}_{n}_{nanos}", std::process::id());
-        Self { schema: format!("t_{tag}_{id}"), channel: format!("c_{id}"), client: connect() }
+        Self {
+            schema: format!("t_{tag}_{id}"),
+            channel: format!("c_{id}"),
+            client: connect(),
+            roles: std::sync::Mutex::new(Vec::new()),
+        }
     }
 
     /// The adapters' configuration for this scope.
@@ -207,6 +213,27 @@ impl PgScope {
         }
     }
 
+    /// Creates a login role (unique to this scope, dropped with it) allowed
+    /// to use this scope's tables, with `settings` applied to its sessions
+    /// (`ALTER ROLE ... SET`), and returns a URL that logs in as it.
+    pub fn role_url(&self, settings: &[(&str, &str)]) -> String {
+        let role = format!("r_{}", self.channel);
+        let mut sql = format!(
+            "CREATE ROLE \"{role}\" LOGIN PASSWORD 'pw'; GRANT USAGE ON SCHEMA \"{s}\" TO \"{role}\"; \
+             GRANT ALL ON ALL TABLES IN SCHEMA \"{s}\" TO \"{role}\"; GRANT ALL ON ALL SEQUENCES IN SCHEMA \"{s}\" TO \"{role}\";",
+            s = self.schema
+        );
+        for (k, v) in settings {
+            sql.push_str(&format!(" ALTER ROLE \"{role}\" SET {k} = '{v}';"));
+        }
+        self.execute(&sql);
+        self.roles.lock().unwrap_or_else(|e| e.into_inner()).push(role.clone());
+        let url = url();
+        let (scheme, rest) = url.split_once("://").expect("a URL");
+        let host = rest.rsplit_once('@').map_or(rest, |(_, h)| h);
+        format!("{scheme}://{role}:pw@{host}")
+    }
+
     /// Another session on the test server (its own connection), for locks and
     /// transactions held across steps.
     pub fn other_session(&self) -> PgSession {
@@ -237,7 +264,13 @@ impl PgSession {
 
 impl Drop for PgScope {
     fn drop(&mut self) {
-        let (client, sql) = (self.client.clone(), format!("DROP SCHEMA IF EXISTS \"{}\" CASCADE", self.schema));
+        let mut sql = format!("DROP SCHEMA IF EXISTS \"{}\" CASCADE;", self.schema);
+        for role in self.roles.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+            sql.push_str(&format!(
+                " SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = '{role}'; DROP ROLE IF EXISTS \"{role}\";"
+            ));
+        }
+        let client = self.client.clone();
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         runtime().spawn(async move {
             let _ = tx.send(client.batch_execute(&sql).await);

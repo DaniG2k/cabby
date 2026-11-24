@@ -37,6 +37,9 @@ pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long one query (or a pipelined batch) may take before its connection
 /// is considered broken and dropped.
 pub(crate) const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a `LISTEN` connection must stay up before a loss reconnects
+/// without the accumulated backoff.
+pub(crate) const STABLE_CONNECTION: Duration = Duration::from_secs(30);
 /// The longest wait between reconnect attempts.
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
@@ -714,7 +717,7 @@ async fn listen_loop(
                 }
             }
         };
-        attempt = 0;
+        let connected_at = Instant::now();
         let reconnected = ever_connected;
         if reconnected {
             metrics.reconnect();
@@ -729,12 +732,20 @@ async fn listen_loop(
             st.confirmed.clear();
         }
         shared.changed.notify_all();
-        match lost {
-            None => return,
-            Some(reason) => {
-                metrics.error();
-                log_error!(log, "LISTEN connection lost, reconnecting", "error" => reason);
-            }
+        let Some(reason) = lost else { return };
+        metrics.error();
+        // Only a connection that stayed up resets the backoff, so a server
+        // that closes sessions right after they connect isn't hammered.
+        if connected_at.elapsed() >= STABLE_CONNECTION {
+            attempt = 0;
+        }
+        let delay = backoff(attempt);
+        attempt = attempt.saturating_add(1);
+        log_error!(log, "LISTEN connection lost, reconnecting", "error" => reason, "retry_in_ms" => i64::try_from(delay.as_millis()).unwrap_or(i64::MAX));
+        tokio::select! {
+            biased;
+            () = stop.cancelled() => return,
+            () = tokio::time::sleep(delay) => {}
         }
     }
 }
