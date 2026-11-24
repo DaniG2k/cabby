@@ -224,7 +224,8 @@ refs=("$IMAGE:$version")
 multiarch=(docker buildx build --builder "$BUILDER" --platform linux/amd64,linux/arm64 --build-arg "VERSION=$version")
 for r in "${refs[@]}"; do multiarch+=(-t "$r"); done
 if ! $publish; then
-  "${multiarch[@]}" "$ctx"
+  # Build both platforms, keep nothing: no local image carries a release tag.
+  "${multiarch[@]}" --output type=cacheonly "$ctx"
   step "dry run done: $out"
   ls -l "$out"
   echo
