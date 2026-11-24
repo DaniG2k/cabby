@@ -444,3 +444,51 @@ fn deviation_d071_postgres_concurrent_epoch_creation_agrees() {
         assert_eq!(ea, eb, "round {i}");
     }
 }
+
+/// A server that accepts connections and never answers (a black-holed
+/// database); returns its port.
+fn black_hole() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        let mut held = Vec::new();
+        for s in listener.incoming().flatten() {
+            held.push(s);
+        }
+    });
+    port
+}
+
+/// regression-for: broker/nats_test.go#TestNATSBroker_Sessions
+/// note: Deviation D-071: with a database that accepts connections but never answers, 8 concurrent calls all fail within one 10 s deadline (connect included, not one deadline per queued caller), and calls right after a failed connect fail fast.
+#[test]
+fn deviation_d071_postgres_calls_to_an_unresponsive_database_are_bounded() {
+    rust_only();
+    let mut pg = cabby_server::postgres::PostgresConfig::new();
+    pg.url = format!("postgres://cabby:x@127.0.0.1:{}/cabby?sslmode=disable", black_hole());
+    let broker = PostgresBroker::new(None, &new_config(), &pg, Metrics::none()).expect("new");
+
+    let started = std::time::Instant::now();
+    let errors: Vec<String> = thread::scope(|s| {
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                s.spawn({
+                    let broker = &broker;
+                    move || broker.restore_session(&format!("sid{i}")).unwrap_err().message
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let took = started.elapsed();
+    assert!(took < Duration::from_secs(13), "8 concurrent calls took {took:?}: {errors:?}");
+    assert!(errors.iter().all(|e| e.starts_with("failed to restore session from Postgres, cause: ")), "{errors:?}");
+
+    let started = std::time::Instant::now();
+    let err = broker.restore_session("again").unwrap_err().message;
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "no fail-fast after a failed connect: {:?} {err}",
+        started.elapsed()
+    );
+}

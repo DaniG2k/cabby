@@ -278,7 +278,8 @@ async fn publish_loop(
                 Err(_) => break,
             }
         }
-        let conn = match pool.get().await {
+        let deadline = tokio::time::Instant::now() + connect::QUERY_TIMEOUT;
+        let conn = match pool.get(deadline).await {
             Ok(c) => c,
             Err(e) => {
                 metrics.error();
@@ -296,7 +297,7 @@ async fn publish_loop(
             async move { conn.query(sql, &[channel, envelope]).await.map(drop) }
         });
         let started = std::time::Instant::now();
-        let results = tokio::time::timeout(connect::QUERY_TIMEOUT, futures_util::future::join_all(sends)).await;
+        let results = tokio::time::timeout_at(deadline, futures_util::future::join_all(sends)).await;
         metrics.took(started.elapsed());
         match results {
             Ok(results) => {
@@ -308,14 +309,14 @@ async fn publish_loop(
                     }
                     log_error!(log, "failed to publish messages", "count" => failed.len(), "error" => first.clone());
                     if conn.client.is_closed() {
-                        pool.discard(&conn).await;
+                        pool.discard(&conn);
                     }
                 }
             }
             Err(_) => {
                 metrics.error();
                 log_error!(log, "failed to publish messages", "count" => batch.len(), "error" => "timed out");
-                pool.discard(&conn).await;
+                pool.discard(&conn);
             }
         }
     }
