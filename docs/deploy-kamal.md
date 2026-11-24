@@ -122,7 +122,7 @@ CABBY_POSTGRES_URL=postgres://myapp:$POSTGRES_PASSWORD@10.0.0.20:5432/myapp_prod
   `postgres://myapp:…@myapp-db:5432/myapp_production`, and the traffic stays on that host. Across
   hosts, use the database host's address, never `sslmode=disable`.
 - Point Cabby at Postgres directly or through a PgBouncer pool in **session** mode: `LISTEN`
-  and advisory locks do not survive transaction pooling.
+  does not survive transaction pooling.
 - On the first boot Cabby creates its tables (`cabby_*` in `public`). To keep them apart from
   the app's tables, add `CABBY_POSTGRES_SCHEMA: cabby`. If the app's database role may not create
   tables, create them with the DDL in [`postgres.md`](postgres.md) and set

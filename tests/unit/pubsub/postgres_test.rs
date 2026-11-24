@@ -6,9 +6,10 @@
 //! own schema and base channel (`cabby_testkit::postgres::PgScope`). AnyCable
 //! has no Postgres subscriber, so the Go arm is not observable.
 //!
-//! Waiting for subscriptions: `start` returns once the `LISTEN` connection
-//! listens to the commands channel, and `subscribe` once the stream's shard
-//! is listened to, so there is nothing left to wait for on the server.
+//! Waiting for subscriptions: `subscribe` only queues the shard's `LISTEN`
+//! and returns, so the harness waits on each subscriber's
+//! [`ListenProbe`] until its shards (or, for `internal`, all its channels)
+//! are listened to.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -228,6 +229,7 @@ fn deviation_d070_postgres_reconnects_and_listens_again() {
 }
 
 /// regression-for: pubsub/redis_test.go#TestRedisReconnect
+/// note: Needs PostgreSQL 14 or newer (idle_session_timeout).
 /// note: Deviation D-070: when the server keeps closing the LISTEN connection right after it connects (here a role with idle_session_timeout = 200ms), reconnects back off (250 ms, then about 2 s, 4 s, ...) instead of looping; the backoff resets only after a connection stayed up for 30 s.
 #[test]
 fn deviation_d070_postgres_listen_reconnects_back_off_when_connections_keep_dropping() {

@@ -17,10 +17,11 @@ in Cabby (deviations D-070 and D-071 in [`compat/deviations.md`](../compat/devia
 
 - PostgreSQL 12 or newer.
 - **A direct or session-mode connection.** `LISTEN` belongs to a database session, so Cabby
-  keeps one long-lived connection for it, and the broadcaster and the broker coordinate nodes
-  with advisory locks, which also belong to sessions. PgBouncer in **transaction** (or
-  statement) pooling mode hands each transaction to a different server connection and loses the
-  `LISTEN`; point Cabby at Postgres directly, or at a PgBouncer pool in **session** mode.
+  keeps one long-lived connection for it. PgBouncer in **transaction** (or statement) pooling
+  mode hands each transaction to a different server connection and loses the `LISTEN`; point
+  Cabby at Postgres directly, or at a PgBouncer pool in **session** mode. (The advisory locks
+  the broadcaster and the broker take are transaction-level, so they alone would work with
+  transaction pooling.)
 - A role that can create tables in the schema, or the tables created beforehand (see
   [Creating the tables yourself](#creating-the-tables-yourself)).
 
@@ -63,7 +64,7 @@ Cabby-only settings: they have no `ANYCABLE_*` names.
 | `--postgres_auto_migrate` | `CABBY_POSTGRES_AUTO_MIGRATE` | `auto_migrate` | `true` | Create the tables at startup; `false` for roles that may not create tables |
 | `--postgres_keepalive_interval` | `CABBY_POSTGRES_KEEPALIVE_INTERVAL` | `keepalive_interval` | `30` | Seconds between `SELECT 1` heartbeats on the `LISTEN` connections (0: none) |
 | `--postgres_tls_verify` | `CABBY_POSTGRES_TLS_VERIFY` | `tls_verify` | `true` | Verify the server certificate and host name with `sslmode=prefer` or `require` |
-| `--postgres_tls_ca_cert_path` | `CABBY_POSTGRES_TLS_CA_CERT_PATH` | `tls_ca_cert_path` | (empty) | PEM file with the CA certificates to trust (default: the system roots; `sslrootcert=` in the URL also works) |
+| `--postgres_tls_ca_cert_path` | `CABBY_POSTGRES_TLS_CA_CERT_PATH` | `tls_ca_cert_path` | (empty) | PEM file with the CA certificates to trust (default: the system roots; `sslrootcert=` in the URL also works, and `sslrootcert=system` means the system roots) |
 | `--postgres_unlogged` | `CABBY_POSTGRES_UNLOGGED` | `unlogged` | `true` | Create every table but the outbox as `UNLOGGED` |
 
 Schema, prefix and channel are SQL identifiers: they must match `^[A-Za-z_][A-Za-z0-9_]*$` (the
@@ -118,6 +119,12 @@ The task reading the `LISTEN` connection hands each notification on at once, als
 up to 8192 received messages waiting for delivery to its clients; a node that can't keep up
 drops the messages that find the queue full, counts them (`postgres_dropped_total`) and logs a
 warning, and reading the connection never stops on that account.
+
+PostgreSQL keeps notifications that a listening session hasn't read yet in one queue of 8 GB
+for the whole server. If a listener stops reading, the queue fills, and once it is full every
+commit that sends a notification fails, including inserts into `cabby_broadcasts` (through the
+trigger) and Cabby's own publications. `SELECT pg_notification_queue_usage()` shows how full it
+is (0 to 1).
 
 The `LISTEN` connection is checked with `SELECT 1` every `--postgres_keepalive_interval`, so a
 connection that died without closing is noticed. After any failure Cabby reconnects with backoff
