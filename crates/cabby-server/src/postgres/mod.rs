@@ -199,12 +199,13 @@ fn invalid(flag: &str, value: &str, max: usize, allow_empty: bool) -> String {
 }
 
 /// The validated names Cabby writes into SQL: schema, table prefix and channel.
+/// Only [`Names::from_config`] makes one, so every instance is validated.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Names {
-    pub schema: String,
-    pub prefix: String,
-    pub channel: String,
-    pub unlogged: bool,
+    schema: String,
+    prefix: String,
+    channel: String,
+    unlogged: bool,
 }
 
 /// Cabby's tables (without the prefix).
@@ -235,6 +236,22 @@ impl Names {
             channel: c.channel.clone(),
             unlogged: c.unlogged,
         })
+    }
+
+    pub fn schema(&self) -> &str {
+        &self.schema
+    }
+
+    pub fn prefix(&self) -> &str {
+        &self.prefix
+    }
+
+    pub fn channel(&self) -> &str {
+        &self.channel
+    }
+
+    pub fn unlogged(&self) -> bool {
+        self.unlogged
     }
 
     /// `"schema"."<prefix><name>"`, for SQL.
