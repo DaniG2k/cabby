@@ -104,14 +104,15 @@ fn marker_error(backend: Backend, o: Outcome) -> Option<(&'static str, &'static 
 /// `Some(Ok(true))`: record `retired`; `Some(Ok(false))`: nothing changes;
 /// `Some(Err(why))`: a compatibility error.
 fn retired_rule(recorded: &str, o: Outcome, implemented: &BTreeSet<u16>, record: bool) -> Option<Result<bool, String>> {
+    let not_implemented =
+        |id: u16| format!("retired by D-{id:03}, which is not under \"Implemented in Cabby\" in compat/deviations.md");
     match (recorded, o) {
+        ("retired", Outcome::Retired(id)) if !implemented.contains(&id) => Some(Err(not_implemented(id))),
         ("retired", Outcome::Retired(_)) => Some(Ok(false)),
         ("retired", other) => {
             Some(Err(format!("recorded retired, now {}; a retired case stays retired", status_str(other))))
         }
-        ("pass", Outcome::Retired(id)) if !implemented.contains(&id) => Some(Err(format!(
-            "retired by D-{id:03}, which is not under \"Implemented in Cabby\" in compat/deviations.md"
-        ))),
+        ("pass", Outcome::Retired(id)) if !implemented.contains(&id) => Some(Err(not_implemented(id))),
         ("pass", Outcome::Retired(_)) if record => Some(Ok(true)),
         ("pass", Outcome::Retired(id)) => Some(Err(format!("retired by D-{id:03}; review and record with --record"))),
         (_, Outcome::Retired(id)) => {
@@ -632,6 +633,10 @@ test result: FAILED. 1 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out
         let implemented = BTreeSet::from([58]);
         let rule = |recorded, o, record| retired_rule(recorded, o, &implemented, record);
         assert_eq!(rule("retired", Outcome::Retired(58), false), Some(Ok(false)));
+        // A recorded retirement is checked again on every run: its deviation must
+        // still be implemented.
+        let err = rule("retired", Outcome::Retired(59), false).unwrap().unwrap_err();
+        assert!(err.contains("D-059, which is not under \"Implemented in Cabby\""), "{err}");
         assert!(rule("retired", Outcome::Pass, true).unwrap().is_err());
         assert!(rule("pass", Outcome::Retired(58), false).unwrap().is_err());
         assert!(rule("pending", Outcome::Retired(58), true).unwrap().is_err());
