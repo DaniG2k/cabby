@@ -204,8 +204,10 @@ fn random_suffix(size: usize) -> String {
 
 /// Creates `dir` (and any missing parents) and makes it private: on Unix it
 /// must be a directory (not a symlink) owned by `owner`, and gets mode 0700,
-/// set through an open handle that is checked to be that directory.
+/// set through an open handle that is checked to be that directory. Errors
+/// name `dir`.
 fn create_private_dir(dir: &Path, owner: u32) -> std::io::Result<()> {
+    let named = |e: std::io::Error| std::io::Error::new(e.kind(), format!("{}: {e}", dir.display()));
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]
@@ -213,13 +215,13 @@ fn create_private_dir(dir: &Path, owner: u32) -> std::io::Result<()> {
         use std::os::unix::fs::DirBuilderExt;
         builder.mode(0o700);
     }
-    builder.create(dir)?;
+    builder.create(dir).map_err(named)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
         let refuse = |why: String| std::io::Error::other(format!("{}: {why}", dir.display()));
-        let link = std::fs::symlink_metadata(dir)?;
+        let link = std::fs::symlink_metadata(dir).map_err(named)?;
         if !link.file_type().is_dir() {
             return Err(refuse("not a directory (a symlink or another file)".into()));
         }
@@ -229,15 +231,46 @@ fn create_private_dir(dir: &Path, owner: u32) -> std::io::Result<()> {
                 link.uid()
             )));
         }
-        let handle = std::fs::File::open(dir)?;
-        let opened = handle.metadata()?;
+        let handle = std::fs::File::open(dir).map_err(named)?;
+        let opened = handle.metadata().map_err(named)?;
         if (opened.dev(), opened.ino()) != (link.dev(), link.ino()) {
             return Err(refuse("replaced while it was being opened".into()));
         }
-        handle.set_permissions(std::fs::Permissions::from_mode(0o700))?;
+        handle.set_permissions(std::fs::Permissions::from_mode(0o700)).map_err(named)?;
     }
     #[cfg(not(unix))]
     let _ = owner;
+    Ok(())
+}
+
+/// Checks the shared parent of the default store dir (`<tmp>/nats-data`),
+/// which another user may have created first: on Unix it must be a directory
+/// (not a symlink) owned by `owner` or root, and either not writable by group
+/// and others, or sticky (as `/tmp` is), so no other user can replace the
+/// store dir inside it.
+fn check_shared_parent(parent: &Path, owner: u32) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let refuse = |why: String| {
+            std::io::Error::other(format!("{}: {why}; remove it or set --enats_store_dir", parent.display()))
+        };
+        let meta = std::fs::symlink_metadata(parent)
+            .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", parent.display())))?;
+        if !meta.file_type().is_dir() {
+            return Err(refuse("not a directory (a symlink or another file)".into()));
+        }
+        if meta.uid() != owner && meta.uid() != 0 {
+            return Err(refuse(format!("owned by uid {}, not by this user (uid {owner}) or root", meta.uid())));
+        }
+        let mode = meta.permissions().mode();
+        if mode & 0o022 != 0 && mode & 0o1000 == 0 {
+            return Err(refuse(format!("writable by other users and not sticky (mode {:o})", mode & 0o777)));
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (parent, owner);
     Ok(())
 }
 
@@ -511,6 +544,7 @@ impl Service {
             .map_err(|e| EnatsError(format!("failed to start NATS server, cause: writing config: {e}")))?;
         if let Some(store) = &default_store
             && let Err(e) = create_private_dir(store, owner)
+                .and_then(|()| store.parent().map_or(Ok(()), |parent| check_shared_parent(parent, owner)))
         {
             let _ = std::fs::remove_file(&conf_path);
             return Err(EnatsError(format!("failed to start NATS server, cause: creating store dir: {e}")));
@@ -999,5 +1033,62 @@ mod tests {
             "{text}"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn store_dir_errors_name_the_directory() {
+        let base = scratch("named");
+        std::fs::create_dir_all(&base).unwrap();
+        let file = base.join("a-file");
+        std::fs::write(&file, "x").unwrap();
+        let dir = file.join("store");
+
+        let err = create_private_dir(&dir, my_uid()).expect_err("a file is in the way");
+
+        assert!(err.to_string().starts_with(&format!("{}: ", dir.display())), "{err}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_shared_parent_of_the_store_dir_is_checked() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let me = my_uid();
+        let parent = scratch("parent");
+        std::fs::create_dir_all(&parent).unwrap();
+        let set_mode = |mode: u32| std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(mode)).unwrap();
+
+        set_mode(0o700);
+        check_shared_parent(&parent, me).expect("private and ours");
+        set_mode(0o755);
+        check_shared_parent(&parent, me).expect("ours, writable only by us");
+        set_mode(0o1777);
+        check_shared_parent(&parent, me).expect("sticky, like /tmp");
+
+        set_mode(0o775);
+        let err = check_shared_parent(&parent, me).expect_err("group-writable");
+        assert_eq!(
+            format!(
+                "{}: writable by other users and not sticky (mode 775); remove it or set --enats_store_dir",
+                parent.display()
+            ),
+            err.to_string()
+        );
+        set_mode(0o777);
+        assert!(check_shared_parent(&parent, me).is_err(), "world-writable");
+
+        set_mode(0o700);
+        let other = me.wrapping_add(1);
+        let err = check_shared_parent(&parent, other).expect_err("owned by someone else");
+        assert!(err.to_string().starts_with(&format!("{}: owned by uid {me}, ", parent.display())), "{err}");
+
+        let link = scratch("parent-link");
+        std::os::unix::fs::symlink(&parent, &link).unwrap();
+        let err = check_shared_parent(&link, me).expect_err("a symlink");
+        assert!(err.to_string().contains("not a directory"), "{err}");
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_dir_all(&parent);
     }
 }
