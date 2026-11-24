@@ -69,8 +69,8 @@ pub fn health_path(get: impl Fn(&str) -> Option<String>) -> String {
 /// response status is 200.
 pub fn probe(addr: SocketAddr, path: &str, until: Instant) -> Result<(), String> {
     let connecting = format!("connecting to {addr}");
-    let mut stream = TcpStream::connect_timeout(&addr, left(until, &connecting)?)
-        .map_err(|e| format!("{connecting}: {e}"))?;
+    let mut stream =
+        TcpStream::connect_timeout(&addr, left(until, &connecting)?).map_err(|e| format!("{connecting}: {e}"))?;
     stream.set_write_timeout(Some(left(until, "sending the request")?)).map_err(|e| e.to_string())?;
     let request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes()).map_err(|e| format!("sending the request: {e}"))?;
@@ -392,7 +392,10 @@ mod tests {
         assert!(server.join().expect("server").starts_with("GET /health HTTP/1.1\r\n"));
 
         let (addr, server) = serve_once("HTTP/1.1 503 Service Unavailable");
-        assert_eq!(probe(addr, "/health", soon()), Err("GET /health answered \"HTTP/1.1 503 Service Unavailable\"".to_owned()));
+        assert_eq!(
+            probe(addr, "/health", soon()),
+            Err("GET /health answered \"HTTP/1.1 503 Service Unavailable\"".to_owned())
+        );
         server.join().expect("server");
 
         let (_reserved, refusing) = refusing_addr();
