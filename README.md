@@ -59,6 +59,9 @@ subscriber. Several Cabby nodes can share broadcasts through Redis or NATS.
 - RPC to your app over HTTP or gRPC
 - Broadcasting via HTTP, Redis (pub/sub or streams) and NATS; multi-node pub/sub via Redis or NATS
 - Reliable streams: history and session recovery after a reconnect
+- SQLite broker (`--broker=sqlite --sqlite_path=/var/lib/cabby/cabby.db`): stream history,
+  offsets and sessions survive a graceful restart of a single node, with no Redis or NATS. After
+  a crash, clients resync cleanly (deviation D-065)
 - Presence
 - JWT identification, signed streams and Turbo Streams
 - Server-Sent Events

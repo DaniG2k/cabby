@@ -14,5 +14,6 @@ mod enats;
 mod file_config;
 mod pusher;
 mod rpc_less;
+mod sqlite;
 mod sse;
 mod with_rpc;

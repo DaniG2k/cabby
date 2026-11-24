@@ -23,7 +23,7 @@
       "pass": 923
     },
     "rust_only": {
-      "cases": 84
+      "cases": 92
     },
     "translation": {
       "reviewed": 923
@@ -26658,6 +26658,16 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "conformance::sqlite::deviation_d065_sqlite_broker_resumes_history_and_sessions_after_a_graceful_restart",
+      "relation": "regression",
+      "links": [
+        "26a1a703:node/broker_integration_test.go#TestIntegrationHistory_Memory/Subscribe_+_History",
+        "26a1a703:node/broker_integration_test.go#TestIntegrationRestore_Memory/Restore_session_connection_and_channels_state"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
       "rust_case": "conformance::sse::authentication_failure",
       "relation": "external",
       "links": [
@@ -26832,6 +26842,69 @@
         "26a1a703:ds/integration_test.go#TestDSIntegration_StreamAuthorization"
       ],
       "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::sqlite::a_crash_restart_uses_a_new_epoch_and_clients_resync",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/memory_test.go#TestMemory_FromOffset/With_unknown_epoch"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::sqlite::a_failed_final_write_leaves_an_unclean_shutdown_and_a_new_epoch",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/memory_test.go#TestMemory_FromOffset/With_unknown_epoch"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::sqlite::a_failed_start_keeps_the_epoch",
+      "relation": "regression",
+      "links": [
+        "26a1a703:node/broker_integration_test.go#TestIntegrationRestore_Memory/Restore_session_connection_and_channels_state"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::sqlite::a_second_server_on_the_same_database_exits_with_the_lock_error",
+      "relation": "regression",
+      "links": [
+        "26a1a703:node/broker_integration_test.go#TestIntegrationRestore_Memory/Restore_session_connection_and_channels_state"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::sqlite::a_session_touched_while_clients_disconnect_at_shutdown_is_on_disk",
+      "relation": "regression",
+      "links": [
+        "26a1a703:cli/cli_test.go#TestRunnerDrainsBroadcastsBeforeBrokerShutdown"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::sqlite::no_wal_file_is_left_after_a_graceful_shutdown",
+      "relation": "regression",
+      "links": [
+        "26a1a703:cli/cli_test.go#TestRunnerDrainsBroadcastsBeforeBrokerShutdown"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::sqlite::the_sqlite_broker_needs_a_database_path",
+      "relation": "regression",
+      "links": [
+        "26a1a703:config/presets_test.go#TestBroker"
+      ],
+      "reference_status": "not_observable",
       "rust_status": "pass"
     },
     {

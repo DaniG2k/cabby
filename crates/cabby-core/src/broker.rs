@@ -273,6 +273,16 @@ pub struct Entry {
     pub data: String,
 }
 
+/// Where [`Memory::handle_broadcast_recorded`] stored a message: the offset and
+/// timestamp assigned in the same critical section, so concurrent broadcasts
+/// can't be mixed up (a later `peak()` could return another message's offset).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Recorded {
+    pub offset: u64,
+    /// Unix seconds, as [`Entry::timestamp`].
+    pub timestamp: i64,
+}
+
 /// One stream's in-memory history (upstream unexported `memstream`).
 ///
 /// Entries live in a ring buffer ordered by offset: appending, trimming to the
@@ -306,12 +316,18 @@ impl Memstream {
     }
 
     pub fn add(&self, data: &str) -> u64 {
+        self.add_recorded(data).offset
+    }
+
+    /// [`Memstream::add`], returning the assigned offset and timestamp.
+    fn add_recorded(&self, data: &str) -> Recorded {
         let now = self.clock.now();
         let mut st = write(&self.state);
         st.offset += 1;
-        let entry = Entry { offset: st.offset, timestamp: unix_secs(now), data: data.to_owned() };
+        let recorded = Recorded { offset: st.offset, timestamp: unix_secs(now) };
+        let entry = Entry { offset: recorded.offset, timestamp: recorded.timestamp, data: data.to_owned() };
         self.append(&mut st, entry, now);
-        st.offset
+        recorded
     }
 
     /// Stores an entry at an explicit offset (upstream `insert`); `ts: None` is "now".
@@ -334,6 +350,18 @@ impl Memstream {
 
     fn deadline(&self) -> i64 {
         read(&self.state).deadline
+    }
+
+    /// Installs restored state: the last assigned offset, the deadline (unix
+    /// seconds) and the newest entries in ascending offsets, at most `limit`.
+    fn restore(&self, offset: u64, deadline: i64, entries: Vec<Entry>) {
+        let mut st = write(&self.state);
+        st.offset = offset;
+        st.deadline = deadline;
+        st.data = VecDeque::from(entries);
+        while st.data.len() > self.limit {
+            st.data.pop_front();
+        }
     }
 
     fn append(&self, st: &mut MemstreamState, entry: Entry, now: SystemTime) {
@@ -536,6 +564,70 @@ impl Memory {
     pub fn expire(&self) {
         self.inner.expire();
     }
+
+    /// [`Broker::handle_broadcast`], returning where a stored message landed
+    /// (`None` for a transient one, which is only fanned out).
+    pub fn handle_broadcast_recorded(&self, msg: &StreamMessage) -> Result<Option<Recorded>, BrokerError> {
+        if msg.meta.as_ref().is_some_and(|m| m.transient) {
+            if let Some(b) = &self.inner.broadcaster {
+                b.broadcast(msg);
+            }
+            return Ok(None);
+        }
+        let recorded = self.inner.stream_or_create(&msg.stream).add_recorded(&msg.data);
+        let msg = StreamMessage { epoch: self.epoch(), offset: recorded.offset, ..msg.clone() };
+        if let Some(b) = &self.inner.broadcaster {
+            b.broadcast(&msg);
+        }
+        Ok(Some(recorded))
+    }
+
+    /// Installs a stream loaded from storage: `max_offset` is its last assigned
+    /// offset, `deadline` (unix seconds) when it may be dropped, and `entries`
+    /// its newest entries, in ascending and contiguous offsets ending at
+    /// `max_offset` (or none).
+    pub fn restore_stream(
+        &self,
+        name: &str,
+        max_offset: u64,
+        deadline: i64,
+        entries: Vec<Entry>,
+    ) -> Result<(), BrokerError> {
+        let contiguous = entries.windows(2).all(|w| w[1].offset == w[0].offset + 1);
+        let anchored = entries.last().is_none_or(|e| e.offset == max_offset);
+        if !contiguous || !anchored {
+            return Err(BrokerError {
+                message: format!("restored entries of {name} must be contiguous and end at offset {max_offset}"),
+            });
+        }
+        self.inner.stream_or_create(name).restore(max_offset, deadline, entries);
+        Ok(())
+    }
+
+    /// Caches session state with an explicit expiry (unix milliseconds), as
+    /// loaded from storage.
+    pub fn restore_session_with_deadline(&self, sid: &str, data: Vec<u8>, expires_at_ms: i64) {
+        self.inner.cache_session(sid, data, expires_at_ms);
+    }
+
+    /// [`Broker::commit_session`] for serialized state; returns the expiry it
+    /// set (unix milliseconds).
+    pub fn commit_session_data(&self, sid: &str, data: Vec<u8>) -> i64 {
+        let deadline = self.inner.session_deadline();
+        self.inner.cache_session(sid, data, deadline);
+        deadline
+    }
+
+    /// [`Broker::touch_session`]; returns the new expiry (unix milliseconds), or
+    /// `None` when nothing is cached for `sid`.
+    pub fn touch_session_deadline(&self, sid: &str) -> Option<i64> {
+        let deadline = self.inner.session_deadline();
+        let mut guard = lock(&self.inner.sessions);
+        let st = &mut *guard;
+        let entry = st.entries.get(sid)?;
+        st.expiration.update(entry.expiration, deadline);
+        Some(deadline)
+    }
 }
 
 impl MemoryInner {
@@ -557,6 +649,25 @@ impl MemoryInner {
 
     fn now_millis(&self) -> i64 {
         unix_millis(self.clock.now())
+    }
+
+    /// When a session committed or touched now expires (unix milliseconds).
+    fn session_deadline(&self) -> i64 {
+        self.now_millis() + self.config.sessions_ttl * 1000
+    }
+
+    /// Caches `data` for `sid` until `deadline` (unix milliseconds).
+    fn cache_session(&self, sid: &str, data: Vec<u8>, deadline: i64) {
+        let mut guard = lock(&self.sessions);
+        let st = &mut *guard;
+        let expiration = match st.entries.get(sid) {
+            Some(entry) => {
+                st.expiration.update(entry.expiration, deadline);
+                entry.expiration
+            }
+            None => st.expiration.push_item(sid.to_owned(), deadline),
+        };
+        st.entries.insert(sid.to_owned(), SessionEntry { data, expiration });
     }
 
     fn expire(&self) {
@@ -672,18 +783,7 @@ impl Broker for Memory {
     }
 
     fn handle_broadcast(&self, msg: &StreamMessage) -> Result<(), BrokerError> {
-        if msg.meta.as_ref().is_some_and(|m| m.transient) {
-            if let Some(b) = &self.inner.broadcaster {
-                b.broadcast(msg);
-            }
-            return Ok(());
-        }
-        let offset = self.add(&msg.stream, &msg.data);
-        let msg = StreamMessage { epoch: self.epoch(), offset, ..msg.clone() };
-        if let Some(b) = &self.inner.broadcaster {
-            b.broadcast(&msg);
-        }
-        Ok(())
+        self.handle_broadcast_recorded(msg).map(drop)
     }
 
     fn handle_command(&self, msg: &RemoteCommandMessage) -> Result<(), BrokerError> {
@@ -734,17 +834,7 @@ impl Broker for Memory {
 
     fn commit_session(&self, sid: &str, session: &dyn Cacheable) -> Result<(), BrokerError> {
         let data = session.to_cache_entry()?;
-        let deadline = self.inner.now_millis() + self.inner.config.sessions_ttl * 1000;
-        let mut guard = lock(&self.inner.sessions);
-        let st = &mut *guard;
-        let expiration = match st.entries.get(sid) {
-            Some(entry) => {
-                st.expiration.update(entry.expiration, deadline);
-                entry.expiration
-            }
-            None => st.expiration.push_item(sid.to_owned(), deadline),
-        };
-        st.entries.insert(sid.to_owned(), SessionEntry { data, expiration });
+        self.commit_session_data(sid, data);
         Ok(())
     }
 
@@ -753,12 +843,7 @@ impl Broker for Memory {
     }
 
     fn touch_session(&self, sid: &str) -> Result<(), BrokerError> {
-        let deadline = self.inner.now_millis() + self.inner.config.sessions_ttl * 1000;
-        let mut guard = lock(&self.inner.sessions);
-        let st = &mut *guard;
-        if let Some(entry) = st.entries.get(sid) {
-            st.expiration.update(entry.expiration, deadline);
-        }
+        self.touch_session_deadline(sid);
         Ok(())
     }
 
@@ -895,6 +980,13 @@ mod nats;
 
 pub use nats::{JETSTREAM_READY_TIMEOUT, Nats};
 
+mod sqlite;
+
+pub use sqlite::{
+    LOCK_TIMEOUT, LoadReport, NoopObserver, OpKind, Previous, QUEUE_CAPACITY, SHUTDOWN_BUDGET, SqliteBroker,
+    SqliteObserver, SqliteOptions,
+};
+
 /// Broker without history, presence or session cache: every call goes straight
 /// to the broadcaster (upstream `broker.NewLegacyBroker(broadcaster)`, used by
 /// single-node setups and by node tests).
@@ -980,20 +1072,25 @@ impl Broker for Legacy {
     }
 }
 
+/// A clock tests move by hand (shared by the memory and SQLite broker tests).
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::common::StreamMessageMetadata;
+pub(crate) mod test_clock {
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    /// A clock tests move by hand.
-    struct TestClock(Mutex<SystemTime>);
+    use super::{Clock, lock};
+
+    /// Where every [`TestClock`] starts, in unix seconds.
+    pub(crate) const T0: i64 = 1_700_000_000;
+
+    pub(crate) struct TestClock(Mutex<SystemTime>);
 
     impl TestClock {
-        fn new() -> Arc<Self> {
-            Arc::new(Self(Mutex::new(UNIX_EPOCH + Duration::from_secs(1_700_000_000))))
+        pub(crate) fn new() -> Arc<Self> {
+            Arc::new(Self(Mutex::new(UNIX_EPOCH + Duration::from_secs(T0.unsigned_abs()))))
         }
 
-        fn advance(&self, d: Duration) {
+        pub(crate) fn advance(&self, d: Duration) {
             *lock(&self.0) += d;
         }
     }
@@ -1003,6 +1100,14 @@ mod tests {
             *lock(&self.0)
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::StreamMessageMetadata;
+
+    use super::test_clock::TestClock;
 
     #[derive(Default)]
     struct Recorder(Mutex<Vec<String>>);
@@ -1043,6 +1148,161 @@ mod tests {
 
         assert_eq!(*lock(&rec.0), ["broadcast s 1 e1", "broadcast s 0 ", "broadcast s 2 e1"]);
         assert_eq!(2, broker.history_since("s", 0).unwrap().unwrap_or_default().len());
+    }
+
+    #[test]
+    fn memory_handle_broadcast_recorded_reports_offset_and_timestamp() {
+        let clock = TestClock::new();
+        let rec = Arc::new(Recorder::default());
+        let broker = Memory::new(Some(rec.clone()), None, &Config::new(), clock.clone());
+        broker.set_epoch("e1");
+
+        assert_eq!(
+            Some(Recorded { offset: 1, timestamp: 1_700_000_000 }),
+            broker.handle_broadcast_recorded(&msg("s", false)).unwrap()
+        );
+        clock.advance(Duration::from_secs(2));
+        assert_eq!(None, broker.handle_broadcast_recorded(&msg("s", true)).unwrap());
+        assert_eq!(
+            Some(Recorded { offset: 2, timestamp: 1_700_000_002 }),
+            broker.handle_broadcast_recorded(&msg("s", false)).unwrap()
+        );
+
+        // Fan-out and storage are exactly handle_broadcast's.
+        assert_eq!(*lock(&rec.0), ["broadcast s 1 e1", "broadcast s 0 ", "broadcast s 2 e1"]);
+        assert_eq!(2, broker.history_since("s", 0).unwrap().unwrap_or_default().len());
+    }
+
+    #[test]
+    fn memory_concurrent_recorded_broadcasts_get_distinct_offsets() {
+        let broker = Memory::new(None, None, &Config::new(), TestClock::new());
+        let offsets: Vec<u64> = std::thread::scope(|s| {
+            let workers: Vec<_> = (0..8)
+                .map(|_| {
+                    s.spawn(|| {
+                        (0..50)
+                            .map(|_| broker.handle_broadcast_recorded(&msg("s", false)).unwrap().unwrap().offset)
+                            .collect::<Vec<u64>>()
+                    })
+                })
+                .collect();
+            workers.into_iter().flat_map(|w| w.join().unwrap()).collect()
+        });
+
+        let mut unique = offsets.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(offsets.len(), unique.len(), "every broadcast got its own offset");
+        assert_eq!((1..=400).collect::<Vec<u64>>(), unique);
+    }
+
+    #[test]
+    fn memory_restore_stream_installs_offset_and_entries() {
+        let broker = Memory::new(None, None, &Config::new(), TestClock::new());
+        let epoch = broker.epoch();
+        let entries = vec![
+            Entry { offset: 7, timestamp: 1_700_000_000, data: "g".into() },
+            Entry { offset: 8, timestamp: 1_700_000_000, data: "h".into() },
+        ];
+        broker.restore_stream("s", 8, 1_700_003_000, entries).unwrap();
+
+        let stored: Vec<(u64, String)> =
+            broker.history_since("s", 0).unwrap().unwrap_or_default().into_iter().map(|m| (m.offset, m.data)).collect();
+        assert_eq!(vec![(7, "g".to_owned()), (8, "h".to_owned())], stored);
+        // A client that saw offset 7 gets 8 (filter_by_offset needs the offset within the stored range).
+        let after: Vec<u64> = broker.history_from("s", &epoch, 7).unwrap().into_iter().map(|m| m.offset).collect();
+        assert_eq!(vec![8], after);
+        assert_eq!(Some(8), broker.peak("s").unwrap().map(|m| m.offset));
+        assert_eq!(9, broker.add("s", "i"), "the next broadcast continues after the restored offset");
+    }
+
+    #[test]
+    fn memory_restored_empty_stream_keeps_its_offset_until_its_deadline() {
+        let clock = TestClock::new();
+        let broker = Memory::new(None, None, &Config::new(), clock.clone());
+        broker.restore_stream("s", 5, 1_700_000_010, Vec::new()).unwrap();
+
+        broker.expire();
+        assert_eq!(Some(vec![]), broker.history_since("s", 0).unwrap(), "kept before its deadline");
+        assert_eq!(None, broker.peak("s").unwrap(), "no entries");
+
+        clock.advance(Duration::from_secs(11));
+        broker.expire();
+        assert_eq!(None, broker.history_since("s", 0).unwrap(), "dropped after its deadline");
+        assert_eq!(1, broker.add("s", "x"));
+    }
+
+    #[test]
+    fn memory_restored_empty_stream_continues_after_its_offset() {
+        let broker = Memory::new(None, None, &Config::new(), TestClock::new());
+        broker.restore_stream("s", 5, 1_700_000_010, Vec::new()).unwrap();
+        assert_eq!(6, broker.add("s", "x"));
+    }
+
+    #[test]
+    fn memory_restore_stream_rejects_gaps_and_unanchored_tails() {
+        let broker = Memory::new(None, None, &Config::new(), TestClock::new());
+        let e = |offset| Entry { offset, timestamp: 1_700_000_000, data: String::new() };
+
+        assert!(broker.restore_stream("gap", 3, 0, vec![e(1), e(3)]).is_err());
+        assert!(broker.restore_stream("unanchored", 4, 0, vec![e(2), e(3)]).is_err());
+        assert!(broker.restore_stream("ok", 3, 0, vec![e(2), e(3)]).is_ok());
+        assert_eq!(None, broker.history_since("gap", 0).unwrap(), "a refused stream is not created");
+    }
+
+    #[test]
+    fn memory_restored_session_keeps_its_original_expiry() {
+        let clock = TestClock::new();
+        let broker = Memory::new(None, None, &Config::new(), clock.clone());
+        // Expires 2 s from now, not sessions_ttl (300 s) from now.
+        broker.restore_session_with_deadline("sid", b"state".to_vec(), 1_700_000_002_000);
+        assert_eq!(Some(b"state".to_vec()), broker.restore_session("sid").unwrap());
+
+        clock.advance(Duration::from_millis(1_999));
+        broker.expire();
+        assert!(broker.restore_session("sid").unwrap().is_some(), "still cached 1 ms before its expiry");
+
+        clock.advance(Duration::from_millis(1));
+        broker.expire();
+        assert_eq!(None, broker.restore_session("sid").unwrap(), "expired at its original deadline");
+    }
+
+    #[test]
+    fn memory_session_commit_and_touch_report_their_expiry() {
+        let clock = TestClock::new();
+        let mut config = Config::new();
+        config.sessions_ttl = 10;
+        let broker = Memory::new(None, None, &config, clock.clone());
+
+        assert_eq!(None, broker.touch_session_deadline("sid"), "nothing cached yet");
+        assert_eq!(1_700_000_010_000, broker.commit_session_data("sid", b"a".to_vec()));
+        clock.advance(Duration::from_secs(3));
+        assert_eq!(Some(1_700_000_013_000), broker.touch_session_deadline("sid"));
+        assert_eq!(Some(b"a".to_vec()), broker.restore_session("sid").unwrap());
+    }
+
+    #[test]
+    fn memory_commit_and_touch_session_still_expire_after_the_ttl() {
+        struct State;
+        impl Cacheable for State {
+            fn to_cache_entry(&self) -> Result<Vec<u8>, BrokerError> {
+                Ok(b"state".to_vec())
+            }
+        }
+        let clock = TestClock::new();
+        let mut config = Config::new();
+        config.sessions_ttl = 1;
+        let broker = Memory::new(None, None, &config, clock.clone());
+
+        broker.commit_session("sid", &State).unwrap();
+        clock.advance(Duration::from_millis(600));
+        broker.touch_session("sid").unwrap();
+        clock.advance(Duration::from_millis(600));
+        broker.expire();
+        assert!(broker.restore_session("sid").unwrap().is_some(), "the touch moved the expiry");
+        clock.advance(Duration::from_millis(400));
+        broker.expire();
+        assert_eq!(None, broker.restore_session("sid").unwrap());
     }
 
     #[test]
