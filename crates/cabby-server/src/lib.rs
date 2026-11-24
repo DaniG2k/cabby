@@ -4,6 +4,7 @@
 
 pub mod api;
 pub mod broadcast;
+pub mod broker;
 pub mod cli;
 mod client_tls;
 pub mod config;
