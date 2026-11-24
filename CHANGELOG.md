@@ -19,7 +19,9 @@ Differences from the AnyCable Go server are listed by ID in
 - SQLite broker files use incremental auto-vacuum, so space freed by pruning goes back to the
   file system. A file written by an earlier Cabby is converted once when it is opened (a
   `VACUUM`, logged with the page counts before and after); shutdown frees pages only within
-  the shutdown timeout.
+  the shutdown timeout. The conversion needs free disk space of about the file's size, for a
+  temporary copy in SQLite's temp directory and for the WAL next to the file; if it fails,
+  Cabby logs a warning and uses the file unconverted.
 
 ### Changed
 

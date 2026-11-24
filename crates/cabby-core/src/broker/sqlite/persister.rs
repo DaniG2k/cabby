@@ -22,6 +22,12 @@ pub(super) const BATCH_SIZE: usize = 1_000;
 /// Free pages returned to the file system after each prune (1 MiB at the
 /// default 4 KiB page size).
 const PRUNE_VACUUM_PAGES: u32 = 256;
+/// The end of the shutdown budget the final vacuum leaves to the checkpoint
+/// and the close.
+const CLOSE_MARGIN: Duration = Duration::from_millis(250);
+/// At most this many free pages are returned at shutdown (100 MiB at the
+/// default 4 KiB page size); the rest goes after later prunes.
+const SHUTDOWN_VACUUM_PAGES: u32 = 25_600;
 /// Pause between attempts of the final write.
 const FINAL_RETRY: Duration = Duration::from_millis(100);
 
@@ -260,8 +266,10 @@ impl Persister {
         }
         let Database { conn, lock, .. } = self.db;
         let _ = conn.busy_timeout(deadline.saturating_duration_since(Instant::now()));
-        // Only what fits in the shutdown budget.
-        if let Err(e) = store::incremental_vacuum(&conn, None, Some(deadline)) {
+        // Only what fits in the shutdown budget, minus the margin for the
+        // checkpoint and the close.
+        let vacuum_until = deadline.checked_sub(CLOSE_MARGIN).unwrap_or_else(Instant::now);
+        if let Err(e) = store::incremental_vacuum(&conn, Some(SHUTDOWN_VACUUM_PAGES), Some(vacuum_until)) {
             log_warn!(log(), "failed to return free SQLite pages to the file system", "path" => path.clone(),
                 "error" => e.to_string());
         }
@@ -428,6 +436,75 @@ mod tests {
         p.tick();
 
         assert_eq!(vec![4, 5], query_i64s(&dir.file("cabby.db"), "SELECT seq FROM history ORDER BY seq"));
+    }
+
+    fn freelist_count(path: &Path) -> i64 {
+        query_i64s(path, "PRAGMA freelist_count")[0]
+    }
+
+    fn big_history(offset: u64) -> queue::WriteOp {
+        queue::WriteOp::History { stream: "s".into(), offset, ts_secs: T0, data: "x".repeat(4096) }
+    }
+
+    /// A database with free pages: 40 history entries of 4 KiB written, then deleted.
+    fn with_free_pages(dir: &TempDir) -> Connection {
+        let mut conn = store::open(&dir.file("cabby.db")).unwrap();
+        let ops: Vec<_> = (1..=40).map(big_history).collect();
+        store::write_batch(&mut conn, &ops, &StreamMaxima::new(), 300, T0, false).unwrap();
+        conn.execute("DELETE FROM history", []).unwrap();
+        let free: i64 = conn.pragma_query_value(None, "freelist_count", |r| r.get(0)).unwrap();
+        assert!(free > 40, "free={free}");
+        conn
+    }
+
+    #[test]
+    fn a_prune_returns_the_freed_pages() {
+        let dir = TempDir::new();
+        let mut config = Config::new();
+        config.history_limit = 2;
+        let mut t = timing(Duration::from_millis(10));
+        t.prune_interval = Duration::ZERO;
+        let queue = Arc::new(WriteQueue::new(100, 30));
+        let observer = Arc::new(Recording::default());
+        let conn = store::open(&dir.file("cabby.db")).unwrap();
+        let mut p = persister(&dir, conn, &queue, &observer, &config, t);
+        for offset in 1..=30 {
+            queue.push(big_history(offset));
+        }
+
+        p.tick();
+
+        assert_eq!(vec![29, 30], query_i64s(&dir.file("cabby.db"), "SELECT seq FROM history ORDER BY seq"));
+        assert_eq!(0, freelist_count(&dir.file("cabby.db")), "the pages freed by the prune are returned");
+    }
+
+    #[test]
+    fn the_final_flush_returns_free_pages_within_its_deadline() {
+        let dir = TempDir::new();
+        let conn = with_free_pages(&dir);
+        let queue = Arc::new(WriteQueue::new(100, 1000));
+        let observer = Arc::new(Recording::default());
+        let p = persister(&dir, conn, &queue, &observer, &Config::new(), timing(Duration::from_millis(10)));
+
+        assert!(p.finish(Instant::now() + Duration::from_secs(5)));
+
+        assert_eq!(0, freelist_count(&dir.file("cabby.db")));
+    }
+
+    #[test]
+    fn the_final_flush_leaves_the_end_of_its_budget_to_the_checkpoint_and_close() {
+        let dir = TempDir::new();
+        let conn = with_free_pages(&dir);
+        let free: i64 = conn.pragma_query_value(None, "freelist_count", |r| r.get(0)).unwrap();
+        let queue = Arc::new(WriteQueue::new(100, 1000));
+        let observer = Arc::new(Recording::default());
+        let p = persister(&dir, conn, &queue, &observer, &Config::new(), timing(Duration::from_millis(10)));
+
+        // Less than the margin left: the write and the checkpoint, no vacuum.
+        assert!(p.finish(Instant::now() + CLOSE_MARGIN / 2));
+
+        assert_eq!(free, freelist_count(&dir.file("cabby.db")), "nothing vacuumed inside the margin");
+        assert!(!dir.file("cabby.db-wal").exists(), "checkpointed and closed");
     }
 
     #[test]
