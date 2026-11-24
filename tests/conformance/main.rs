@@ -22,6 +22,7 @@ mod api;
 mod brokers;
 mod client_messages;
 mod health;
+mod identity;
 mod issues;
 mod logging;
 mod logging_server;

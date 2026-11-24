@@ -23,7 +23,7 @@
       "pass": 923
     },
     "rust_only": {
-      "cases": 92
+      "cases": 93
     },
     "translation": {
       "reviewed": 923
@@ -26359,6 +26359,15 @@
       "relation": "external",
       "links": [
         "26a1a703:server/health_handler_test.go#TestHealthHandler"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::identity::deviation_d058_no_telemetry_requests",
+      "relation": "external",
+      "links": [
+        "26a1a703:telemetry/telemetry_test.go#TestTracking"
       ],
       "reference_status": "pass",
       "rust_status": "pass"
