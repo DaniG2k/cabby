@@ -467,7 +467,6 @@ impl HttpServer {
         self.tls.is_some()
     }
 
-    /// The bound address once started (useful with port 0).
     /// The connection cap (0: unlimited).
     pub fn max_conn(&self) -> usize {
         self.max_conn
@@ -478,6 +477,7 @@ impl HttpServer {
         self.state.lock().unwrap_or_else(|e| e.into_inner()).idle_timeout
     }
 
+    /// The bound address once started (useful with port 0).
     pub fn local_addr(&self) -> Option<SocketAddr> {
         self.state.lock().unwrap_or_else(|e| e.into_inner()).local_addr
     }
