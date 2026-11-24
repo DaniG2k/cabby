@@ -3,7 +3,8 @@
 #   release-meta.sh check <tag>     verifies that <tag> is v<workspace version> and that
 #                                   CHANGELOG.md has a section for it; prints
 #                                   version=<v>, prerelease=<true|false> and
-#                                   dated=<true|false> (false: the heading says Unreleased)
+#                                   dated=<true|false> (true only for a heading
+#                                   `## [<v>] - YYYY-MM-DD` with a real date)
 #   release-meta.sh notes <version> prints the CHANGELOG.md section of <version>
 # A pre-release (0.2.0-rc.1) uses the section of its release (0.2.0).
 set -euo pipefail
@@ -40,7 +41,13 @@ case "${1:-}" in
     fi
     echo "version=$version"
     if [ "$base" = "$version" ]; then echo "prerelease=false"; else echo "prerelease=true"; fi
-    if heading "$base" | grep -q 'Unreleased'; then echo "dated=false"; else echo "dated=true"; fi
+    date="$(heading "$base" | sed -n 's/^## \[[^]]*\] - \([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)$/\1/p')"
+    # A real calendar date: it must survive a round trip through date(1).
+    if [ -n "$date" ] && [ "$(date -j -f %Y-%m-%d "$date" +%Y-%m-%d 2>/dev/null || date -d "$date" +%Y-%m-%d 2>/dev/null)" = "$date" ]; then
+      echo "dated=true"
+    else
+      echo "dated=false"
+    fi
     ;;
   notes)
     version="${2:?usage: release-meta.sh notes <version>}"
