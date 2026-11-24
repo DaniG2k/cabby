@@ -733,16 +733,18 @@ mod tests {
         assert_eq!(name, service.server_name());
     }
 
-    /// Runs the real server when the test services binary is available
-    /// (`target/test-services/nats-server`, built by the test kit) or
-    /// `CABBY_NATS_SERVER` is set.
+    /// The `nats-server` for tests that run the real server: the configured one
+    /// (`CABBY_NATS_SERVER_BIN`, then `CABBY_NATS_SERVER`), else the test services
+    /// binary (`target/test-services/nats-server`, built by the test kit), if it exists.
+    fn test_server_binary() -> Option<PathBuf> {
+        let built = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-services/nats-server");
+        configured_server_binary(|k| std::env::var_os(k)).or(Some(built)).filter(|p| p.is_file())
+    }
+
+    /// Runs the real server when [`test_server_binary`] finds one.
     #[test]
     fn starts_and_stops_nats_server() {
-        let built = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-services/nats-server");
-        if std::env::var_os("CABBY_NATS_SERVER").is_none() && !built.is_file() {
-            return;
-        }
-        let bin = std::env::var_os("CABBY_NATS_SERVER").map_or(built, PathBuf::from);
+        let Some(bin) = test_server_binary() else { return };
         let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let store = std::env::temp_dir().join(format!("cabby-enats-test-{port}"));
         let config = Config {
@@ -776,11 +778,7 @@ mod tests {
     /// error). Pins D-044.
     #[test]
     fn deviation_d044_unexpected_server_exit_is_reported() {
-        let built = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-services/nats-server");
-        if std::env::var_os("CABBY_NATS_SERVER").is_none() && !built.is_file() {
-            return;
-        }
-        let bin = std::env::var_os("CABBY_NATS_SERVER").map_or(built, PathBuf::from);
+        let Some(bin) = test_server_binary() else { return };
         let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let config = Config { service_addr: format!("nats://127.0.0.1:{port}"), ..Config::new() };
         let service = Service::new(&config);
