@@ -104,6 +104,9 @@ pub struct Runner {
     /// was created: the SQLite broker, so a failed start leaves its file clean
     /// (everything it assigned is persisted) and the next start keeps the epoch.
     startup_cleanup: Option<Arc<dyn Shutdownable>>,
+    /// Whether the broadcast adapters were set (flag, variable or file)
+    /// rather than left at the default or filled in by a preset.
+    broadcast_adapters_set: bool,
 }
 
 impl std::fmt::Debug for Runner {
@@ -145,6 +148,7 @@ impl Runner {
             node_broker: None,
             pusher_controller: None,
             startup_cleanup: None,
+            broadcast_adapters_set: false,
         };
         r.check_and_set_defaults(options)?;
         Ok(r)
@@ -194,6 +198,7 @@ impl Runner {
                 ],
             );
         }
+        self.broadcast_adapters_set = broadcast_adapters_set(&self.config);
         let c = &mut self.config;
         let (redis, nats) = (c.redis.clone(), c.nats.clone());
         c.load_presets(&env).map_err(|e| decorate(e, "failed to load configuration presets"))?;
@@ -322,10 +327,12 @@ impl Runner {
             crate::metrics::log(level, &message, &attrs);
         }
 
-        for warning in
-            [redis_broadcast_warning(&self.config), live_only_broadcast_warning(&self.config)].into_iter().flatten()
-        {
-            crate::metrics::log(Level::Warn, &warning, &[Attr::new("context", LogValue::String("config".into()))]);
+        let context = || [Attr::new("context", LogValue::String("config".into()))];
+        if let Some(warning) = redis_broadcast_warning(&self.config) {
+            crate::metrics::log(Level::Warn, &warning, &context());
+        }
+        if let Some(warning) = live_only_broadcast_warning(&self.config) {
+            crate::metrics::log(live_only_level(self.broadcast_adapters_set), &warning, &context());
         }
 
         if self.config.public_mode {
@@ -952,6 +959,18 @@ fn live_only_broadcast_warning(c: &Config) -> Option<String> {
     ))
 }
 
+/// Whether the broadcast adapters differ from the default list (checked
+/// before presets apply).
+fn broadcast_adapters_set(c: &Config) -> bool {
+    c.broadcast_adapters != Config::new().broadcast_adapters
+}
+
+/// The level of the live-only warning: a warning for adapters the user
+/// chose, debug for the default list or a preset's.
+fn live_only_level(adapters_set: bool) -> Level {
+    if adapters_set { Level::Warn } else { Level::Debug }
+}
+
 /// The log record of a start-up note (D-060, D-061). An environment conflict
 /// names both variables and never their values, which may be secrets.
 fn note_record(note: &StartupNote) -> (Level, String, Vec<Attr>) {
@@ -1223,5 +1242,17 @@ mod tests {
                 "broadcasts through the redis and nats adapters are delivered live and not stored in history; use http or redisx to keep history"
             )
         );
+    }
+
+    /// Pins D-069: the live-only warning is for broadcast adapters the user
+    /// chose; the default list and a preset's list log it at debug level.
+    #[test]
+    fn live_only_warnings_are_for_chosen_broadcast_adapters() {
+        let mut c = Config::new();
+        assert!(!broadcast_adapters_set(&c), "the default list");
+        c.broadcast_adapters = vec!["http".to_owned(), "redis".to_owned(), "nats".to_owned()];
+        assert!(broadcast_adapters_set(&c));
+        assert_eq!(Level::Warn, live_only_level(true));
+        assert_eq!(Level::Debug, live_only_level(false));
     }
 }

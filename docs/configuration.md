@@ -100,8 +100,10 @@ add redisx)`.
 
 With a broker that keeps history (`memory`, `sqlite`, `nats`, `redis`), broadcasts through the
 `redis` (PUBLISH) and `nats` adapters are delivered live but not stored in history, as in the
-AnyCable server; Cabby logs `WRN broadcasts through the redis adapter are delivered live and not
-stored in history; use http or redisx to keep history` (naming the adapters in use).
+AnyCable server; when you set the broadcast adapters (flag, variable or configuration file) to
+include them, Cabby logs `WRN broadcasts through the redis adapter are delivered live and not
+stored in history; use http or redisx to keep history` (naming the adapters in use). With the
+default list or a preset's, the same line is logged at debug level.
 
 ## Migrating from AnyCable
 
