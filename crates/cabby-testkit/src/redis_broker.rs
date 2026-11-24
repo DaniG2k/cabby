@@ -12,7 +12,7 @@ use cabby_core::common::{RemoteCommandMessage, StreamMessage};
 use cabby_server::metrics::{Instrumenter, Metrics};
 use cabby_server::redis::RedisConfig;
 
-pub use cabby_server::broker::redis::ACL_COMMANDS;
+pub use cabby_server::broker::redis::{ACL_COMMANDS, ADD_LUA};
 pub use cabby_server::broker::{RedisBroker, RedisBrokerConfig};
 
 use crate::services::RedisScope;

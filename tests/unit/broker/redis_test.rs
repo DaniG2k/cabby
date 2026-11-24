@@ -69,6 +69,10 @@ fn offsets_and_data(history: &[StreamMessage]) -> Vec<(u64, &str)> {
     history.iter().map(|m| (m.offset, m.data.as_str())).collect()
 }
 
+fn with_epochs(history: &[StreamMessage]) -> Vec<(u64, &str, &str)> {
+    history.iter().map(|m| (m.offset, m.data.as_str(), m.epoch.as_str())).collect()
+}
+
 fn ttl(scope: &RedisScope, key: &str) -> i64 {
     scope.command(&["TTL", key]).expect("TTL").as_int().expect("TTL reply")
 }
@@ -455,7 +459,7 @@ fn change_instance(scope: &RedisScope, stream: &str, run_id: bool) {
 
 /// regression-for: broker/nats_test.go#TestNATSBroker_Epoch
 /// regression-for: broker/memory_test.go#TestMemory_FromOffset/With_unknown_epoch
-/// note: Deviation D-069: after Redis restarts from a snapshot (a new run_id, the offset counter back at the snapshot), the stream's next broadcast gets a new epoch, so reissued offsets never pair with the old epoch; clients holding the old epoch get unknown epoch and resync; the entries kept from before are not served under the new epoch.
+/// note: Deviation D-069: after Redis restarts from a snapshot (a new run_id, the offset counter back at the snapshot), every position in the stream gets unknown epoch until the next broadcast gives it a new epoch, so reissued offsets never pair with the old epoch and a client never misses the lost messages; history_since returns every kept message with its own epoch.
 /// note: The restart is simulated on the shared test Redis: the stream's keys are copied after b and copied back after c (COPY ... REPLACE), and the stored instance gets another run_id; not_observable on Go: AnyCable rejects --broker=redis.
 #[test]
 fn a_restart_from_a_snapshot_rotates_the_stream_epoch() {
@@ -496,7 +500,7 @@ fn a_restart_from_a_snapshot_rotates_the_stream_epoch() {
     let e = broker.history_from("test", &old, 2).unwrap_err();
     assert_eq!(format!("unknown epoch: {old}, current: {}", d.epoch), e.message);
     let since = broker.history_since("test", 0).expect("history").unwrap_or_default();
-    assert_eq!(vec![(3, "d")], offsets_and_data(&since), "only entries of the new epoch");
+    assert_eq!(vec![(1, "a", old.as_str()), (2, "b", old.as_str()), (3, "d", d.epoch.as_str())], with_epochs(&since));
     assert_eq!(Ok(vec![]), broker.history_from("test", &d.epoch, 3));
 
     let e2 = send(&broker, &sent, "test", "e");
@@ -517,15 +521,62 @@ fn a_failover_rotates_the_stream_epoch() {
     assert_eq!(4, d.offset);
     assert_ne!(old, d.epoch);
     assert!(broker.history_from("test", &old, 3).unwrap_err().message.starts_with("unknown epoch"));
+    let since = broker.history_since("test", 0).expect("history").unwrap_or_default();
     assert_eq!(
-        vec![(4, "d")],
-        offsets_and_data(&broker.history_since("test", 0).expect("history").unwrap_or_default())
+        vec![(1, old.as_str()), (2, &old), (3, &old), (4, &d.epoch)],
+        since.iter().map(|m| (m.offset, m.epoch.as_str())).collect::<Vec<_>>()
     );
+}
+
+/// regression-for: broker/nats_test.go#TestNATSBroker_HistoryFrom/With_unknown_epoch
+/// regression-for: broker/memory_test.go#TestMemory_FromOffset/With_unknown_epoch
+/// note: Deviation D-069: between a restart or failover and the stream's next broadcast, a position in the stream (even one at or below the restored offset) gets unknown epoch, so the client resyncs instead of confirming a history that may miss lost messages; the instance change is simulated by changing the stored instance; not_observable on Go: AnyCable rejects --broker=redis.
+#[test]
+fn positions_are_unknown_after_an_instance_change_until_the_next_broadcast() {
+    rb::rust_only();
+    let scope = scope();
+    let (broker, sent, epoch) = three_messages(&scope);
+    change_instance(&scope, "test", true);
+
+    for offset in [1, 3] {
+        let e = broker.history_from("test", &epoch, offset).unwrap_err();
+        assert_eq!(format!("unknown epoch: {epoch}, current: {epoch} (the Redis instance changed)"), e.message);
+    }
+    assert_eq!(3, broker.history_since("test", 0).expect("history").unwrap_or_default().len());
+
+    let d = send(&broker, &sent, "test", "d");
+    assert_ne!(epoch, d.epoch);
+    assert_eq!(Ok(vec![]), broker.history_from("test", &d.epoch, 4));
+}
+
+/// regression-for: broker/nats_test.go#TestNATSBroker_HistoryFrom
+/// note: Deviation D-069: the broadcast script is idempotent per broadcast token: a resend (as a Redis Cluster client does after a dropped connection) returns the first offset and epoch and stores nothing twice; not_observable on Go: AnyCable rejects --broker=redis.
+#[test]
+fn a_resent_broadcast_is_stored_once() {
+    rb::rust_only();
+    let scope = scope();
+    let (meta, hist) = (meta_key(&scope, "test"), hist_key(&scope, "test"));
+    let add = |token: &str| {
+        let reply = scope
+            .command(&["EVAL", rb::ADD_LUA, "2", &meta, &hist, "data", "100", "300", "3000", "E1new", token, ""])
+            .expect("EVAL");
+        reply
+            .items()
+            .iter()
+            .map(|v| v.as_text().unwrap_or_else(|| v.as_int().unwrap_or(-1).to_string()))
+            .collect::<Vec<_>>()
+    };
+    let first = add("token-1");
+    assert_eq!(vec!["1", "E1new", "1"], first);
+    assert_eq!(vec!["1", "E1new", "0"], add("token-1"), "the same offset and epoch, nothing changed");
+    assert_eq!(Some(1), scope.command(&["XLEN", &hist]).expect("XLEN").as_int());
+    assert_eq!(vec!["2", "E1new", "0"], add("token-2"));
+    assert_eq!(Some(2), scope.command(&["XLEN", &hist]).expect("XLEN").as_int());
 }
 
 /// regression-for: broker/nats_test.go#TestNATSBroker_Epoch
 /// regression-for: broker/memory_test.go#TestMemory_Store
-/// note: Deviation D-069: a stream whose offset and epoch were lost while its history stayed (an eviction) gets a new epoch and continues after the newest offset Redis generated; only entries of the new epoch are served; not_observable on Go: AnyCable rejects --broker=redis.
+/// note: Deviation D-069: a stream whose offset and epoch were lost while its history stayed (an eviction) gets a new epoch and continues after the newest offset Redis generated; positions in the old epoch are unknown, and history_since returns every kept message with its own epoch; not_observable on Go: AnyCable rejects --broker=redis.
 #[test]
 fn a_lost_stream_state_gets_a_new_epoch() {
     rb::rust_only();
@@ -537,10 +588,8 @@ fn a_lost_stream_state_gets_a_new_epoch() {
     let d = send(&broker, &sent, "test", "d");
     assert_eq!(4, d.offset);
     assert_ne!(old, d.epoch);
-    assert_eq!(
-        vec![(4, "d")],
-        offsets_and_data(&broker.history_since("test", 0).expect("history").unwrap_or_default())
-    );
+    let since = broker.history_since("test", 0).expect("history").unwrap_or_default();
+    assert_eq!(vec![(3, "c", old.as_str()), (4, "d", d.epoch.as_str())], with_epochs(&since)[2..]);
     assert!(broker.history_from("test", &old, 3).unwrap_err().message.starts_with("unknown epoch"));
 }
 
@@ -815,4 +864,87 @@ fn each_killed_connection_counts_one_reconnect() {
         assert_eq!(kill, metrics.counter("redis_broker_reconnects_total").unwrap().value());
     }
     assert_eq!(0, metrics.counter("redis_broker_errors_total").unwrap().value());
+}
+
+/// A node that answers like a read-only replica: the handshake, `INFO` and
+/// `SCRIPT LOAD` work, every script gets `READONLY`. Counts connections.
+struct ReadOnlyRedis {
+    url: String,
+    accepted: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl ReadOnlyRedis {
+    fn start() -> Self {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let url = format!("redis://{}", listener.local_addr().expect("addr"));
+        let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = accepted.clone();
+        thread::spawn(move || {
+            for conn in listener.incoming().flatten() {
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                thread::spawn(move || {
+                    let mut writer = conn.try_clone().expect("clone");
+                    let mut reader = BufReader::new(conn);
+                    let mut line = String::new();
+                    // One RESP array of bulk strings per command.
+                    while reader.read_line(&mut line).is_ok_and(|n| n > 0) {
+                        let n: usize = line.trim().trim_start_matches('*').parse().unwrap_or(0);
+                        let mut args = Vec::new();
+                        for _ in 0..n {
+                            line.clear();
+                            let _ = reader.read_line(&mut line);
+                            let len: usize = line.trim().trim_start_matches('$').parse().unwrap_or(0);
+                            let mut buf = vec![0; len + 2];
+                            let _ = std::io::Read::read_exact(&mut reader, &mut buf);
+                            args.push(String::from_utf8_lossy(&buf[..len]).to_uppercase());
+                        }
+                        line.clear();
+                        let reply = match args.first().map(String::as_str) {
+                            Some("INFO") => {
+                                let info = format!("run_id:{}\r\nmaster_replid:{}\r\n", "a".repeat(40), "b".repeat(40));
+                                format!("${}\r\n{info}\r\n", info.len())
+                            }
+                            Some("SCRIPT") => format!("$40\r\n{}\r\n", "c".repeat(40)),
+                            Some("EVAL" | "EVALSHA") => {
+                                "-READONLY You can't write against a read only replica.\r\n".to_owned()
+                            }
+                            Some("CLUSTER") => "-ERR This instance has cluster support disabled\r\n".to_owned(),
+                            _ => "+OK\r\n".to_owned(),
+                        };
+                        if writer.write_all(reply.as_bytes()).is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+        });
+        Self { url, accepted }
+    }
+
+    fn accepted(&self) -> usize {
+        self.accepted.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// regression-for: broker/nats_test.go#TestNATSBroker_Sessions
+/// note: Deviation D-069: a node that stays read-only (READONLY: Redis ran nothing) gets one retry on a new connection, then the back-off: 20 broadcasts open at most 3 connections and count at most 2 reconnects; the node is a fake that answers every script with READONLY; not_observable on Go: AnyCable rejects --broker=redis.
+#[test]
+fn a_node_that_stays_read_only_starts_the_back_off() {
+    rb::rust_only();
+    let redis = ReadOnlyRedis::start();
+    let metrics = rb::metrics();
+    let options = rb::RedisBrokerConfig { key_prefix: "readonly".into(), timeout: 1 };
+    let broker = rb::try_new_broker(&redis.url, &Config::new(), &options, None, Some(metrics.clone())).expect("broker");
+    broker.start().expect("start");
+
+    let e = broker.handle_broadcast(&msg("test", "m0")).unwrap_err();
+    assert!(e.message.contains("read only replica"), "{e}");
+    for i in 1..20 {
+        let e = broker.handle_broadcast(&msg("test", &format!("m{i}"))).unwrap_err();
+        assert!(e.message.contains("read only replica") || e.message.contains("back-off"), "{e}");
+    }
+    assert!(redis.accepted() <= 3, "{} connections", redis.accepted());
+    assert!(metrics.counter("redis_broker_reconnects_total").unwrap().value() <= 2);
+    assert_eq!(20, metrics.counter("redis_broker_errors_total").unwrap().value());
 }
