@@ -12,10 +12,11 @@
 
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-/// How long the probe waits to connect, and then for each read and write.
-pub const TIMEOUT: Duration = Duration::from_secs(2);
+/// The whole probe's time budget, shared by the candidate addresses: under
+/// the image's `HEALTHCHECK --timeout=3s`.
+pub const BUDGET: Duration = Duration::from_millis(2500);
 
 /// The server port: the first of `CABBY_PORT`, `ANYCABLE_PORT` and `PORT` that
 /// is set, else 8080, parsed as the server parses it (Go `strconv.ParseInt` with
@@ -43,9 +44,16 @@ pub fn tls(get: impl Fn(&str) -> Option<String>) -> bool {
     !setting(&get, "SSL_CERT").is_empty() && !setting(&get, "SSL_KEY").is_empty()
 }
 
-/// Connects to `addr`; `Ok(())` when the port accepts the connection.
-pub fn connect(addr: SocketAddr) -> Result<(), String> {
-    TcpStream::connect_timeout(&addr, TIMEOUT).map(drop).map_err(|e| format!("connecting to {addr}: {e}"))
+/// The time left until `until`, or an error once it has passed.
+fn left(until: Instant, what: &str) -> Result<Duration, String> {
+    let d = until.saturating_duration_since(Instant::now());
+    if d.is_zero() { Err(format!("{what}: timed out")) } else { Ok(d) }
+}
+
+/// Connects to `addr` before `until`; `Ok(())` when the port accepts the connection.
+pub fn connect(addr: SocketAddr, until: Instant) -> Result<(), String> {
+    let what = format!("connecting to {addr}");
+    TcpStream::connect_timeout(&addr, left(until, &what)?).map(drop).map_err(|e| format!("{what}: {e}"))
 }
 
 /// The health path: `CABBY_HEALTH_PATH`, then `ANYCABLE_HEALTH_PATH`, else `/health`.
@@ -57,16 +65,19 @@ pub fn health_path(get: impl Fn(&str) -> Option<String>) -> String {
         .unwrap_or_else(|| "/health".to_owned())
 }
 
-/// Sends `GET path` to `addr`; `Ok(())` when the response status is 200.
-pub fn probe(addr: SocketAddr, path: &str) -> Result<(), String> {
-    let mut stream = TcpStream::connect_timeout(&addr, TIMEOUT).map_err(|e| format!("connecting to {addr}: {e}"))?;
-    stream.set_read_timeout(Some(TIMEOUT)).map_err(|e| e.to_string())?;
-    stream.set_write_timeout(Some(TIMEOUT)).map_err(|e| e.to_string())?;
+/// Sends `GET path` to `addr`, all of it before `until`; `Ok(())` when the
+/// response status is 200.
+pub fn probe(addr: SocketAddr, path: &str, until: Instant) -> Result<(), String> {
+    let connecting = format!("connecting to {addr}");
+    let mut stream = TcpStream::connect_timeout(&addr, left(until, &connecting)?)
+        .map_err(|e| format!("{connecting}: {e}"))?;
+    stream.set_write_timeout(Some(left(until, "sending the request")?)).map_err(|e| e.to_string())?;
     let request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes()).map_err(|e| format!("sending the request: {e}"))?;
     let mut head = Vec::new();
     let mut buf = [0u8; 128];
     while !head.windows(2).any(|w| w == b"\r\n") && head.len() < 512 {
+        stream.set_read_timeout(Some(left(until, "reading the response")?)).map_err(|e| e.to_string())?;
         let n = stream.read(&mut buf).map_err(|e| format!("reading the response: {e}"))?;
         if n == 0 {
             break;
@@ -112,10 +123,15 @@ fn candidates(raw: &str, resolve: impl Fn(&str) -> Result<Vec<IpAddr>, String>) 
 
 /// Checks each of `addrs` in turn (a connection with `tls`, else `GET path`)
 /// and succeeds on the first healthy one; otherwise reports every failure.
-pub fn check_any(addrs: &[SocketAddr], tls: bool, path: &str) -> Result<(), String> {
+/// All of it ends by `until`: each candidate gets an equal share of the time
+/// left when its turn comes, so one that stalls leaves time for the next.
+pub fn check_any(addrs: &[SocketAddr], tls: bool, path: &str, until: Instant) -> Result<(), String> {
     let mut failures = Vec::with_capacity(addrs.len());
-    for &addr in addrs {
-        match if tls { connect(addr) } else { probe(addr, path) } {
+    for (i, &addr) in addrs.iter().enumerate() {
+        let others = u32::try_from(addrs.len() - i).unwrap_or(u32::MAX);
+        let slot = until.saturating_duration_since(Instant::now()) / others;
+        let slot_end = Instant::now() + slot;
+        match if tls { connect(addr, slot_end) } else { probe(addr, path, slot_end) } {
             Ok(()) => return Ok(()),
             Err(e) => failures.push(e),
         }
@@ -127,7 +143,7 @@ pub fn check_any(addrs: &[SocketAddr], tls: bool, path: &str) -> Result<(), Stri
 pub fn run(get: impl Fn(&str) -> Option<String>) -> Result<(), String> {
     let port = port(&get)?;
     let addrs: Vec<SocketAddr> = hosts(&get)?.into_iter().map(|ip| SocketAddr::new(ip, port)).collect();
-    check_any(&addrs, tls(&get), &health_path(&get))
+    check_any(&addrs, tls(&get), &health_path(&get), Instant::now() + BUDGET)
 }
 
 #[cfg(test)]
@@ -135,6 +151,55 @@ mod tests {
     use std::net::{SocketAddr, TcpListener};
 
     use super::*;
+
+    fn soon() -> Instant {
+        Instant::now() + BUDGET
+    }
+
+    /// A server that accepts every connection and never answers; the
+    /// connections stay open while it runs.
+    fn stalling() -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            while let Ok((conn, _)) = listener.accept() {
+                held.push(conn);
+            }
+        });
+        addr
+    }
+
+    #[test]
+    fn the_budget_is_under_the_image_timeout() {
+        assert!(BUDGET < Duration::from_secs(3), "the Dockerfile has HEALTHCHECK --timeout=3s");
+    }
+
+    #[test]
+    fn a_stalled_candidate_leaves_time_for_the_next() {
+        let (healthy, server) = serve_once("HTTP/1.1 200 OK");
+        let started = Instant::now();
+
+        assert_eq!(check_any(&[stalling(), healthy], false, "/health", started + Duration::from_millis(800)), Ok(()));
+
+        let took = started.elapsed();
+        assert!(took >= Duration::from_millis(350), "the stalled one gets its share: {took:?}");
+        assert!(took < Duration::from_millis(800), "the healthy one answers in its share: {took:?}");
+        server.join().expect("server");
+    }
+
+    #[test]
+    fn stalled_candidates_end_by_the_deadline() {
+        let started = Instant::now();
+        let until = started + Duration::from_millis(600);
+
+        let err = check_any(&[stalling(), stalling()], false, "/health", until).expect_err("nothing answers");
+
+        let took = started.elapsed();
+        assert!(took < Duration::from_millis(900), "took {took:?}");
+        assert_eq!(2, err.matches("reading the response").count(), "{err}");
+        assert!(check_any(&[stalling()], false, "/health", Instant::now()).is_err(), "no time left");
+    }
 
     fn env(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
         move |k| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| (*v).to_owned())
@@ -213,13 +278,13 @@ mod tests {
         let (_reserved, refusing) = refusing_addr();
         let (unhealthy, first) = serve_once("HTTP/1.1 503 Service Unavailable");
         let (healthy, second) = serve_once("HTTP/1.1 200 OK");
-        assert_eq!(check_any(&[refusing, unhealthy, healthy], false, "/health"), Ok(()));
+        assert_eq!(check_any(&[refusing, unhealthy, healthy], false, "/health", soon()), Ok(()));
         first.join().expect("server");
         second.join().expect("server");
 
         let (one, first) = serve_once("HTTP/1.1 503 Service Unavailable");
         let (two, second) = serve_once("HTTP/1.1 500 Internal Server Error");
-        let err = check_any(&[one, two], false, "/health").expect_err("no healthy candidate");
+        let err = check_any(&[one, two], false, "/health", soon()).expect_err("no healthy candidate");
         assert_eq!(
             "GET /health answered \"HTTP/1.1 503 Service Unavailable\"; \
              GET /health answered \"HTTP/1.1 500 Internal Server Error\"",
@@ -233,10 +298,20 @@ mod tests {
     /// after `127.0.0.1` (skipped where IPv6 loopback is unavailable).
     #[test]
     fn an_unspecified_host_reaches_a_server_on_ipv6_loopback() {
-        let Ok(listener) = TcpListener::bind("[::1]:0") else { return };
+        // A port free on both loopbacks: `::1` listens, `127.0.0.1` is
+        // reserved by a bound socket that does not listen, so no other test
+        // can answer there.
+        let Some((listener, _reserved)) = (0..20).find_map(|_| {
+            let listener = TcpListener::bind("[::1]:0").ok()?;
+            let port = listener.local_addr().ok()?.port();
+            let reserved = tokio::net::TcpSocket::new_v4().ok()?;
+            reserved.bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).ok()?;
+            Some((listener, reserved))
+        }) else {
+            return; // no IPv6 loopback here
+        };
         let port = listener.local_addr().expect("addr").port();
         let server = std::thread::spawn(move || {
-            // The probe may first reach whatever owns this port on 127.0.0.1.
             let (mut conn, _) = listener.accept().expect("accept");
             let mut request = Vec::new();
             let mut buf = [0u8; 512];
@@ -282,11 +357,11 @@ mod tests {
     fn with_tls_a_connection_is_healthy() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
-        assert_eq!(connect(addr), Ok(()));
-        assert_eq!(check_any(&[addr], true, "/health"), Ok(()));
+        assert_eq!(connect(addr, soon()), Ok(()));
+        assert_eq!(check_any(&[addr], true, "/health", soon()), Ok(()));
         let (_reserved, refusing) = refusing_addr();
-        assert_eq!(check_any(&[refusing, addr], true, "/health"), Ok(()));
-        assert!(connect(refusing).expect_err("nothing listens").starts_with("connecting to "));
+        assert_eq!(check_any(&[refusing, addr], true, "/health", soon()), Ok(()));
+        assert!(connect(refusing, soon()).expect_err("nothing listens").starts_with("connecting to "));
         drop(listener);
     }
 
@@ -313,14 +388,14 @@ mod tests {
     #[test]
     fn a_200_is_healthy_and_anything_else_is_not() {
         let (addr, server) = serve_once("HTTP/1.1 200 OK");
-        assert_eq!(probe(addr, "/health"), Ok(()));
+        assert_eq!(probe(addr, "/health", soon()), Ok(()));
         assert!(server.join().expect("server").starts_with("GET /health HTTP/1.1\r\n"));
 
         let (addr, server) = serve_once("HTTP/1.1 503 Service Unavailable");
-        assert_eq!(probe(addr, "/health"), Err("GET /health answered \"HTTP/1.1 503 Service Unavailable\"".to_owned()));
+        assert_eq!(probe(addr, "/health", soon()), Err("GET /health answered \"HTTP/1.1 503 Service Unavailable\"".to_owned()));
         server.join().expect("server");
 
         let (_reserved, refusing) = refusing_addr();
-        assert!(probe(refusing, "/health").expect_err("nothing listens").starts_with("connecting to "));
+        assert!(probe(refusing, "/health", soon()).expect_err("nothing listens").starts_with("connecting to "));
     }
 }
