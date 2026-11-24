@@ -11,6 +11,11 @@ license.workspace = true
 name = "cabby"
 path = "src/main.rs"
 
+# The container image's HEALTHCHECK (distroless has no shell or curl).
+[[bin]]
+name = "cabby-healthcheck"
+path = "src/bin/cabby-healthcheck.rs"
+
 [features]
 default = []
 # Embedded mruby scripting (upstream's `mrb` build tag), off by default and in

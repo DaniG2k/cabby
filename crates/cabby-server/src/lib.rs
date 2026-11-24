@@ -9,6 +9,7 @@ mod client_tls;
 pub mod config;
 pub mod ds;
 pub mod enats;
+pub mod healthcheck;
 mod http_client;
 pub mod metrics;
 pub mod mrb;
