@@ -23,10 +23,12 @@ use cabby_core::toml_config::{self, go_quote};
 
 use crate::metrics::Instrumenter;
 
+pub mod broadcast;
 pub(crate) mod connect;
 pub mod pubsub;
 pub(crate) mod schema;
 
+pub use broadcast::PostgresBroadcaster;
 pub use pubsub::PostgresSubscriber;
 
 /// The longest identifier PostgreSQL keeps (`NAMEDATALEN - 1`).
@@ -344,6 +346,12 @@ impl Metrics {
             m.counter_increment(RECONNECTS);
         }
     }
+
+    pub(crate) fn claimed(&self, n: usize) {
+        if let Some(m) = &self.0 {
+            m.counter_add(CLAIMED, u64::try_from(n).unwrap_or(u64::MAX));
+        }
+    }
 }
 
 /// Creates Cabby's tables for `config` (as `auto_migrate` does at startup).
@@ -464,10 +472,12 @@ mod tests {
         pm.spillover();
         pm.spillover();
         pm.reconnect();
+        pm.claimed(3);
         pm.took(Duration::from_millis(9));
         assert_eq!(1, m.counter(ERRORS).unwrap().value());
         assert_eq!(2, m.counter(SPILLOVER).unwrap().value());
         assert_eq!(1, m.counter(RECONNECTS).unwrap().value());
+        assert_eq!(3, m.counter(CLAIMED).unwrap().value());
         assert_eq!(9, m.gauge(QUERY_MS).unwrap().value());
         Metrics::none().error();
 

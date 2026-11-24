@@ -26,6 +26,7 @@ pub(crate) const SCHEMA_VERSION: i64 = 1;
 
 /// The tables an adapter needs.
 pub(crate) const PUBSUB_TABLES: &[&str] = &[OVERFLOW];
+pub(crate) const BROADCAST_TABLES: &[&str] = &[BROADCASTS];
 
 /// The DDL of schema version 1 for `names`, one statement per entry.
 pub(crate) fn ddl(n: &Names) -> Vec<String> {

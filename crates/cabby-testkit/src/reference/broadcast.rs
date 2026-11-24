@@ -212,6 +212,23 @@ impl Broadcaster {
         }
     }
 
+    /// The Postgres broadcaster (a Cabby addition, D-070: not observable on Go).
+    pub fn postgres(
+        handler: &MockHandler,
+        config: &cabby_server::postgres::PostgresConfig,
+        metrics: cabby_server::postgres::Metrics,
+    ) -> Result<Self, String> {
+        crate::postgres::rust_only();
+        cabby_server::postgres::PostgresBroadcaster::new(handler.rust(), config, metrics)
+            .map(|b| Self { inner: BroadcasterImpl::Rust(Box::new(b)) })
+            .map_err(|e| e.0)
+    }
+
+    /// `IsFanout()`.
+    pub fn is_fanout(&self) -> bool {
+        self.rust().is_fanout()
+    }
+
     fn rust(&self) -> &dyn rs::Broadcaster {
         match &self.inner {
             BroadcasterImpl::Http(h) => &h.broadcaster,

@@ -775,6 +775,15 @@ impl Runner {
                 }
                 "redisx" => Arc::new(crate::broadcast::RedisBroadcaster::new(h.clone(), &c.redis_broadcast)),
                 "nats" => Arc::new(crate::broadcast::LegacyNatsBroadcaster::new(h.clone(), &c.nats_broadcast)),
+                // Cabby only (D-070).
+                "postgres" => Arc::new(
+                    crate::postgres::PostgresBroadcaster::new(
+                        h.clone(),
+                        &c.postgres,
+                        crate::postgres::Metrics::register_once(&self.metrics),
+                    )
+                    .map_err(|e| CliError(e.0))?,
+                ),
                 other => return Err(illegal_argument(&format!("Unsupported broadcast adapter: {other}"))),
             };
             out.push(Arc::new(CoreBroadcaster { inner, events: self.events.clone() }));

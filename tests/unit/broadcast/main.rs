@@ -11,4 +11,5 @@
 mod http_test;
 mod legacy_nats_test;
 mod legacy_redis_test;
+mod postgres_test;
 mod redis_test;
