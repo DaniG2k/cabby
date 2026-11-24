@@ -667,7 +667,7 @@ mod tests {
         assert_eq!("/data/cabby.db", back.sqlite.path);
     }
 
-    /// Pins spec §2: `--presets=broker` only fills in a default broker.
+    /// Pins D-065: `--presets=broker` only fills in a default broker.
     #[test]
     fn broker_preset_keeps_an_explicit_sqlite_broker() {
         let mut c = Config::new();

@@ -1,5 +1,5 @@
-//! The SQLite broker: a Cabby addition (deviation D-065; design in
-//! `docs/superpowers/specs/2026-11-23-sqlite-broker-design.md`).
+//! The SQLite broker: a Cabby addition (deviation D-065 in `compat/deviations.md`
+//! describes its observable behavior).
 //!
 //! The memory broker stays the live path: it serves every read, assigns
 //! offsets and fans out. Beside it, a bounded write queue (`queue`) feeds one
@@ -45,7 +45,7 @@ fn log() -> &'static Logger {
 }
 
 /// Where the broker reports its write path; the server turns these into
-/// metrics (spec §7). Calls come from the broadcast path and the persister
+/// metrics. Calls come from the broadcast path and the persister
 /// thread, so they must be cheap.
 pub trait SqliteObserver: Send + Sync {
     /// Ops waiting to be written, after each write attempt.
@@ -69,9 +69,9 @@ impl SqliteObserver for NoopObserver {
     fn dropped(&self, _kind: OpKind) {}
 }
 
-/// How long opening waits for another process to release the database (spec §5).
+/// How long opening waits for another process to release the database.
 pub const LOCK_TIMEOUT: Duration = Duration::from_secs(10);
-/// The write queue's bound (spec §3).
+/// The write queue's bound.
 pub const QUEUE_CAPACITY: usize = 100_000;
 
 /// Where the database lives and how the broker treats it.
@@ -137,7 +137,7 @@ impl SqliteBroker {
     /// Opens (creating if needed) the database at `options.path`, takes its
     /// lock and loads it into a new memory broker. Errors name the path:
     /// another process holds it, it can't be created or read, or its schema
-    /// is newer. A corrupt file is moved aside instead (spec §6).
+    /// is newer. A corrupt file is moved aside instead.
     pub fn open(
         broadcaster: Option<Arc<dyn Broadcaster>>,
         presenter: Option<Arc<dyn Presenter>>,
@@ -327,7 +327,7 @@ impl Broker for SqliteBroker {
         Ok(())
     }
 
-    /// Presence lives in memory only: every connection drops on restart (spec §2).
+    /// Presence lives in memory only: every connection drops on restart.
     fn supports_presence(&self) -> bool {
         self.memory.supports_presence()
     }

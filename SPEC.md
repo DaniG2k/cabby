@@ -1,6 +1,6 @@
 # Cabby: tests-first AnyCable Rust port specification
 
-Status: M0–M7 benchmarks done: 922 of 923 upstream cases pass and 1 is retired by design (telemetry, D-058); general review fixed; three-way, Pusher-protocol and AnyCable issue 265 soak benchmarks in the README. All §11 owner requests done.
+Status: M0–M7 benchmarks done: 922 of 923 upstream cases pass and 1 is retired by design (telemetry, D-058); general review fixed; three-way, Pusher-protocol and AnyCable issue 265 soak benchmarks in the README. All end-of-project requests done.
 Prepared: 2026-11-17. Progress: `cargo xtask report`; baseline evidence: `compat/baseline/README.md`.
 Project name: **Cabby**. Directory and planned binary: `cabby` (an independent AnyCable-compatible implementation).
 
@@ -298,12 +298,12 @@ Set measurable improvement targets after M0 establishes real baseline variance. 
 
 The next coding deliverable is the test workspace, manifest, and baseline evidence—not an initial server implementation.
 
-### Owner requests to complete at the end
+### Project requests to complete at the end
 
 - [x] Pusher-protocol benchmark: Cabby and AnyCable Pusher modes vs Soketi and Laravel Reverb, through a Pusher client mode in the harness.
 - [x] Soak test for AnyCable issue 265 (memory over hours of churn), Cabby vs AnyCable: 2-hour soak plus a high-churn run, in the README (D-005). No growth with churn in either server; it found and fixed one Cabby bug (idle HTTP RPC connections not closed after traffic stopped).
 
-- [x] Independent review of the whole project with Fable 5.2 (not anchored on the implementer's summary).
+- [x] An independent review of the whole project (not anchored on the implementer's summary).
 - [x] Fill the README's Go vs Rust comparison table with measured results from the external harness (`crates/cabby-bench`), including workloads where Rust is not faster.
 - [x] Hand over manual testing instructions (`docs/manual-testing.md`, each step verified against a live server).
 - [x] Three-way stress test with thousands of connections (Action Cable vs AnyCable vs Cabby) through the external harness, published in the README; run only when the machine is idle.

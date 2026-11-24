@@ -1,4 +1,4 @@
-//! The database file (spec §4): connection settings, schema and migrations,
+//! The database file: connection settings, schema and migrations,
 //! and the `meta` table.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,7 +25,7 @@ const CREATE_META: &str = "CREATE TABLE IF NOT EXISTS meta (
   value TEXT NOT NULL
 ) WITHOUT ROWID";
 
-/// Version 1: the spec §4 schema, plus `streams_deadline` so pruning streams
+/// Version 1: the first schema, plus `streams_deadline` so pruning streams
 /// by deadline uses an index.
 const SCHEMA_V1: &str = "
 -- One row per stream ever written, so a quiet stream keeps its offsets after
@@ -55,7 +55,7 @@ CREATE TABLE sessions (
 CREATE INDEX sessions_expires ON sessions (expires_at_ms);
 ";
 
-/// A database failure, classified as spec §6 needs it.
+/// A database failure, classified by what startup does with the file.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum StoreError {
     /// `SQLITE_CORRUPT`, `SQLITE_NOTADB` or a failed `quick_check`: the only
@@ -114,7 +114,7 @@ pub(super) fn schema_version(conn: &Connection) -> Result<i64, StoreError> {
             .parse::<i64>()
             .ok()
             .filter(|v| *v >= 0)
-            // Readable, but not a version Cabby wrote: refuse it (spec §6), never move it aside.
+            // Readable, but not a version Cabby wrote: refuse it, never move it aside.
             .ok_or_else(|| {
                 StoreError::Other(format!(
                     "invalid schema_version {v:?} in its meta table (not written by Cabby?); fix it or move the file away"
@@ -154,7 +154,7 @@ pub(super) fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<(), 
 }
 
 /// Records the run's epoch and that it has not shut down cleanly yet, in one
-/// transaction, before Cabby accepts connections (spec §5 step 3). It must be
+/// transaction, before Cabby accepts connections. It must be
 /// durable: with WAL and `synchronous=NORMAL` a commit isn't synced, and a
 /// power cut that lost `clean_shutdown = '0'` would let the next start reuse
 /// the epoch. So it checkpoints right away, which syncs the WAL and then the
@@ -187,7 +187,7 @@ const UPSERT_STREAM: &str = "INSERT INTO streams (stream, max_seq, deadline) VAL
 /// Writes `ops` in one transaction, in order, and upserts `streams` for every
 /// stream they wrote and every stream in `dropped` (offsets whose history ops
 /// were dropped from the queue: the stream offset still moves past them). With `clean_shutdown`, marks the shutdown clean in the
-/// same transaction (spec §5). `now_secs` decides whether a stored stream row
+/// same transaction. `now_secs` decides whether a stored stream row
 /// is stale. Nothing is written if any statement fails.
 pub(super) fn write_batch(
     conn: &mut Connection,
@@ -285,7 +285,7 @@ pub(super) fn prune(conn: &mut Connection, p: &Prune<'_>) -> Result<(), StoreErr
 }
 
 /// `PRAGMA wal_checkpoint(TRUNCATE)`: copies the WAL into the database file
-/// and truncates it, so the file is self-contained for backups (spec §5).
+/// and truncates it, so the file is self-contained for backups.
 pub(super) fn checkpoint(conn: &Connection) -> Result<(), StoreError> {
     let blocked: i64 = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))?;
     if blocked != 0 {

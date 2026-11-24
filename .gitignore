@@ -4,6 +4,6 @@
 # Local scratch output from reference runs
 /compat/baseline/**/tmp/
 
-# Local agent worktrees and settings
+# Local tool folders
 /.claude/
 THIRD_PARTY_LICENSES.md
