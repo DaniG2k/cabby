@@ -889,7 +889,8 @@ fn default_rpc_controller() -> ControllerFactory {
     })
 }
 
-/// The log record of a start-up note (D-060, D-061).
+/// The log record of a start-up note (D-060, D-061). An environment conflict
+/// names both variables and never their values, which may be secrets.
 fn note_record(note: &StartupNote) -> (Level, String, Vec<Attr>) {
     let context = Attr::new("context", LogValue::String("config".into()));
     match note {
@@ -902,6 +903,9 @@ fn note_record(note: &StartupNote) -> (Level, String, Vec<Attr>) {
                 context,
             ],
         ),
+        StartupNote::EnvConflict { cabby, anycable } => {
+            (Level::Warn, format!("both {cabby} and {anycable} are set; using {cabby}"), vec![context])
+        }
     }
 }
 
@@ -999,5 +1003,15 @@ mod tests {
                 Attr::new("context", LogValue::String("config".into())),
             ]
         );
+    }
+
+    /// Pins D-061: a conflict names both variables and never their values.
+    #[test]
+    fn env_conflicts_are_warnings_without_values() {
+        let (level, message, attrs) =
+            note_record(&StartupNote::EnvConflict { cabby: "CABBY_SECRET".into(), anycable: "ANYCABLE_SECRET".into() });
+        assert_eq!(level, Level::Warn);
+        assert_eq!(message, "both CABBY_SECRET and ANYCABLE_SECRET are set; using CABBY_SECRET");
+        assert_eq!(attrs, vec![Attr::new("context", LogValue::String("config".into()))]);
     }
 }

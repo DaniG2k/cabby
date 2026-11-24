@@ -10,15 +10,16 @@
 //!    `/etc/cabby/cabby.toml`, `./anycable.toml` and `/etc/anycable/anycable.toml`,
 //!    D-060), loaded in the `Before` hook;
 //! 3. flags set on the command line or through their environment variables
-//!    (`ANYCABLE_<NAME>`, plus `PORT` and `REDIS_URL`), applied by flag actions
-//!    after the file; the command line wins over the environment.
+//!    (`CABBY_<NAME>`, then `ANYCABLE_<NAME>`, then `PORT` or `REDIS_URL`, D-061;
+//!    Cabby-only flags have no `ANYCABLE_*` name), applied by flag actions after
+//!    the file; the command line wins over the environment.
 //!
 //! Presets are applied later, by the runner (`Config::load_presets`).
 
 use std::io::Write;
 use std::path::PathBuf;
 
-use super::flags::{self, App, Binding, Flag, Setter, Val, env_var_name};
+use super::flags::{self, App, Binding, Flag, Setter, Val, env_conflict, env_var_names};
 use super::{CliError, CliOption};
 use crate::config::{Config, EnvMap, StartupNote};
 
@@ -57,6 +58,14 @@ impl ConfigSearch {
         (existing.next(), existing.collect())
     }
 }
+
+/// Settings read from the environment outside flags, as `CABBY_<X>` then
+/// `ANYCABLE_<X>` (D-061).
+const NON_FLAG_ENV: &[&str] = &["FILTER_LOGS", "FLY_RPC_APP_NAME"];
+
+/// The last line of `--help` (D-061). Cabby-only settings (D-065) have no
+/// `ANYCABLE_*` name; a test checks that each one is named here.
+const ENV_FOOTER: &str = "Every CABBY_* variable can also be set as ANYCABLE_* (CABBY_* takes precedence), except Cabby-only settings such as CABBY_SQLITE_PATH.";
 
 const SERVER: &str = "SERVER:";
 const SSL: &str = "SSL:";
@@ -172,6 +181,7 @@ pub fn new_config_from_cli_with(
         name: "cabby".to_owned(),
         version: crate::version::label(),
         usage: "Cabby, a real-time server for Rails and beyond".to_owned(),
+        footer: ENV_FOOTER.to_owned(),
     };
 
     for opt in opts {
@@ -221,6 +231,16 @@ pub fn new_config_from_cli_with(
     if let Err(err) = flags::parse_args(&flags, &flag_args, &mut parsed, &mut state) {
         return usage_error(&mut emit, err);
     }
+    let non_flag_conflicts = NON_FLAG_ENV
+        .iter()
+        .filter_map(|name| env_conflict(&[format!("CABBY_{name}"), format!("ANYCABLE_{name}")], env));
+    let env_notes: Vec<StartupNote> = parsed
+        .env_conflicts
+        .iter()
+        .cloned()
+        .chain(non_flag_conflicts)
+        .map(|(cabby, anycable)| StartupNote::EnvConflict { cabby, anycable })
+        .collect();
 
     if parsed.bool(&flags, "help") {
         emit(&app.help(&flags));
@@ -266,7 +286,7 @@ pub fn new_config_from_cli_with(
 
     let print_config = state.print_config;
     let mut c = finalize(state, &mut emit);
-    c.startup_notes = file_notes;
+    c.startup_notes = file_notes.into_iter().chain(env_notes).collect();
 
     if print_config {
         emit(&c.to_toml());
@@ -574,14 +594,14 @@ fn with_env(f: Flag, env: &[&str]) -> Flag {
 }
 
 /// Upstream `withDefaults`: the help category and, unless set, the
-/// `ANYCABLE_<NAME>` environment variable.
+/// `CABBY_<NAME>` and `ANYCABLE_<NAME>` environment variables (D-061).
 fn with_defaults(category: &'static str, flags: Vec<Flag>) -> Vec<Flag> {
     flags
         .into_iter()
         .map(|mut f| {
             f.category = category;
             if f.env_vars.is_empty() {
-                f.env_vars = vec![env_var_name(&f.name)];
+                f.env_vars = env_var_names(&f.name);
             }
             f
         })
@@ -605,7 +625,7 @@ fn definitions(c: &Config) -> Vec<Flag> {
                 "Fail if the configuration file contains unknown keys",
                 Binding::Unbound,
             ),
-            &["ANYCABLE_STRICT_CONFIG"],
+            &["CABBY_STRICT_CONFIG", "ANYCABLE_STRICT_CONFIG"],
         ),
         Flag::new(
             "print-config",
@@ -650,7 +670,7 @@ fn server_flags(c: &Config) -> Vec<Flag> {
             str_flag("host", &c.server.host, "Server host", |s, v| s.c.server.host = v),
             with_env(
                 int_flag("port", c.server.port, "Server port", |s, v| s.c.server.port = v),
-                &["ANYCABLE_PORT", "PORT"],
+                &["CABBY_PORT", "ANYCABLE_PORT", "PORT"],
             ),
             str_flag(
                 "allowed_origins",
@@ -796,7 +816,7 @@ fn redis_flags(c: &Config) -> Vec<Flag> {
         vec![
             with_env(
                 str_flag("redis_url", &c.redis.url, "Redis url", |s, v| s.c.redis.url = v),
-                &["ANYCABLE_REDIS_URL", "REDIS_URL"],
+                &["CABBY_REDIS_URL", "ANYCABLE_REDIS_URL", "REDIS_URL"],
             ),
             str_flag(
                 "redis_sentinels",
@@ -1407,6 +1427,10 @@ mod tests {
         assert_eq!(res.unwrap().0.server.port, 3);
         let (res, _) = run(&[], &[("ANYCABLE_PORT", "2"), ("PORT", "3")]);
         assert_eq!(res.unwrap().0.server.port, 2);
+        let (res, _) = run(&[], &[("CABBY_PORT", "4"), ("ANYCABLE_PORT", "2"), ("PORT", "3")]);
+        assert_eq!(res.unwrap().0.server.port, 4);
+        let (res, _) = run(&["--port=1"], &[("CABBY_PORT", "4")]);
+        assert_eq!(res.unwrap().0.server.port, 1);
     }
 
     #[test]
@@ -1462,10 +1486,6 @@ mod tests {
             "{out}"
         );
         assert!(out.contains("\n   SERVER:\n\n"), "{out}");
-        assert!(
-            out.contains("   --port value              Server port (default: 8080) [$ANYCABLE_PORT, $PORT]\n"),
-            "{out}"
-        );
         assert!(!out.to_lowercase().contains("anycable-go"), "{out}");
         let (res, _) = run(&["-h", "--help"], &[]);
         assert_eq!(res.unwrap_err().0, "Cannot use two forms of the same flag: h help");
@@ -1581,6 +1601,109 @@ mod tests {
         assert_eq!(Some(vec!["broker".to_owned()]), c.user_presets);
         c.load_presets(&EnvMap::new()).unwrap();
         assert_eq!("sqlite", c.broker.adapter);
+    }
+
+    /// Pins D-061: help lists Cabby's variable names and the unprefixed aliases,
+    /// and explains the `ANYCABLE_*` fallback once.
+    #[test]
+    fn deviation_d061_help_lists_cabby_names() {
+        let (_, out) = run(&["--help"], &[]);
+        assert!(
+            out.contains("   --port value              Server port (default: 8080) [$CABBY_PORT, $PORT]\n"),
+            "{out}"
+        );
+        assert!(!out.contains("$ANYCABLE_"), "{out}");
+        assert!(out.ends_with(&format!("\n{ENV_FOOTER}\n")), "{out}");
+        assert!(
+            ENV_FOOTER.starts_with("Every CABBY_* variable can also be set as ANYCABLE_* (CABBY_* takes precedence)")
+        );
+    }
+
+    /// Pins D-061: the help footer names every Cabby-only variable, the flags
+    /// that have no `ANYCABLE_*` name (D-065).
+    #[test]
+    fn deviation_d061_cabby_only_variables_are_named_in_help() {
+        let cabby_only: Vec<String> = definitions(&Config::new())
+            .into_iter()
+            .filter(|f| !f.env_vars.iter().any(|v| v.starts_with("ANYCABLE_")))
+            .flat_map(|f| f.env_vars.into_iter().filter(|v| v.starts_with("CABBY_")))
+            .collect();
+        assert_eq!(cabby_only, vec!["CABBY_SQLITE_PATH"]);
+        for v in &cabby_only {
+            assert!(ENV_FOOTER.contains(v.as_str()), "{v} is not in the help footer: {ENV_FOOTER}");
+        }
+    }
+
+    /// Pins D-061: `CABBY_*` wins over `ANYCABLE_*` and the unprefixed alias; two
+    /// different prefixed values are noted once per setting, without the values.
+    #[test]
+    fn deviation_d061_cabby_env_wins_and_conflicts_are_noted() {
+        let conflict = |name: &str| StartupNote::EnvConflict {
+            cabby: format!("CABBY_{name}"),
+            anycable: format!("ANYCABLE_{name}"),
+        };
+        let (res, _) = run(&[], &[("CABBY_PORT", "1"), ("ANYCABLE_PORT", "2"), ("PORT", "3")]);
+        let c = res.unwrap().0;
+        assert_eq!(c.server.port, 1);
+        assert_eq!(c.startup_notes, vec![conflict("PORT")]);
+
+        // Equal values, or an unprefixed alias: nothing to note.
+        let (res, _) = run(&[], &[("CABBY_SECRET", "s"), ("ANYCABLE_SECRET", "s")]);
+        let c = res.unwrap().0;
+        assert_eq!((c.secret.as_str(), c.startup_notes.len()), ("s", 0));
+        let (res, _) = run(&[], &[("CABBY_REDIS_URL", "redis://a:6379"), ("REDIS_URL", "redis://b:6379")]);
+        let c = res.unwrap().0;
+        assert_eq!((c.redis.url.as_str(), c.startup_notes.len()), ("redis://a:6379", 0));
+
+        // Settings read outside flags are noted too.
+        let (res, _) = run(&[], &[("CABBY_FILTER_LOGS", "false"), ("ANYCABLE_FILTER_LOGS", "true")]);
+        assert_eq!(res.unwrap().0.startup_notes, vec![conflict("FILTER_LOGS")]);
+
+        // The command line still wins over the environment.
+        let (res, _) = run(&["--port=4"], &[("CABBY_PORT", "1")]);
+        assert_eq!(res.unwrap().0.server.port, 4);
+
+        // Values may be secrets: notes never carry them.
+        let (res, _) = run(&[], &[("CABBY_SECRET", "cabby-secret-1"), ("ANYCABLE_SECRET", "anycable-secret-2")]);
+        let notes = format!("{:?}", res.unwrap().0.startup_notes);
+        assert!(!notes.contains("secret-1") && !notes.contains("secret-2"), "{notes}");
+    }
+
+    /// Pins D-061: with only `ANYCABLE_*` variables, nothing changes.
+    #[test]
+    fn deviation_d061_anycable_env_still_works() {
+        let (res, _) = run(&[], &[("ANYCABLE_PORT", "2"), ("PORT", "3"), ("ANYCABLE_SECRET", "s")]);
+        let c = res.unwrap().0;
+        assert_eq!((c.server.port, c.secret.as_str()), (2, "s"));
+        assert!(c.startup_notes.is_empty());
+        let (res, _) = run(&[], &[("ANYCABLE_STRICT_CONFIG", "x")]);
+        assert_eq!(
+            res.unwrap_err().0,
+            "could not parse \"x\" as bool value from environment variable \"ANYCABLE_STRICT_CONFIG\" for flag strict-config: strconv.ParseBool: parsing \"x\": invalid syntax"
+        );
+    }
+
+    /// Pins D-061: no flag reads a variable the server or its test harness reserves.
+    #[test]
+    fn no_flag_reads_a_reserved_variable() {
+        let reserved = [
+            "CABBY_NATS_SERVER",
+            "CABBY_NATS_SERVER_BIN",
+            "CABBY_BACKEND",
+            "CABBY_GO_BRIDGE",
+            "CABBY_GO_MRUBY_BRIDGE",
+            "CABBY_BRIDGE_LOG",
+            "CABBY_BENCHI_SHIM",
+        ];
+        for f in definitions(&Config::new()) {
+            for v in &f.env_vars {
+                assert!(
+                    !reserved.contains(&v.as_str()) && !v.starts_with("CABBY_TEST_") && !v.starts_with("CABBY_BENCH_"),
+                    "flag {} reads the reserved variable {v}",
+                    f.name
+                );
+            }
+        }
     }
 
     /// A fresh directory for configuration-file tests, removed on drop.

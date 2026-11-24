@@ -211,6 +211,9 @@ pub struct Config {
 pub enum StartupNote {
     /// `path` exists but ranks below the configuration file in use (D-060).
     IgnoredConfigFile { path: String, used: String },
+    /// `CABBY_<X>` and `ANYCABLE_<X>` are both set, to different values; the
+    /// `CABBY_*` value is used (D-061). Values are never recorded.
+    EnvConflict { cabby: String, anycable: String },
 }
 
 // Untagged upstream fields decode by their Go names (case-insensitively);
