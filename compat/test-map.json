@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 113
+      "cases": 123
     },
     "translation": {
       "reviewed": 923
@@ -26245,7 +26245,7 @@
       "rust_status": "pass"
     },
     {
-      "rust_case": "broker::redis_test::a_lost_epoch_is_replaced_and_every_node_follows",
+      "rust_case": "broker::redis_test::a_failover_rotates_the_stream_epoch",
       "relation": "regression",
       "links": [
         "26a1a703:broker/nats_test.go#TestNATSBroker_Epoch"
@@ -26254,10 +26254,39 @@
       "rust_status": "pass"
     },
     {
-      "rust_case": "broker::redis_test::a_lost_offset_counter_continues_after_the_newest_entry",
+      "rust_case": "broker::redis_test::a_flushed_script_cache_is_refilled",
       "relation": "regression",
       "links": [
-        "26a1a703:broker/memory_test.go#TestMemory_Store"
+        "26a1a703:broker/nats_test.go#TestNATSBroker_HistoryFrom"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broker::redis_test::a_lost_stream_state_gets_a_new_epoch",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/memory_test.go#TestMemory_Store",
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Epoch"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broker::redis_test::a_restart_from_a_snapshot_rotates_the_stream_epoch",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/memory_test.go#TestMemory_FromOffset/With_unknown_epoch",
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Epoch"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broker::redis_test::a_stall_on_an_established_connection_times_out",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Sessions"
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"
@@ -26272,7 +26301,52 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "broker::redis_test::a_stream_lost_entirely_starts_over_in_a_new_epoch",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Epoch"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broker::redis_test::an_empty_history_never_fails_a_broadcast",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/memory_test.go#TestMemory_Limit"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
       "rust_case": "broker::redis_test::an_unreachable_redis_fails_operations",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Sessions"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broker::redis_test::concurrent_broadcasts_from_two_brokers_get_distinct_offsets",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/nats_test.go#TestNATSBroker_HistoryFrom"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broker::redis_test::concurrent_callers_share_one_connection_attempt_and_then_fail_fast",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Sessions"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broker::redis_test::each_killed_connection_counts_one_reconnect",
       "relation": "regression",
       "links": [
         "26a1a703:broker/nats_test.go#TestNATSBroker_Sessions"
@@ -26338,6 +26412,16 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "broker::redis_test::history_from_matches_the_memory_broker",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/memory_test.go#TestMemory_FromOffset/With_current_epoch",
+        "26a1a703:broker/memory_test.go#TestMemstream_filterByOffset"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
       "rust_case": "broker::redis_test::history_limit_is_exact_despite_approximate_trimming",
       "relation": "regression",
       "links": [
@@ -26391,6 +26475,15 @@
       "relation": "regression",
       "links": [
         "26a1a703:broker/memory_test.go#TestMemory_RestoreSession",
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Sessions"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broker::redis_test::the_documented_acl_is_enough",
+      "relation": "regression",
+      "links": [
         "26a1a703:broker/nats_test.go#TestNATSBroker_Sessions"
       ],
       "reference_status": "not_observable",
