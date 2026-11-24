@@ -3,16 +3,22 @@
 //! Applications insert the standard broadcast JSON (one message or a batch)
 //! into `<prefix>broadcasts`, typically in the same transaction as the change
 //! it announces, so a rolled-back transaction broadcasts nothing. The table's
-//! `AFTER INSERT` trigger notifies `<channel>_in` with the row ID; every node
-//! listens there, and also polls every [`POLL_INTERVAL`] in case a
-//! notification was missed while it reconnected. Nodes claim rows with
-//! `DELETE ... FOR UPDATE SKIP LOCKED ... RETURNING`, so each row is handled
-//! by exactly one node (at most once: a claimed row is gone), which hands it
-//! to the broker ([`Handler::handle_broadcast`]); the pub/sub adapter fans it
-//! out. A node drains the outbox while holding a session advisory lock (the
-//! claim lock), so rows are handled one batch at a time in insertion order,
-//! across nodes, and offsets follow that order. This is
-//! not a fan-out broadcaster.
+//! statement-level `AFTER INSERT` trigger notifies `<channel>_in` (empty
+//! payload, so one notification per statement); every node listens there,
+//! and also polls every [`POLL_INTERVAL`] in case a notification was missed
+//! while it reconnected.
+//!
+//! Claiming is at least once. A batch is one transaction holding the claim
+//! lock (`pg_try_advisory_xact_lock`, so one node drains at a time and rows
+//! go out in `id` order): `SELECT ... FOR UPDATE SKIP LOCKED`, each row
+//! handed to the broker ([`Handler::handle_broadcast`]), the handled rows
+//! deleted, commit. A crash mid-batch rolls back, so the rows already handled
+//! are delivered again; a handler error ends the batch keeping the failed row
+//! and the rows after it, and the claim is retried with backoff. A row that
+//! is not JSON, or that fails [`MAX_HANDLER_FAILURES`] times in a row, is
+//! deleted with an error log. A node that finds the lock taken retries a
+//! second later; the server ends a claim transaction left idle for 60 s.
+//! This is not a fan-out broadcaster.
 //!
 //! A JSON payload sent directly with `NOTIFY <channel>_in, '<json>'` (no
 //! table) reaches every node, so each node delivers it to its own clients
@@ -29,22 +35,30 @@ use cabby_core::{log_debug, log_error, log_info, log_warn};
 use tokio::sync::{Notify, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use super::connect::{self, Conn, ConnectSpec, ListenSink, Listener};
+use super::connect::{self, ConnectSpec, ListenSink, Listener};
 use super::{BROADCASTS, Metrics, Names, PgError, PostgresConfig, schema};
 
 /// How often the outbox is polled without a notification.
 pub const POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Most rows claimed at once.
 pub const CLAIM_BATCH: i64 = 100;
-/// How long a node waits for another one to finish draining the outbox.
-const LOCK_WAIT: Duration = Duration::from_secs(60);
+/// How soon a node tries again when another one holds the claim lock.
+const BUSY_RETRY: Duration = Duration::from_secs(1);
+/// The server ends a claim transaction idle this long (a node that died
+/// mid-batch releases the lock and its rows).
+const IDLE_IN_TRANSACTION: Duration = Duration::from_secs(60);
+/// The longest one batch (claim, handle, delete, commit) may take.
+const BATCH_TIMEOUT: Duration = Duration::from_secs(60);
+/// A row the node fails to handle this many times in a row is dropped.
+pub const MAX_HANDLER_FAILURES: u32 = 5;
 /// How long `start` waits for the `LISTEN` connection.
 const START_WAIT: Duration = Duration::from_secs(10);
 
 /// What a notification on the ingestion channel asks for.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Ingest<'a> {
-    /// Claim rows from the outbox (the trigger sends the row ID).
+    /// Claim rows from the outbox (the trigger's notification, or anything
+    /// else that is not JSON).
     Claim,
     /// A broadcast sent directly with `NOTIFY` (JSON object or array).
     Direct(&'a str),
@@ -117,114 +131,197 @@ impl ListenSink for Sink {
     }
 }
 
+/// Why a claim round ended.
+#[derive(Debug, PartialEq, Eq)]
+enum Round {
+    /// The outbox is empty (as far as this transaction could see).
+    Drained,
+    /// Another node holds the claim lock and is draining.
+    Busy,
+    /// The node failed to handle a row; retry after a backoff.
+    HandlerFailed,
+}
+
 struct Claimer {
     node: Arc<dyn Handler>,
     spec: Arc<ConnectSpec>,
     app: String,
-    claim_sql: String,
+    select_sql: String,
+    delete_sql: String,
     lock_key: i64,
     metrics: Metrics,
     log: Logger,
+    /// The row that failed last and how many times in a row.
+    failing: Option<(i64, u32)>,
+}
+
+/// The delay before retrying after the `n`th handler failure in a row
+/// (100 ms doubling, at most 5 s).
+fn retry_delay(n: u32) -> Duration {
+    Duration::from_millis(100u64 << n.min(6)).min(Duration::from_secs(5))
 }
 
 impl Claimer {
-    async fn run(self, wake: Arc<Notify>, stop: CancellationToken) {
-        let mut conn: Option<Conn> = None;
+    async fn run(mut self, wake: Arc<Notify>, stop: CancellationToken) {
+        let mut client: Option<tokio_postgres::Client> = None;
+        // When to try again without a notification.
+        let mut next = POLL_INTERVAL;
+        let mut retries: u32 = 0;
         loop {
             tokio::select! {
                 biased;
                 () = stop.cancelled() => return,
-                () = wake.notified() => {}
-                () = tokio::time::sleep(POLL_INTERVAL) => {}
+                () = wake.notified(), if retries == 0 => {}
+                () = tokio::time::sleep(next) => {}
             }
             if stop.is_cancelled() {
                 return;
             }
-            if conn.as_ref().is_none_or(|c| c.client.is_closed()) {
+            if client.as_ref().is_none_or(tokio_postgres::Client::is_closed) {
                 match self.spec.connect(&self.app, None).await {
-                    Ok(c) => conn = Some(Conn::new(c)),
+                    Ok(c) => client = Some(c),
                     Err(e) => {
                         self.metrics.error();
                         log_error!(self.log, "failed to claim broadcasts", "error" => e.0);
+                        next = POLL_INTERVAL;
                         continue;
                     }
                 }
             }
-            let Some(c) = conn.as_ref() else { continue };
-            if let Err(e) = self.drain(c, &stop).await {
-                self.metrics.error();
-                log_error!(self.log, "failed to claim broadcasts", "error" => e.0);
-                // Closing the connection releases the lock.
-                conn = None;
-            }
+            let Some(c) = client.as_mut() else { continue };
+            next = match self.drain(c, &stop).await {
+                Ok(Round::Drained) => {
+                    retries = 0;
+                    POLL_INTERVAL
+                }
+                // The holder drains to empty; notifications and the poll cover the rest.
+                Ok(Round::Busy) => {
+                    retries = 0;
+                    BUSY_RETRY
+                }
+                Ok(Round::HandlerFailed) => {
+                    retries += 1;
+                    retry_delay(retries - 1)
+                }
+                Err(e) => {
+                    self.metrics.error();
+                    log_error!(self.log, "failed to claim broadcasts", "error" => e.0);
+                    // A broken transaction or connection: reconnect next time.
+                    client = None;
+                    retries = 0;
+                    POLL_INTERVAL
+                }
+            };
         }
     }
 
-    /// Claims and handles rows until the outbox is empty, holding the claim
-    /// lock: one node drains at a time, so rows are handled in insertion
-    /// order. Claimed rows are deleted when claimed (at most once).
-    async fn drain(&self, conn: &Conn, stop: &CancellationToken) -> Result<(), PgError> {
-        let locked =
-            tokio::time::timeout(LOCK_WAIT, conn.query("SELECT pg_advisory_lock($1)", &[&self.lock_key])).await;
-        match locked {
-            Ok(Ok(_)) => {}
-            Ok(Err(e)) => return Err(e.into()),
-            Err(_) => return Err(PgError("timed out waiting for the claim lock".into())),
-        }
-        let drained = self.claim_all(conn, stop).await;
-        let unlocked = tokio::time::timeout(
-            connect::QUERY_TIMEOUT,
-            conn.query("SELECT pg_advisory_unlock($1)", &[&self.lock_key]),
-        )
-        .await;
-        drained?;
-        match unlocked {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) => Err(e.into()),
-            Err(_) => Err(PgError("timed out releasing the claim lock".into())),
-        }
-    }
-
-    async fn claim_all(&self, conn: &Conn, stop: &CancellationToken) -> Result<(), PgError> {
+    /// Claims and handles batches until the outbox is empty. Each batch is
+    /// one transaction holding the claim lock (a transaction advisory lock),
+    /// so one node drains at a time, in id order; a row is deleted in the
+    /// transaction that handled it, so a crash mid-batch rolls the batch
+    /// back and its rows are delivered again (at least once).
+    async fn drain(&mut self, client: &mut tokio_postgres::Client, stop: &CancellationToken) -> Result<Round, PgError> {
         while !stop.is_cancelled() {
             let started = std::time::Instant::now();
-            let rows = tokio::time::timeout(connect::QUERY_TIMEOUT, conn.query(&self.claim_sql, &[&CLAIM_BATCH]))
-                .await
-                .map_err(|_| PgError("claiming broadcasts timed out".into()))??;
+            let round = tokio::time::timeout(BATCH_TIMEOUT, self.batch(client)).await;
             self.metrics.took(started.elapsed());
-            let mut claimed: Vec<(i64, String)> = rows.iter().map(|r| (r.get(0), r.get(1))).collect();
-            if claimed.is_empty() {
-                return Ok(());
-            }
-            claimed.sort_unstable_by_key(|(id, _)| *id);
-            let full = claimed.len() as i64 >= CLAIM_BATCH;
-            self.metrics.claimed(claimed.len());
-            log_debug!(self.log, "claimed broadcasts", "count" => claimed.len());
-            let (node, metrics, log) = (self.node.clone(), self.metrics.clone(), self.log.clone());
-            // The handler may wait for the broker (another Postgres query).
-            let handled = tokio::task::spawn_blocking(move || {
-                for (id, payload) in claimed {
-                    if let Err(e) = node.handle_broadcast(payload.as_bytes()) {
-                        metrics.error();
-                        log_error!(log, "failed to handle broadcast", "id" => id, "error" => e.0);
-                    }
-                }
-            })
-            .await;
-            if handled.is_err() {
-                self.metrics.error();
-                log_error!(self.log, "broadcast handler panicked");
-            }
-            if !full {
-                return Ok(());
+            match round {
+                Ok(Ok(Some(round))) => return Ok(round),
+                Ok(Ok(None)) => {}
+                Ok(Err(e)) => return Err(e),
+                Err(_) => return Err(PgError("claiming broadcasts timed out".into())),
             }
         }
-        Ok(())
+        Ok(Round::Drained)
+    }
+
+    /// One batch; `None` when it was full and more rows may be waiting.
+    async fn batch(&mut self, client: &mut tokio_postgres::Client) -> Result<Option<Round>, PgError> {
+        let tx = client.transaction().await?;
+        tx.batch_execute(&format!(
+            "SET LOCAL idle_in_transaction_session_timeout = '{}s'",
+            IDLE_IN_TRANSACTION.as_secs()
+        ))
+        .await?;
+        let locked: bool = tx.query_one("SELECT pg_try_advisory_xact_lock($1)", &[&self.lock_key]).await?.get(0);
+        if !locked {
+            tx.rollback().await?;
+            return Ok(Some(Round::Busy));
+        }
+        let rows = tx.query(self.select_sql.as_str(), &[&CLAIM_BATCH]).await?;
+        let claimed: Vec<(i64, String)> = rows.iter().map(|r| (r.get(0), r.get(1))).collect();
+        if claimed.is_empty() {
+            tx.commit().await?;
+            return Ok(Some(Round::Drained));
+        }
+        let full = claimed.len() as i64 >= CLAIM_BATCH;
+        log_debug!(self.log, "claimed broadcasts", "count" => claimed.len());
+
+        let mut done: Vec<i64> = Vec::new();
+        let mut valid: Vec<(i64, String)> = Vec::new();
+        for (id, payload) in claimed {
+            if serde_json::from_str::<serde::de::IgnoredAny>(&payload).is_err() {
+                self.metrics.error();
+                log_error!(self.log, "dropping a broadcast that is not JSON", "id" => id);
+                done.push(id);
+            } else {
+                valid.push((id, payload));
+            }
+        }
+        let (node, log) = (self.node.clone(), self.log.clone());
+        // The handler may wait for the broker (another Postgres query). It
+        // stops at the first failure: (handled IDs, failed ID).
+        let (handled, failed) = tokio::task::spawn_blocking(move || {
+            let mut handled = Vec::new();
+            for (id, payload) in valid {
+                if let Err(e) = node.handle_broadcast(payload.as_bytes()) {
+                    log_error!(log, "failed to handle broadcast", "id" => id, "error" => e.0);
+                    return (handled, Some(id));
+                }
+                handled.push(id);
+            }
+            (handled, None)
+        })
+        .await
+        .map_err(|_| PgError("broadcast handler panicked".into()))?;
+        self.metrics.claimed(handled.len());
+        done.extend(&handled);
+        let round = match failed {
+            None => {
+                self.failing = None;
+                None
+            }
+            Some(id) => {
+                self.metrics.error();
+                let count = match self.failing {
+                    Some((last, n)) if last == id => n + 1,
+                    _ => 1,
+                };
+                if count >= MAX_HANDLER_FAILURES {
+                    log_error!(self.log, &format!("dropping a broadcast the node failed to handle {count} times in a row"), "id" => id);
+                    done.push(id);
+                    self.failing = None;
+                } else {
+                    self.failing = Some((id, count));
+                }
+                Some(Round::HandlerFailed)
+            }
+        };
+        if !done.is_empty() {
+            tx.execute(self.delete_sql.as_str(), &[&done]).await?;
+        }
+        tx.commit().await?;
+        Ok(match round {
+            Some(r) => Some(r),
+            None if full => None,
+            None => Some(Round::Drained),
+        })
     }
 }
 
-/// The claim lock's key (FNV-1a 64 bits of the outbox name).
-fn claim_lock_key(n: &Names) -> i64 {
+/// The claim lock's key (FNV-1a 64 bits of the outbox name), taken with
+/// `pg_try_advisory_xact_lock`.
+pub fn claim_lock_key(n: &Names) -> i64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for b in format!("cabby-claim:{}.{}", n.schema, n.prefix).bytes() {
         hash ^= u64::from(b);
@@ -275,11 +372,11 @@ impl Broadcaster for PostgresBroadcaster {
             spec: self.spec.clone(),
             app: format!("cabby broadcast {}", self.names.channel),
             lock_key: claim_lock_key(&self.names),
-            claim_sql: format!(
-                "DELETE FROM {table} WHERE id IN (SELECT id FROM {table} ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED) RETURNING id, payload"
-            ),
+            select_sql: format!("SELECT id, payload FROM {table} ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED"),
+            delete_sql: format!("DELETE FROM {table} WHERE id = ANY($1)"),
             metrics: self.metrics.clone(),
             log: self.log.clone(),
+            failing: None,
         };
         let claimer = connect::runtime().spawn(claimer.run(wake.clone(), stop.clone()));
         let (dtx, drx) = mpsc::unbounded_channel();

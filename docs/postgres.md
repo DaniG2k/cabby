@@ -10,18 +10,17 @@ Postgres (Rails 8, Laravel, Django, ...) can run more than one Cabby node withou
 | `--broker=postgres` | Stream history, offsets and session recovery shared by every node |
 
 The three are independent: use one, two or all three, and combine them with the other adapters
-(for example `--broadcast_adapter=http,postgres` with `--broker=memory`). They are Cabby additions
-(deviations D-070 and D-071 in [`compat/deviations.md`](../compat/deviations.md)); the AnyCable Go
-server stops at startup with any of them (`Unsupported subscriber adapter: postgres`,
-`couldn't configure broadcasters`, `Unsupported broker adapter: postgres`).
+(for example `--broadcast_adapter=http,postgres` with `--broker=memory`). These flags exist only
+in Cabby (deviations D-070 and D-071 in [`compat/deviations.md`](../compat/deviations.md)).
 
 ## Requirements
 
 - PostgreSQL 12 or newer.
 - **A direct or session-mode connection.** `LISTEN` belongs to a database session, so Cabby
-  keeps one long-lived connection for it. PgBouncer in **transaction** (or statement) pooling
-  mode hands each transaction to a different server connection and loses the `LISTEN`; point
-  Cabby at Postgres directly, or at a PgBouncer pool in **session** mode.
+  keeps one long-lived connection for it, and the broadcaster and the broker coordinate nodes
+  with advisory locks, which also belong to sessions. PgBouncer in **transaction** (or
+  statement) pooling mode hands each transaction to a different server connection and loses the
+  `LISTEN`; point Cabby at Postgres directly, or at a PgBouncer pool in **session** mode.
 - A role that can create tables in the schema, or the tables created beforehand (see
   [Creating the tables yourself](#creating-the-tables-yourself)).
 
@@ -124,16 +123,24 @@ VALUES ('{"stream":"chat_42","data":"{\"text\":\"hello\"}"}');
 ```
 
 `payload` is the same JSON as an HTTP broadcast: one message (`stream`, `data` as a JSON string,
-optional `meta`) or an array of them. The table's `AFTER INSERT` trigger notifies
-`cabby_internal_in`; one node claims the row (`DELETE ... FOR UPDATE SKIP LOCKED ... RETURNING`)
-and hands it to the broker, which stores it (with `--broker=postgres`) and fans it out through
-pub/sub. Nodes also poll every 5 seconds, so a row inserted while a node was reconnecting is not
-left behind.
+optional `meta`) or an array of them. The table's statement-level `AFTER INSERT` trigger
+notifies `cabby_internal_in` once per insert statement; one node claims the rows
+(`SELECT ... FOR UPDATE SKIP LOCKED`, 100 at a time, in one transaction), hands each one to the
+broker, which stores it (with `--broker=postgres`) and fans it out through pub/sub, and deletes
+the rows it handled when the transaction commits. Nodes also poll every 5 seconds, so a row
+inserted while a node was reconnecting is not left behind.
 
-- **Once.** A claimed row is deleted, so each row is delivered once, by one node, whatever the
-  number of nodes (at most once: a node that dies while handling a batch doesn't hand it on).
-- **In order.** One node drains the table at a time (a session advisory lock), so rows are
-  broadcast in insertion order, and offsets follow that order.
+- **At least once.** A row is deleted in the transaction that handled it. If the node fails to
+  handle a row (the broker can't reach Postgres, for example), the rows handled before it are
+  deleted, it and the rows after it stay, and the node retries with a backoff: nothing is lost.
+  If a node crashes in the middle of a batch, the transaction rolls back and the rows it had
+  already handled are delivered again: duplicates only after a crash. A row that is not JSON is
+  deleted and logged; a row the node fails to handle 5 times in a row is deleted with an error
+  log, so it can't block the table.
+- **In order.** One node drains the table at a time (a transaction advisory lock; the server
+  ends a claim transaction left idle for 60 s), so committed rows are broadcast in order of
+  their `id`, and offsets follow that order. A node that finds the lock taken tries again a
+  second later.
 - **Transactional.** The row and its notification only exist once the transaction commits. A
   transaction that rolls back broadcasts nothing.
 
@@ -236,7 +243,7 @@ CREATE TABLE IF NOT EXISTS "public"."cabby_broadcasts" (
 
 CREATE OR REPLACE FUNCTION "public"."cabby_broadcasts_notify"() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  PERFORM pg_notify('cabby_internal_in', NEW.id::text);
+  PERFORM pg_notify('cabby_internal_in', '');
   RETURN NULL;
 END
 $$;
@@ -266,7 +273,7 @@ CREATE UNLOGGED TABLE IF NOT EXISTS "public"."cabby_sessions" (
 
 CREATE INDEX IF NOT EXISTS "cabby_sessions_expires_at_ms" ON "public"."cabby_sessions" (expires_at_ms);
 
-CREATE TRIGGER "cabby_broadcasts_notify" AFTER INSERT ON "public"."cabby_broadcasts" FOR EACH ROW EXECUTE FUNCTION "public"."cabby_broadcasts_notify"();
+CREATE TRIGGER "cabby_broadcasts_notify" AFTER INSERT ON "public"."cabby_broadcasts" FOR EACH STATEMENT EXECUTE FUNCTION "public"."cabby_broadcasts_notify"();
 
 INSERT INTO "public"."cabby_meta" (key, value) VALUES ('schema_version', '1') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 ```
@@ -285,7 +292,7 @@ connects as needs `SELECT`, `INSERT`, `UPDATE` and `DELETE` on them and `USAGE` 
 | `postgres_query_ms` | gauge | Duration of the last operation, in milliseconds |
 | `postgres_spillover_total` | counter | Pub/sub messages sent through `cabby_pubsub_overflow` |
 | `postgres_reconnects_total` | counter | `LISTEN` connections re-established |
-| `postgres_claimed_broadcasts_total` | counter | Rows claimed from `cabby_broadcasts` |
+| `postgres_claimed_broadcasts_total` | counter | Rows from `cabby_broadcasts` handed to the broker |
 
 With Prometheus they have the usual `anycable_go_` prefix.
 

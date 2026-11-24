@@ -38,6 +38,9 @@ pub struct HandlerCall {
 struct RustHandler {
     calls: Mutex<Vec<HandlerCall>>,
     ready: Condvar,
+    /// `HandleBroadcast` fails for payloads containing the text, the given
+    /// number of times (`None`: always). Rust arm only.
+    failures: Mutex<Vec<(String, Option<usize>)>>,
 }
 
 impl RustHandler {
@@ -50,6 +53,21 @@ impl RustHandler {
 
 impl rs::Handler for RustHandler {
     fn handle_broadcast(&self, json: &[u8]) -> Result<(), BroadcastError> {
+        let text = String::from_utf8_lossy(json);
+        let fail = {
+            let mut failures = self.failures.lock().unwrap_or_else(|e| e.into_inner());
+            failures.iter_mut().any(|(needle, times)| {
+                let hit = text.contains(needle.as_str()) && times.is_none_or(|n| n > 0);
+                if hit && let Some(n) = times {
+                    *n -= 1;
+                }
+                hit
+            })
+        };
+        if fail {
+            self.record("HandleBroadcastFailed", json);
+            return Err(BroadcastError("handler failed".into()));
+        }
         self.record("HandleBroadcast", json);
         Ok(())
     }
@@ -75,6 +93,7 @@ impl MockHandler {
                 inner: HandlerImpl::Rust(Arc::new(RustHandler {
                     calls: Mutex::new(Vec::new()),
                     ready: Condvar::new(),
+                    failures: Mutex::new(Vec::new()),
                 })),
             },
             Backend::Go => Self { inner: HandlerImpl::Go(bridge::call("broadcast.NewHandler", json!({}))) },
@@ -89,6 +108,14 @@ impl MockHandler {
     fn go(&self) -> i64 {
         let HandlerImpl::Go(id) = &self.inner else { unreachable!() };
         *id
+    }
+
+    /// Makes `HandleBroadcast` fail (recorded as `HandleBroadcastFailed`) for
+    /// payloads containing `needle`, `times` times (`None`: always). Cabby's
+    /// own broadcaster tests only (Rust arm).
+    pub fn fail_broadcasts_containing(&self, needle: &str, times: Option<usize>) {
+        let HandlerImpl::Rust(h) = &self.inner else { unimplemented!("not_observable: Rust arm only") };
+        h.failures.lock().unwrap_or_else(|e| e.into_inner()).push((needle.to_owned(), times));
     }
 
     /// Calls recorded since the last `calls`/`drain`.

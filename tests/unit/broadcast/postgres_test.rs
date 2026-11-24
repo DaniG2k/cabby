@@ -46,7 +46,7 @@ fn kinds(calls: &[HandlerCall]) -> Vec<&str> {
 }
 
 /// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts
-/// note: Deviation D-070: a row inserted into <prefix>broadcasts is picked up through the AFTER INSERT trigger's NOTIFY, deleted, and handed to the node once (HandleBroadcast); the broadcaster is not a fan-out one.
+/// note: Deviation D-070: a row inserted into <prefix>broadcasts is picked up through the AFTER INSERT trigger's NOTIFY, handed to the node once (HandleBroadcast) and deleted; the broadcaster is not a fan-out one.
 #[test]
 fn deviation_d070_postgres_outbox_rows_are_broadcast() {
     let scope = scope();
@@ -63,7 +63,7 @@ fn deviation_d070_postgres_outbox_rows_are_broadcast() {
 }
 
 /// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/With_multiple_subscribers
-/// note: Deviation D-070: three nodes claim rows with DELETE ... FOR UPDATE SKIP LOCKED; 300 rows inserted in one statement and 100 more one by one are each handled exactly once and in insertion order (one node drains at a time, under the claim lock), and the claimed counter adds up to 400.
+/// note: Deviation D-070: three nodes claim rows with SELECT ... FOR UPDATE SKIP LOCKED under the claim lock; 300 rows inserted in one statement and 100 more one by one are each handled exactly once and in id order (one node drains at a time, under the claim lock), and the claimed counter adds up to 400.
 #[test]
 fn deviation_d070_postgres_nodes_claim_each_row_once() {
     let scope = scope();
@@ -88,7 +88,7 @@ fn deviation_d070_postgres_nodes_claim_each_row_once() {
     assert_eq!(400, registry.counter("postgres_claimed_broadcasts_total").expect("claimed metric").value());
     let order: Vec<String> = calls.iter().map(|c| c.payload.clone()).collect();
     let expected: Vec<String> = (1..=400).map(|i| payload("s", &i.to_string())).collect();
-    assert_eq!(expected, order, "handled in insertion order across nodes (the claim lock)");
+    assert_eq!(expected, order, "handled in id order across nodes (the claim lock)");
 }
 
 /// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts
@@ -174,4 +174,101 @@ fn deviation_d070_postgres_missing_tables_fail_the_start_without_auto_migrate() 
         "{err}"
     );
     assert_eq!(None, scope.scalar(&format!("SELECT to_regclass('{}')::text", scope.table("broadcasts"))));
+}
+
+fn payloads(calls: &[HandlerCall], kind: &str) -> Vec<String> {
+    calls.iter().filter(|c| c.kind == kind).map(|c| c.payload.clone()).collect()
+}
+
+fn outbox_rows(scope: &PgScope) -> Option<String> {
+    scope.scalar(&format!("SELECT count(*) FROM {}", scope.table("broadcasts")))
+}
+
+/// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts
+/// note: Deviation D-070: while another session holds the claim lock, a node skips its round instead of waiting on the server (no stalled claim, no extra backends); once the lock is released, the rows are delivered.
+#[test]
+fn deviation_d070_postgres_a_held_claim_lock_does_not_stall_the_claimer() {
+    let scope = scope();
+    scope.migrate();
+    let names = cabby_server::postgres::Names::from_config(&scope.config()).unwrap();
+    let key = cabby_server::postgres::broadcast::claim_lock_key(&names);
+    let holder = scope.other_session();
+    holder.execute(&format!("BEGIN; SELECT pg_advisory_xact_lock({key});"));
+
+    let handler = MockHandler::new();
+    let _b = start(&scope, &handler, Metrics::none());
+    scope.insert_broadcast(&payload("s", "held"));
+    assert!(handler.drain(Duration::from_secs(2)).is_empty(), "nothing is claimed while the lock is held");
+    let app = format!("cabby broadcast {}", scope.channel);
+    assert!(scope.pids(&app).len() <= 1, "one claim connection at most: {:?}", scope.pids(&app));
+    let waiting = scope.scalar(&format!(
+        "SELECT count(*) FROM pg_stat_activity WHERE application_name = '{app}' AND wait_event_type = 'Lock'"
+    ));
+    assert_eq!(Some("0".to_owned()), waiting, "the claimer does not wait on the lock");
+
+    holder.execute("ROLLBACK;");
+    let calls = handler.drain(Duration::from_secs(3));
+    assert_eq!(vec![payload("s", "held")], payloads(&calls, "HandleBroadcast"));
+    assert!(scope.pids(&app).len() <= 1, "no backend pile-up: {:?}", scope.pids(&app));
+}
+
+/// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts
+/// note: Deviation D-070: a row that is not JSON is deleted and logged without reaching the node; the rows after it are delivered.
+#[test]
+fn deviation_d070_postgres_invalid_rows_are_dropped() {
+    let scope = scope();
+    let handler = MockHandler::new();
+    let _b = start(&scope, &handler, Metrics::none());
+    scope.insert_broadcast("not json");
+    scope.insert_broadcast(&payload("s", "after"));
+
+    let calls = handler.drain(DRAIN_IDLE);
+    assert_eq!(vec![payload("s", "after")], payloads(&calls, "HandleBroadcast"));
+    assert_eq!(1, calls.len(), "{calls:?}");
+    assert_eq!(Some("0".to_owned()), outbox_rows(&scope));
+}
+
+/// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts
+/// note: Deviation D-070: when the node fails to handle a row, the rows handled before it are deleted, it and the rows after it stay in the outbox, and the claim is retried with backoff; nothing is lost.
+#[test]
+fn deviation_d070_postgres_handler_errors_keep_the_remaining_rows() {
+    let scope = scope();
+    scope.migrate();
+    let handler = MockHandler::new();
+    handler.fail_broadcasts_containing("\"bad\"", Some(1));
+    scope.execute(&format!(
+        "INSERT INTO {} (payload) VALUES ('{}'), ('{}'), ('{}')",
+        scope.table("broadcasts"),
+        payload("s", "a"),
+        payload("s", "bad"),
+        payload("s", "c")
+    ));
+    let _b = start(&scope, &handler, Metrics::none());
+
+    let calls = handler.drain(Duration::from_secs(2));
+    assert_eq!(vec![payload("s", "bad")], payloads(&calls, "HandleBroadcastFailed"));
+    assert_eq!(
+        vec![payload("s", "a"), payload("s", "bad"), payload("s", "c")],
+        payloads(&calls, "HandleBroadcast"),
+        "a once, then bad and c after the retry"
+    );
+    assert_eq!(Some("0".to_owned()), outbox_rows(&scope));
+}
+
+/// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts
+/// note: Deviation D-070: a row the node fails to handle 5 times in a row is deleted with an error log, so it cannot block the outbox; the rows after it are delivered.
+#[test]
+fn deviation_d070_postgres_a_row_failing_five_times_is_dropped() {
+    let scope = scope();
+    scope.migrate();
+    let handler = MockHandler::new();
+    handler.fail_broadcasts_containing("\"bad\"", None);
+    scope.insert_broadcast(&payload("s", "bad"));
+    scope.insert_broadcast(&payload("s", "c"));
+    let _b = start(&scope, &handler, Metrics::none());
+
+    let calls = handler.drain(Duration::from_secs(3));
+    assert_eq!(5, payloads(&calls, "HandleBroadcastFailed").len(), "{calls:?}");
+    assert_eq!(vec![payload("s", "c")], payloads(&calls, "HandleBroadcast"));
+    assert_eq!(Some("0".to_owned()), outbox_rows(&scope));
 }

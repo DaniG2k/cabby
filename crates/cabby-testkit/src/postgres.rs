@@ -207,6 +207,12 @@ impl PgScope {
         }
     }
 
+    /// Another session on the test server (its own connection), for locks and
+    /// transactions held across steps.
+    pub fn other_session(&self) -> PgSession {
+        PgSession(connect())
+    }
+
     /// The name of a pub/sub `LISTEN` connection in this scope.
     pub fn pubsub_listener(&self) -> String {
         format!("cabby pubsub-listen {}", self.channel)
@@ -215,6 +221,17 @@ impl PgScope {
     /// The name of a broadcaster `LISTEN` connection in this scope.
     pub fn broadcast_listener(&self) -> String {
         format!("cabby broadcast-listen {}", self.channel)
+    }
+}
+
+/// A separate connection; dropping it closes the session (and releases its
+/// locks).
+pub struct PgSession(std::sync::Arc<Client>);
+
+impl PgSession {
+    pub fn execute(&self, sql: &str) {
+        let (client, sql) = (self.0.clone(), sql.to_owned());
+        block(async move { client.batch_execute(&sql).await }).unwrap_or_else(|e| panic!("SQL failed: {e:?}"));
     }
 }
 

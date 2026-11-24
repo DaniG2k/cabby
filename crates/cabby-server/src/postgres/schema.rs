@@ -8,7 +8,8 @@
 //! - `<prefix>meta (key, value)`: `schema_version` and the shared `epoch`;
 //! - `<prefix>pubsub_overflow`: pub/sub payloads too large for `NOTIFY`;
 //! - `<prefix>broadcasts`: the outbox applications insert broadcasts into,
-//!   with an `AFTER INSERT` trigger notifying `<channel>_in`;
+//!   with a statement-level `AFTER INSERT` trigger notifying `<channel>_in`
+//!   (one notification per insert statement, empty payload);
 //! - `<prefix>streams`, `<prefix>history`, `<prefix>sessions`: the broker.
 //!
 //! With `unlogged`, every table but the outbox is `UNLOGGED`: PostgreSQL
@@ -53,7 +54,7 @@ pub(crate) fn ddl(n: &Names) -> Vec<String> {
             n.table(BROADCASTS)
         ),
         format!(
-            "CREATE OR REPLACE FUNCTION {function}() RETURNS trigger LANGUAGE plpgsql AS $$\nBEGIN\n  PERFORM pg_notify('{}', NEW.id::text);\n  RETURN NULL;\nEND\n$$",
+            "CREATE OR REPLACE FUNCTION {function}() RETURNS trigger LANGUAGE plpgsql AS $$\nBEGIN\n  PERFORM pg_notify('{}', '');\n  RETURN NULL;\nEND\n$$",
             n.ingest_channel()
         ),
         format!(
@@ -80,7 +81,7 @@ pub(crate) fn ddl(n: &Names) -> Vec<String> {
 /// The outbox trigger (created when missing).
 pub(crate) fn trigger_ddl(n: &Names) -> String {
     format!(
-        "CREATE TRIGGER {} AFTER INSERT ON {} FOR EACH ROW EXECUTE FUNCTION {}()",
+        "CREATE TRIGGER {} AFTER INSERT ON {} FOR EACH STATEMENT EXECUTE FUNCTION {}()",
         quote(&trigger_name(n)),
         n.table(BROADCASTS),
         n.object("broadcasts_notify")

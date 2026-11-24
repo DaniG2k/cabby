@@ -380,6 +380,8 @@ impl ConnectSpec {
         config.connect_timeout(CONNECT_TIMEOUT);
         config.keepalives(true);
         config.keepalives_idle(Duration::from_secs(30));
+        config.keepalives_interval(Duration::from_secs(10));
+        config.keepalives_retries(3);
         let (client, mut conn) = tokio::time::timeout(CONNECT_TIMEOUT, config.connect(self.tls.clone()))
             .await
             .map_err(|_| PgError(format!("timed out connecting to {}", self.description)))?
