@@ -27,14 +27,10 @@ pub(crate) const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Removes `userinfo@` from a URL string so credentials do not appear in errors
 /// or debug output. The authority starts after `scheme://` (or, without `://`,
-/// after a `scheme:` followed by slashes, else at the start) and ends at the
-/// first `/`, `?` or `#`; everything in it up to its last `@` is removed.
+/// after an optional `scheme:` and any slashes) and ends at the first `/`, `?`
+/// or `#`; everything in it up to its last `@` is removed.
 fn redact_url(raw: &str) -> String {
-    let start = match raw.find("://") {
-        Some(scheme_end) => scheme_end + 3,
-        None => scheme_with_slashes(raw),
-    };
-    let (prefix, rest) = raw.split_at(start);
+    let (prefix, rest) = raw.split_at(authority_start(raw));
     let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     match rest[..authority_end].rfind('@') {
         Some(at) => format!("{prefix}{}", &rest[at + 1..]),
@@ -42,15 +38,37 @@ fn redact_url(raw: &str) -> String {
     }
 }
 
-/// The length of a leading `scheme:/…/` (RFC 3986 scheme characters, then at
-/// least one slash), or 0.
-fn scheme_with_slashes(raw: &str) -> usize {
-    let Some(colon) = raw.find(':') else { return 0 };
-    let scheme = &raw[..colon];
-    let is_scheme = scheme.starts_with(|c: char| c.is_ascii_alphabetic())
-        && scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
-    let slashes = raw[colon + 1..].len() - raw[colon + 1..].trim_start_matches('/').len();
-    if is_scheme && slashes > 0 { colon + 1 + slashes } else { 0 }
+/// [`redact_url`] for the error text of a URL that is refused: it may not be
+/// well formed (a `/` in the password ends the authority early), so
+/// everything from the start of the authority up to the last `@` before any
+/// `?` or `#` is removed.
+fn redact_refused_url(raw: &str) -> String {
+    let (prefix, rest) = raw.split_at(authority_start(raw));
+    let end = rest.find(['?', '#']).unwrap_or(rest.len());
+    match rest[..end].rfind('@') {
+        Some(at) => format!("{prefix}{}", &rest[at + 1..]),
+        None => raw.to_owned(),
+    }
+}
+
+/// Where the authority starts: after `scheme://`, or else after an optional
+/// leading `scheme:` (RFC 3986 scheme characters, followed by a slash) and
+/// any slashes.
+fn authority_start(raw: &str) -> usize {
+    if let Some(scheme_end) = raw.find("://") {
+        return scheme_end + 3;
+    }
+    let scheme_len = raw
+        .find(':')
+        .filter(|&colon| {
+            let scheme = &raw[..colon];
+            scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+                && scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+                && raw[colon + 1..].starts_with('/')
+        })
+        .map_or(0, |colon| colon + 1);
+    let rest = &raw[scheme_len..];
+    scheme_len + (rest.len() - rest.trim_start_matches('/').len())
 }
 
 /// A parsed base URL. Its `Debug` leaves out the credentials.
@@ -87,18 +105,28 @@ impl std::fmt::Debug for Origin {
 impl Origin {
     pub(crate) fn parse(raw: &str) -> Result<Self, String> {
         let safe = redact_url(raw);
-        let uri: Uri = raw.parse().map_err(|e| format!("parse {safe:?}: {e}"))?;
+        let refused = redact_refused_url(raw);
+        let uri: Uri = raw.parse().map_err(|e| format!("parse {refused:?}: {e}"))?;
         let https = match uri.scheme_str() {
             Some("https") => true,
             Some("http") => false,
             Some(other) => return Err(format!("unsupported protocol scheme {other:?}")),
-            None => return Err(format!("parse {safe:?}: missing protocol scheme")),
+            None => return Err(format!("parse {refused:?}: missing protocol scheme")),
         };
-        let authority = uri.authority().ok_or_else(|| format!("parse {safe:?}: missing host"))?;
+        let authority = uri.authority().ok_or_else(|| format!("parse {refused:?}: missing host"))?;
         let (credentials, host_port) = match authority.as_str().rsplit_once('@') {
             Some((c, h)) => (Some(c), h),
             None => (None, authority.as_str()),
         };
+        // Go rejects a port that is not a number; it may be a part of a
+        // password with an unescaped `/`, so the error does not show it.
+        let port_text = match host_port.rfind(']') {
+            Some(bracket) => host_port[bracket + 1..].strip_prefix(':'),
+            None => host_port.rsplit_once(':').map(|(_, p)| p),
+        };
+        if port_text.is_some_and(|p| !p.bytes().all(|b| b.is_ascii_digit())) {
+            return Err(format!("parse {refused:?}: invalid port after host"));
+        }
         let host = authority.host().to_owned();
         let port = authority.port_u16().unwrap_or(if https { 443 } else { 80 });
         let basic_auth = credentials.map(|c| {
@@ -536,6 +564,7 @@ pub(crate) mod dial_error_tests {
             "http:/user:s3cr3t@host/x",
             "ftp://user:s3cr3t@host/x",
             "user:s3cr3t@host/x?q",
+            "//user:s3cr3t@host/x",
         ] {
             let err = super::Origin::parse(raw).unwrap_err();
             assert_no_credentials(&format!("the error for {raw:?}"), &err);
@@ -560,9 +589,25 @@ pub(crate) mod dial_error_tests {
             ("a@b:s3cr3t@host?q=@", "host?q=@"),
             ("http:/user:s3cr3t@host/x", "http:/host/x"),
             ("localhost:3000/rpc", "localhost:3000/rpc"),
+            ("//user:s3cr3t@host/x", "//host/x"),
+            ("///user:s3cr3t@host/x", "///host/x"),
+            ("//host/x@y", "//host/x@y"),
         ] {
             assert_eq!(want, super::redact_url(raw), "{raw}");
         }
+    }
+
+    /// A `/` in the password ends the authority early, so the URL does not
+    /// parse (its port is not a number, as Go also reports); the error leaves
+    /// out everything up to the last `@`.
+    #[test]
+    fn a_slash_in_the_password_is_refused_without_the_password() {
+        for raw in ["http://user:s3/cr3t@host/rpc", "http://user:s3/cr3t@host:3000/rpc?x=1", "user:s3/cr3t@host/rpc"] {
+            let err = super::Origin::parse(raw).unwrap_err();
+            assert!(!err.contains("cr3t") && !err.contains("user:s3"), "credentials in the error for {raw:?}: {err}");
+        }
+        let err = super::Origin::parse("http://user:s3/cr3t@host/rpc").unwrap_err();
+        assert!(err.starts_with("parse \"http://host/rpc\": "), "{err}");
     }
 
     #[tokio::test]
