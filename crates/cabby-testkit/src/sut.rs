@@ -72,15 +72,18 @@ pub struct SutOptions {
     /// configured (upstream `test-conformance-http`/`-embedded`); without a key
     /// it is a fixed port, so turn this off only together with a key.
     pub separate_broadcast_port: bool,
-    /// Pass host and ports as `ANYCABLE_HOST`/`ANYCABLE_PORT`/
-    /// `ANYCABLE_HTTP_BROADCAST_PORT` instead of flags (settings entirely from
+    /// Pass host and ports as `<env_prefix>HOST`/`<env_prefix>PORT`/
+    /// `<env_prefix>HTTP_BROADCAST_PORT` instead of flags (settings entirely from
     /// the environment, like the upstream embedded target).
     pub via_env: bool,
+    /// The prefix of the variables `via_env` sets: `ANYCABLE_` (the default,
+    /// which both servers read) or `CABBY_` (Cabby only, D-061).
+    pub env_prefix: &'static str,
 }
 
 impl Default for SutOptions {
     fn default() -> Self {
-        Self { separate_broadcast_port: true, via_env: false }
+        Self { separate_broadcast_port: true, via_env: false, env_prefix: "ANYCABLE_" }
     }
 }
 
@@ -118,9 +121,10 @@ impl Sut {
         cmd.env("ANYCABLE_DISABLE_TELEMETRY", "true");
         cmd.envs(env.iter().copied());
         if options.via_env {
-            cmd.env("ANYCABLE_HOST", "127.0.0.1").env("ANYCABLE_PORT", port.to_string());
+            let prefix = options.env_prefix;
+            cmd.env(format!("{prefix}HOST"), "127.0.0.1").env(format!("{prefix}PORT"), port.to_string());
             if options.separate_broadcast_port {
-                cmd.env("ANYCABLE_HTTP_BROADCAST_PORT", broadcast_port.to_string());
+                cmd.env(format!("{prefix}HTTP_BROADCAST_PORT"), broadcast_port.to_string());
             }
         } else {
             cmd.arg("--host=127.0.0.1").arg(format!("--port={port}"));

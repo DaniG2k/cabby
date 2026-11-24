@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 94
+      "cases": 95
     },
     "translation": {
       "reviewed": 923
@@ -26371,6 +26371,15 @@
         "26a1a703:telemetry/telemetry_test.go#TestTracking"
       ],
       "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::identity::deviation_d061_cabby_env_configures_the_server",
+      "relation": "external",
+      "links": [
+        "26a1a703:features/file_config.testfile#scenario"
+      ],
+      "reference_status": "not_observable",
       "rust_status": "pass"
     },
     {

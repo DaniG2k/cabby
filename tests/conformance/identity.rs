@@ -6,7 +6,8 @@ use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
 use cabby_testkit::fake_http::HttpRecorder;
-use cabby_testkit::sut::Sut;
+use cabby_testkit::sut::{Sut, SutOptions};
+use cabby_testkit::{Backend, backend};
 
 const IO_DEADLINE: Duration = Duration::from_secs(5);
 
@@ -29,7 +30,6 @@ fn get_status(sut: &Sut, path: &str) -> u16 {
 }
 
 /// Waits (bounded) until the server's output contains `needle`; returns the output.
-#[allow(dead_code)] // used by the D-061 scenario
 fn wait_output(sut: &Sut, needle: &str) -> String {
     let until = Instant::now() + IO_DEADLINE;
     loop {
@@ -65,4 +65,26 @@ fn deviation_d058_no_telemetry_requests() {
     let out = sut.process.output();
     assert_eq!(recorder.requests().len(), 0, "telemetry requests were sent; output:\n{out}");
     assert!(!out.to_lowercase().contains("telemetry"), "{out}");
+}
+
+/// Pins D-061: `CABBY_HOST` and `CABBY_PORT` configure the server, a stale
+/// `ANYCABLE_PORT` loses to `CABBY_PORT`, and the conflict is logged once as a
+/// warning. Go ignores `CABBY_*`, so the Go arm is not observable.
+/// external-for: features/file_config.testfile#scenario
+#[test]
+fn deviation_d061_cabby_env_configures_the_server() {
+    if backend() == Backend::Go {
+        unimplemented!("not_observable: Cabby-only configuration names");
+    }
+    let options = SutOptions { via_env: true, env_prefix: "CABBY_", ..SutOptions::default() };
+    // `Sut` waits for the CABBY_PORT listener; ANYCABLE_PORT=1 would not bind.
+    let sut =
+        Sut::try_start_with(&["--noauth"], &[("ANYCABLE_PORT", "1")], options).unwrap_or_else(|e| panic!("{e:#}"));
+    assert_eq!(200, get_status(&sut, "/health"));
+
+    let warning = "both CABBY_PORT and ANYCABLE_PORT are set; using CABBY_PORT";
+    let out = wait_output(&sut, warning);
+    let lines: Vec<&str> = out.lines().filter(|l| l.contains(warning)).collect();
+    assert_eq!(lines.len(), 1, "{out}");
+    assert!(lines[0].contains(" WRN ") && lines[0].contains("context=config"), "{}", lines[0]);
 }
