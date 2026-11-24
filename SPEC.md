@@ -78,7 +78,7 @@ Each entry must contain:
 - Rust case name/path and any split or merged mappings.
 - Translation status: `unreviewed | translated | reviewed`.
 - Reference status: `unverified | pass | upstream_failure | upstream_skip | not_observable`.
-- Rust status: `pending | fail | pass`.
+- Rust status: `pending | fail | pass | retired`. `retired` marks a case whose behavior a deliberate product decision removed; it needs an implemented deviation (see `docs/translating-tests.md`, "Retiring a translated case").
 - Adaptation notes, known discrepancies, and evidence/run artifact paths.
 
 One upstream case may map to several Rust cases. Multiple upstream cases may share a Rust parameterized implementation, but each must remain individually reported. Source helpers and mock files must also be mapped as dependencies.
