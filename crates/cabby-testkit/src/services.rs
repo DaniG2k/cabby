@@ -447,9 +447,9 @@ pub fn nats() -> &'static NatsService {
         let monitor = NatsMonitor::new(
             parse_http_addr(&murl).unwrap_or_else(|e| panic!("CABBY_TEST_NATS_MONITOR_URL={murl:?}: {e:#}")),
         );
-        monitor
-            .get("/varz")
-            .unwrap_or_else(|e| panic!("NATS monitoring at CABBY_TEST_NATS_MONITOR_URL={murl:?} is unreachable: {e:#}"));
+        monitor.get("/varz").unwrap_or_else(|e| {
+            panic!("NATS monitoring at CABBY_TEST_NATS_MONITOR_URL={murl:?} is unreachable: {e:#}")
+        });
         NatsService { url, monitor }
     })
 }
