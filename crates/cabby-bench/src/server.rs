@@ -16,8 +16,8 @@
 //! With `rpc_host` set it switches to HTTP RPC mode (`--rpc_host=<url>
 //! --rpc_impl=http`, auth and public streams off). [`ServerTuning`] maps to the
 //! matching node flags; `extra_args` come last. The metrics endpoint shares the
-//! main port unless another one is given. The environment is cleared of
-//! `ANYCABLE_*` variables, telemetry is disabled for the Go server
+//! main port unless another one is given. The environment is scrubbed as for
+//! every server under test ([`crate::server_env`], D-064), telemetry is disabled for the Go server
 //! (`ANYCABLE_DISABLE_TELEMETRY`; Cabby has none, D-058) and
 //! [`ServerConfig::env`] is added.
 //!
@@ -331,16 +331,21 @@ impl Server {
         Err(last.unwrap_or_else(|| BenchError("server did not start".into())))
     }
 
-    fn start_once(cfg: &ServerConfig) -> Result<Server, BenchError> {
-        let port = free_port();
+    /// The server's command line and environment: `inherited` (the harness's
+    /// variable names) scrubbed as for every server under test (D-064), then
+    /// [`ServerConfig::env`].
+    fn command<'a>(cfg: &ServerConfig, port: u16, inherited: impl IntoIterator<Item = &'a str>) -> Command {
         let mut cmd = Command::new(&cfg.binary);
-        for (k, _) in std::env::vars_os() {
-            if k.to_string_lossy().starts_with("ANYCABLE_") {
-                cmd.env_remove(k);
-            }
-        }
+        crate::server_env::scrub_env_of(&mut cmd, inherited);
         cmd.env("ANYCABLE_DISABLE_TELEMETRY", "true").args(cfg.args(port, port)).stdin(Stdio::null());
         cmd.envs(cfg.env.iter().map(|(k, v)| (k, v)));
+        cmd
+    }
+
+    fn start_once(cfg: &ServerConfig) -> Result<Server, BenchError> {
+        let port = free_port();
+        let names: Vec<String> = std::env::vars_os().map(|(k, _)| k.to_string_lossy().into_owned()).collect();
+        let mut cmd = Self::command(cfg, port, names.iter().map(String::as_str));
         let forward = cfg.log == ServerLog::Stderr;
         match &cfg.log {
             ServerLog::File(path) => {
@@ -604,6 +609,28 @@ fn fetch_metrics(port: u16) -> Result<String, MetricsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pins D-064: a benchmarked server inherits no server configuration from
+    /// the harness's environment, as servers under test don't.
+    #[test]
+    fn server_config_variables_are_not_inherited() {
+        let cfg = ServerConfig { env: vec![("PORT".into(), "1".into())], ..ServerConfig::new("cabby") };
+        let inherited =
+            ["ANYCABLE_SECRET", "CABBY_PORT", "CABBY_NATS_SERVER_BIN", "CABBY_TEST_REDIS_URL", "PORT", "PATH"];
+        let cmd = Server::command(&cfg, 8080, inherited);
+        let envs: Vec<(String, Option<String>)> = cmd
+            .get_envs()
+            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned())))
+            .collect();
+        for removed in ["ANYCABLE_SECRET", "CABBY_PORT"] {
+            assert!(envs.contains(&(removed.into(), None)), "{removed} is inherited: {envs:?}");
+        }
+        for kept in ["CABBY_NATS_SERVER_BIN", "CABBY_TEST_REDIS_URL", "PATH"] {
+            assert!(!envs.iter().any(|(k, _)| k == kept), "{kept} is touched: {envs:?}");
+        }
+        // The harness's own settings still apply.
+        assert!(envs.contains(&("PORT".into(), Some("1".into()))), "{envs:?}");
+    }
 
     #[test]
     fn parses_prometheus_text() {

@@ -3,8 +3,8 @@
 //! The binary is `SUT_BIN`, or by backend: `target/debug/cabby` (Rust) and
 //! `target/reference-bin/anycable-go` (Go, built by `cargo xtask reference-build`).
 //! Both receive the same AnyCable CLI flags. Every listener gets an isolated port,
-//! and the server inherits no `CABBY_*` or `ANYCABLE_*` variable apart from
-//! [`KEPT_VARS`] and `CABBY_TEST_*` ([`scrub_env`], D-064).
+//! and the server inherits no `CABBY_*`, `ANYCABLE_*`, `PORT` or `REDIS_URL`
+//! variable apart from [`KEPT_VARS`] and `CABBY_TEST_*` ([`scrub_env`], D-064).
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -20,27 +20,8 @@ use crate::{Backend, backend, workspace_root};
 
 const START_DEADLINE: Duration = Duration::from_secs(20);
 
-/// Variables a server under test keeps from the test process: the `nats-server`
-/// binary for embedded NATS (D-064). `CABBY_TEST_*` (the test services) is kept too.
-pub const KEPT_VARS: &[&str] = &["CABBY_NATS_SERVER", "CABBY_NATS_SERVER_BIN"];
+pub use cabby_bench::server_env::{KEPT_VARS, scrub_env, scrubbed};
 
-/// The names in `vars` a server under test must not inherit: every `CABBY_*`
-/// and `ANYCABLE_*` variable except [`KEPT_VARS`] and `CABBY_TEST_*` (D-064).
-/// Otherwise a developer's shell would configure the server the tests start.
-pub fn scrubbed<'a>(vars: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
-    vars.into_iter()
-        .filter(|k| k.starts_with("CABBY_") || k.starts_with("ANYCABLE_"))
-        .filter(|k| !k.starts_with("CABBY_TEST_") && !KEPT_VARS.contains(k))
-        .collect()
-}
-
-/// Removes the variables [`scrubbed`] names from what `cmd` inherits.
-pub fn scrub_env(cmd: &mut Command) {
-    let names: Vec<String> = std::env::vars_os().map(|(k, _)| k.to_string_lossy().into_owned()).collect();
-    for k in scrubbed(names.iter().map(String::as_str)) {
-        cmd.env_remove(k);
-    }
-}
 const IO_DEADLINE: Duration = Duration::from_secs(5);
 
 pub fn sut_binary() -> PathBuf {
@@ -199,6 +180,7 @@ mod tests {
             "PATH",
             "PORT",
         ];
-        assert_eq!(scrubbed(vars), vec!["ANYCABLE_PORT", "CABBY_PORT", "CABBY_REDIS_URL", "CABBY_BACKEND"]);
+        assert_eq!(scrubbed(vars), vec!["ANYCABLE_PORT", "CABBY_PORT", "CABBY_REDIS_URL", "CABBY_BACKEND", "PORT"]);
+        assert_eq!(scrubbed(["REDIS_URL", "HOME"]), vec!["REDIS_URL"]);
     }
 }

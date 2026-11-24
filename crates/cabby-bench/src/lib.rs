@@ -109,6 +109,7 @@ pub mod rpc_server;
 pub mod runtime;
 pub mod scenarios;
 pub mod server;
+pub mod server_env;
 pub mod throughput;
 
 /// An error reported by the harness. Upstream returns `error` values whose text the
