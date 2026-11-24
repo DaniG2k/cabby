@@ -17,31 +17,30 @@ before.
 ### Added
 
 - The SQLite broker (`--broker=sqlite --sqlite_path=<file>`): stream history, offsets and
-  sessions survive a graceful restart of a single node, without Redis or NATS (D-065).
-- `cabby.toml` and `/etc/cabby/cabby.toml`, found before `anycable.toml` (D-060).
+  sessions survive a graceful restart of a single node, without Redis or NATS. The Docker image
+  has a data directory for it, `/var/lib/cabby`, owned by its non-root user.
+- `cabby.toml` and `/etc/cabby/cabby.toml`, found before `anycable.toml` and
+  `/etc/anycable/anycable.toml`.
 - `CABBY_*` environment variables, read before `ANYCABLE_*`, with one warning per setting
-  when both are set to different values (D-061). `CABBY_NATS_SERVER_BIN` names the
-  `nats-server` executable for embedded NATS (`CABBY_NATS_SERVER` still works).
+  when both are set to different values. `CABBY_NATS_SERVER_BIN` names the `nats-server`
+  executable for embedded NATS (`CABBY_NATS_SERVER` still works).
 - A startup warning when a Redis URL is set but no broadcast adapter reads from Redis (the
   Docker image takes broadcasts over HTTP only unless `CABBY_BROADCAST_ADAPTER` or
   `ANYCABLE_BROADCAST_ADAPTER` says otherwise).
-- A built-in health check in the Docker image (`cabby-healthcheck`, `GET /health` on the
-  main port).
-- `THIRD_PARTY_LICENSES.md` in every archive and in the image (`/usr/share/doc/cabby/`).
+- A built-in health check in the Docker image (`cabby-healthcheck`: `GET /health` on the main
+  port, or a TCP connection when TLS is configured).
 
 ### Changed
 
-- `cabby --version` prints `cabby 0.2.0 (AnyCable 1.6.21 compatible)` instead of `1.6.21`,
-  and `--help` and deprecation warnings name Cabby (D-059). Scripts that parse the version
-  output need updating.
-- `--help` lists the `CABBY_*` names; the `ANYCABLE_*` names still work (D-061).
+- `--help` lists the `CABBY_*` variable names instead of the `ANYCABLE_*` ones, which still
+  work.
 - mruby is a cargo feature, off by default and not in release builds. `--metrics_log_formatter`
-  needs a build with `--features mruby`, and otherwise stops with an error that says so (D-062).
+  needs a build with `--features mruby`, and otherwise stops with an error that says so.
 
 ### Removed
 
 - The usage telemetry code. The `cabby` binary never sent telemetry; now the code is gone, and
-  `ANYCABLE_DISABLE_TELEMETRY` and the other telemetry variables are accepted and ignored (D-058).
+  `ANYCABLE_DISABLE_TELEMETRY` and the other telemetry variables are accepted and ignored.
 - `RunnerOption::Telemetry` from the embedding API.
 
 ## [0.1.0] - 2026-11-23
