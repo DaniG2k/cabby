@@ -25,15 +25,16 @@
 //!   epoch is created and clients resynchronize.
 //! - **Pruning.** Every 30 s, one node (the one holding a transaction-level
 //!   advisory lock) deletes expired history, streams and sessions and trims
-//!   history beyond `history_limit`; reads filter by the same rules, so
-//!   pruning only reclaims space.
+//!   history beyond `history_limit`, 10000 rows per transaction (each with a
+//!   server-side statement timeout) for at most 20 s per pass; reads filter
+//!   by the same rules, so pruning only reclaims space.
 //! - **Errors.** Database failures are returned as broker errors (and counted
 //!   and logged); a failed `handle_broadcast` doesn't fan the message out.
 //!   Presence is not supported (as with the NATS broker).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cabby_core::broker::{
     Broadcaster, Broker, BrokerError, Cacheable, Config as BrokerConfig, PresenceInfoOptions, StreamsTracker,
@@ -83,16 +84,27 @@ struct Sql {
     commit: String,
     restore: String,
     touch: String,
-    prune: Vec<(String, PruneArg)>,
+    prune: Vec<Prune>,
 }
 
-/// The parameter of a pruning statement.
-#[derive(Clone, Copy)]
-enum PruneArg {
-    Limit,
-    Ttl,
-    None,
+/// A pruning step; each statement deletes at most [`PRUNE_BATCH`] rows.
+enum Prune {
+    /// History beyond `history_limit` (`$1`).
+    Limit(String),
+    /// History older than `history_ttl` (`$1`).
+    Ttl(String),
+    /// Expired streams, then their history (`$1`: the deleted streams).
+    Streams { streams: String, history: String },
+    /// Expired sessions.
+    Plain(String),
 }
+
+/// Rows deleted per pruning statement (each in its own transaction).
+const PRUNE_BATCH: i64 = 10_000;
+/// How long one pruning pass may take; the next pass goes on from there.
+const PRUNE_BUDGET: Duration = Duration::from_secs(20);
+/// The server-side limit for one pruning statement.
+const PRUNE_STATEMENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl Sql {
     fn new(n: &Names) -> Self {
@@ -146,21 +158,23 @@ impl Sql {
                 "UPDATE {sessions} SET expires_at_ms = {NOW_MS} + $2 WHERE sid = $1 AND expires_at_ms > {NOW_MS}"
             ),
             prune: vec![
-                (
-                    format!(
-                        "DELETE FROM {history} h USING {streams} s WHERE h.stream = s.stream AND h.seq <= s.max_seq - $1"
+                Prune::Limit(format!(
+                    "DELETE FROM {history} WHERE ctid IN (SELECT h.ctid FROM {history} h JOIN {streams} s \
+                     ON h.stream = s.stream WHERE h.seq <= s.max_seq - $1 LIMIT {PRUNE_BATCH})"
+                )),
+                Prune::Ttl(format!(
+                    "DELETE FROM {history} WHERE ctid IN (SELECT ctid FROM {history} WHERE ts_sec < {NOW_S} - $1 LIMIT {PRUNE_BATCH})"
+                )),
+                Prune::Streams {
+                    streams: format!(
+                        "DELETE FROM {streams} WHERE stream IN (SELECT stream FROM {streams} WHERE deadline_sec < {NOW_S} \
+                         LIMIT {PRUNE_BATCH}) RETURNING stream"
                     ),
-                    PruneArg::Limit,
-                ),
-                (format!("DELETE FROM {history} WHERE ts_sec < {NOW_S} - $1"), PruneArg::Ttl),
-                (
-                    format!(
-                        "WITH gone AS (DELETE FROM {streams} WHERE deadline_sec < {NOW_S} RETURNING stream) \
-                         DELETE FROM {history} WHERE stream IN (SELECT stream FROM gone)"
-                    ),
-                    PruneArg::None,
-                ),
-                (format!("DELETE FROM {sessions} WHERE expires_at_ms <= {NOW_MS}"), PruneArg::None),
+                    history: format!("DELETE FROM {history} WHERE stream = ANY($1)"),
+                },
+                Prune::Plain(format!(
+                    "DELETE FROM {sessions} WHERE ctid IN (SELECT ctid FROM {sessions} WHERE expires_at_ms <= {NOW_MS} LIMIT {PRUNE_BATCH})"
+                )),
             ],
         }
     }
@@ -327,44 +341,76 @@ impl Inner {
         Ok(StreamMessage { offset: u64::try_from(seq).unwrap_or(0), epoch, ..msg.clone() })
     }
 
+    /// Deletes expired rows in batches, each batch one transaction holding
+    /// the pruning lock (another node pruning makes this return false), until
+    /// done or [`PRUNE_BUDGET`] is used up.
     async fn prune(&self) -> Result<bool, PgError> {
         let mut slot = self.maintenance.lock().await;
         if slot.as_ref().is_none_or(tokio_postgres::Client::is_closed) {
-            *slot = Some(self.spec.connect(&format!("cabby broker-maintenance {}", self.names.channel), None).await?);
+            *slot = Some(self.spec.connect(&format!("cabby broker-maintenance {}", self.names.channel()), None).await?);
         }
         let Some(client) = slot.as_mut() else { unreachable!("connected above") };
-        let result = tokio::time::timeout(connect::QUERY_TIMEOUT, async {
-            let tx = client.transaction().await?;
-            let key = prune_lock_key(&self.names);
-            let locked: bool = tx.query_one("SELECT pg_try_advisory_xact_lock($1)", &[&key]).await?.get(0);
-            if !locked {
-                return Ok(false);
-            }
-            let limit = i64::try_from(self.conf.history_limit).unwrap_or(i64::MAX);
-            let ttl = ttl(self.conf.history_ttl);
-            for (sql, arg) in &self.sql.prune {
-                match arg {
-                    PruneArg::Limit => tx.execute(sql.as_str(), &[&limit]).await?,
-                    PruneArg::Ttl => tx.execute(sql.as_str(), &[&ttl]).await?,
-                    PruneArg::None => tx.execute(sql.as_str(), &[]).await?,
+        let started = Instant::now();
+        for step in &self.sql.prune {
+            loop {
+                let batch = tokio::time::timeout(
+                    connect::QUERY_TIMEOUT + PRUNE_STATEMENT_TIMEOUT,
+                    self.prune_batch(client, step),
+                )
+                .await;
+                let deleted = match batch {
+                    Ok(Ok(Some(n))) => n,
+                    Ok(Ok(None)) => return Ok(false),
+                    Ok(Err(e)) => {
+                        self.metrics.error();
+                        return Err(PgError(error_text(&e)));
+                    }
+                    Err(_) => {
+                        self.metrics.error();
+                        *slot = None;
+                        return Err(PgError("pruning timed out".into()));
+                    }
                 };
-            }
-            tx.commit().await?;
-            Ok::<_, tokio_postgres::Error>(true)
-        })
-        .await;
-        match result {
-            Ok(Ok(done)) => Ok(done),
-            Ok(Err(e)) => {
-                self.metrics.error();
-                Err(PgError(error_text(&e)))
-            }
-            Err(_) => {
-                self.metrics.error();
-                *slot = None;
-                Err(PgError("pruning timed out".into()))
+                if deleted < PRUNE_BATCH as u64 {
+                    break;
+                }
+                if started.elapsed() >= PRUNE_BUDGET {
+                    return Ok(true);
+                }
             }
         }
+        Ok(true)
+    }
+
+    /// One batch of `step`: rows deleted, or `None` without the lock.
+    async fn prune_batch(
+        &self,
+        client: &mut tokio_postgres::Client,
+        step: &Prune,
+    ) -> Result<Option<u64>, tokio_postgres::Error> {
+        let tx = client.transaction().await?;
+        tx.batch_execute(&format!("SET LOCAL statement_timeout = '{}s'", PRUNE_STATEMENT_TIMEOUT.as_secs())).await?;
+        let locked: bool =
+            tx.query_one("SELECT pg_try_advisory_xact_lock($1)", &[&prune_lock_key(&self.names)]).await?.get(0);
+        if !locked {
+            return Ok(None);
+        }
+        let limit = i64::try_from(self.conf.history_limit).unwrap_or(i64::MAX);
+        let ttl = ttl(self.conf.history_ttl);
+        let deleted = match step {
+            Prune::Limit(sql) => tx.execute(sql.as_str(), &[&limit]).await?,
+            Prune::Ttl(sql) => tx.execute(sql.as_str(), &[&ttl]).await?,
+            Prune::Plain(sql) => tx.execute(sql.as_str(), &[]).await?,
+            Prune::Streams { streams, history } => {
+                let gone: Vec<String> = tx.query(streams.as_str(), &[]).await?.iter().map(|r| r.get(0)).collect();
+                if !gone.is_empty() {
+                    tx.execute(history.as_str(), &[&gone]).await?;
+                }
+                gone.len() as u64
+            }
+        };
+        tx.commit().await?;
+        Ok(Some(deleted))
     }
 
     async fn maintain(self: Arc<Self>) {

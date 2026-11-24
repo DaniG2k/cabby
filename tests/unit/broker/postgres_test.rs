@@ -492,3 +492,29 @@ fn deviation_d071_postgres_calls_to_an_unresponsive_database_are_bounded() {
         started.elapsed()
     );
 }
+
+/// regression-for: broker/memory_test.go#TestMemory_Expire
+/// note: Deviation D-071: pruning deletes in batches of 10000 rows, each in its own transaction with a server-side statement timeout, so a large backlog of expired history, streams and sessions is cleared instead of timing out as a whole.
+#[test]
+fn deviation_d071_postgres_pruning_clears_a_large_backlog_in_batches() {
+    let scope = scope();
+    let mut config = new_config();
+    config.history_ttl = 1;
+    let broker = broker(&scope, &config, None);
+    scope.execute(&format!(
+        "INSERT INTO {streams} (stream, max_seq, deadline_sec, last_ts_sec) SELECT 'old' || i, 1, 0, 0 FROM generate_series(1, 12000) i; \
+         INSERT INTO {history} (stream, seq, ts_sec, data) SELECT 'bulk', i, 0, 'x' FROM generate_series(1, 25000) i; \
+         INSERT INTO {sessions} (sid, data, expires_at_ms) SELECT 's' || i, '\\x00', 0 FROM generate_series(1, 25000) i;",
+        streams = scope.table("streams"),
+        history = scope.table("history"),
+        sessions = scope.table("sessions"),
+    ));
+    assert!(broker.prune().expect("prune"), "this node held the pruning lock");
+    for table in ["streams", "history", "sessions"] {
+        assert_eq!(
+            Some("0".to_owned()),
+            scope.scalar(&format!("SELECT count(*) FROM {}", scope.table(table))),
+            "{table}"
+        );
+    }
+}

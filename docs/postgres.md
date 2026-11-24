@@ -200,7 +200,8 @@ node resumes its session and catches up on what it missed.
 - **Time** is the database's clock, so nodes with skewed clocks agree on what has expired.
 - **Epoch.** The first node to start stores a random epoch in `cabby_meta`; every node uses it.
 - **Pruning.** Every 30 seconds one node (holding an advisory lock) deletes expired history,
-  streams and sessions and trims history beyond `--history_limit`.
+  streams and sessions and trims history beyond `--history_limit`, 10000 rows per transaction,
+  so a large backlog is cleared over a few passes.
 - **Errors.** When Postgres is unreachable, broadcasts fail (logged and counted; they are not
   delivered without an offset) and session recovery falls back to a new session, as with the NATS
   broker.
