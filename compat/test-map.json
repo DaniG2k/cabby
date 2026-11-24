@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 93
+      "cases": 94
     },
     "translation": {
       "reviewed": 923
@@ -26852,6 +26852,15 @@
         "26a1a703:ds/integration_test.go#TestDSIntegration_StreamAuthorization"
       ],
       "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::file_config::deviation_d060_cabby_toml_beats_anycable_toml",
+      "relation": "external",
+      "links": [
+        "26a1a703:features/file_config.testfile#scenario"
+      ],
+      "reference_status": "not_observable",
       "rust_status": "pass"
     },
     {

@@ -3,6 +3,7 @@
 //! CLI/env overrides of file values. Commands run with `ANYCABLE_*` removed
 //! from the environment (`clean_env: true`) in a fresh working directory.
 
+use cabby_testkit::{Backend, backend};
 use toml::Value;
 
 use crate::support::*;
@@ -134,4 +135,25 @@ fn file_config() {
     check(&mut errors, "metrics.statsd.tags_format", s("influx"), dig(&config, &["metrics", "statsd", "tags_format"]));
     check(&mut errors, "debug", None, dig(&config, &["logging", "debug"]));
     fail_on(&errors);
+}
+
+/// Pins D-060: a `cabby.toml` next to an `anycable.toml` wins; without it the
+/// `anycable.toml` is loaded as before. Go ignores `cabby.toml`, so the Go arm
+/// is not observable.
+/// external-for: features/file_config.testfile#scenario
+#[test]
+fn deviation_d060_cabby_toml_beats_anycable_toml() {
+    if backend() == Backend::Go {
+        unimplemented!("not_observable: Cabby-only configuration names");
+    }
+    let dir = TempDir::new("cabby-toml");
+    std::fs::write(dir.0.join("anycable.toml"), "secret = \"from-anycable-toml\"\n").expect("anycable.toml");
+    std::fs::write(dir.0.join("cabby.toml"), "secret = \"from-cabby-toml\"\n").expect("cabby.toml");
+
+    let config = print_config(&["--print-config"], &[], &dir.0);
+    assert_eq!(config.get("secret"), s("from-cabby-toml").as_ref());
+
+    std::fs::remove_file(dir.0.join("cabby.toml")).expect("removing cabby.toml");
+    let config = print_config(&["--print-config"], &[], &dir.0);
+    assert_eq!(config.get("secret"), s("from-anycable-toml").as_ref());
 }
