@@ -256,19 +256,28 @@ fn deviation_d070_postgres_handler_errors_keep_the_remaining_rows() {
 }
 
 /// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts
-/// note: Deviation D-070: a row the node fails to handle 5 times in a row is deleted with an error log, so it cannot block the outbox; the rows after it are delivered.
+/// note: Deviation D-070: while the node fails to handle broadcasts (a broker outage of 4 s here), the first row is retried with a backoff of at most 5 s and no row is dropped; afterwards every row is delivered once, in order. Retries are counted.
 #[test]
-fn deviation_d070_postgres_a_row_failing_five_times_is_dropped() {
+fn deviation_d070_postgres_broker_errors_never_drop_rows() {
     let scope = scope();
     scope.migrate();
+    let registry = Arc::new(cabby_server::metrics::Metrics::new(Vec::new(), 0));
     let handler = MockHandler::new();
-    handler.fail_broadcasts_containing("\"bad\"", None);
-    scope.insert_broadcast(&payload("s", "bad"));
-    scope.insert_broadcast(&payload("s", "c"));
-    let _b = start(&scope, &handler, Metrics::none());
+    handler.fail_broadcasts_for(Duration::from_secs(4));
+    for i in 1..=3 {
+        scope.insert_broadcast(&payload("s", &i.to_string()));
+    }
+    let _b = start(&scope, &handler, Metrics::register(registry.clone()));
 
-    let calls = handler.drain(Duration::from_secs(3));
-    assert_eq!(5, payloads(&calls, "HandleBroadcastFailed").len(), "{calls:?}");
-    assert_eq!(vec![payload("s", "c")], payloads(&calls, "HandleBroadcast"));
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    let mut calls = Vec::new();
+    while payloads(&calls, "HandleBroadcast").len() < 3 {
+        assert!(std::time::Instant::now() < deadline, "not delivered after the outage: {calls:?}");
+        calls.extend(handler.drain(Duration::from_millis(200)));
+    }
+    let expected: Vec<String> = (1..=3).map(|i| payload("s", &i.to_string())).collect();
+    assert_eq!(expected, payloads(&calls, "HandleBroadcast"), "in order, none dropped");
+    assert!(payloads(&calls, "HandleBroadcastFailed").iter().all(|p| *p == payload("s", "1")), "head-of-line retry");
+    assert!(registry.counter("postgres_broadcast_retries_total").expect("retries metric").value() >= 1);
     assert_eq!(Some("0".to_owned()), outbox_rows(&scope));
 }

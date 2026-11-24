@@ -13,10 +13,12 @@
 //! go out in `id` order): `SELECT ... FOR UPDATE SKIP LOCKED`, each row
 //! handed to the broker ([`Handler::handle_broadcast`]), the handled rows
 //! deleted, commit. A crash mid-batch rolls back, so the rows already handled
-//! are delivered again; a handler error ends the batch keeping the failed row
-//! and the rows after it, and the claim is retried with backoff. A row that
-//! is not JSON, or that fails [`MAX_HANDLER_FAILURES`] times in a row, is
-//! deleted with an error log. A node that finds the lock taken retries a
+//! are delivered again. The node's only error is a broker error (it accepts
+//! payloads it can't parse, logging them), so a handler error ends the batch
+//! keeping the failed row and the rows after it, and the claim is retried
+//! with backoff (at most 5 s) for as long as it takes: no row is dropped for
+//! it. A row that is not JSON is deleted with an error log without reaching
+//! the node. A node that finds the lock taken retries a
 //! second later; the server ends a claim transaction left idle for 60 s.
 //! This is not a fan-out broadcaster.
 //!
@@ -49,8 +51,6 @@ const BUSY_RETRY: Duration = Duration::from_secs(1);
 const IDLE_IN_TRANSACTION: Duration = Duration::from_secs(60);
 /// The longest one batch (claim, handle, delete, commit) may take.
 const BATCH_TIMEOUT: Duration = Duration::from_secs(60);
-/// A row the node fails to handle this many times in a row is dropped.
-pub const MAX_HANDLER_FAILURES: u32 = 5;
 /// How long `start` waits for the `LISTEN` connection.
 const START_WAIT: Duration = Duration::from_secs(10);
 
@@ -149,8 +149,8 @@ struct Claimer {
     lock_key: i64,
     metrics: Metrics,
     log: Logger,
-    /// The row that failed last and how many times in a row.
-    failing: Option<(i64, u32)>,
+    /// Failed handler calls in a row (for the log).
+    failures: u64,
 }
 
 /// The delay before retrying after the `n`th handler failure in a row
@@ -266,15 +266,14 @@ impl Claimer {
                 valid.push((id, payload));
             }
         }
-        let (node, log) = (self.node.clone(), self.log.clone());
+        let node = self.node.clone();
         // The handler may wait for the broker (another Postgres query). It
-        // stops at the first failure: (handled IDs, failed ID).
+        // stops at the first failure: (handled IDs, the failed ID and error).
         let (handled, failed) = tokio::task::spawn_blocking(move || {
             let mut handled = Vec::new();
             for (id, payload) in valid {
                 if let Err(e) = node.handle_broadcast(payload.as_bytes()) {
-                    log_error!(log, "failed to handle broadcast", "id" => id, "error" => e.0);
-                    return (handled, Some(id));
+                    return (handled, Some((id, e.0)));
                 }
                 handled.push(id);
             }
@@ -286,21 +285,19 @@ impl Claimer {
         done.extend(&handled);
         let round = match failed {
             None => {
-                self.failing = None;
+                if self.failures > 0 {
+                    log_info!(self.log, "handling broadcasts again", "failed_attempts" => self.failures);
+                    self.failures = 0;
+                }
                 None
             }
-            Some(id) => {
+            // A broker error: the row stays first in line and is retried.
+            Some((id, error)) => {
                 self.metrics.error();
-                let count = match self.failing {
-                    Some((last, n)) if last == id => n + 1,
-                    _ => 1,
-                };
-                if count >= MAX_HANDLER_FAILURES {
-                    log_error!(self.log, &format!("dropping a broadcast the node failed to handle {count} times in a row"), "id" => id);
-                    done.push(id);
-                    self.failing = None;
-                } else {
-                    self.failing = Some((id, count));
+                self.metrics.broadcast_retry();
+                self.failures += 1;
+                if self.failures.is_power_of_two() {
+                    log_error!(self.log, "failed to handle broadcast, retrying", "id" => id, "failed_attempts" => self.failures, "error" => error);
                 }
                 Some(Round::HandlerFailed)
             }
@@ -374,7 +371,7 @@ impl Broadcaster for PostgresBroadcaster {
             delete_sql: format!("DELETE FROM {table} WHERE id = ANY($1)"),
             metrics: self.metrics.clone(),
             log: self.log.clone(),
-            failing: None,
+            failures: 0,
         };
         let claimer = connect::runtime().spawn(claimer.run(wake.clone(), stop.clone()));
         let (dtx, drx) = connect::Inbox::new(connect::INBOX_CAPACITY, self.metrics.clone(), self.log.clone());

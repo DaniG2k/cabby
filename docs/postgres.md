@@ -145,13 +145,17 @@ broker, which stores it (with `--broker=postgres`) and fans it out through pub/s
 the rows it handled when the transaction commits. Nodes also poll every 5 seconds, so a row
 inserted while a node was reconnecting is not left behind.
 
-- **At least once.** A row is deleted in the transaction that handled it. If the node fails to
-  handle a row (the broker can't reach Postgres, for example), the rows handled before it are
-  deleted, it and the rows after it stay, and the node retries with a backoff: nothing is lost.
-  If a node crashes in the middle of a batch, the transaction rolls back and the rows it had
-  already handled are delivered again: duplicates only after a crash. A row that is not JSON is
-  deleted and logged; a row the node fails to handle 5 times in a row is deleted with an error
-  log, so it can't block the table.
+- **At least once.** A row is deleted in the same transaction that handed it to the broker.
+  When the broker fails (it can't reach Postgres, for example), the rows handled before it are
+  deleted, the failed row and the rows after it stay, and the node tries that row again with a
+  backoff of at most 5 seconds, for as long as it takes: no row is dropped because of a broker
+  error. Errors are logged at the 1st, 2nd, 4th, 8th, ... failure in a row and counted in
+  `postgres_broadcast_retries_total`. A row that is not JSON is deleted and logged without
+  reaching the broker.
+- **Duplicates** can happen: rows already handed to the broker are handed again after a node
+  crashes mid-batch, after its claim connection is lost or its commit fails (the transaction
+  rolls back), and when a row holding an array of messages fails partway (the messages before
+  the failed one are broadcast again on the retry).
 - **In order.** One node drains the table at a time (a transaction advisory lock; the server
   ends a claim transaction left idle for 60 s), so committed rows are broadcast in order of
   their `id`, and offsets follow that order. A node that finds the lock taken tries again a
@@ -309,6 +313,7 @@ connects as needs `SELECT`, `INSERT`, `UPDATE` and `DELETE` on them and `USAGE` 
 | `postgres_spillover_total` | counter | Pub/sub messages sent through `cabby_pubsub_overflow` |
 | `postgres_reconnects_total` | counter | `LISTEN` connections re-established |
 | `postgres_claimed_broadcasts_total` | counter | Rows from `cabby_broadcasts` handed to the broker |
+| `postgres_broadcast_retries_total` | counter | Outbox rows retried after the broker failed to take them |
 | `postgres_dropped_total` | counter | Received messages dropped because the node was not keeping up |
 
 With Prometheus they have the usual `anycable_go_` prefix.

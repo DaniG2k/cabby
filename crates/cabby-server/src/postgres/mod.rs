@@ -314,6 +314,7 @@ pub(crate) const SPILLOVER: &str = "postgres_spillover_total";
 pub(crate) const RECONNECTS: &str = "postgres_reconnects_total";
 pub(crate) const CLAIMED: &str = "postgres_claimed_broadcasts_total";
 pub(crate) const DROPPED: &str = "postgres_dropped_total";
+pub(crate) const BROADCAST_RETRIES: &str = "postgres_broadcast_retries_total";
 
 /// The Postgres adapters' metrics (shared by every adapter of a server).
 #[derive(Clone, Default)]
@@ -328,6 +329,10 @@ impl Metrics {
         metrics.register_counter(SPILLOVER, "The total number of pub/sub messages sent through the overflow table");
         metrics.register_counter(RECONNECTS, "The total number of Postgres LISTEN connection reconnects");
         metrics.register_counter(CLAIMED, "The total number of broadcasts claimed from the Postgres outbox table");
+        metrics.register_counter(
+            BROADCAST_RETRIES,
+            "The total number of outbox broadcasts retried after the node failed to handle them",
+        );
         metrics.register_counter(
             DROPPED,
             "The total number of received Postgres messages dropped because the node was not keeping up",
@@ -368,6 +373,12 @@ impl Metrics {
     pub(crate) fn reconnect(&self) {
         if let Some(m) = &self.0 {
             m.counter_increment(RECONNECTS);
+        }
+    }
+
+    pub(crate) fn broadcast_retry(&self) {
+        if let Some(m) = &self.0 {
+            m.counter_increment(BROADCAST_RETRIES);
         }
     }
 

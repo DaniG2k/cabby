@@ -41,6 +41,12 @@ struct RustHandler {
     /// `HandleBroadcast` fails for payloads containing the text, the given
     /// number of times (`None`: always). Rust arm only.
     failures: Mutex<Vec<(String, Option<usize>)>>,
+    /// `HandleBroadcast` fails until then (Rust arm only).
+    fail_until: Mutex<Option<std::time::Instant>>,
+    /// How long each `HandleBroadcast` takes (Rust arm only).
+    delay: Mutex<Duration>,
+    inflight: std::sync::atomic::AtomicUsize,
+    max_inflight: std::sync::atomic::AtomicUsize,
 }
 
 impl RustHandler {
@@ -53,6 +59,20 @@ impl RustHandler {
 
 impl rs::Handler for RustHandler {
     fn handle_broadcast(&self, json: &[u8]) -> Result<(), BroadcastError> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let now = self.inflight.fetch_add(1, SeqCst) + 1;
+        self.max_inflight.fetch_max(now, SeqCst);
+        let delay = *self.delay.lock().unwrap_or_else(|e| e.into_inner());
+        if !delay.is_zero() {
+            std::thread::sleep(delay);
+        }
+        self.inflight.fetch_sub(1, SeqCst);
+        let outage =
+            self.fail_until.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|u| std::time::Instant::now() < u);
+        if outage {
+            self.record("HandleBroadcastFailed", json);
+            return Err(BroadcastError("broker unavailable".into()));
+        }
         let text = String::from_utf8_lossy(json);
         let fail = {
             let mut failures = self.failures.lock().unwrap_or_else(|e| e.into_inner());
@@ -94,6 +114,10 @@ impl MockHandler {
                     calls: Mutex::new(Vec::new()),
                     ready: Condvar::new(),
                     failures: Mutex::new(Vec::new()),
+                    fail_until: Mutex::new(None),
+                    delay: Mutex::new(Duration::ZERO),
+                    inflight: std::sync::atomic::AtomicUsize::new(0),
+                    max_inflight: std::sync::atomic::AtomicUsize::new(0),
                 })),
             },
             Backend::Go => Self { inner: HandlerImpl::Go(bridge::call("broadcast.NewHandler", json!({}))) },
@@ -116,6 +140,25 @@ impl MockHandler {
     pub fn fail_broadcasts_containing(&self, needle: &str, times: Option<usize>) {
         let HandlerImpl::Rust(h) = &self.inner else { unimplemented!("not_observable: Rust arm only") };
         h.failures.lock().unwrap_or_else(|e| e.into_inner()).push((needle.to_owned(), times));
+    }
+
+    /// Makes every `HandleBroadcast` fail for `d` from now (a broker outage).
+    /// Rust arm only.
+    pub fn fail_broadcasts_for(&self, d: Duration) {
+        let HandlerImpl::Rust(h) = &self.inner else { unimplemented!("not_observable: Rust arm only") };
+        *h.fail_until.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now() + d);
+    }
+
+    /// Makes each `HandleBroadcast` take `d`. Rust arm only.
+    pub fn delay_broadcasts(&self, d: Duration) {
+        let HandlerImpl::Rust(h) = &self.inner else { unimplemented!("not_observable: Rust arm only") };
+        *h.delay.lock().unwrap_or_else(|e| e.into_inner()) = d;
+    }
+
+    /// The most `HandleBroadcast` calls that ran at the same time. Rust arm only.
+    pub fn max_concurrent_broadcasts(&self) -> usize {
+        let HandlerImpl::Rust(h) = &self.inner else { unimplemented!("not_observable: Rust arm only") };
+        h.max_inflight.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Calls recorded since the last `calls`/`drain`.
