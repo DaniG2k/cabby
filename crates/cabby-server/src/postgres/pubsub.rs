@@ -287,6 +287,24 @@ async fn publish_loop(
                 continue;
             }
         };
+        // Both statements are prepared before the batch is sent: a first
+        // spill preparing its statement mid-batch would let the messages after
+        // it overtake it.
+        let prepared = tokio::time::timeout_at(deadline, async {
+            conn.prepare(&notify_sql).await?;
+            conn.prepare(&spill_sql).await
+        })
+        .await;
+        if !matches!(prepared, Ok(Ok(_))) {
+            metrics.error();
+            let error = match prepared {
+                Ok(Err(e)) => super::error_text(&e),
+                _ => "timed out".to_owned(),
+            };
+            log_error!(log, "failed to publish messages", "count" => batch.len(), "error" => error);
+            pool.discard(&conn);
+            continue;
+        }
         let sends = batch.iter().map(|(channel, envelope)| {
             let conn = conn.clone();
             let spill = spills(envelope);

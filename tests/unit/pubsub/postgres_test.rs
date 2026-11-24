@@ -214,3 +214,28 @@ fn deviation_d070_postgres_listen_reconnects_back_off_when_connections_keep_drop
     let reconnects = registry.counter("postgres_reconnects_total").expect("reconnects metric").value();
     assert!((1..=4).contains(&reconnects), "{reconnects} reconnects in 6 s");
 }
+
+/// regression-for: pubsub/redis_test.go#TestRedisCommon/Broadcast
+/// note: Deviation D-070: a spilled message followed by a small one in the same publish batch arrive in publish order (both statements are prepared before a batch is sent).
+#[test]
+fn deviation_d070_postgres_spilled_and_inline_messages_keep_their_order() {
+    let h = Postgres::new();
+    let handler = TestHandler::new();
+    let s = ShutdownGuard(h.subscriber(&handler));
+    s.0.start().expect("start");
+    s.0.subscribe("order");
+    s.0.broadcast(&msg("order", "warm-up"));
+    assert_eq!("warm-up", handler.receive().expect("message").data);
+
+    let big = format!("{{\"text\":\"{}\"}}", "x".repeat(9000));
+    let mut sent = Vec::new();
+    for round in 0..10 {
+        for i in 0..10 {
+            let data = if i == 0 { format!("{big}{round}") } else { format!("small-{round}-{i}") };
+            s.0.broadcast(&msg("order", &data));
+            sent.push(data);
+        }
+    }
+    let received: Vec<String> = sent.iter().map(|_| handler.receive().expect("message").data).collect();
+    assert!(received == sent, "out of order: {:?}", received.iter().map(|d| &d[..d.len().min(12)]).collect::<Vec<_>>());
+}
