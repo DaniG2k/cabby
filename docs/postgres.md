@@ -88,9 +88,14 @@ Cabby uses rustls (no OpenSSL) and reads `sslmode` from the URL:
 | `verify-ca` | yes | chain only |
 | `verify-full` | yes | chain and host name |
 
-Unlike libpq, `prefer` and `require` verify the certificate by default: set
-`--postgres_tls_verify=false` for a server with a self-signed certificate you can't install a CA
-for, or give the CA with `--postgres_tls_ca_cert_path`.
+Unlike libpq, `prefer` and `require` verify the certificate by default. A certificate that
+doesn't verify is a connection error: Cabby never falls back to a plaintext connection. So with
+the default `prefer`, a server whose certificate isn't signed by a CA in the system roots is
+rejected; managed Postgres services often use their own CA. Download it and set
+`--postgres_tls_ca_cert_path` (or `sslrootcert=` in the URL), or, on a network you trust, set
+`--postgres_tls_verify=false`. When verification is on and there is no CA certificate at all
+(no file given and none in the system roots), Cabby stops at startup and names these settings;
+`sslmode=disable` reads no CA.
 
 ## Pub/sub (`--pubsub=postgres`)
 
@@ -99,7 +104,8 @@ are hashed into 16 channels (`cabby_internal_0` to `cabby_internal_15`); a node 
 channel while one of its clients is subscribed to a stream hashed into it, and delivers only the
 streams it has subscribers for. Subscribing doesn't wait for the server: the `LISTEN` for a new
 channel is sent right away, and a message published before it takes effect (usually a few
-milliseconds) reaches the node's clients through history, as with Redis pub/sub. Remote commands (disconnects through the API, for example) use
+milliseconds) isn't delivered live to that node; clients that request history get it from
+there, as with Redis pub/sub. Remote commands (disconnects through the API, for example) use
 `cabby_internal_cmd`, which every node listens to.
 
 `NOTIFY` payloads must stay under 8000 bytes. A message larger than 7500 bytes (after its

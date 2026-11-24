@@ -79,29 +79,19 @@ The log has a line like `Accept broadcast requests at http://…:8090/_broadcast
 
 With the Postgres adapters ([`postgres.md`](postgres.md)), Cabby nodes share broadcasts, stream
 history and sessions through the database the app already has, with no Redis or NATS. This
-example runs Cabby on two hosts and the app broadcasts either over HTTP or by inserting rows
-into Cabby's outbox table.
+example runs Cabby on two hosts next to a Postgres server on a third, reached over the private
+network with TLS. The app broadcasts over HTTP or by inserting rows into Cabby's outbox table.
 
 ```yaml
 accessories:
-  db:
-    image: postgres:18.6-alpine
-    host: 203.0.113.20
-    env:
-      clear:
-        POSTGRES_USER: myapp
-        POSTGRES_DB: myapp_production
-      secret:
-        - POSTGRES_PASSWORD
-    directories:
-      - data:/var/lib/postgresql/data
-
   cabby:
     image: ghcr.io/danig2k/cabby:0.2.0
     hosts:
       - 203.0.113.10
       - 203.0.113.11
     port: "8080:8080"
+    files:
+      - config/postgres-ca.pem:/etc/cabby/postgres-ca.pem   # the database server's CA
     env:
       clear:
         CABBY_RPC_HOST: "https://app.example.com/_anycable"
@@ -110,6 +100,7 @@ accessories:
         CABBY_HTTP_BROADCAST_PORT: 8090
         CABBY_PUBSUB: postgres                   # nodes share broadcasts
         CABBY_BROKER: postgres                   # shared history and session recovery
+        CABBY_POSTGRES_TLS_CA_CERT_PATH: /etc/cabby/postgres-ca.pem
       secret:
         - CABBY_SECRET
         - CABBY_POSTGRES_URL
@@ -118,17 +109,20 @@ accessories:
 `.kamal/secrets`:
 
 ```sh
-POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 CABBY_SECRET=$CABBY_SECRET
 ANYCABLE_SECRET=$CABBY_SECRET
-CABBY_POSTGRES_URL=postgres://myapp:$POSTGRES_PASSWORD@myapp-db:5432/myapp_production?sslmode=disable
+# The database host's private address; verify-full checks its certificate against the CA above.
+CABBY_POSTGRES_URL=postgres://myapp:$POSTGRES_PASSWORD@10.0.0.20:5432/myapp_production?sslmode=verify-full
 ```
 
-- `myapp-db` is the accessory's container on Kamal's Docker network, reachable from every host
-  only if they share that network (one host, or an overlay network between hosts). Across hosts,
-  use the database host's private address and `sslmode=verify-full` (or `require`) instead.
+- The certificate's name must match the host in the URL (`10.0.0.20` here, or a private DNS
+  name). A managed database's CA bundle is on its provider's documentation page.
+- If Postgres runs as a Kamal accessory (say `db`) on the **same host** as a single Cabby node,
+  both containers are on Kamal's Docker network: use the accessory's container name,
+  `postgres://myapp:…@myapp-db:5432/myapp_production`, and the traffic stays on that host. Across
+  hosts, use the database host's address, never `sslmode=disable`.
 - Point Cabby at Postgres directly or through a PgBouncer pool in **session** mode: `LISTEN`
-  does not survive transaction pooling.
+  and advisory locks do not survive transaction pooling.
 - On the first boot Cabby creates its tables (`cabby_*` in `public`). To keep them apart from
   the app's tables, add `CABBY_POSTGRES_SCHEMA: cabby`. If the app's database role may not create
   tables, create them with the DDL in [`postgres.md`](postgres.md) and set
