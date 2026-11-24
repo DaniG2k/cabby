@@ -37,8 +37,6 @@ pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long one query (or a pipelined batch) may take before its connection
 /// is considered broken and dropped.
 pub(crate) const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
-/// Notifications read from a `LISTEN` connection and not yet handed on.
-const NOTICES_CAPACITY: usize = 1024;
 /// Received messages waiting for the node (per adapter); beyond this they
 /// are dropped and counted.
 pub(crate) const INBOX_CAPACITY: usize = 8192;
@@ -516,10 +514,25 @@ impl ConnectSpec {
         Ok(Self { description: describe(&config), config, tls: MakeRustlsConnect::new(tls), keepalive: c.keepalive() })
     }
 
-    /// Opens a connection named `app` (`application_name`); its I/O runs on
-    /// the Postgres runtime. Messages other than query results
-    /// (notifications) go to `notices` when given.
-    pub async fn connect(&self, app: &str, notices: Option<mpsc::Sender<(String, String)>>) -> Result<Client, PgError> {
+    /// Opens a command connection named `app` (`application_name`); its I/O
+    /// runs on the Postgres runtime.
+    pub async fn connect(&self, app: &str) -> Result<Client, PgError> {
+        self.open(app, None).await.map(|(client, _)| client)
+    }
+
+    /// Opens a connection whose notifications go straight to `sink` from the
+    /// task reading the socket (sinks never block), so they keep flowing while
+    /// a query on the connection is awaited. The token is cancelled when the
+    /// connection ends.
+    pub async fn connect_listening(
+        &self,
+        app: &str,
+        sink: Arc<dyn ListenSink>,
+    ) -> Result<(Client, CancellationToken), PgError> {
+        self.open(app, Some(sink)).await
+    }
+
+    async fn open(&self, app: &str, sink: Option<Arc<dyn ListenSink>>) -> Result<(Client, CancellationToken), PgError> {
         let mut config = self.config.clone();
         config.application_name(truncate(app, super::MAX_IDENTIFIER));
         config.connect_timeout(CONNECT_TIMEOUT);
@@ -531,17 +544,16 @@ impl ConnectSpec {
             .await
             .map_err(|_| PgError(format!("timed out connecting to {}", self.description)))?
             .map_err(|e| PgError(format!("failed to connect to {}: {}", self.description, error_text(&e))))?;
+        let closed = CancellationToken::new();
+        let ended = closed.clone();
         runtime().spawn(async move {
+            let _ended = ended.drop_guard();
             let mut conn = std::pin::pin!(&mut conn);
             while let Some(message) = std::future::poll_fn(|cx| conn.as_mut().poll_message(cx)).await {
                 match message {
                     Ok(AsyncMessage::Notification(n)) => {
-                        // A full queue stops reading the socket; PostgreSQL keeps
-                        // the notifications queued on its side meanwhile.
-                        if let Some(tx) = &notices
-                            && tx.send((n.channel().to_owned(), n.payload().to_owned())).await.is_err()
-                        {
-                            break;
+                        if let Some(sink) = &sink {
+                            sink.notification(n.channel(), n.payload());
                         }
                     }
                     Ok(_) => {}
@@ -549,7 +561,7 @@ impl ConnectSpec {
                 }
             }
         });
-        Ok(client)
+        Ok((client, closed))
     }
 }
 
@@ -751,7 +763,7 @@ impl Pool {
         runtime().spawn(async move {
             // Claimed above; the guard takes over here.
             let guard = Connecting { pool: &pool, slot: i, done: false };
-            let result = pool.spec.connect(&pool.app, None).await;
+            let result = pool.spec.connect(&pool.app).await;
             if result.is_err() {
                 pool.metrics.error();
             }
@@ -784,7 +796,7 @@ impl Pool {
                 }
                 continue;
             };
-            let result = match tokio::time::timeout_at(deadline, self.spec.connect(&self.app, None)).await {
+            let result = match tokio::time::timeout_at(deadline, self.spec.connect(&self.app)).await {
                 Ok(r) => r,
                 Err(_) => Err(PgError(format!("timed out connecting to {}", self.spec.description))),
             };
@@ -997,13 +1009,12 @@ async fn listen_loop(
     let mut attempt: u32 = 0;
     let mut ever_connected = false;
     loop {
-        let (tx, mut rx) = mpsc::channel(NOTICES_CAPACITY);
         let client = tokio::select! {
             biased;
             () = stop.cancelled() => return,
-            c = spec.connect(&app, Some(tx)) => c,
+            c = spec.connect_listening(&app, sink.clone()) => c,
         };
-        let client = match client {
+        let (client, closed) = match client {
             Ok(c) => c,
             Err(e) => {
                 metrics.error();
@@ -1025,7 +1036,7 @@ async fn listen_loop(
         }
         ever_connected = true;
 
-        let lost = serve(&client, &mut rx, &shared, sink.as_ref(), spec.keepalive, &stop, reconnected).await;
+        let lost = serve(&client, &closed, &shared, sink.as_ref(), spec.keepalive, &stop, reconnected).await;
         {
             let mut st = shared.lock();
             st.connected = false;
@@ -1050,12 +1061,12 @@ async fn listen_loop(
     }
 }
 
-/// Runs one connection: keeps `LISTEN` in sync with the desired channels,
-/// forwards notifications and sends heartbeats. Returns why it ended (`None`:
+/// Runs one connection: keeps `LISTEN` in sync with the desired channels and
+/// sends heartbeats (the connection task forwards notifications). Returns why it ended (`None`:
 /// stopped).
 async fn serve(
     client: &Client,
-    rx: &mut mpsc::Receiver<(String, String)>,
+    closed: &CancellationToken,
     shared: &ListenShared,
     sink: &dyn ListenSink,
     keepalive: Option<Duration>,
@@ -1092,10 +1103,7 @@ async fn serve(
         tokio::select! {
             biased;
             () = stop.cancelled() => return None,
-            n = rx.recv() => match n {
-                Some((channel, payload)) => sink.notification(&channel, &payload),
-                None => return Some("connection closed".to_owned()),
-            },
+            () = closed.cancelled() => return Some("connection closed".to_owned()),
             () = shared.wake.notified() => {}
             () = ping => {
                 let period = keepalive.unwrap_or(QUERY_TIMEOUT);

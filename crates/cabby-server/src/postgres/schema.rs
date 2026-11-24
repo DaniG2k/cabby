@@ -122,7 +122,7 @@ pub(crate) async fn prepare(
     needed: &[&str],
     log: &Logger,
 ) -> Result<(), PgError> {
-    let mut client = spec.connect("cabby migrate", None).await?;
+    let mut client = spec.connect("cabby migrate").await?;
     if auto_migrate { migrate(&mut client, names).await } else { check(&client, names, needed, log).await }
 }
 

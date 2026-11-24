@@ -347,7 +347,7 @@ impl Inner {
     async fn prune(&self) -> Result<bool, PgError> {
         let mut slot = self.maintenance.lock().await;
         if slot.as_ref().is_none_or(tokio_postgres::Client::is_closed) {
-            *slot = Some(self.spec.connect(&format!("cabby broker-maintenance {}", self.names.channel()), None).await?);
+            *slot = Some(self.spec.connect(&format!("cabby broker-maintenance {}", self.names.channel())).await?);
         }
         let Some(client) = slot.as_mut() else { unreachable!("connected above") };
         let started = Instant::now();

@@ -374,3 +374,35 @@ fn deviation_d070_postgres_unsubscribing_one_stream_of_a_shard_keeps_the_other()
     assert_eq!("kept", handler.receive().expect("message").data);
     assert!(handler.receive().is_none(), "the unsubscribed stream is not delivered");
 }
+
+/// regression-for: pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast
+/// note: Deviation D-070: a burst of 20000 notifications arriving while a new shard is listened to doesn't stall the LISTEN connection: the LISTEN completes, there is no reconnect, and every notification is delivered or counted in postgres_dropped_total.
+#[test]
+fn deviation_d070_postgres_a_notification_burst_does_not_stall_listen() {
+    let h = Postgres::new();
+    let registry = Arc::new(cabby_server::metrics::Metrics::new(Vec::new(), 0));
+    let handler = TestHandler::new();
+    let s = ShutdownGuard(h.subscriber_with(&handler, &h.config, Metrics::register(registry.clone())));
+    s.0.start().expect("start");
+    s.0.subscribe("s");
+    h.wait("s");
+    let other = (0..1000).map(|i| format!("o{i}")).find(|n| shard(n) != shard("s")).unwrap();
+    let channel = format!("{}_{}", h.config.channel, shard("s"));
+
+    h.scope.execute(&format!(
+        "SELECT count(pg_notify('{channel}', '{{\"t\":\"s\",\"m\":{{\"stream\":\"s\",\"data\":\"' || i || '\"}}}}')) FROM generate_series(1, 20000) i"
+    ));
+    let started = std::time::Instant::now();
+    s.0.subscribe(&other);
+    h.wait(&other);
+    let took = started.elapsed();
+
+    let mut delivered = 0u64;
+    while handler.receive().is_some() {
+        delivered += 1;
+    }
+    let count = |name: &str| registry.counter(name).map_or(0, |c| c.value());
+    assert!(took < Duration::from_secs(5), "the LISTEN took {took:?}");
+    assert_eq!(0, count("postgres_reconnects_total"), "no reconnect");
+    assert_eq!(20000, delivered + count("postgres_dropped_total"), "delivered {delivered}");
+}

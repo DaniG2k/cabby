@@ -113,10 +113,11 @@ envelope) is stored in `cabby_pubsub_overflow` for 60 seconds and the notificati
 row's ID; receivers read it from there. A node deletes expired rows every 30 seconds, so a node
 that falls more than 60 seconds behind skips such a message (with a warning).
 
-Each node keeps up to 8192 received messages waiting for delivery to its clients. A node that
-can't keep up drops the messages that find the queue full, counts them
-(`postgres_dropped_total`) and logs a warning; reading from the `LISTEN` connection itself never
-stops on that account.
+The task reading the `LISTEN` connection hands each notification on at once, also while a
+`LISTEN`, `UNLISTEN` or heartbeat on that connection is waiting for its answer. Each node keeps
+up to 8192 received messages waiting for delivery to its clients; a node that can't keep up
+drops the messages that find the queue full, counts them (`postgres_dropped_total`) and logs a
+warning, and reading the connection never stops on that account.
 
 The `LISTEN` connection is checked with `SELECT 1` every `--postgres_keepalive_interval`, so a
 connection that died without closing is noticed. After any failure Cabby reconnects with backoff

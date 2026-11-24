@@ -190,7 +190,7 @@ impl Claimer {
                 return;
             }
             if client.as_ref().is_none_or(tokio_postgres::Client::is_closed) {
-                match self.spec.connect(&self.app, None).await {
+                match self.spec.connect(&self.app).await {
                     Ok(c) => client = Some(c),
                     Err(e) => {
                         self.metrics.error();
