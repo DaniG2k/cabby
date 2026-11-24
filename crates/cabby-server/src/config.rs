@@ -175,6 +175,8 @@ pub struct Config {
     pub broker: BrokerConfig,
     /// `[sqlite]` (Cabby only, D-065).
     pub sqlite: SqliteConfig,
+    /// `[redis_broker]` (Cabby only, D-069).
+    pub redis_broker: crate::broker::RedisBrokerConfig,
     pub redis: RedisConfig,
     /// `[redis_pubsub_broadcast]`
     pub legacy_redis_broadcast: crate::broadcast::LegacyRedisConfig,
@@ -235,6 +237,7 @@ cabby_core::toml_section!(Config, "config.Config" {
     "rpc" => rpc,
     "broker" => broker,
     "sqlite" => sqlite,
+    "redis_broker" => redis_broker,
     "redis" => redis,
     "redis_pubsub_broadcast" => legacy_redis_broadcast,
     "redis_stream_broadcast" => redis_broadcast,
@@ -294,6 +297,7 @@ impl Config {
             server: crate::server::Config::new(),
             broadcast_adapters: vec!["http".to_owned(), "redis".to_owned()],
             broker: BrokerConfig::new(),
+            redis_broker: crate::broker::RedisBrokerConfig::new(),
             log: cabby_core::logger::Config::new(),
             app: AppConfig::new(),
             ws: crate::ws::Config::new(),
@@ -395,12 +399,13 @@ impl Config {
             _ => out.push_str("# presets = [\"broker\"]\n\n"),
         }
 
-        let sections: [(&str, String); 14] = [
+        let sections: [(&str, String); 15] = [
             ("# Server configuration\n[server]\n", self.server.to_toml()),
             ("# Logging configuration\n[logging]\n", self.log.to_toml()),
             ("# RPC configuration\n[rpc]\n", self.rpc.to_toml()),
             ("# Broker configuration\n[broker]\n", self.broker.to_toml()),
             ("# SQLite broker configuration (--broker=sqlite)\n[sqlite]\n", self.sqlite.to_toml()),
+            ("# Redis broker configuration (--broker=redis)\n[redis_broker]\n", self.redis_broker.to_toml()),
             ("# JWT configuration\n[jwt]\n", self.jwt.to_toml()),
             ("# Pub/sub (signed) streams configuration\n[streams]\n", self.streams.to_toml()),
             ("# WebSockets configuration\n[ws]\n", self.ws.to_toml()),
@@ -665,6 +670,40 @@ mod tests {
         let unknown = toml_config::decode(&mut back, &c.to_toml()).unwrap();
         assert!(unknown.is_empty(), "{unknown:?}");
         assert_eq!("/data/cabby.db", back.sqlite.path);
+    }
+
+    #[test]
+    fn redis_broker_settings_come_from_the_redis_broker_section() {
+        let mut c = Config::new();
+        assert_eq!(crate::broker::RedisBrokerConfig::new(), c.redis_broker);
+        let unknown = toml_config::decode(&mut c, "[redis_broker]\nkey_prefix = \"app\"\ntimeout = 2\n").unwrap();
+        assert!(unknown.is_empty(), "{unknown:?}");
+        assert_eq!(("app", 2), (c.redis_broker.key_prefix.as_str(), c.redis_broker.timeout));
+    }
+
+    #[test]
+    fn printed_configuration_has_a_redis_broker_section_that_reads_back() {
+        assert!(Config::new().to_toml().contains(
+            "# Redis broker configuration (--broker=redis)\n[redis_broker]\n\
+             # Prefix of the keys the Redis broker writes (--broker=redis)\nkey_prefix = \"__cabby__\"\n"
+        ));
+        let mut c = Config::new();
+        c.redis_broker.key_prefix = "app:prod".into();
+        c.redis_broker.timeout = 7;
+        let mut back = Config::new();
+        let unknown = toml_config::decode(&mut back, &c.to_toml()).unwrap();
+        assert!(unknown.is_empty(), "{unknown:?}");
+        assert_eq!(c.redis_broker, back.redis_broker);
+    }
+
+    /// Pins D-069: `--presets=broker` keeps an explicit Redis broker.
+    #[test]
+    fn broker_preset_keeps_an_explicit_redis_broker() {
+        let mut c = Config::new();
+        c.user_presets = Some(vec!["broker".to_owned()]);
+        c.broker.adapter = "redis".to_owned();
+        c.load_presets(&EnvMap::new()).unwrap();
+        assert_eq!("redis", c.broker.adapter);
     }
 
     /// Pins D-065: `--presets=broker` only fills in a default broker.

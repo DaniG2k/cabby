@@ -65,7 +65,7 @@ const NON_FLAG_ENV: &[&str] = &["FILTER_LOGS", "FLY_RPC_APP_NAME"];
 
 /// The last line of `--help` (D-061). Cabby-only settings (D-065) have no
 /// `ANYCABLE_*` name; a test checks that each one is named here.
-const ENV_FOOTER: &str = "Every CABBY_* variable can also be set as ANYCABLE_* (CABBY_* takes precedence), except Cabby-only settings such as CABBY_SQLITE_PATH.";
+const ENV_FOOTER: &str = "Every CABBY_* variable can also be set as ANYCABLE_* (CABBY_* takes precedence), except the Cabby-only CABBY_SQLITE_PATH, CABBY_REDIS_BROKER_KEY_PREFIX and CABBY_REDIS_BROKER_TIMEOUT.";
 
 const SERVER: &str = "SERVER:";
 const SSL: &str = "SSL:";
@@ -91,6 +91,7 @@ const PUSHER: &str = "PUSHER:";
 const DS: &str = "DURABLE STREAMS:";
 const API: &str = "API:";
 const SQLITE: &str = "SQLITE:";
+const REDIS_BROKER: &str = "REDIS BROKER:";
 
 /// The configuration being built plus upstream's local flag destinations.
 #[derive(Default)]
@@ -642,6 +643,7 @@ fn definitions(c: &Config) -> Vec<Flag> {
     flags.extend(broadcast_flags(c));
     flags.extend(broker_flags(c));
     flags.extend(sqlite_flags(c));
+    flags.extend(redis_broker_flags(c));
     flags.extend(redis_flags(c));
     flags.extend(redis_broadcast_flags(c));
     flags.extend(http_broadcast_flags(c));
@@ -753,7 +755,9 @@ fn broadcast_flags(c: &Config) -> Vec<Flag> {
                 "Broadcasting adapter to use (http, redisx, redis or nats). You can specify multiple at once via a comma-separated list",
                 |s, v| s.broadcast_adapters = v,
             ),
-            str_flag("broker", &c.broker.adapter, "Broker engine to use (memory)", |s, v| s.c.broker.adapter = v),
+            str_flag("broker", &c.broker.adapter, "Broker engine to use (memory, nats, sqlite or redis)", |s, v| {
+                s.c.broker.adapter = v
+            }),
             str_flag("pubsub", &c.pubsub_adapter, "Pub/Sub adapter to use (redis or nats)", |s, v| {
                 s.c.pubsub_adapter = v
             }),
@@ -809,6 +813,33 @@ fn sqlite_flags(c: &Config) -> Vec<Flag> {
             }),
             &["CABBY_SQLITE_PATH"],
         )],
+    )
+}
+
+/// The Redis broker (Cabby only, D-069): `CABBY_REDIS_BROKER_*`, no `ANYCABLE_*` alias.
+fn redis_broker_flags(c: &Config) -> Vec<Flag> {
+    with_defaults(
+        REDIS_BROKER,
+        vec![
+            with_env(
+                str_flag(
+                    "redis_broker_key_prefix",
+                    &c.redis_broker.key_prefix,
+                    "Prefix of the keys --broker=redis writes (Cabby only)",
+                    |s, v| s.c.redis_broker.key_prefix = v,
+                ),
+                &["CABBY_REDIS_BROKER_KEY_PREFIX"],
+            ),
+            with_env(
+                int_flag(
+                    "redis_broker_timeout",
+                    c.redis_broker.timeout,
+                    "Timeout of one --broker=redis operation (seconds, Cabby only)",
+                    |s, v| s.c.redis_broker.timeout = v,
+                ),
+                &["CABBY_REDIS_BROKER_TIMEOUT"],
+            ),
+        ],
     )
 }
 
@@ -1605,6 +1636,64 @@ mod tests {
         assert_eq!("sqlite", c.broker.adapter);
     }
 
+    /// Pins D-069: `--broker=redis` without `--pubsub` selects Redis pub/sub,
+    /// as upstream's option parsing does; an explicit `--pubsub` wins.
+    #[test]
+    fn deviation_d069_redis_broker_selects_redis_pubsub() {
+        let (res, _) = run(&["--broker=redis"], &[]);
+        let c = res.unwrap().0;
+        assert_eq!(("redis", "redis"), (c.broker.adapter.as_str(), c.pubsub_adapter.as_str()));
+
+        let (res, _) = run(&["--broker=redis", "--pubsub=nats"], &[]);
+        assert_eq!("nats", res.unwrap().0.pubsub_adapter);
+
+        let (res, _) = run(&[], &[("CABBY_BROKER", "redis")]);
+        assert_eq!("redis", res.unwrap().0.pubsub_adapter);
+    }
+
+    /// Pins D-069: the Redis broker's settings are Cabby-only (no `ANYCABLE_*` alias).
+    #[test]
+    fn deviation_d069_redis_broker_flags_and_cabby_env() {
+        let (res, _) = run(&["--redis_broker_key_prefix=app1", "--redis_broker_timeout=9"], &[]);
+        let c = res.unwrap().0;
+        assert_eq!(("app1", 9), (c.redis_broker.key_prefix.as_str(), c.redis_broker.timeout));
+
+        let (res, _) = run(&[], &[]);
+        let c = res.unwrap().0;
+        assert_eq!(("__cabby__", 5), (c.redis_broker.key_prefix.as_str(), c.redis_broker.timeout));
+
+        let env = [("CABBY_REDIS_BROKER_KEY_PREFIX", "app2"), ("CABBY_REDIS_BROKER_TIMEOUT", "3")];
+        let (res, _) = run(&[], &env);
+        let c = res.unwrap().0;
+        assert_eq!(("app2", 3), (c.redis_broker.key_prefix.as_str(), c.redis_broker.timeout));
+
+        let (res, _) = run(&["--redis_broker_key_prefix=app3"], &env);
+        assert_eq!("app3", res.unwrap().0.redis_broker.key_prefix, "the command line wins");
+
+        let (res, _) = run(&[], &[("ANYCABLE_REDIS_BROKER_KEY_PREFIX", "app4")]);
+        assert_eq!("__cabby__", res.unwrap().0.redis_broker.key_prefix, "no ANYCABLE_* alias");
+    }
+
+    #[test]
+    fn redis_broker_flags_show_in_help() {
+        let (_, out) = run(&["--help"], &[]);
+        assert!(out.contains("REDIS BROKER:"), "{out}");
+        assert!(
+            out.contains("--redis_broker_key_prefix value") && out.contains("[$CABBY_REDIS_BROKER_KEY_PREFIX]"),
+            "{out}"
+        );
+        assert!(out.contains("--redis_broker_timeout value") && out.contains("[$CABBY_REDIS_BROKER_TIMEOUT]"), "{out}");
+        assert!(out.contains("Broker engine to use (memory, nats, sqlite or redis)"), "{out}");
+    }
+
+    #[test]
+    fn explicit_redis_broker_survives_the_broker_preset() {
+        let (res, _) = run(&["--presets=broker", "--broker=redis"], &[]);
+        let mut c = res.unwrap().0;
+        c.load_presets(&EnvMap::new()).unwrap();
+        assert_eq!("redis", c.broker.adapter);
+    }
+
     /// Pins D-061: help lists Cabby's variable names and the unprefixed aliases,
     /// and explains the `ANYCABLE_*` fallback once.
     #[test]
@@ -1622,7 +1711,7 @@ mod tests {
     }
 
     /// Pins D-061: the help footer names every Cabby-only variable, the flags
-    /// that have no `ANYCABLE_*` name (D-065).
+    /// that have no `ANYCABLE_*` name (D-065, D-069).
     #[test]
     fn deviation_d061_cabby_only_variables_are_named_in_help() {
         let cabby_only: Vec<String> = definitions(&Config::new())
@@ -1630,7 +1719,10 @@ mod tests {
             .filter(|f| !f.env_vars.iter().any(|v| v.starts_with("ANYCABLE_")))
             .flat_map(|f| f.env_vars.into_iter().filter(|v| v.starts_with("CABBY_")))
             .collect();
-        assert_eq!(cabby_only, vec!["CABBY_SQLITE_PATH"]);
+        assert_eq!(
+            cabby_only,
+            vec!["CABBY_SQLITE_PATH", "CABBY_REDIS_BROKER_KEY_PREFIX", "CABBY_REDIS_BROKER_TIMEOUT"]
+        );
         for v in &cabby_only {
             assert!(ENV_FOOTER.contains(v.as_str()), "{v} is not in the help footer: {ENV_FOOTER}");
         }
