@@ -6,7 +6,7 @@
 //! `ANYCABLE_*`); the probe can't see command-line flags.
 
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 /// How long the probe waits to connect, and then for each read and write.
@@ -77,9 +77,31 @@ pub fn probe(addr: SocketAddr, path: &str) -> Result<(), String> {
     }
 }
 
+/// The host to probe: reads `CABBY_HOST`, then `ANYCABLE_HOST`. Wildcard bind
+/// addresses (`0.0.0.0`, `::`) and `localhost` map to their loopback address;
+/// explicit IP literals are probed directly.
+pub fn host(get: impl Fn(&str) -> Option<String>) -> IpAddr {
+    let raw = setting(&get, "HOST");
+    let trimmed = raw.trim().trim_start_matches('[').trim_end_matches(']');
+    if trimmed.is_empty() || trimmed == "0.0.0.0" || trimmed.eq_ignore_ascii_case("localhost") {
+        return IpAddr::V4(Ipv4Addr::LOCALHOST);
+    }
+    if trimmed == "::" {
+        return IpAddr::V6(Ipv6Addr::LOCALHOST);
+    }
+    if let Ok(ip) = trimmed.parse::<IpAddr>() {
+        return ip;
+    }
+    (trimmed, 0)
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut addrs| addrs.next().map(|a| a.ip()))
+        .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST))
+}
+
 /// The whole probe, with `get` reading the environment.
 pub fn run(get: impl Fn(&str) -> Option<String>) -> Result<(), String> {
-    let addr = SocketAddr::from(([127, 0, 0, 1], port(&get)?));
+    let addr = SocketAddr::new(host(&get), port(&get)?);
     if tls(&get) { connect(addr) } else { probe(addr, &health_path(&get)) }
 }
 
@@ -108,6 +130,12 @@ mod tests {
         assert_eq!(health_path(env(&[])), "/health");
         assert_eq!(health_path(env(&[("ANYCABLE_HEALTH_PATH", "/up")])), "/up");
         assert_eq!(health_path(env(&[("CABBY_HEALTH_PATH", "/ok"), ("ANYCABLE_HEALTH_PATH", "/up")])), "/ok");
+        assert_eq!(host(env(&[])), IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(host(env(&[("CABBY_HOST", "0.0.0.0")])), IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(host(env(&[("CABBY_HOST", "localhost")])), IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(host(env(&[("CABBY_HOST", "::")])), IpAddr::V6(Ipv6Addr::LOCALHOST));
+        assert_eq!(host(env(&[("CABBY_HOST", "[::1]")])), IpAddr::V6(Ipv6Addr::LOCALHOST));
+        assert_eq!(host(env(&[("ANYCABLE_HOST", "127.0.0.2")])), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)));
     }
 
     #[test]

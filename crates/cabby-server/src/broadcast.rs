@@ -264,7 +264,7 @@ impl HttpInner {
             return Err(HttpResponse::status(422, headers));
         }
         if !prepared.auth_header.is_empty()
-            && !constant_time_eq(header("Authorization"), prepared.auth_header.as_bytes())
+            && !cabby_core::utils::constant_time_eq(header("Authorization"), prepared.auth_header.as_bytes())
         {
             return Err(HttpResponse::status(401, headers));
         }
@@ -275,11 +275,6 @@ impl HttpInner {
     fn deliver(&self, body: &[u8]) -> u16 {
         if self.node.handle_broadcast(body).is_ok() { 201 } else { 501 }
     }
-}
-
-/// Go `subtle.ConstantTimeCompare(a, b) == 1`.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 impl Broadcaster for HttpBroadcaster {

@@ -15,3 +15,11 @@ pub use localtime::LocalTime;
 pub use message_verifier::{MessageVerifier, VerifierError};
 pub use priority_queue::{ItemId, PriorityQueue, PriorityQueueItem};
 pub use queue::{Item, PushResult, Queue};
+
+/// Constant-time byte-slice comparison backed by `subtle::ConstantTimeEq`.
+///
+/// The time depends only on whether the lengths match, never on the contents,
+/// and the compiler cannot optimize it back into an early-exit loop.
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    subtle::ConstantTimeEq::ct_eq(a, b).into()
+}

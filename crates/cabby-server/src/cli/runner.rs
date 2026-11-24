@@ -755,6 +755,9 @@ impl Runner {
     /// and the Pusher REST API (on the main port, or its own when `api_port` is set).
     fn mount_pusher(&mut self, node: &Arc<Node>, ws_server: &server::HttpServer) -> Result<(), CliError> {
         let c = self.config.clone();
+        if c.pusher.secret.is_empty() {
+            return Err(illegal_argument("Pusher requires a secret (--pusher_secret or --secret)"));
+        }
         let broker = self.node_broker.clone().ok_or_else(|| assertion_failed("broker is not initialized"))?;
 
         // The `$pusher` channel only accepts subscriptions from the Pusher endpoint.

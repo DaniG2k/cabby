@@ -250,6 +250,7 @@ impl Persister {
         }
         let Database { conn, lock, .. } = self.db;
         let _ = conn.busy_timeout(deadline.saturating_duration_since(Instant::now()));
+        let _ = store::incremental_vacuum(&conn, None);
         if let Err(e) = store::checkpoint(&conn) {
             log_warn!(log(), "failed to checkpoint the SQLite WAL", "path" => path.clone(), "error" => e.to_string());
         }

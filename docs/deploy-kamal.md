@@ -15,6 +15,7 @@ accessories:
     env:
       clear:
         CABBY_RPC_HOST: "https://app.example.com/_anycable"   # your app's public URL
+        CABBY_ALLOWED_ORIGINS: "app.example.com"              # restrict WebSocket origins
         CABBY_BROADCAST_ADAPTER: http
         CABBY_HTTP_BROADCAST_PORT: 8090  # broadcasts on 8090, kept inside the Docker network
       secret:

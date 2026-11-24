@@ -216,12 +216,26 @@ impl Metrics {
         let mut has_server = false;
         if let Some(HttpEndpoint { path, port, dedicated_host: Some(host) }) = &self.http {
             has_server = true;
-            // The server runs in its own task (it never blocks rotation); a bind
-            // failure ends `run`, as upstream's server error does.
-            let listener = prometheus::bind(host, *port)
-                .await
+            // Reuse `HttpServer` so the dedicated metrics listener inherits the
+            // same header timeout, header limits, accept backoff and connection
+            // cap as the main server.
+            let max_conn = match crate::server::current_defaults().max_conn {
+                0 => prometheus::DEFAULT_DEDICATED_MAX_CONN,
+                n => n,
+            };
+            let server = crate::server::HttpServer::new(host, &port.to_string(), None, max_conn)
                 .map_err(|e| MetricsError(format!("metrics HTTP server at {host}:{port} stopped: {e}")))?;
-            let addr = listener.local_addr().ok();
+            let shared = Arc::clone(&self.shared);
+            server.setup_handler(path, move |_req: crate::server::Request| {
+                let shared = Arc::clone(&shared);
+                async move {
+                    let resp = prometheus::response(shared.prometheus());
+                    let (parts, body) = resp.into_parts();
+                    http::Response::from_parts(parts, crate::server::full(body))
+                }
+            });
+            server.start().map_err(|e| MetricsError(format!("metrics HTTP server at {host}:{port} stopped: {e}")))?;
+            let addr = server.local_addr();
             *self.server_addr.lock().unwrap_or_else(|e| e.into_inner()) = addr;
             let shown = addr.map_or_else(|| format!("{host}:{port}"), |a| a.to_string());
             printer::log(
@@ -229,7 +243,11 @@ impl Metrics {
                 &format!("Serve metrics at {shown}{path}"),
                 &[Attr::new("context", LogValue::String("metrics".into()))],
             );
-            prometheus::serve(listener, path.clone(), Arc::clone(&self.shared), self.shutdown.clone());
+            let shutdown = self.shutdown.clone();
+            tokio::spawn(async move {
+                shutdown.cancelled().await;
+                server.shutdown();
+            });
         }
 
         let writers: Vec<Arc<dyn IntervalWriter>> = self.writers.lock().unwrap_or_else(|e| e.into_inner()).clone();

@@ -164,14 +164,8 @@ impl Authenticator {
         let Some(token) = req.header("Authorization").and_then(|h| h.strip_prefix("Bearer ")) else {
             return false;
         };
-        constant_time_eq(token.as_bytes(), self.secret.as_bytes())
+        cabby_core::utils::constant_time_eq(token.as_bytes(), self.secret.as_bytes())
     }
-}
-
-/// Go `subtle.ConstantTimeCompare(a, b) == 1`: the time depends only on the
-/// lengths, not on the contents.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 impl HttpRequest {

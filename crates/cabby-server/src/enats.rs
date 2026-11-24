@@ -202,6 +202,43 @@ fn random_suffix(size: usize) -> String {
     bytes.iter().map(|b| ALPHABET[usize::from(b & 63)] as char).collect()
 }
 
+/// Creates `dir` (and any missing parents) with mode 0700 on Unix.
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+/// Writes the `nats-server` config to a freshly created 0600 file with a
+/// random suffix, refusing to follow pre-existing paths or symlinks in `/tmp`.
+fn write_private_config(port: u16, conf: &str) -> std::io::Result<PathBuf> {
+    use std::io::Write as _;
+
+    let path =
+        std::env::temp_dir().join(format!("cabby-enats-{}-{}-{}.conf", std::process::id(), port, random_suffix(12)));
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut file = opts.open(&path)?;
+    file.write_all(conf.as_bytes())?;
+    Ok(path)
+}
+
 /// The variables naming the `nats-server` executable, in precedence order:
 /// `CABBY_NATS_SERVER_BIN` and its older spelling `CABBY_NATS_SERVER`. They are
 /// the only server variables that aren't flags (D-061).
@@ -406,18 +443,30 @@ impl Service {
             (h, Some(p)) => (h, p),
             (_, None) => return Err(EnatsError("failed to parse NATS server URL, can not fetch port".into())),
         };
-        let conf_path = std::env::temp_dir().join(format!("cabby-enats-{}-{}.conf", std::process::id(), port));
-        std::fs::write(&conf_path, conf)
-            .map_err(|e| EnatsError(format!("failed to start NATS server, cause: writing {conf_path:?}: {e}")))?;
+        if self.config.jetstream && self.config.store_dir.is_empty() {
+            let store = std::env::temp_dir().join("nats-data").join(self.server_name());
+            create_private_dir(&store).map_err(|e| {
+                EnatsError(format!("failed to start NATS server, cause: creating store dir {store:?}: {e}"))
+            })?;
+        }
 
-        let mut child = Command::new(bin)
+        let conf_path = write_private_config(port, &conf)
+            .map_err(|e| EnatsError(format!("failed to start NATS server, cause: writing config: {e}")))?;
+
+        let mut child = match Command::new(bin)
             .arg("-c")
             .arg(&conf_path)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| EnatsError(format!("failed to start NATS server, cause: running {bin:?}: {e}")))?;
+        {
+            Ok(child) => child,
+            Err(e) => {
+                let _ = std::fs::remove_file(&conf_path);
+                return Err(EnatsError(format!("failed to start NATS server, cause: running {bin:?}: {e}")));
+            }
+        };
 
         // Drain the output continuously. In debug mode its records go to the
         // log (upstream sets the server's logger to `log.With("service",
@@ -795,5 +844,24 @@ mod tests {
         assert!(err.0.starts_with("embedded NATS server exited unexpectedly: "), "{err}");
         assert!(lock(&service.running).is_none());
         service.shutdown().expect("shutdown after the exit is a no-op");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_file_and_store_dir_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = write_private_config(4222, "port: 4222\n").expect("write private config");
+        let mode = std::fs::metadata(&path).expect("metadata").permissions().mode() & 0o777;
+        assert_eq!(0o600, mode);
+        assert_eq!("port: 4222\n", std::fs::read_to_string(&path).expect("read"));
+        let _ = std::fs::remove_file(&path);
+
+        let dir =
+            std::env::temp_dir().join(format!("cabby-enats-dir-test-{}-{}", std::process::id(), random_suffix(6)));
+        create_private_dir(&dir).expect("create private dir");
+        let dir_mode = std::fs::metadata(&dir).expect("metadata").permissions().mode() & 0o777;
+        assert_eq!(0o700, dir_mode);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

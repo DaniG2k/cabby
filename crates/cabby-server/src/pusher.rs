@@ -155,11 +155,6 @@ pub fn generate_socket_id(uid: &str) -> String {
 
 // --- Verifier (verifier.go) ---
 
-/// Constant-time comparison (Go `hmac.Equal`).
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
 fn hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(bytes.len() * 2);
@@ -200,13 +195,19 @@ impl Verifier {
     }
 
     fn verify_string(&self, input: &str, signature: &str) -> bool {
+        if self.key.is_empty() {
+            return false;
+        }
         let calculated = format!("{}:{}", self.app_id, self.sign(input));
-        constant_time_eq(calculated.as_bytes(), signature.as_bytes())
+        cabby_core::utils::constant_time_eq(calculated.as_bytes(), signature.as_bytes())
     }
 
     /// Whether `signature` is the hex HMAC of `input` (REST API requests).
     pub fn verify(&self, input: &str, signature: &str) -> bool {
-        constant_time_eq(self.sign(input).as_bytes(), signature.as_bytes())
+        if self.key.is_empty() {
+            return false;
+        }
+        cabby_core::utils::constant_time_eq(self.sign(input).as_bytes(), signature.as_bytes())
     }
 
     /// The hex HMAC-SHA256 of `input`.
@@ -1202,12 +1203,22 @@ impl RestApi {
         }
 
         // See https://pusher.com/docs/channels/library_auth_reference/rest-api/#worked-authentication-example
+        if self.conf.secret.is_empty() {
+            log(Level::Debug, "pusher secret is empty", &[]);
+            return Err(401);
+        }
+
         let path = request_path(uri);
         let query = uri.query().unwrap_or_default();
         let key = query_param(query, "auth_key");
         let auth_timestamp = query_param(query, "auth_timestamp");
         let auth_version = query_param(query, "auth_version");
         let signature = query_param(query, "auth_signature");
+
+        if !cabby_core::utils::constant_time_eq(key.as_bytes(), self.conf.app_key.as_bytes()) {
+            log(Level::Debug, "invalid auth_key", &[]);
+            return Err(401);
+        }
 
         let Ok(ts) = auth_timestamp.parse::<i64>() else {
             log(Level::Debug, "invalid auth_timestamp", &[Attr::new("timestamp", LogValue::String(auth_timestamp))]);

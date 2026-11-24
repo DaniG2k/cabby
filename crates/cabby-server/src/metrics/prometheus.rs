@@ -1,21 +1,33 @@
-//! Prometheus text exposition and the dedicated metrics HTTP server (upstream
-//! `metrics/prometheus.go`, `server.NewServer`).
+//! Prometheus text exposition (upstream `metrics/prometheus.go`).
 
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use cabby_core::common::StringMap;
-use http_body_util::Full;
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
-use tokio::net::TcpListener;
-use tokio_util::sync::CancellationToken;
 
-use super::{Counter, Gauge, PROMETHEUS_NAMESPACE, Shared, sorted};
+use super::{Counter, Gauge, PROMETHEUS_NAMESPACE, sorted};
+
+/// Default connection cap for a dedicated metrics server when `server.max_conn`
+/// is 0 (unlimited): prevents an exposed metrics port from exhausting FDs.
+pub(super) const DEFAULT_DEDICATED_MAX_CONN: usize = 1024;
+
+/// Escapes a Prometheus label value per the text exposition format (`\`, `"`, `\n`).
+fn escape_label_value(v: &str) -> String {
+    if !v.contains(['\\', '"', '\n']) {
+        return v.to_owned();
+    }
+    let mut out = String::with_capacity(v.len() + 4);
+    for c in v.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            c => out.push(c),
+        }
+    }
+    out
+}
 
 fn prom_tags(tags: Option<&StringMap>) -> String {
     let Some(tags) = tags else {
@@ -24,7 +36,7 @@ fn prom_tags(tags: Option<&StringMap>) -> String {
     // Upstream iterates a Go map (random order); sorted here.
     let mut sorted: Vec<_> = tags.iter().collect();
     sorted.sort();
-    let parts: Vec<String> = sorted.into_iter().map(|(k, v)| format!("{k}=\"{v}\"")).collect();
+    let parts: Vec<String> = sorted.into_iter().map(|(k, v)| format!("{k}=\"{}\"", escape_label_value(v))).collect();
     format!("{{{}}}", parts.join(", "))
 }
 
@@ -62,45 +74,13 @@ pub(super) fn response(body: String) -> http::Response<String> {
         .expect("a valid response")
 }
 
-pub(super) async fn bind(host: &str, port: i64) -> std::io::Result<TcpListener> {
-    let port = u16::try_from(port)
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("invalid port {port}")))?;
-    let host = host.trim_start_matches('[').trim_end_matches(']');
-    TcpListener::bind((host, port)).await
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Serves `path` from `shared` until `shutdown`; other paths get Go's 404.
-pub(super) fn serve(listener: TcpListener, path: String, shared: Arc<Shared>, shutdown: CancellationToken) {
-    let path: Arc<str> = path.into();
-    tokio::spawn(async move {
-        loop {
-            let accepted = tokio::select! {
-                () = shutdown.cancelled() => return,
-                a = listener.accept() => a,
-            };
-            let Ok((stream, _)) = accepted else { continue };
-            let (path, shared, shutdown) = (Arc::clone(&path), Arc::clone(&shared), shutdown.clone());
-            tokio::spawn(async move {
-                let service = service_fn(move |req: http::Request<hyper::body::Incoming>| {
-                    let response = if req.uri().path() == &*path {
-                        response(shared.prometheus())
-                    } else {
-                        http::Response::builder()
-                            .status(404)
-                            .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
-                            .header("X-Content-Type-Options", "nosniff")
-                            .body("404 page not found\n".to_owned())
-                            .expect("a valid response")
-                    };
-                    async move { Ok::<_, Infallible>(response.map(|b| Full::new(Bytes::from(b)))) }
-                });
-                let conn = http1::Builder::new().serve_connection(TokioIo::new(stream), service);
-                // Shutting down drops open connections.
-                tokio::select! {
-                    _ = conn => {}
-                    () = shutdown.cancelled() => {}
-                }
-            });
-        }
-    });
+    #[test]
+    fn escapes_prometheus_label_values() {
+        let tags = StringMap::from([("env".into(), "prod".into()), ("note".into(), "a\"b\\c\nd".into())]);
+        assert_eq!(r#"{env="prod", note="a\"b\\c\nd"}"#, prom_tags(Some(&tags)));
+    }
 }

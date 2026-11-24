@@ -223,11 +223,12 @@ impl HttpService {
                     .map_err(|e| RpcError::Other(format!("invalid HTTP RPC secret: {e}")))?,
             )
         };
-        Ok(Self {
-            client: HttpClient::new(origin, tls, max_idle, IDLE_CONN_TIMEOUT, timeout),
-            secret,
-            breaker: Mutex::new(Breaker::new()),
-        })
+        let max_recv = usize::try_from(config.max_recv_size).ok().filter(|n| *n > 0);
+        let mut client = HttpClient::new(origin, tls, max_idle, IDLE_CONN_TIMEOUT, timeout);
+        if let Some(limit) = max_recv {
+            client = client.with_max_response_bytes(limit);
+        }
+        Ok(Self { client, secret, breaker: Mutex::new(Breaker::new()) })
     }
 
     fn breaker_open(&self) -> bool {

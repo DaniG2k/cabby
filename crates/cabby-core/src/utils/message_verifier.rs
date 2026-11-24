@@ -88,11 +88,7 @@ impl MessageVerifier {
     /// `VerifySignature`).
     pub fn verify_signature(&self, payload: &[u8], digest: &[u8]) -> bool {
         let actual = self.sign(payload);
-        let actual = actual.as_bytes();
-        if actual.len() != digest.len() {
-            return false;
-        }
-        actual.iter().zip(digest).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+        crate::utils::constant_time_eq(actual.as_bytes(), digest)
     }
 }
 

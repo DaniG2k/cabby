@@ -47,6 +47,15 @@ impl WriteOp {
             WriteOp::SessionCommit { .. } => OpKind::SessionCommit,
         }
     }
+
+    /// Payload bytes held by this op (used to bound total queued memory).
+    pub(crate) fn approx_bytes(&self) -> usize {
+        match self {
+            WriteOp::History { stream, data, .. } => stream.len() + data.len(),
+            WriteOp::SessionCommit { sid, data, .. } => sid.len() + data.len(),
+            WriteOp::SessionTouch { sid, .. } => sid.len(),
+        }
+    }
 }
 
 /// Per stream, the highest offset and its timestamp (unix seconds).
@@ -72,6 +81,7 @@ struct Lanes {
     history: Lane,
     touches: Lane,
     commits: Lane,
+    bytes: usize,
     next_seq: u64,
     /// Set by [`WriteQueue::close`]: the deadline of the final flush.
     closed: Option<Instant>,
@@ -119,7 +129,9 @@ impl Lanes {
     /// The oldest op across the lanes.
     fn pop_oldest(&mut self) -> Option<WriteOp> {
         let (_, kind) = DROP_ORDER.into_iter().filter_map(|kind| self.front_seq(kind).map(|seq| (seq, kind))).min()?;
-        self.lane(kind).pop_front().map(|(_, op)| op)
+        let (_, op) = self.lane(kind).pop_front()?;
+        self.bytes = self.bytes.saturating_sub(op.approx_bytes());
+        Some(op)
     }
 
     fn take(&mut self, max: usize) -> Vec<WriteOp> {
@@ -139,54 +151,98 @@ pub(crate) struct WriteQueue {
     lanes: Mutex<Lanes>,
     ready: Condvar,
     capacity: usize,
+    max_bytes: usize,
     batch: usize,
 }
 
 impl WriteQueue {
-    /// At most `capacity` ops; a waiting taker wakes once `batch` are queued.
+    /// At most `capacity` ops (and [`super::QUEUE_MAX_BYTES`] payload bytes); a
+    /// waiting taker wakes once `batch` are queued.
+    #[cfg(test)]
     pub(crate) fn new(capacity: usize, batch: usize) -> Self {
-        Self { lanes: Mutex::new(Lanes::default()), ready: Condvar::new(), capacity, batch: batch.max(1) }
+        Self::with_max_bytes(capacity, super::QUEUE_MAX_BYTES, batch)
+    }
+
+    /// At most `capacity` ops and `max_bytes` payload bytes; a waiting taker
+    /// wakes once `batch` are queued.
+    pub(crate) fn with_max_bytes(capacity: usize, max_bytes: usize, batch: usize) -> Self {
+        Self { lanes: Mutex::new(Lanes::default()), ready: Condvar::new(), capacity, max_bytes, batch: batch.max(1) }
+    }
+
+    /// Adds `op` without blocking, calling `on_drop` for every op dropped to
+    /// stay within `capacity` and `max_bytes` (or for `op` itself once closed
+    /// or when a single op exceeds `max_bytes`).
+    pub(crate) fn push_with_drops(&self, op: WriteOp, mut on_drop: impl FnMut(OpKind)) {
+        let op_bytes = op.approx_bytes();
+        let mut dropped = [0usize; 3];
+        let mut late_kind = None;
+        {
+            let mut lanes = lock(&self.lanes);
+            if lanes.closed.is_some() {
+                lanes.record_drop(&op);
+                let first = !std::mem::replace(&mut lanes.late_logged, true);
+                let kind = op.kind();
+                drop(lanes);
+                if first {
+                    log_warn!(super::log(), "a write arrived after the SQLite broker shut down and is not persisted",
+                        "kind" => format!("{kind:?}"));
+                }
+                on_drop(kind);
+                return;
+            }
+            if op_bytes > self.max_bytes || self.capacity == 0 {
+                lanes.record_drop(&op);
+                late_kind = Some(op.kind());
+            } else {
+                let before = lanes.len();
+                let seq = lanes.next_seq;
+                lanes.next_seq += 1;
+                lanes.bytes += op_bytes;
+                lanes.lane(op.kind()).push_back((seq, op));
+                while lanes.len() > self.capacity || lanes.bytes > self.max_bytes {
+                    let mut evicted = false;
+                    for kind in DROP_ORDER {
+                        if let Some((_, op)) = lanes.lane(kind).pop_front() {
+                            lanes.bytes = lanes.bytes.saturating_sub(op.approx_bytes());
+                            lanes.record_drop(&op);
+                            dropped[kind as usize] += 1;
+                            evicted = true;
+                            break;
+                        }
+                    }
+                    if !evicted {
+                        break;
+                    }
+                }
+                // Wake the taker only when this push fills a batch: it rechecks under
+                // the lock, and a partial batch is taken on its tick anyway.
+                if before < self.batch && lanes.len() >= self.batch {
+                    #[cfg(test)]
+                    {
+                        lanes.notifies += 1;
+                    }
+                    self.ready.notify_one();
+                }
+            }
+        }
+        if let Some(kind) = late_kind {
+            on_drop(kind);
+        }
+        for kind in DROP_ORDER {
+            for _ in 0..dropped[kind as usize] {
+                on_drop(kind);
+            }
+        }
     }
 
     /// Adds `op` without blocking; returns the kind of the op dropped to stay
     /// within capacity, if any. Once closed, `op` itself is dropped (and
     /// returned as such, the first time with a warning).
+    #[cfg(test)]
     pub(crate) fn push(&self, op: WriteOp) -> Option<OpKind> {
-        let mut lanes = lock(&self.lanes);
-        if lanes.closed.is_some() {
-            lanes.record_drop(&op);
-            let first = !std::mem::replace(&mut lanes.late_logged, true);
-            drop(lanes);
-            if first {
-                log_warn!(super::log(), "a write arrived after the SQLite broker shut down and is not persisted",
-                    "kind" => format!("{:?}", op.kind()));
-            }
-            return Some(op.kind());
-        }
-        let before = lanes.len();
-        let seq = lanes.next_seq;
-        lanes.next_seq += 1;
-        lanes.lane(op.kind()).push_back((seq, op));
-        let mut dropped = None;
-        if lanes.len() > self.capacity {
-            for kind in DROP_ORDER {
-                if let Some((_, op)) = lanes.lane(kind).pop_front() {
-                    lanes.record_drop(&op);
-                    dropped = Some(kind);
-                    break;
-                }
-            }
-        }
-        // Wake the taker only when this push fills a batch: it rechecks under
-        // the lock, and a partial batch is taken on its tick anyway.
-        if before < self.batch && lanes.len() >= self.batch {
-            #[cfg(test)]
-            {
-                lanes.notifies += 1;
-            }
-            self.ready.notify_one();
-        }
-        dropped
+        let mut last = None;
+        self.push_with_drops(op, |kind| last = Some(kind));
+        last
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -427,5 +483,33 @@ mod tests {
         assert_eq!(Some(OpKind::History), q.push(history_at("s", 4, T0)));
         assert!(q.history_dropped());
         assert_eq!(StreamMaxima::from([("s".to_owned(), (4, T0))]), q.take_dropped_streams());
+    }
+
+    #[test]
+    fn byte_limit_evicts_oldest_in_drop_order_and_drops_oversized_ops() {
+        let q = WriteQueue::with_max_bytes(100, 10, 1000);
+        let mut drops = Vec::new();
+        // Each history("s", n) has approx_bytes = 1 + 2 = 3.
+        for offset in 1..=3 {
+            q.push_with_drops(history("s", offset), |k| drops.push(k));
+        }
+        assert!(drops.is_empty());
+        assert_eq!(3, q.len());
+
+        // A 7-byte commit forces two 3-byte history ops out (9 + 7 = 16 -> 10).
+        q.push_with_drops(WriteOp::SessionCommit { sid: "a".into(), data: vec![b'x'; 6], expires_at_ms: 1 }, |k| {
+            drops.push(k);
+        });
+        assert_eq!(vec![OpKind::History, OpKind::History], drops);
+        assert!(q.history_dropped());
+        assert_eq!(2, q.len());
+
+        // A single op larger than max_bytes is dropped directly without evicting queued ops.
+        drops.clear();
+        q.push_with_drops(WriteOp::History { stream: "s".into(), offset: 9, ts_secs: T0, data: "x".repeat(20) }, |k| {
+            drops.push(k)
+        });
+        assert_eq!(vec![OpKind::History], drops);
+        assert_eq!(2, q.len());
     }
 }

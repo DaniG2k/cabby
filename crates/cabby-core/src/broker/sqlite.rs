@@ -71,8 +71,11 @@ impl SqliteObserver for NoopObserver {
 
 /// How long opening waits for another process to release the database.
 pub const LOCK_TIMEOUT: Duration = Duration::from_secs(10);
-/// The write queue's bound.
+/// The write queue's op-count bound.
 pub const QUEUE_CAPACITY: usize = 100_000;
+/// The write queue's payload byte bound (64 MiB), so large broadcast payloads
+/// cannot grow RAM without limit if disk writes stall.
+pub const QUEUE_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 /// Where the database lives and how the broker treats it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,11 +83,17 @@ pub struct SqliteOptions {
     pub path: PathBuf,
     pub lock_timeout: Duration,
     pub queue_capacity: usize,
+    pub queue_max_bytes: usize,
 }
 
 impl SqliteOptions {
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into(), lock_timeout: LOCK_TIMEOUT, queue_capacity: QUEUE_CAPACITY }
+        Self {
+            path: path.into(),
+            lock_timeout: LOCK_TIMEOUT,
+            queue_capacity: QUEUE_CAPACITY,
+            queue_max_bytes: QUEUE_MAX_BYTES,
+        }
     }
 }
 
@@ -148,7 +157,11 @@ impl SqliteBroker {
     ) -> Result<Self, BrokerError> {
         let memory = Memory::new(broadcaster, presenter, config, clock.clone());
         let loaded = loader::load(&memory, config, options, clock.as_ref())?;
-        let queue = Arc::new(WriteQueue::new(options.queue_capacity, persister::BATCH_SIZE));
+        let queue = Arc::new(WriteQueue::with_max_bytes(
+            options.queue_capacity,
+            options.queue_max_bytes,
+            persister::BATCH_SIZE,
+        ));
         let persister = Persister::new(loaded.db, queue.clone(), config, clock, observer.clone(), Timing::standard());
         Ok(Self {
             memory,
@@ -209,9 +222,7 @@ impl SqliteBroker {
     }
 
     fn enqueue(&self, op: WriteOp) {
-        if let Some(kind) = self.queue.push(op) {
-            self.observer.dropped(kind);
-        }
+        self.queue.push_with_drops(op, |kind| self.observer.dropped(kind));
     }
 }
 

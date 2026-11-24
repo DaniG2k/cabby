@@ -83,12 +83,17 @@ impl From<rusqlite::Error> for StoreError {
     }
 }
 
-/// Opens (creating if needed) the database: WAL, `synchronous=NORMAL`, a busy
-/// timeout, `quick_check`, then migrations up to the current version.
+/// Opens (creating if needed) the database: incremental auto-vacuum for fresh
+/// files, WAL, `synchronous=NORMAL`, a busy timeout, `quick_check`, then
+/// migrations up to the current version.
 pub(super) fn open(path: &Path) -> Result<Connection, StoreError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let conn = Connection::open_with_flags(path, flags)?;
     conn.busy_timeout(BUSY_TIMEOUT)?;
+    let page_count: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0))?;
+    if page_count == 0 {
+        conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
+    }
     let mode: String = conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0))?;
     if !mode.eq_ignore_ascii_case("wal") {
         return Err(StoreError::Other(format!("journal_mode is {mode}, the SQLite broker needs WAL")));
@@ -268,7 +273,11 @@ pub(super) struct Prune<'a> {
     pub(super) streams: &'a Touched,
 }
 
-/// One prune pass, in one transaction.
+/// Pages reclaimed per periodic prune pass (~1 MiB at default 4 KiB page size).
+const PRUNE_VACUUM_PAGES: u32 = 256;
+
+/// One prune pass, in one transaction, followed by bounded incremental vacuum
+/// so deleted history/sessions return disk space to the OS.
 pub(super) fn prune(conn: &mut Connection, p: &Prune<'_>) -> Result<(), StoreError> {
     let tx = conn.transaction()?;
     tx.execute(PRUNE_BY_TTL, [p.history_cutoff])?;
@@ -281,6 +290,17 @@ pub(super) fn prune(conn: &mut Connection, p: &Prune<'_>) -> Result<(), StoreErr
     tx.execute(PRUNE_STREAMS, [p.now_secs])?;
     tx.execute(PRUNE_SESSIONS, [p.now_ms])?;
     tx.commit()?;
+    incremental_vacuum(conn, Some(PRUNE_VACUUM_PAGES))?;
+    Ok(())
+}
+
+/// Reclaims freed pages (`PRAGMA incremental_vacuum`). A no-op on files that
+/// were created without `auto_vacuum = INCREMENTAL`.
+pub(super) fn incremental_vacuum(conn: &Connection, pages: Option<u32>) -> Result<(), StoreError> {
+    match pages {
+        Some(n) => conn.execute_batch(&format!("PRAGMA incremental_vacuum({n})"))?,
+        None => conn.execute_batch("PRAGMA incremental_vacuum")?,
+    }
     Ok(())
 }
 
@@ -330,6 +350,8 @@ mod tests {
         assert_eq!("wal", mode);
         let synchronous: i64 = conn.pragma_query_value(None, "synchronous", |r| r.get(0)).unwrap();
         assert_eq!(1, synchronous, "synchronous=NORMAL");
+        let auto_vacuum: i64 = conn.pragma_query_value(None, "auto_vacuum", |r| r.get(0)).unwrap();
+        assert_eq!(2, auto_vacuum, "auto_vacuum=INCREMENTAL");
     }
 
     #[test]
@@ -663,5 +685,25 @@ mod tests {
             Err(StoreError::Other(why)) => assert!(why.contains("schema_version \"one\""), "{why}"),
             other => panic!("expected a startup error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn pruning_reclaims_freed_pages_via_incremental_vacuum() {
+        let dir = TempDir::new();
+        let path = dir.file("cabby.db");
+        let mut conn = open(&path).unwrap();
+        let payload = "x".repeat(4096);
+        let ops: Vec<WriteOp> = (1..=80)
+            .map(|offset| WriteOp::History { stream: "s".into(), offset, ts_secs: T0 - 1000, data: payload.clone() })
+            .collect();
+        write_batch(&mut conn, &ops, &StreamMaxima::new(), 300, T0, false).unwrap();
+        let pages_before: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0)).unwrap();
+        assert!(pages_before > 40, "pages_before={pages_before}");
+
+        let touched = Touched::from(["s".to_owned()]);
+        let p = Prune { history_cutoff: T0, now_secs: T0, now_ms: T0 * 1000, history_limit: 100, streams: &touched };
+        prune(&mut conn, &p).unwrap();
+        let pages_after: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0)).unwrap();
+        assert!(pages_after < pages_before, "expected page count to shrink: {pages_before} -> {pages_after}");
     }
 }

@@ -328,3 +328,52 @@ fn deviation_d057_batch_events_are_broadcast() {
     let target = signed_target(&app.conf, "POST", "/apps/my-test-id/batch_events", Some(bad));
     assert_eq!(422, app.api("POST", &target, bad).0);
 }
+
+/// Pins D-066: Pusher never accepts signatures computed with an empty secret,
+/// and the REST API rejects a mismatched `auth_key`.
+#[test]
+fn deviation_d066_pusher_rejects_empty_secret_and_wrong_auth_key() {
+    let empty = Verifier::new("my-key", "");
+    let empty_key_channel_sig = format!("my-key:{}", empty.sign("1234.1234:private-room"));
+    assert!(!empty.verify_channel("1234.1234", "private-room", &empty_key_channel_sig));
+    let empty_key_rest_sig = empty.sign("POST\n/apps/app/events\nauth_key=my-key");
+    assert!(!empty.verify("POST\n/apps/app/events\nauth_key=my-key", &empty_key_rest_sig));
+
+    let broker =
+        Arc::new(core_broker::Memory::new(None, None, &core_broker::Config::new(), Arc::new(core_broker::SystemClock)));
+    struct Noop;
+    impl BroadcastHandler for Noop {
+        fn handle_broadcast(&self, _: &[u8]) -> Result<(), BroadcastError> {
+            Ok(())
+        }
+        fn handle_pubsub(&self, _: &[u8]) {}
+    }
+
+    // A RestApi without a secret answers 401.
+    let mut empty_conf = Config::new();
+    empty_conf.app_id = "app".into();
+    empty_conf.app_key = "my-key".into();
+    let empty_api = RestApi::new(Arc::new(Noop), broker.clone(), empty_conf.clone());
+    let body = br#"{"name":"e","channel":"c","data":"{}"}"#;
+    let target = signed_target(&empty_conf, "POST", "/apps/app/events", Some(body));
+    let req = http::Request::builder()
+        .method("POST")
+        .uri(target)
+        .body(Box::new(Cursor::new(body.to_vec())) as Box<dyn Read + Send>)
+        .unwrap();
+    assert_eq!(401, empty_api.handle(req).status().as_u16());
+
+    // Valid secret but wrong auth_key in query string is rejected with 401.
+    let mut conf = empty_conf;
+    conf.secret = "s3cr3t".into();
+    let api = RestApi::new(Arc::new(Noop), broker, conf.clone());
+    let mut wrong_key_conf = conf;
+    wrong_key_conf.app_key = "other-key".into();
+    let target = signed_target(&wrong_key_conf, "POST", "/apps/app/events", Some(body));
+    let req = http::Request::builder()
+        .method("POST")
+        .uri(target)
+        .body(Box::new(Cursor::new(body.to_vec())) as Box<dyn Read + Send>)
+        .unwrap();
+    assert_eq!(401, api.handle(req).status().as_u16());
+}

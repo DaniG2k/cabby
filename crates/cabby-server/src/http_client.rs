@@ -14,13 +14,27 @@ use std::time::Duration;
 use bytes::Bytes;
 use http::header::{AUTHORIZATION, HOST, HeaderName, HeaderValue};
 use http::{Method, Request, Uri};
-use http_body_util::{BodyExt, Full};
+use http_body_util::{BodyExt, Full, LengthLimitError, Limited};
 use hyper::client::conn::http1::{self, SendRequest};
 use hyper_util::rt::TokioIo;
 use rustls::ClientConfig;
 use tokio::time::Instant;
 
 use crate::client_tls::ClientStream;
+
+/// Default maximum HTTP RPC response body size (16 MiB, D-068).
+pub(crate) const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+
+/// Removes `userinfo@` from a URL string so credentials do not appear in errors
+/// or debug output.
+fn redact_url(raw: &str) -> String {
+    let Some(scheme_end) = raw.find("://") else { return raw.to_owned() };
+    let after_scheme = &raw[scheme_end + 3..];
+    let authority_end = after_scheme.find(['/', '?', '#']).unwrap_or(after_scheme.len());
+    let authority = &after_scheme[..authority_end];
+    let Some(at) = authority.rfind('@') else { return raw.to_owned() };
+    format!("{}://{}", &raw[..scheme_end], &after_scheme[at + 1..])
+}
 
 /// A parsed base URL.
 #[derive(Debug, Clone)]
@@ -41,14 +55,15 @@ pub(crate) struct Origin {
 
 impl Origin {
     pub(crate) fn parse(raw: &str) -> Result<Self, String> {
-        let uri: Uri = raw.parse().map_err(|e| format!("parse {raw:?}: {e}"))?;
+        let safe = redact_url(raw);
+        let uri: Uri = raw.parse().map_err(|e| format!("parse {safe:?}: {e}"))?;
         let https = match uri.scheme_str() {
             Some("https") => true,
             Some("http") => false,
             Some(other) => return Err(format!("unsupported protocol scheme {other:?}")),
-            None => return Err(format!("parse {raw:?}: missing protocol scheme")),
+            None => return Err(format!("parse {safe:?}: missing protocol scheme")),
         };
-        let authority = uri.authority().ok_or_else(|| format!("parse {raw:?}: missing host"))?;
+        let authority = uri.authority().ok_or_else(|| format!("parse {safe:?}: missing host"))?;
         let (credentials, host_port) = match authority.as_str().rsplit_once('@') {
             Some((c, h)) => (Some(c), h),
             None => (None, authority.as_str()),
@@ -68,7 +83,7 @@ impl Origin {
             base_path,
             query: uri.query().map(str::to_owned),
             basic_auth,
-            raw: raw.to_owned(),
+            raw: safe,
         })
     }
 
@@ -163,6 +178,7 @@ pub(crate) struct HttpClient {
     max_idle: usize,
     idle_timeout: Duration,
     timeout: Option<Duration>,
+    max_response_bytes: usize,
 }
 
 impl std::fmt::Debug for HttpClient {
@@ -179,7 +195,22 @@ impl HttpClient {
         idle_timeout: Duration,
         timeout: Option<Duration>,
     ) -> Self {
-        Self { origin, tls, pool: Arc::default(), max_idle, idle_timeout, timeout }
+        Self {
+            origin,
+            tls,
+            pool: Arc::default(),
+            max_idle,
+            idle_timeout,
+            timeout,
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
+        }
+    }
+
+    pub(crate) fn with_max_response_bytes(mut self, limit: usize) -> Self {
+        if limit > 0 {
+            self.max_response_bytes = limit;
+        }
+        self
     }
 
     pub(crate) fn origin(&self) -> &Origin {
@@ -279,8 +310,17 @@ impl HttpClient {
             .get(http::header::CONNECTION)
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| v.eq_ignore_ascii_case("close"));
-        let body =
-            response.into_body().collect().await.map_err(|e| self.error(path, &e.to_string(), false))?.to_bytes();
+        let body = match Limited::new(response.into_body(), self.max_response_bytes).collect().await {
+            Ok(collected) => collected.to_bytes(),
+            Err(e) if e.is::<LengthLimitError>() => {
+                return Err(self.error(
+                    path,
+                    &format!("response body exceeds limit of {} bytes", self.max_response_bytes),
+                    false,
+                ));
+            }
+            Err(e) => return Err(self.error(path, &e.to_string(), false)),
+        };
         if keep_alive {
             self.checkin(sender);
         }
@@ -448,5 +488,40 @@ mod dial_error_tests {
         }
         let other = std::io::Error::other("lookup failed");
         assert_eq!("lookup failed", super::go_dial_error(&other));
+    }
+
+    #[test]
+    fn origin_redacts_credentials_in_errors_and_debug() {
+        let err = super::Origin::parse("http://user:s3cr3t@bad host").unwrap_err();
+        assert!(!err.contains("s3cr3t"), "secret leaked in error: {err}");
+        let origin = super::Origin::parse("http://user:s3cr3t@127.0.0.1:8080/rpc").unwrap();
+        let dbg = format!("{origin:?}");
+        assert!(!dbg.contains("s3cr3t"), "secret leaked in Debug: {dbg}");
+        assert_eq!("http://127.0.0.1:8080/rpc", origin.raw());
+    }
+
+    /// Pins D-068: HTTP RPC responses exceeding the configured limit fail
+    /// instead of buffering unboundedly into memory.
+    #[tokio::test]
+    async fn deviation_d068_response_body_exceeding_limit_fails() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = sock.read(&mut buf).await;
+            let body = "x".repeat(64);
+            let resp = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+            let _ = sock.write_all(resp.as_bytes()).await;
+        });
+
+        let origin = super::Origin::parse(&format!("http://{addr}")).unwrap();
+        let client = super::HttpClient::new(origin, None, 1, std::time::Duration::from_secs(5), None)
+            .with_max_response_bytes(16);
+        let err = client.post("connect", &[], bytes::Bytes::new()).await.unwrap_err();
+        assert!(err.message.contains("response body exceeds limit of 16 bytes"), "{}", err.message);
     }
 }
