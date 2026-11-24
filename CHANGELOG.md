@@ -8,7 +8,7 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-11-24
 
 Cabby 0.2.0 is compatible with AnyCable server 1.6.21: an AnyCable deployment that swaps
 `anycable-go` for `cabby` and keeps its `anycable.toml` and `ANYCABLE_*` variables behaves as
