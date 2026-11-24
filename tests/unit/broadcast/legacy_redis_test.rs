@@ -1,6 +1,6 @@
 //! upstream file: broadcast/legacy_redis_test.go
 //!
-//! Real Redis at `CABBY_REDIS_URL` (required; upstream skips without Redis).
+//! Real Redis at `CABBY_TEST_REDIS_URL` (required; upstream skips without Redis).
 //! Channels are unique per test (`<prefix>:<upstream name>`), the broadcaster
 //! connects as the test's own ACL user, and the reconnect test kills only that
 //! user's pub/sub connections (upstream: `CLIENT KILL TYPE pubsub`, every pub/sub

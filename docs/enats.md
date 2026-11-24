@@ -73,7 +73,7 @@ remaining Go runtime dependency. It does not require rewriting NATS.
   belong to the server milestone), so the CLI doesn't start the service yet.
 - Translated tests that need a NATS server (the broker, pub/sub and node integration
   cases) use an external `nats-server` process (`cabby_testkit::nats::NatsServer`, or the
-  shared `CABBY_NATS_URL`), as upstream uses `enats`. They pass on Cabby.
+  shared `CABBY_TEST_NATS_URL`), as upstream uses `enats`. They pass on Cabby.
 - Still pending because they need the CLI wiring and the transport layer:
   - `features/enats_broker.testfile#scenario`
   - `features/enats_clusters.testfile#scenario`

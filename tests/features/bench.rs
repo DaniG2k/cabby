@@ -197,10 +197,10 @@ fn run_workload(sut: &Sut, w: Workload) -> Vec<(usize, usize)> {
     results
 }
 
-/// Host and port of `CABBY_REDIS_URL` (the default user publishes).
+/// Host and port of `CABBY_TEST_REDIS_URL` (the default user publishes).
 fn redis_addr() -> std::net::SocketAddr {
     use std::net::ToSocketAddrs;
-    let url = std::env::var("CABBY_REDIS_URL").expect("CABBY_REDIS_URL");
+    let url = std::env::var("CABBY_TEST_REDIS_URL").expect("CABBY_TEST_REDIS_URL");
     let rest = url.trim_start_matches("redis://");
     let authority = rest.split('/').next().unwrap_or(rest);
     let hp = authority.rsplit_once('@').map_or(authority, |(_, hp)| hp);

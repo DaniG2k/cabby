@@ -2,8 +2,9 @@
 //!
 //! The binary is `SUT_BIN`, or by backend: `target/debug/cabby` (Rust) and
 //! `target/reference-bin/anycable-go` (Go, built by `cargo xtask reference-build`).
-//! Both receive the same AnyCable CLI flags. Every listener gets an isolated port
-//! and the environment is cleared of `ANYCABLE_*` variables.
+//! Both receive the same AnyCable CLI flags. Every listener gets an isolated port,
+//! and the server inherits no `CABBY_*` or `ANYCABLE_*` variable apart from
+//! [`KEPT_VARS`] and `CABBY_TEST_*` ([`scrub_env`], D-064).
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -18,6 +19,28 @@ use crate::process::Supervised;
 use crate::{Backend, backend, workspace_root};
 
 const START_DEADLINE: Duration = Duration::from_secs(20);
+
+/// Variables a server under test keeps from the test process: the `nats-server`
+/// binary for embedded NATS (D-064). `CABBY_TEST_*` (the test services) is kept too.
+pub const KEPT_VARS: &[&str] = &["CABBY_NATS_SERVER", "CABBY_NATS_SERVER_BIN"];
+
+/// The names in `vars` a server under test must not inherit: every `CABBY_*`
+/// and `ANYCABLE_*` variable except [`KEPT_VARS`] and `CABBY_TEST_*` (D-064).
+/// Otherwise a developer's shell would configure the server the tests start.
+pub fn scrubbed<'a>(vars: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
+    vars.into_iter()
+        .filter(|k| k.starts_with("CABBY_") || k.starts_with("ANYCABLE_"))
+        .filter(|k| !k.starts_with("CABBY_TEST_") && !KEPT_VARS.contains(k))
+        .collect()
+}
+
+/// Removes the variables [`scrubbed`] names from what `cmd` inherits.
+pub fn scrub_env(cmd: &mut Command) {
+    let names: Vec<String> = std::env::vars_os().map(|(k, _)| k.to_string_lossy().into_owned()).collect();
+    for k in scrubbed(names.iter().map(String::as_str)) {
+        cmd.env_remove(k);
+    }
+}
 const IO_DEADLINE: Duration = Duration::from_secs(5);
 
 pub fn sut_binary() -> PathBuf {
@@ -91,11 +114,7 @@ impl Sut {
         let port = free_port();
         let broadcast_port = if options.separate_broadcast_port { free_port() } else { port };
         let mut cmd = Command::new(sut_binary());
-        for (k, _) in std::env::vars() {
-            if k.starts_with("ANYCABLE_") {
-                cmd.env_remove(k);
-            }
-        }
+        scrub_env(&mut cmd);
         cmd.env("ANYCABLE_DISABLE_TELEMETRY", "true");
         cmd.envs(env.iter().copied());
         if options.via_env {
@@ -155,5 +174,27 @@ pub fn handshake_status(addr: SocketAddr, path: &str, headers: &[(&str, &str)]) 
     match code {
         Some(c) => Ok(c),
         None => bail!("malformed status line {line:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pins D-064: servers under test inherit no server configuration.
+    #[test]
+    fn server_config_variables_are_scrubbed() {
+        let vars = [
+            "ANYCABLE_PORT",
+            "CABBY_PORT",
+            "CABBY_REDIS_URL",
+            "CABBY_BACKEND",
+            "CABBY_NATS_SERVER",
+            "CABBY_NATS_SERVER_BIN",
+            "CABBY_TEST_REDIS_URL",
+            "PATH",
+            "PORT",
+        ];
+        assert_eq!(scrubbed(vars), vec!["ANYCABLE_PORT", "CABBY_PORT", "CABBY_REDIS_URL", "CABBY_BACKEND"]);
     }
 }

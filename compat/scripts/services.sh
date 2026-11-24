@@ -19,7 +19,7 @@ case "${1:-start}" in
     mp=$(docker port cabby-svc-nats 8222/tcp | head -1 | cut -d: -f2)
     for _ in $(seq 1 100); do docker exec cabby-svc-redis redis-cli ping 2>/dev/null | grep -q PONG && break; sleep 0.1; done
     for _ in $(seq 1 100); do curl -sf "http://127.0.0.1:$mp/healthz" >/dev/null && break; sleep 0.1; done
-    echo "export CABBY_REDIS_URL=redis://127.0.0.1:$rp/ CABBY_NATS_URL=nats://127.0.0.1:$np CABBY_NATS_MONITOR_URL=http://127.0.0.1:$mp"
+    echo "export CABBY_TEST_REDIS_URL=redis://127.0.0.1:$rp/ CABBY_TEST_NATS_URL=nats://127.0.0.1:$np CABBY_TEST_NATS_MONITOR_URL=http://127.0.0.1:$mp"
     ;;
   restart) "$0" stop; exec "$0" start ;;
   stop) docker rm -f cabby-svc-redis cabby-svc-nats >/dev/null 2>&1 || true ;;

@@ -321,10 +321,10 @@ impl World {
     }
 }
 
-/// Host and port of `CABBY_REDIS_URL` (the default user publishes).
+/// Host and port of `CABBY_TEST_REDIS_URL` (the default user publishes).
 fn redis_addr() -> std::net::SocketAddr {
     services::redis();
-    let url = std::env::var("CABBY_REDIS_URL").expect("CABBY_REDIS_URL");
+    let url = std::env::var("CABBY_TEST_REDIS_URL").expect("CABBY_TEST_REDIS_URL");
     host_port(&url, "redis://")
 }
 
