@@ -1,5 +1,10 @@
 # mruby in Cabby
 
+> **Compatibility feature.** mruby scripting is supported and tested for deployments that use a
+> custom metrics formatter with AnyCable today. It is a cargo feature, off by default and not in
+> release builds: build with `--features mruby` to use `--metrics_log_formatter`. For new
+> setups, use Prometheus metrics (`--metrics_http`).
+
 Upstream AnyCable embeds mruby so operators can script extensions in Ruby. Today the only
 consumer is the custom metrics printer (`--metrics_log_formatter=<file.rb>`,
 `metrics/custom_printer.go`, scenario `features/mruby_printers.testfile`). It is built only

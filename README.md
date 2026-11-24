@@ -56,7 +56,7 @@ subscriber. Several Cabby nodes can share broadcasts through Redis or NATS.
 
 - Action Cable protocol (`actioncable-v1-json`) and its extended version with stream history
 - RPC to your app over HTTP or gRPC
-- Broadcasting via HTTP, Redis (pub/sub or streams) and NATS; multi-node pub/sub via Redis or NATS
+- Broadcasting via HTTP, Redis streams and NATS; multi-node pub/sub via Redis or NATS
 - Reliable streams: history and session recovery after a reconnect
 - SQLite broker (`--broker=sqlite --sqlite_path=/var/lib/cabby/cabby.db`): stream history,
   offsets and sessions survive a graceful restart of a single node, with no Redis or NATS. After
@@ -66,10 +66,6 @@ subscriber. Several Cabby nodes can share broadcasts through Redis or NATS.
 - Server-Sent Events
 - Pusher protocol compatibility, including the Pusher REST API for broadcasts
 - Durable Streams: HTTP catch-up, long polling and SSE
-- Embedded NATS (`--embed_nats`), run as a supervised `nats-server` child process. Cabby looks for
-  `CABBY_NATS_SERVER`, then `nats-server` next to the `cabby` binary, then on `PATH`; until there
-  are release builds, install `nats-server` yourself ([`docs/enats.md`](docs/enats.md))
-- mruby scripting for custom metrics output (cargo feature `mruby`, [`docs/mruby.md`](docs/mruby.md))
 - Prometheus metrics and log lines named as in the Go server, so existing dashboards and alerts
   keep working
 
@@ -339,6 +335,20 @@ Until Cabby has its own documentation, the [AnyCable server docs](https://docs.a
 its configuration and features. Intended differences from the Go server, such as Redis 6 or
 later for pub/sub, are recorded in [`compat/deviations.md`](compat/deviations.md), most with a pinning test.
 AnyCable Pro features are out of scope.
+
+### Supported for compatibility
+
+These features work, are covered by the translated tests, and stay supported so that existing
+AnyCable deployments can switch without changes. For new setups, prefer the alternative in the
+last column.
+
+| Feature | What it does | For new setups |
+|---|---|---|
+| Embedded NATS (`--embed_nats`) | Runs a `nats-server` as a supervised child process ([`docs/enats.md`](docs/enats.md)). You install `nats-server` yourself; release artifacts don't include it | an external NATS server (`--nats_servers`), for example the official `nats` image |
+| CableReady streams (`--cable_ready`) | Verifies signed CableReady stream names | Turbo Streams (`--turbo_streams`) or signed streams |
+| Legacy Redis pub/sub broadcasting (`--broadcast_adapter=redis`) | Takes broadcasts from a Redis pub/sub channel | `http` or `redisx` (Redis streams) broadcasting |
+| StatsD metrics (`--statsd_host`) | Sends metrics to a StatsD server | Prometheus (`--metrics_http`) |
+| mruby metrics formatters (`--metrics_log_formatter`) | Formats metrics log lines with a Ruby script ([`docs/mruby.md`](docs/mruby.md)). A build feature, off by default and not in release builds | Prometheus, or the default log format |
 
 ## Layout
 

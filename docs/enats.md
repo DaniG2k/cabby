@@ -1,5 +1,10 @@
 # Embedded NATS (`enats`): strategy
 
+> **Compatibility feature.** Embedded NATS is supported and tested, and stays for deployments
+> that use it with AnyCable today. For new setups, run a NATS server next to Cabby (for example
+> the official `nats` image) and point `--nats_servers` at it. Cabby's release artifacts don't
+> include `nats-server`.
+
 Upstream links the NATS server into the AnyCable binary as a Go library
 (`github.com/nats-io/nats-server/v2` v2.15.1, pinned by `compat/reference/go.mod`).
 `enats.Service` builds `server.Options` from `enats.Config`, starts the server in-process,
@@ -22,10 +27,10 @@ remaining Go runtime dependency. It does not require rewriting NATS.
 
 ## The chosen design (`cabby_server::enats::Service`)
 
-- **Binary lookup:** `CABBY_NATS_SERVER`, then `nats-server` next to the Cabby executable,
-  then `nats-server` on `PATH`. Releases should bundle the binary next to `cabby`, at the
-  version pinned by the reference `go.mod` (the test kit builds exactly that version into
-  `target/test-services/nats-server`).
+- **Binary lookup:** `CABBY_NATS_SERVER_BIN` (or its older spelling `CABBY_NATS_SERVER`), then
+  `nats-server` next to the Cabby executable, then `nats-server` on `PATH`. Release artifacts
+  don't bundle it: install the version you want (the test kit builds the one pinned by the
+  reference `go.mod` into `target/test-services/nats-server`).
 - **Configuration:** `Service::server_config` writes a nats-server configuration file that
   mirrors upstream's `server.Options`:
   - server name: the configured name, or the service address plus a random suffix, as upstream;
@@ -65,15 +70,8 @@ remaining Go runtime dependency. It does not require rewriting NATS.
 
 ## Status
 
-- Done: `enats::Config` (TOML, defaults), plus `enats::Service` with start, readiness,
-  JetStream readiness, description and shutdown. Unit tests cover configuration generation
-  and a real start/stop against the test-services `nats-server`
-  (`cabby-server` `enats::tests`).
-- Not yet done: wiring `--embed_nats` into the server launch (the launcher and transports
-  belong to the server milestone), so the CLI doesn't start the service yet.
-- Translated tests that need a NATS server (the broker, pub/sub and node integration
-  cases) use an external `nats-server` process (`cabby_testkit::nats::NatsServer`, or the
-  shared `CABBY_TEST_NATS_URL`), as upstream uses `enats`. They pass on Cabby.
-- Still pending because they need the CLI wiring and the transport layer:
-  - `features/enats_broker.testfile#scenario`
-  - `features/enats_clusters.testfile#scenario`
+Done. `--embed_nats` starts the service from the CLI, and the NATS broker and pub/sub connect to
+it. The translated cases that need a NATS server use an external `nats-server` process
+(`cabby_testkit::nats::NatsServer`, or the shared `CABBY_TEST_NATS_URL`), as upstream uses
+`enats`, and the scenarios `features/enats_broker.testfile` and `features/enats_clusters.testfile`
+run the CLI with `--embed_nats`. All of them pass on Cabby (`cargo xtask report --by-package`).
