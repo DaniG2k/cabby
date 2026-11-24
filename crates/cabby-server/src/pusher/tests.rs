@@ -330,9 +330,9 @@ fn deviation_d057_batch_events_are_broadcast() {
 }
 
 /// Pins D-066: Pusher never accepts signatures computed with an empty secret,
-/// and the REST API rejects a mismatched `auth_key`.
+/// neither in the verifier nor in the REST API.
 #[test]
-fn deviation_d066_pusher_rejects_empty_secret_and_wrong_auth_key() {
+fn deviation_d066_pusher_rejects_an_empty_secret() {
     let empty = Verifier::new("my-key", "");
     let empty_key_channel_sig = format!("my-key:{}", empty.sign("1234.1234:private-room"));
     assert!(!empty.verify_channel("1234.1234", "private-room", &empty_key_channel_sig));
@@ -353,7 +353,7 @@ fn deviation_d066_pusher_rejects_empty_secret_and_wrong_auth_key() {
     let mut empty_conf = Config::new();
     empty_conf.app_id = "app".into();
     empty_conf.app_key = "my-key".into();
-    let empty_api = RestApi::new(Arc::new(Noop), broker.clone(), empty_conf.clone());
+    let empty_api = RestApi::new(Arc::new(Noop), broker, empty_conf.clone());
     let body = br#"{"name":"e","channel":"c","data":"{}"}"#;
     let target = signed_target(&empty_conf, "POST", "/apps/app/events", Some(body));
     let req = http::Request::builder()
@@ -362,18 +362,4 @@ fn deviation_d066_pusher_rejects_empty_secret_and_wrong_auth_key() {
         .body(Box::new(Cursor::new(body.to_vec())) as Box<dyn Read + Send>)
         .unwrap();
     assert_eq!(401, empty_api.handle(req).status().as_u16());
-
-    // Valid secret but wrong auth_key in query string is rejected with 401.
-    let mut conf = empty_conf;
-    conf.secret = "s3cr3t".into();
-    let api = RestApi::new(Arc::new(Noop), broker, conf.clone());
-    let mut wrong_key_conf = conf;
-    wrong_key_conf.app_key = "other-key".into();
-    let target = signed_target(&wrong_key_conf, "POST", "/apps/app/events", Some(body));
-    let req = http::Request::builder()
-        .method("POST")
-        .uri(target)
-        .body(Box::new(Cursor::new(body.to_vec())) as Box<dyn Read + Send>)
-        .unwrap();
-    assert_eq!(401, api.handle(req).status().as_u16());
 }

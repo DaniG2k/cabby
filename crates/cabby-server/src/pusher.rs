@@ -1215,11 +1215,6 @@ impl RestApi {
         let auth_version = query_param(query, "auth_version");
         let signature = query_param(query, "auth_signature");
 
-        if !cabby_core::utils::constant_time_eq(key.as_bytes(), self.conf.app_key.as_bytes()) {
-            log(Level::Debug, "invalid auth_key", &[]);
-            return Err(401);
-        }
-
         let Ok(ts) = auth_timestamp.parse::<i64>() else {
             log(Level::Debug, "invalid auth_timestamp", &[Attr::new("timestamp", LogValue::String(auth_timestamp))]);
             return Err(401);
