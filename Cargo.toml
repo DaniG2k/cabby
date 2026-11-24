@@ -38,6 +38,10 @@ redis = { version = "=1.8.1", default-features = false, features = ["aio", "toki
 # SQLite broker (D-065): SQLite compiled in from the bundled amalgamation (public domain), so no
 # system library is needed; `cache` keeps `prepare_cached`.
 rusqlite = { version = "=0.41.1", default-features = false, features = ["bundled", "cache"] }
+# PostgreSQL adapters (D-070, D-071): a pure-Rust client, TLS through the workspace rustls
+# (ring provider; no OpenSSL).
+tokio-postgres = { version = "=0.7.18", default-features = false, features = ["runtime"] }
+tokio-postgres-rustls = { version = "=0.14.0", default-features = false }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8.5"
 serde = { version = "1.0.229", features = ["derive"] }

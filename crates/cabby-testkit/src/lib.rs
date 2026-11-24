@@ -30,6 +30,7 @@ pub mod fault_proxy;
 pub mod http_stub;
 pub mod mruby_bridge;
 pub mod ports;
+pub mod postgres;
 pub mod process;
 pub mod redis_broker;
 pub mod reference;

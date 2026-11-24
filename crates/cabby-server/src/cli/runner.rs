@@ -665,6 +665,15 @@ impl Runner {
                     "nats" => Arc::new(
                         crate::pubsub::NatsSubscriber::new(handler, &c.nats_pubsub).map_err(|e| CliError(e.0))?,
                     ),
+                    // Cabby only (D-070).
+                    "postgres" => Arc::new(
+                        crate::postgres::PostgresSubscriber::new(
+                            handler,
+                            &c.postgres,
+                            crate::postgres::Metrics::register_once(&self.metrics),
+                        )
+                        .map_err(|e| CliError(e.0))?,
+                    ),
                     other => return Err(illegal_argument(&format!("Unsupported subscriber adapter: {other}"))),
                 };
                 let core = Arc::new(CoreSubscriber { inner, events: self.events.clone() });

@@ -166,6 +166,18 @@ impl Subscriber {
         }
     }
 
+    /// The Postgres subscriber (a Cabby addition, D-070: not observable on Go).
+    pub fn postgres(
+        handler: &TestHandler,
+        config: &cabby_server::postgres::PostgresConfig,
+        metrics: cabby_server::postgres::Metrics,
+    ) -> Result<Self, String> {
+        crate::postgres::rust_only();
+        cabby_server::postgres::PostgresSubscriber::new(handler.rust(), config, metrics)
+            .map(|s| Self { inner: SubscriberImpl::Rust(Box::new(s)) })
+            .map_err(|e| e.0)
+    }
+
     /// Upstream `NewNATSSubscriber(handler, &config, ...)`.
     pub fn nats(handler: &TestHandler, config: &NatsConfig) -> Result<Self, String> {
         match backend() {

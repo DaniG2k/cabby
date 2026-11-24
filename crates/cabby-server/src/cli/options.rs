@@ -65,7 +65,7 @@ const NON_FLAG_ENV: &[&str] = &["FILTER_LOGS", "FLY_RPC_APP_NAME"];
 
 /// The last line of `--help` (D-061). Cabby-only settings (D-065) have no
 /// `ANYCABLE_*` name; a test checks that each one is named here.
-const ENV_FOOTER: &str = "Every CABBY_* variable can also be set as ANYCABLE_* (CABBY_* takes precedence), except the Cabby-only CABBY_SQLITE_PATH, CABBY_REDIS_BROKER_KEY_PREFIX and CABBY_REDIS_BROKER_TIMEOUT.";
+const ENV_FOOTER: &str = "Every CABBY_* variable can also be set as ANYCABLE_* (CABBY_* takes precedence), except the Cabby-only CABBY_SQLITE_PATH, CABBY_REDIS_BROKER_KEY_PREFIX, CABBY_REDIS_BROKER_TIMEOUT and CABBY_POSTGRES_*.";
 
 const SERVER: &str = "SERVER:";
 const SSL: &str = "SSL:";
@@ -92,6 +92,7 @@ const DS: &str = "DURABLE STREAMS:";
 const API: &str = "API:";
 const SQLITE: &str = "SQLITE:";
 const REDIS_BROKER: &str = "REDIS BROKER:";
+const POSTGRES: &str = "POSTGRES:";
 
 /// The configuration being built plus upstream's local flag destinations.
 #[derive(Default)]
@@ -644,6 +645,7 @@ fn definitions(c: &Config) -> Vec<Flag> {
     flags.extend(broker_flags(c));
     flags.extend(sqlite_flags(c));
     flags.extend(redis_broker_flags(c));
+    flags.extend(postgres_flags(c));
     flags.extend(redis_flags(c));
     flags.extend(redis_broadcast_flags(c));
     flags.extend(http_broadcast_flags(c));
@@ -838,6 +840,92 @@ fn redis_broker_flags(c: &Config) -> Vec<Flag> {
                     |s, v| s.c.redis_broker.timeout = v,
                 ),
                 &["CABBY_REDIS_BROKER_TIMEOUT"],
+            ),
+        ],
+    )
+}
+
+/// The Postgres adapters (Cabby only, D-070, D-071): `CABBY_POSTGRES_*`, no
+/// `ANYCABLE_*` aliases.
+fn postgres_flags(c: &Config) -> Vec<Flag> {
+    let p = &c.postgres;
+    with_defaults(
+        POSTGRES,
+        vec![
+            with_env(
+                str_flag(
+                    "postgres_url",
+                    &p.url,
+                    "Postgres connection URL for the postgres adapters (Cabby only)",
+                    |s, v| s.c.postgres.url = v,
+                ),
+                &["CABBY_POSTGRES_URL"],
+            ),
+            with_env(
+                str_flag("postgres_schema", &p.schema, "Postgres schema for Cabby's tables", |s, v| {
+                    s.c.postgres.schema = v
+                }),
+                &["CABBY_POSTGRES_SCHEMA"],
+            ),
+            with_env(
+                str_flag(
+                    "postgres_table_prefix",
+                    &p.table_prefix,
+                    "Prefix for Cabby's Postgres table names",
+                    |s, v| s.c.postgres.table_prefix = v,
+                ),
+                &["CABBY_POSTGRES_TABLE_PREFIX"],
+            ),
+            with_env(
+                str_flag("postgres_channel", &p.channel, "Base Postgres LISTEN/NOTIFY channel name", |s, v| {
+                    s.c.postgres.channel = v
+                }),
+                &["CABBY_POSTGRES_CHANNEL"],
+            ),
+            with_env(
+                bool_flag(
+                    "postgres_auto_migrate",
+                    p.auto_migrate,
+                    "Create Cabby's Postgres tables at startup",
+                    |s, v| s.c.postgres.auto_migrate = v,
+                ),
+                &["CABBY_POSTGRES_AUTO_MIGRATE"],
+            ),
+            with_env(
+                int_flag(
+                    "postgres_keepalive_interval",
+                    p.keepalive_interval,
+                    "Heartbeat interval of the Postgres LISTEN connection (seconds, 0 to disable)",
+                    |s, v| s.c.postgres.keepalive_interval = v,
+                ),
+                &["CABBY_POSTGRES_KEEPALIVE_INTERVAL"],
+            ),
+            with_env(
+                bool_flag(
+                    "postgres_tls_verify",
+                    p.tls_verify,
+                    "Verify the Postgres server's TLS certificate",
+                    |s, v| s.c.postgres.tls_verify = v,
+                ),
+                &["CABBY_POSTGRES_TLS_VERIFY"],
+            ),
+            with_env(
+                str_flag(
+                    "postgres_tls_ca_cert_path",
+                    &p.tls_ca_cert_path,
+                    "CA certificates (PEM file) to verify the Postgres server with",
+                    |s, v| s.c.postgres.tls_ca_cert_path = v,
+                ),
+                &["CABBY_POSTGRES_TLS_CA_CERT_PATH"],
+            ),
+            with_env(
+                bool_flag(
+                    "postgres_unlogged",
+                    p.unlogged,
+                    "Create Cabby's ephemeral Postgres tables as UNLOGGED",
+                    |s, v| s.c.postgres.unlogged = v,
+                ),
+                &["CABBY_POSTGRES_UNLOGGED"],
             ),
         ],
     )
@@ -1628,6 +1716,98 @@ mod tests {
     }
 
     #[test]
+    fn postgres_settings_from_flags_and_cabby_env_vars() {
+        let (res, _) = run(
+            &[
+                "--pubsub=postgres",
+                "--broadcast_adapter=http,postgres",
+                "--broker=postgres",
+                "--postgres_url=postgres://db/app",
+                "--postgres_schema=rt",
+                "--postgres_table_prefix=x_",
+                "--postgres_channel=rt_chan",
+                "--postgres_auto_migrate=false",
+                "--postgres_keepalive_interval=5",
+                "--postgres_tls_verify=false",
+                "--postgres_tls_ca_cert_path=/ca.pem",
+                "--postgres_unlogged=false",
+            ],
+            &[],
+        );
+        let c = res.unwrap().0;
+        assert_eq!(("postgres", "postgres"), (c.pubsub_adapter.as_str(), c.broker.adapter.as_str()));
+        assert_eq!(vec!["http".to_owned(), "postgres".to_owned()], c.broadcast_adapters);
+        let p = &c.postgres;
+        assert_eq!(
+            ("postgres://db/app", "rt", "x_", "rt_chan"),
+            (p.url.as_str(), p.schema.as_str(), p.table_prefix.as_str(), p.channel.as_str())
+        );
+        assert_eq!(
+            (false, 5, false, "/ca.pem", false),
+            (p.auto_migrate, p.keepalive_interval, p.tls_verify, p.tls_ca_cert_path.as_str(), p.unlogged)
+        );
+
+        let (res, _) =
+            run(&[], &[("CABBY_POSTGRES_URL", "postgres://env/app"), ("CABBY_POSTGRES_AUTO_MIGRATE", "false")]);
+        let c = res.unwrap().0;
+        assert_eq!(("postgres://env/app", false), (c.postgres.url.as_str(), c.postgres.auto_migrate));
+
+        let (res, _) = run(&[], &[("ANYCABLE_POSTGRES_URL", "postgres://env/app")]);
+        assert_eq!("", res.unwrap().0.postgres.url, "no ANYCABLE_* alias");
+
+        let (res, _) = run(&[], &[]);
+        assert_eq!(crate::postgres::PostgresConfig::new(), res.unwrap().0.postgres, "defaults");
+    }
+
+    #[test]
+    fn postgres_settings_from_the_config_file_unless_overridden() {
+        let file = std::env::temp_dir().join(format!("cabby-postgres-options-{}.toml", std::process::id()));
+        std::fs::write(&file, "[postgres]\nurl = \"postgres://file/app\"\nchannel = \"from_file\"\n").unwrap();
+        let path = file.to_str().unwrap();
+        let mut out = Vec::new();
+
+        let (c, _) =
+            new_config_from_cli_to(&["cabby", "--config-path", path], &EnvMap::new(), vec![], &mut out).unwrap();
+        assert_eq!(("postgres://file/app", "from_file"), (c.postgres.url.as_str(), c.postgres.channel.as_str()));
+
+        let args = ["cabby", "--config-path", path, "--postgres_channel=from_flag"];
+        let (c, _) = new_config_from_cli_to(&args, &EnvMap::new(), vec![], &mut out).unwrap();
+        assert_eq!("from_flag", c.postgres.channel);
+        std::fs::remove_file(&file).unwrap();
+    }
+
+    #[test]
+    fn postgres_settings_show_in_help() {
+        let (_, out) = run(&["--help"], &[]);
+        assert!(out.contains("POSTGRES:"), "{out}");
+        assert!(out.contains("--postgres_url value") && out.contains("[$CABBY_POSTGRES_URL]"), "{out}");
+    }
+
+    /// Pins D-070, D-071: `--presets=broker` keeps explicit Postgres adapters
+    /// and picks nothing Postgres on its own.
+    #[test]
+    fn explicit_postgres_adapters_survive_the_broker_preset() {
+        let (res, _) = run(
+            &["--presets=broker", "--broker=postgres", "--pubsub=postgres", "--broadcast_adapter=postgres"],
+            &[("CABBY_POSTGRES_URL", "postgres://db/app")],
+        );
+        let mut c = res.unwrap().0;
+        c.load_presets(&EnvMap::new()).unwrap();
+        assert_eq!(("postgres", "postgres"), (c.broker.adapter.as_str(), c.pubsub_adapter.as_str()));
+        assert_eq!(vec!["postgres".to_owned()], c.broadcast_adapters);
+
+        let (res, _) = run(&["--presets=broker"], &[("CABBY_POSTGRES_URL", "postgres://db/app")]);
+        let mut c = res.unwrap().0;
+        c.load_presets(&EnvMap::new()).unwrap();
+        assert_eq!(
+            ("memory", ""),
+            (c.broker.adapter.as_str(), c.pubsub_adapter.as_str()),
+            "a Postgres URL alone changes no preset"
+        );
+        assert_eq!(vec!["http".to_owned()], c.broadcast_adapters);
+    }
+
+    #[test]
     fn explicit_sqlite_broker_survives_the_broker_preset() {
         let (res, _) = run(&["--presets=broker", "--broker=sqlite", "--sqlite_path=/data/cabby.db"], &[]);
         let mut c = res.unwrap().0;
@@ -1719,12 +1899,23 @@ mod tests {
             .filter(|f| !f.env_vars.iter().any(|v| v.starts_with("ANYCABLE_")))
             .flat_map(|f| f.env_vars.into_iter().filter(|v| v.starts_with("CABBY_")))
             .collect();
-        assert_eq!(
-            cabby_only,
-            vec!["CABBY_SQLITE_PATH", "CABBY_REDIS_BROKER_KEY_PREFIX", "CABBY_REDIS_BROKER_TIMEOUT"]
-        );
+        let postgres = [
+            "CABBY_POSTGRES_URL",
+            "CABBY_POSTGRES_SCHEMA",
+            "CABBY_POSTGRES_TABLE_PREFIX",
+            "CABBY_POSTGRES_CHANNEL",
+            "CABBY_POSTGRES_AUTO_MIGRATE",
+            "CABBY_POSTGRES_KEEPALIVE_INTERVAL",
+            "CABBY_POSTGRES_TLS_VERIFY",
+            "CABBY_POSTGRES_TLS_CA_CERT_PATH",
+            "CABBY_POSTGRES_UNLOGGED",
+        ];
+        let expected: Vec<&str> = ["CABBY_SQLITE_PATH", "CABBY_REDIS_BROKER_KEY_PREFIX", "CABBY_REDIS_BROKER_TIMEOUT"].into_iter().chain(postgres).collect();
+        assert_eq!(cabby_only, expected);
         for v in &cabby_only {
-            assert!(ENV_FOOTER.contains(v.as_str()), "{v} is not in the help footer: {ENV_FOOTER}");
+            let named = ENV_FOOTER.contains(v.as_str())
+                || (v.starts_with("CABBY_POSTGRES_") && ENV_FOOTER.contains("CABBY_POSTGRES_*"));
+            assert!(named, "{v} is not in the help footer: {ENV_FOOTER}");
         }
     }
 

@@ -16,6 +16,7 @@ pub mod metrics;
 pub mod mrb;
 pub mod nats;
 pub mod node;
+pub mod postgres;
 pub mod pubsub;
 pub mod pusher;
 pub mod redis;

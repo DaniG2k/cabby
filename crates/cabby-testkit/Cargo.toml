@@ -26,6 +26,7 @@ hyper-util.workspace = true
 prost.workspace = true
 rusqlite.workspace = true
 tokio.workspace = true
+tokio-postgres.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
 tonic = { workspace = true, features = ["tls-ring"] }

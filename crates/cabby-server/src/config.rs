@@ -177,6 +177,8 @@ pub struct Config {
     pub sqlite: SqliteConfig,
     /// `[redis_broker]` (Cabby only, D-069).
     pub redis_broker: crate::broker::RedisBrokerConfig,
+    /// `[postgres]` (Cabby only, D-070, D-071).
+    pub postgres: crate::postgres::PostgresConfig,
     pub redis: RedisConfig,
     /// `[redis_pubsub_broadcast]`
     pub legacy_redis_broadcast: crate::broadcast::LegacyRedisConfig,
@@ -238,6 +240,7 @@ cabby_core::toml_section!(Config, "config.Config" {
     "broker" => broker,
     "sqlite" => sqlite,
     "redis_broker" => redis_broker,
+    "postgres" => postgres,
     "redis" => redis,
     "redis_pubsub_broadcast" => legacy_redis_broadcast,
     "redis_stream_broadcast" => redis_broadcast,
@@ -319,6 +322,7 @@ impl Config {
             pusher: crate::pusher::Config::new(),
             ds: DsConfig::new(),
             api: crate::api::Config::new(),
+            postgres: crate::postgres::PostgresConfig::new(),
             ..Default::default()
         }
     }
@@ -399,13 +403,17 @@ impl Config {
             _ => out.push_str("# presets = [\"broker\"]\n\n"),
         }
 
-        let sections: [(&str, String); 15] = [
+        let sections: [(&str, String); 16] = [
             ("# Server configuration\n[server]\n", self.server.to_toml()),
             ("# Logging configuration\n[logging]\n", self.log.to_toml()),
             ("# RPC configuration\n[rpc]\n", self.rpc.to_toml()),
             ("# Broker configuration\n[broker]\n", self.broker.to_toml()),
             ("# SQLite broker configuration (--broker=sqlite)\n[sqlite]\n", self.sqlite.to_toml()),
             ("# Redis broker configuration (--broker=redis)\n[redis_broker]\n", self.redis_broker.to_toml()),
+            (
+                "# Postgres adapters configuration (--pubsub, --broadcast_adapter, --broker=postgres)\n[postgres]\n",
+                self.postgres.to_toml(),
+            ),
             ("# JWT configuration\n[jwt]\n", self.jwt.to_toml()),
             ("# Pub/sub (signed) streams configuration\n[streams]\n", self.streams.to_toml()),
             ("# WebSockets configuration\n[ws]\n", self.ws.to_toml()),

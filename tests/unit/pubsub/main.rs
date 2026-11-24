@@ -9,6 +9,7 @@
 //! (Go's runtime subtest names). Run against Go with `CABBY_BACKEND=go`.
 
 mod nats_test;
+mod postgres_test;
 mod redis_issues_test;
 mod redis_test;
 mod subscriber_test;

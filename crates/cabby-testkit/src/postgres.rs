@@ -1,0 +1,230 @@
+//! PostgreSQL for the Postgres adapter tests (Cabby additions, D-070 and
+//! D-071).
+//!
+//! SPEC.md §9: there is no silent skip. A test needs a server at
+//! `CABBY_TEST_POSTGRES_URL` (`compat/scripts/services.sh start` runs one) and
+//! panics with a message naming the variable when it is not set. Every test
+//! works in its own scope: a unique schema (dropped afterwards) and a unique
+//! base channel, so tests sharing the server never see each other's tables
+//! or notifications.
+//!
+//! AnyCable has no Postgres adapters, so every scenario calls [`rust_only`]
+//! first; on the Go backend the runner records the case as not observable.
+
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+use cabby_server::postgres::PostgresConfig;
+use tokio::runtime::Runtime;
+use tokio_postgres::{Client, NoTls, SimpleQueryMessage};
+
+use crate::{Backend, backend};
+
+/// Bound for every wait on the database.
+pub const DEADLINE: Duration = Duration::from_secs(10);
+
+/// Reports the case as not observable on the Go backend.
+pub fn rust_only() {
+    if backend() == Backend::Go {
+        unimplemented!("not_observable: AnyCable has no Postgres adapters; they are a Cabby addition (D-070, D-071)");
+    }
+}
+
+/// `CABBY_TEST_POSTGRES_URL`, required.
+pub fn url() -> String {
+    match std::env::var("CABBY_TEST_POSTGRES_URL") {
+        Ok(v) if !v.trim().is_empty() => v.trim().to_owned(),
+        _ => panic!(
+            "CABBY_TEST_POSTGRES_URL is not set: this test needs a real PostgreSQL server (SPEC.md §9: no silent \
+             skips). Start one with `eval \"$(compat/scripts/services.sh start)\"`, see crates/cabby-testkit/src/postgres.rs"
+        ),
+    }
+}
+
+fn runtime() -> &'static Runtime {
+    static RT: OnceLock<Runtime> = OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("testkit-postgres")
+            .enable_all()
+            .build()
+            .expect("building the test Postgres runtime")
+    })
+}
+
+fn block<F>(fut: F) -> F::Output
+where
+    F: std::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    runtime().spawn(async move {
+        let _ = tx.send(fut.await);
+    });
+    rx.recv_timeout(DEADLINE * 3).expect("a test database call timed out")
+}
+
+/// A test's schema and channel on the shared server.
+pub struct PgScope {
+    pub schema: String,
+    pub channel: String,
+    client: std::sync::Arc<Client>,
+}
+
+/// A plain connection to the test server.
+pub fn connect() -> std::sync::Arc<Client> {
+    let url = url();
+    block(async move {
+        let (client, conn) = tokio_postgres::connect(&url, NoTls).await.expect("connecting to CABBY_TEST_POSTGRES_URL");
+        tokio::spawn(conn);
+        std::sync::Arc::new(client)
+    })
+}
+
+impl PgScope {
+    pub fn new(tag: &str) -> Self {
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let nanos =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+        let id = format!("{}_{n}_{nanos}", std::process::id());
+        Self { schema: format!("t_{tag}_{id}"), channel: format!("c_{id}"), client: connect() }
+    }
+
+    /// The adapters' configuration for this scope.
+    pub fn config(&self) -> PostgresConfig {
+        PostgresConfig {
+            url: url(),
+            schema: self.schema.clone(),
+            channel: self.channel.clone(),
+            keepalive_interval: 1,
+            ..PostgresConfig::new()
+        }
+    }
+
+    /// Creates the tables (what `auto_migrate` does when an adapter starts).
+    pub fn migrate(&self) {
+        cabby_server::postgres::migrate(&self.config()).expect("creating the Postgres tables");
+    }
+
+    /// `"schema"."cabby_<name>"`.
+    pub fn table(&self, name: &str) -> String {
+        format!("\"{}\".\"cabby_{name}\"", self.schema)
+    }
+
+    /// Runs SQL (one or more statements, simple protocol).
+    pub fn execute(&self, sql: &str) {
+        let (client, sql) = (self.client.clone(), sql.to_owned());
+        block(async move { client.batch_execute(&sql).await }).unwrap_or_else(|e| panic!("SQL failed: {e:?}"));
+    }
+
+    /// Runs one query; every value as text (`None` for NULL).
+    pub fn rows(&self, sql: &str) -> Vec<Vec<Option<String>>> {
+        let (client, sql) = (self.client.clone(), sql.to_owned());
+        let messages =
+            block(async move { client.simple_query(&sql).await }).unwrap_or_else(|e| panic!("SQL failed: {e:?}"));
+        messages
+            .into_iter()
+            .filter_map(|m| match m {
+                SimpleQueryMessage::Row(r) => Some((0..r.len()).map(|i| r.get(i).map(str::to_owned)).collect()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The first column of the first row.
+    pub fn scalar(&self, sql: &str) -> Option<String> {
+        self.rows(sql).into_iter().next().and_then(|r| r.into_iter().next().flatten())
+    }
+
+    /// `INSERT INTO <schema>.cabby_broadcasts (payload) VALUES ($1)`.
+    pub fn insert_broadcast(&self, payload: &str) {
+        let (client, sql, payload) = (
+            self.client.clone(),
+            format!("INSERT INTO {} (payload) VALUES ($1)", self.table("broadcasts")),
+            payload.to_owned(),
+        );
+        block(async move { client.execute(&sql, &[&payload]).await }).expect("inserting a broadcast");
+    }
+
+    /// `pg_notify(channel, payload)`.
+    pub fn notify(&self, channel: &str, payload: &str) {
+        let (client, channel, payload) = (self.client.clone(), channel.to_owned(), payload.to_owned());
+        block(async move { client.execute("SELECT pg_notify($1, $2)", &[&channel, &payload]).await }).expect("NOTIFY");
+    }
+
+    /// Backend PIDs of the connections named `app`.
+    pub fn pids(&self, app: &str) -> Vec<i32> {
+        let (client, app) = (self.client.clone(), app.to_owned());
+        block(async move {
+            client
+                .query("SELECT pid FROM pg_stat_activity WHERE application_name = $1 ORDER BY pid", &[&app])
+                .await
+                .map(|rows| rows.iter().map(|r| r.get(0)).collect())
+        })
+        .expect("reading pg_stat_activity")
+    }
+
+    /// Terminates the connections named `app`; returns how many.
+    pub fn terminate(&self, app: &str) -> usize {
+        let (client, app) = (self.client.clone(), app.to_owned());
+        block(async move {
+            client
+                .query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = $1", &[&app])
+                .await
+                .map(|rows| rows.len())
+        })
+        .expect("pg_terminate_backend")
+    }
+
+    /// Waits until a connection named `app` other than `old` has run a
+    /// statement: a reconnected `LISTEN` connection's first statement is its
+    /// `LISTEN` batch.
+    pub fn wait_listening_again(&self, app: &str, old: &[i32]) {
+        let (client, app2) = (self.client.clone(), app.to_owned());
+        let old = old.to_vec();
+        let deadline = Instant::now() + DEADLINE * 3;
+        loop {
+            let (client, app2, old) = (client.clone(), app2.clone(), old.clone());
+            let ready: bool = block(async move {
+                client
+                    .query_one(
+                        "SELECT count(*) > 0 FROM pg_stat_activity WHERE application_name = $1 AND query <> '' AND state = 'idle' \
+                         AND NOT (pid = ANY($2))",
+                        &[&app2, &old],
+                    )
+                    .await
+                    .map(|r| r.get(0))
+            })
+            .expect("reading pg_stat_activity");
+            if ready {
+                return;
+            }
+            assert!(Instant::now() < deadline, "the {app} connection did not come back");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// The name of a pub/sub `LISTEN` connection in this scope.
+    pub fn pubsub_listener(&self) -> String {
+        format!("cabby pubsub-listen {}", self.channel)
+    }
+
+    /// The name of a broadcaster `LISTEN` connection in this scope.
+    pub fn broadcast_listener(&self) -> String {
+        format!("cabby broadcast-listen {}", self.channel)
+    }
+}
+
+impl Drop for PgScope {
+    fn drop(&mut self) {
+        let (client, sql) = (self.client.clone(), format!("DROP SCHEMA IF EXISTS \"{}\" CASCADE", self.schema));
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        runtime().spawn(async move {
+            let _ = tx.send(client.batch_execute(&sql).await);
+        });
+        let _ = rx.recv_timeout(DEADLINE);
+    }
+}
