@@ -14,6 +14,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde_json::{Value, json};
 
 use crate::cable_client::{CableClient, Options};
+use crate::fake_rpc::{FakeRpc, Method, Reply};
 use crate::raw_http;
 use crate::sut::Sut;
 use crate::{Backend, backend, workspace_root};
@@ -104,6 +105,23 @@ pub fn kill_hard(sut: &mut Sut) {
     let status = std::process::Command::new("kill").args(["-KILL", &pid]).status().expect("running kill");
     assert!(status.success(), "kill -KILL {pid}");
     sut.process.wait_exit(DEADLINE).expect("the killed server exits");
+}
+
+/// An application that authenticates every connection and welcomes it with
+/// its session ID, as anycable-rails does.
+pub fn session_app() -> FakeRpc {
+    let fake = FakeRpc::start();
+    fake.on(Method::Connect).reply(Reply::with(|call| {
+        let sid = call.meta("sid").or_else(|| call.meta("x-anycable-meta-sid")).unwrap_or_default().to_owned();
+        cabby_core::protos::ConnectionResponse {
+            status: cabby_core::protos::Status::Success as i32,
+            identifiers: r#"{"user":"u1"}"#.into(),
+            transmissions: vec![json!({"type": "welcome", "sid": sid}).to_string()],
+            ..Default::default()
+        }
+        .into()
+    }));
+    fake
 }
 
 /// Connects with the extended protocol, restoring `restore_sid` if given;

@@ -30,6 +30,7 @@ mod logging_transport;
 mod origin;
 mod ping_intervals;
 mod pusher;
+mod redis_broker;
 mod rpc_sessions;
 mod sqlite;
 mod sse;

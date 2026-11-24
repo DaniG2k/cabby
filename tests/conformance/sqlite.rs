@@ -2,27 +2,8 @@
 //! A graceful restart keeps the epoch, the stream offsets, the history and the
 //! sessions. AnyCable has no such broker, so the Go arm is not observable.
 
-use cabby_core::protos;
-use cabby_testkit::fake_rpc::{FakeRpc, Method, Reply};
+use cabby_testkit::fake_rpc::Method;
 use cabby_testkit::sqlite_broker::{self as sq, DataDir};
-use serde_json::json;
-
-/// An application that authenticates every connection and welcomes it with
-/// its session ID, as anycable-rails does.
-fn app() -> FakeRpc {
-    let fake = FakeRpc::start();
-    fake.on(Method::Connect).reply(Reply::with(|call| {
-        let sid = call.meta("sid").or_else(|| call.meta("x-anycable-meta-sid")).unwrap_or_default().to_owned();
-        protos::ConnectionResponse {
-            status: protos::Status::Success as i32,
-            identifiers: r#"{"user":"u1"}"#.into(),
-            transmissions: vec![json!({"type": "welcome", "sid": sid}).to_string()],
-            ..Default::default()
-        }
-        .into()
-    }));
-    fake
-}
 
 /// regression-for: node/broker_integration_test.go#TestIntegrationRestore_Memory/Restore_session_connection_and_channels_state
 /// regression-for: node/broker_integration_test.go#TestIntegrationHistory_Memory/Subscribe_+_History
@@ -32,7 +13,7 @@ fn app() -> FakeRpc {
 #[test]
 fn deviation_d065_sqlite_broker_resumes_history_and_sessions_after_a_graceful_restart() {
     sq::rust_only();
-    let fake = app();
+    let fake = sq::session_app();
     let dir = DataDir::new("d065");
     let db = dir.db();
     let rpc = format!("--rpc_host={}", fake.http_url());

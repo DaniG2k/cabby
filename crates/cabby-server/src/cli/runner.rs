@@ -698,6 +698,17 @@ impl Runner {
                         nats.set_done(forward_errors_verbatim::<core_broker::BrokerError>(&self.events));
                         Arc::new(nats)
                     }
+                    // Cabby only (D-069).
+                    "redis" => Arc::new(
+                        crate::broker::RedisBroker::new(
+                            Some(br),
+                            &c.broker,
+                            &c.redis,
+                            &c.redis_broker,
+                            Some(self.metrics.clone() as Arc<dyn Instrumenter>),
+                        )
+                        .map_err(|e| CliError(e.message))?,
+                    ),
                     other => return Err(illegal_argument(&format!("Unsupported broker adapter: {other}"))),
                 };
                 Ok((Arc::new(CoreBroker(inner.clone())), inner))
@@ -898,11 +909,11 @@ fn default_rpc_controller() -> ControllerFactory {
 /// A warning when a Redis URL is configured (after presets) but no broadcast
 /// adapter reads from Redis: the release image defaults to HTTP-only
 /// broadcasts, so an AnyCable set-up that broadcasts through Redis would
-/// silently receive nothing.
+/// silently receive nothing. The Redis broker explains a Redis URL by itself.
 fn redis_broadcast_warning(c: &Config) -> Option<String> {
     let redis_configured = c.redis.url != Config::new().redis.url;
     let redis_broadcasts = c.broadcast_adapters.iter().any(|a| a == "redis" || a == "redisx");
-    if !redis_configured || redis_broadcasts {
+    if !redis_configured || redis_broadcasts || c.broker.adapter == "redis" {
         return None;
     }
     let adapters = if c.broadcast_adapters == ["http"] { "HTTP".to_owned() } else { c.broadcast_adapters.join(",") };
@@ -1128,6 +1139,9 @@ mod tests {
         assert_eq!(redis_broadcast_warning(&config(&default_url, &["http"])), None);
         assert_eq!(redis_broadcast_warning(&config("redis://redis:6379", &["http", "redis"])), None);
         assert_eq!(redis_broadcast_warning(&config("redis://redis:6379", &["redisx"])), None);
+        let mut redis_broker = config("redis://redis:6379", &["http"]);
+        redis_broker.broker.adapter = "redis".to_owned();
+        assert_eq!(redis_broadcast_warning(&redis_broker), None, "the Redis broker uses the URL");
         assert_eq!(
             redis_broadcast_warning(&config("redis://redis:6379", &["http"])).as_deref(),
             Some(
