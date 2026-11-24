@@ -208,6 +208,22 @@ mod tests {
     use super::*;
     use crate::postgres::PostgresConfig;
 
+    /// The DDL in docs/postgres.md is the DDL Cabby runs for the default names.
+    #[test]
+    fn the_documented_ddl_is_the_migration() {
+        let names = Names::from_config(&PostgresConfig::new()).unwrap();
+        let mut expected: Vec<String> = ddl(&names).into_iter().map(|s| format!("{s};")).collect();
+        expected.push(format!("{};", trigger_ddl(&names)));
+        expected.push(format!("{};", version_sql(&names)));
+        let expected = expected.join("\n\n");
+
+        let doc = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/postgres.md")).unwrap();
+        let start = doc.find("<!-- ddl:start -->").expect("ddl:start marker") + "<!-- ddl:start -->".len();
+        let end = doc.find("<!-- ddl:end -->").expect("ddl:end marker");
+        let block = doc[start..end].trim().trim_start_matches("```sql").trim_end_matches("```").trim();
+        assert_eq!(expected, block, "update the DDL in docs/postgres.md");
+    }
+
     #[test]
     fn unlogged_applies_to_every_table_but_the_outbox() {
         let mut c = PostgresConfig::new();

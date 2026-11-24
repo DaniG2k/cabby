@@ -51,7 +51,7 @@ flowchart LR
 Cabby holds the connections and subscriptions, keeps stream history and sends pings. When a
 client connects, subscribes or performs an action, Cabby calls your app over RPC and your channel
 code decides. When your app broadcasts, it sends the message to Cabby, which delivers it to every
-subscriber. Several Cabby nodes can share broadcasts through Redis or NATS.
+subscriber. Several Cabby nodes can share broadcasts through Redis, NATS or PostgreSQL.
 
 ## Features
 
@@ -65,6 +65,9 @@ subscriber. Several Cabby nodes can share broadcasts through Redis or NATS.
 - Redis broker (`--broker=redis`): stream history and sessions shared by several nodes through
   the Redis they already use, without NATS JetStream; see
   [`docs/redis-broker.md`](docs/redis-broker.md) (deviation D-069)
+- PostgreSQL adapters (`--pubsub=postgres`, `--broadcast_adapter=postgres`): several nodes
+  share broadcasts through the app's Postgres, with no Redis or NATS; the app can broadcast from
+  SQL, inside its own transactions ([`docs/postgres.md`](docs/postgres.md), deviation D-070)
 - Presence
 - JWT identification, signed streams and Turbo Streams
 - Server-Sent Events
@@ -155,6 +158,22 @@ Cabby prints the URLs it listens on at startup: point the gem's `http_broadcast_
 broadcast one, and your JavaScript client at `ws://localhost:8080/cable`. To use gRPC RPC instead,
 run the gem's RPC server (`bundle exec anycable`) and leave out `--rpc_host` (it defaults to
 `localhost:50051`).
+
+### Several nodes on PostgreSQL
+
+If the app already runs PostgreSQL, Cabby nodes can share everything through it:
+
+```sh
+cabby --pubsub=postgres --broadcast_adapter=http,postgres \
+  --postgres_url="postgres://cabby:secret@db.internal:5432/app?sslmode=verify-full" \
+  --rpc_host=http://localhost:3000/_anycable --secret=…
+```
+
+Every node delivers every broadcast, and the app can
+broadcast by inserting a row into `cabby_broadcasts`, inside the transaction that makes the
+change, so a rollback broadcasts nothing. Cabby creates its tables on the first start. It needs a
+direct or session-mode connection (`LISTEN` does not survive PgBouncer transaction pooling).
+[`docs/postgres.md`](docs/postgres.md) covers the settings, TLS, the table DDL and the details.
 
 Every flag has a `CABBY_*` environment variable (`ANYCABLE_*` also works), and Cabby reads
 `cabby.toml` (or `anycable.toml`) from the working directory or `/etc/cabby`. `cabby --help` lists

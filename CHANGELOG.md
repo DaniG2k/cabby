@@ -24,6 +24,9 @@ Differences from the AnyCable Go server are listed by ID in
   Cabby logs a warning and uses the file unconverted.
 - The Redis broker (`--broker=redis`): stream history and sessions shared by several nodes
   through Redis ([`docs/redis-broker.md`](docs/redis-broker.md), D-069).
+- PostgreSQL pub/sub and broadcasting (`--pubsub=postgres`, `--broadcast_adapter=postgres`):
+  several nodes share broadcasts through the app's Postgres, and the app can broadcast by
+  inserting into an outbox table inside its own transactions (`docs/postgres.md`).
 
 ### Changed
 

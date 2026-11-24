@@ -1,0 +1,254 @@
+# PostgreSQL adapters
+
+Cabby can use PostgreSQL for everything several nodes need to share, so an app that already runs
+Postgres (Rails 8, Laravel, Django, ...) can run more than one Cabby node without Redis or NATS:
+
+| Flag | What Postgres does |
+|---|---|
+| `--pubsub=postgres` | Cross-node pub/sub over `LISTEN`/`NOTIFY`: every node delivers every broadcast to its own clients |
+| `--broadcast_adapter=postgres` | Broadcasts from SQL: the app inserts into an outbox table, inside its own transaction if it likes |
+
+The two are independent: use either or both, and combine them with the other adapters
+(for example `--broadcast_adapter=http,postgres` with `--broker=memory`). They are Cabby additions
+(deviation D-070 in [`compat/deviations.md`](../compat/deviations.md)); the AnyCable Go server
+stops at startup with either of them (`Unsupported subscriber adapter: postgres`,
+`couldn't configure broadcasters`).
+
+## Requirements
+
+- PostgreSQL 12 or newer.
+- **A direct or session-mode connection.** `LISTEN` belongs to a database session, so Cabby
+  keeps one long-lived connection for it. PgBouncer in **transaction** (or statement) pooling
+  mode hands each transaction to a different server connection and loses the `LISTEN`; point
+  Cabby at Postgres directly, or at a PgBouncer pool in **session** mode.
+- A role that can create tables in the schema, or the tables created beforehand (see
+  [Creating the tables yourself](#creating-the-tables-yourself)).
+
+Each node opens up to 5 connections with both adapters: one `LISTEN` connection and two command
+connections for pub/sub, one `LISTEN` connection and one claim connection for the broadcaster
+(plus one for a moment at startup, for the migration). Size
+`max_connections` (or the PgBouncer pool) for your node count.
+
+## Quick start
+
+```sh
+cabby --pubsub=postgres --broadcast_adapter=http,postgres --broker=memory \
+  --postgres_url="postgres://cabby:secret@db.internal:5432/app?sslmode=verify-full" \
+  --rpc_host=http://localhost:3000/_anycable --secret=…
+```
+
+At startup each adapter logs a line without credentials:
+
+```text
+INF Starting Postgres pub/sub: db.internal:5432/app (channel: cabby_internal, table: public.cabby_pubsub_overflow) context=pubsub provider=postgres
+INF Starting Postgres broadcaster: db.internal:5432/app (table: public.cabby_broadcasts, channel: cabby_internal_in) context=broadcast provider=postgres
+```
+
+With `--postgres_auto_migrate` (the default) Cabby creates its tables on the first start. Every
+node runs the same migration inside an advisory lock, so nodes starting together don't race.
+
+## Settings
+
+Cabby-only settings: they have no `ANYCABLE_*` names.
+
+| Flag | Environment | `[postgres]` key | Default | Purpose |
+|---|---|---|---|---|
+| `--postgres_url` | `CABBY_POSTGRES_URL` | `url` | (empty) | Connection URI (`postgres://user:password@host:5432/db?sslmode=...`) or libpq key/value string. Required by every Postgres adapter: a start without it stops with `--pubsub=postgres needs a connection URL: ...` |
+| `--postgres_schema` | `CABBY_POSTGRES_SCHEMA` | `schema` | `public` | Schema for Cabby's tables |
+| `--postgres_table_prefix` | `CABBY_POSTGRES_TABLE_PREFIX` | `table_prefix` | `cabby_` | Prefix of Cabby's table names (may be empty; at most 37 bytes) |
+| `--postgres_channel` | `CABBY_POSTGRES_CHANNEL` | `channel` | `cabby_internal` | Base `LISTEN`/`NOTIFY` channel name (at most 59 bytes) |
+| `--postgres_auto_migrate` | `CABBY_POSTGRES_AUTO_MIGRATE` | `auto_migrate` | `true` | Create the tables at startup; `false` for roles that may not create tables |
+| `--postgres_keepalive_interval` | `CABBY_POSTGRES_KEEPALIVE_INTERVAL` | `keepalive_interval` | `30` | Seconds between `SELECT 1` heartbeats on the `LISTEN` connections (0: none) |
+| `--postgres_tls_verify` | `CABBY_POSTGRES_TLS_VERIFY` | `tls_verify` | `true` | Verify the server certificate and host name with `sslmode=prefer` or `require` |
+| `--postgres_tls_ca_cert_path` | `CABBY_POSTGRES_TLS_CA_CERT_PATH` | `tls_ca_cert_path` | (empty) | PEM file with the CA certificates to trust (default: the system roots; `sslrootcert=` in the URL also works) |
+| `--postgres_unlogged` | `CABBY_POSTGRES_UNLOGGED` | `unlogged` | `true` | Create every table but the outbox as `UNLOGGED` (they are emptied after a database crash) |
+
+Schema, prefix and channel are SQL identifiers: they must match `^[A-Za-z_][A-Za-z0-9_]*$` (the
+prefix may also be empty), and Cabby refuses to start otherwise. They are used as written, quoted,
+so `App` and `app` are different schemas.
+
+```toml
+[postgres]
+url = "postgres://cabby:secret@db.internal:5432/app?sslmode=verify-full"
+schema = "cabby"
+```
+
+### TLS
+
+Cabby uses rustls (no OpenSSL) and reads `sslmode` from the URL:
+
+| `sslmode` | TLS | Certificate check |
+|---|---|---|
+| `disable` | no | none |
+| `prefer` (default) | if the server offers it | chain and host name, unless `--postgres_tls_verify=false` |
+| `require` | yes | chain and host name, unless `--postgres_tls_verify=false` |
+| `verify-ca` | yes | chain only |
+| `verify-full` | yes | chain and host name |
+
+Unlike libpq, `prefer` and `require` verify the certificate by default: set
+`--postgres_tls_verify=false` for a server with a self-signed certificate you can't install a CA
+for, or give the CA with `--postgres_tls_ca_cert_path`.
+
+## Pub/sub (`--pubsub=postgres`)
+
+Each node publishes with `NOTIFY` and listens with `LISTEN` on a dedicated connection. Streams
+are hashed into 16 channels (`cabby_internal_0` to `cabby_internal_15`); a node listens to a
+channel while one of its clients is subscribed to a stream hashed into it, and delivers only the
+streams it has subscribers for. Remote commands (disconnects through the API, for example) use
+`cabby_internal_cmd`, which every node listens to.
+
+`NOTIFY` payloads must stay under 8000 bytes. A message larger than 7500 bytes (after its
+envelope) is stored in `cabby_pubsub_overflow` for 60 seconds and the notification carries the
+row's ID; receivers read it from there. A node deletes expired rows every 30 seconds.
+
+The `LISTEN` connection is checked with `SELECT 1` every `--postgres_keepalive_interval`, so a
+connection that died without closing is noticed. After any failure Cabby reconnects with backoff
+(250 ms, then about 2, 4, 8, ... seconds, at most 30 s) and listens again to every channel. Messages published
+while a node is disconnected don't reach it.
+
+Publications wait in a queue of 1024 per node; when Postgres is slower than the broadcasts, the
+broadcasting caller waits for room, so memory stays bounded.
+
+## Broadcasting from SQL (`--broadcast_adapter=postgres`)
+
+Insert the usual broadcast JSON into `cabby_broadcasts`:
+
+```sql
+INSERT INTO cabby_broadcasts (payload)
+VALUES ('{"stream":"chat_42","data":"{\"text\":\"hello\"}"}');
+```
+
+`payload` is the same JSON as an HTTP broadcast: one message (`stream`, `data` as a JSON string,
+optional `meta`) or an array of them. The table's `AFTER INSERT` trigger notifies
+`cabby_internal_in`; one node claims the row (`DELETE ... FOR UPDATE SKIP LOCKED ... RETURNING`)
+and hands it to the broker, which fans it out through pub/sub. Nodes also poll every 5 seconds,
+so a row inserted while a node was reconnecting is not left behind.
+
+- **Once.** A claimed row is deleted, so each row is delivered once, by one node, whatever the
+  number of nodes (at most once: a node that dies while handling a batch doesn't hand it on).
+- **In order.** One node drains the table at a time (a session advisory lock), so rows are
+  broadcast in insertion order, and offsets follow that order.
+- **Transactional.** The row and its notification only exist once the transaction commits. A
+  transaction that rolls back broadcasts nothing.
+
+### From Rails (ActiveRecord)
+
+```ruby
+class CabbyBroadcast < ApplicationRecord
+  self.table_name = "cabby_broadcasts"   # "<schema>.<prefix>broadcasts" if you changed them
+
+  def self.to(stream, data)
+    create!(payload: { stream: stream, data: data.to_json }.to_json)
+  end
+end
+
+ApplicationRecord.transaction do
+  message = room.messages.create!(body: params[:body], user: current_user)
+  CabbyBroadcast.to("chat_#{room.id}", { id: message.id, body: message.body })
+end
+# Nothing is broadcast if the transaction rolls back.
+```
+
+For Turbo Streams, broadcast the rendered stream action to the signed stream name, as
+`Turbo::StreamsChannel.broadcast_*` would. The `anycable-rails` gem can keep broadcasting over
+HTTP alongside: `--broadcast_adapter=http,postgres` takes both.
+
+### Direct `NOTIFY`
+
+```sql
+SELECT pg_notify('cabby_internal_in', '{"stream":"chat_42","data":"{\"text\":\"typing\"}"}');
+```
+
+A JSON payload sent straight to the channel (no table) reaches every node, and each node delivers
+it to its own clients: nothing is stored in history and there is no offset, like the legacy
+`redis` broadcaster. The payload must be under 8000 bytes. Use the table when the message should
+be in history or part of a transaction.
+
+## Creating the tables yourself
+
+With `--postgres_auto_migrate=false` Cabby only checks that the tables it needs exist and stops at
+startup with a message naming the first one missing:
+
+```text
+failed to start subscriber, cause: failed to prepare the Postgres schema, cause: table public.cabby_pubsub_overflow is missing: create it with the DDL in docs/postgres.md or set --postgres_auto_migrate=true
+```
+
+This is the DDL Cabby runs for the defaults (schema `public`, prefix `cabby_`, channel
+`cabby_internal`, `--postgres_unlogged=true`). Change the names if you changed those settings,
+drop `UNLOGGED` for logged tables, and keep the channel in the trigger function in step with
+`--postgres_channel`:
+
+<!-- ddl:start -->
+```sql
+CREATE UNLOGGED TABLE IF NOT EXISTS "public"."cabby_meta" (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE UNLOGGED TABLE IF NOT EXISTS "public"."cabby_pubsub_overflow" (
+  id         BIGSERIAL PRIMARY KEY,
+  payload    TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS "cabby_pubsub_overflow_expires_at" ON "public"."cabby_pubsub_overflow" (expires_at);
+
+CREATE TABLE IF NOT EXISTS "public"."cabby_broadcasts" (
+  id         BIGSERIAL PRIMARY KEY,
+  payload    TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE OR REPLACE FUNCTION "public"."cabby_broadcasts_notify"() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM pg_notify('cabby_internal_in', NEW.id::text);
+  RETURN NULL;
+END
+$$;
+
+CREATE UNLOGGED TABLE IF NOT EXISTS "public"."cabby_streams" (
+  stream       TEXT PRIMARY KEY,
+  max_seq      BIGINT NOT NULL,
+  deadline_sec BIGINT NOT NULL,
+  last_ts_sec  BIGINT NOT NULL
+);
+
+CREATE UNLOGGED TABLE IF NOT EXISTS "public"."cabby_history" (
+  stream TEXT NOT NULL,
+  seq    BIGINT NOT NULL,
+  ts_sec BIGINT NOT NULL,
+  data   TEXT NOT NULL,
+  PRIMARY KEY (stream, seq)
+);
+
+CREATE INDEX IF NOT EXISTS "cabby_history_ts_sec" ON "public"."cabby_history" (ts_sec);
+
+CREATE UNLOGGED TABLE IF NOT EXISTS "public"."cabby_sessions" (
+  sid           TEXT PRIMARY KEY,
+  data          BYTEA NOT NULL,
+  expires_at_ms BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS "cabby_sessions_expires_at_ms" ON "public"."cabby_sessions" (expires_at_ms);
+
+CREATE TRIGGER "cabby_broadcasts_notify" AFTER INSERT ON "public"."cabby_broadcasts" FOR EACH ROW EXECUTE FUNCTION "public"."cabby_broadcasts_notify"();
+
+INSERT INTO "public"."cabby_meta" (key, value) VALUES ('schema_version', '1') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+```
+<!-- ddl:end -->
+
+Without the trigger the broadcaster still works, by polling every 5 seconds, and logs a warning at
+startup. The pub/sub adapter needs `cabby_pubsub_overflow` and the broadcaster `cabby_broadcasts`.
+The role Cabby connects as needs `SELECT`, `INSERT`, `UPDATE` and `DELETE` on them and `USAGE` on the sequences.
+
+## Metrics
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `postgres_errors_total` | counter | Failed Postgres operations (queries, publications, lost `LISTEN` connections) |
+| `postgres_query_ms` | gauge | Duration of the last operation, in milliseconds |
+| `postgres_spillover_total` | counter | Pub/sub messages sent through `cabby_pubsub_overflow` |
+| `postgres_reconnects_total` | counter | `LISTEN` connections re-established |
+| `postgres_claimed_broadcasts_total` | counter | Rows claimed from `cabby_broadcasts` |
+
+With Prometheus they have the usual `anycable_go_` prefix.
