@@ -8,6 +8,39 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
+## [Unreleased]
+
+### Added
+
+- `cabby-healthcheck` reads the host from `CABBY_HOST` or `ANYCABLE_HOST`. For an empty
+  host, `localhost`, `0.0.0.0` or `::` it tries `127.0.0.1`, then `::1`; for an IP address,
+  that address; for a host name, every address it resolves to, IPv4 first. The first healthy
+  address passes the check.
+- SQLite broker files use incremental auto-vacuum, so space freed by pruning goes back to the
+  file system. A file written by an earlier Cabby is converted once when it is opened (a
+  `VACUUM`, logged with the page counts before and after); shutdown frees pages only within
+  the shutdown timeout.
+
+### Changed
+
+- **Breaking:** Pusher needs a secret. When Pusher is enabled (`--pusher_app_id` and
+  `--pusher_app_key`) without `--pusher_secret` or `--secret`, Cabby stops at startup with
+  `Pusher requires a secret (--pusher_secret or --secret)`.
+- **Breaking for very large responses:** `rpc.max_recv_size` (`--rpc_max_call_recv_size`) now
+  also limits HTTP RPC response bodies, to 16 MiB by default. A larger response fails the call
+  without a retry and does not count against the circuit breaker.
+- Prometheus label values escape `\`, `"` and newlines, so the exposition output stays valid
+  for any tag value.
+- The dedicated Prometheus listener (`--metrics_host` different from `--host`) uses the
+  server's TLS settings, the main server's header timeout and limits, a connection limit of
+  `--max-conn` (1024 when it is 0) and a 60 s idle timeout for keep-alive connections.
+- The SQLite write queue is also bounded by 64 MiB of payload; history writes it drops make the
+  next start use a new epoch, as for the op count bound.
+- URL credentials (`user:password@`) are left out of HTTP RPC error messages and debug output.
+- The embedded NATS config file is created with mode 0600 under a random name, and the default
+  JetStream store directory with mode 0700; an existing default store directory must belong to
+  the user running Cabby.
+
 ## [0.2.0] - 2026-11-24
 
 Cabby 0.2.0 is compatible with AnyCable server 1.6.21: an AnyCable deployment that swaps
