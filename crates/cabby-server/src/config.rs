@@ -390,7 +390,7 @@ impl Config {
 
         out.push_str("# Pub/sub adapter for inter-node communication\n");
         if self.pubsub_adapter.is_empty() {
-            out.push_str("# pubsub_adapter = \"redis\" # or \"nats\"\n\n");
+            out.push_str("# pubsub_adapter = \"redis\" # or \"nats\", \"postgres\"\n\n");
         } else {
             out.push_str(&format!("pubsub_adapter = \"{}\"\n\n", self.pubsub_adapter));
         }

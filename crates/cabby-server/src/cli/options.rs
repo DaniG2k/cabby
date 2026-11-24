@@ -754,13 +754,16 @@ fn broadcast_flags(c: &Config) -> Vec<Flag> {
             str_flag(
                 "broadcast_adapter",
                 "",
-                "Broadcasting adapter to use (http, redisx, redis or nats). You can specify multiple at once via a comma-separated list",
+                "Broadcasting adapter to use (http, redisx, redis, nats or postgres). You can specify multiple at once via a comma-separated list",
                 |s, v| s.broadcast_adapters = v,
             ),
-            str_flag("broker", &c.broker.adapter, "Broker engine to use (memory, nats, sqlite or redis)", |s, v| {
-                s.c.broker.adapter = v
-            }),
-            str_flag("pubsub", &c.pubsub_adapter, "Pub/Sub adapter to use (redis or nats)", |s, v| {
+            str_flag(
+                "broker",
+                &c.broker.adapter,
+                "Broker engine to use (memory, nats, sqlite, redis or postgres)",
+                |s, v| s.c.broker.adapter = v,
+            ),
+            str_flag("pubsub", &c.pubsub_adapter, "Pub/Sub adapter to use (redis, nats or postgres)", |s, v| {
                 s.c.pubsub_adapter = v
             }),
             str_flag("redis_channel", &c.legacy_redis_broadcast.channel, "Redis channel for broadcasts", |s, v| {
@@ -1781,6 +1784,8 @@ mod tests {
         let (_, out) = run(&["--help"], &[]);
         assert!(out.contains("POSTGRES:"), "{out}");
         assert!(out.contains("--postgres_url value") && out.contains("[$CABBY_POSTGRES_URL]"), "{out}");
+        assert!(out.contains("Pub/Sub adapter to use (redis, nats or postgres)"), "{out}");
+        assert!(out.contains("Broadcasting adapter to use (http, redisx, redis, nats or postgres)"), "{out}");
     }
 
     /// Pins D-070, D-071: `--presets=broker` keeps explicit Postgres adapters
@@ -1863,7 +1868,7 @@ mod tests {
             "{out}"
         );
         assert!(out.contains("--redis_broker_timeout value") && out.contains("[$CABBY_REDIS_BROKER_TIMEOUT]"), "{out}");
-        assert!(out.contains("Broker engine to use (memory, nats, sqlite or redis)"), "{out}");
+        assert!(out.contains("Broker engine to use (memory, nats, sqlite, redis or postgres)"), "{out}");
     }
 
     #[test]

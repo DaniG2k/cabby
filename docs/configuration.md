@@ -102,7 +102,7 @@ stores history in Redis but doesn't read broadcasts from it, the warning is `WRN
 HTTP only; the Redis broker does not read broadcasts from Redis (set CABBY_BROADCAST_ADAPTER to
 add redisx)`.
 
-With a broker that keeps history (`memory`, `sqlite`, `nats`, `redis`), broadcasts through the
+With a broker that keeps history (`memory`, `sqlite`, `nats`, `redis`, `postgres`), broadcasts through the
 `redis` (PUBLISH) and `nats` adapters are delivered live but not stored in history, as in the
 AnyCable server; when you set the broadcast adapters (flag, variable or configuration file) to
 include them, Cabby logs `WRN broadcasts through the redis adapter are delivered live and not
