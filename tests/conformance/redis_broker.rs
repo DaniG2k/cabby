@@ -12,7 +12,7 @@ use cabby_testkit::sqlite_broker::{self as ext, DEADLINE};
 /// regression-for: node/broker_integration_test.go#TestIntegrationRestore_Memory/Restore_session_connection_and_channels_state
 /// regression-for: node/broker_integration_test.go#TestIntegrationHistory_Memory/Subscribe_+_History
 /// note: Deviation D-069: two cabby processes with --broker=redis (pub/sub not set, so Redis pub/sub) on one Redis: a client that saw m1 on node A and left catches up on node B from its offset (m2, m3, broadcast through B, with A's epoch), and its session restores on B by X-ANYCABLE-RESTORE-SID without an RPC Connect call.
-/// note: The next broadcast through A reaches the client on B over Redis pub/sub with the next offset; A starts with a new epoch and B logs the same one as existing.
+/// note: The next broadcast through A reaches the client on B over Redis pub/sub with the next offset and the stream's epoch; both nodes log the startup line.
 /// note: not_observable on Go: AnyCable rejects --broker=redis (Unsupported broker adapter: redis).
 #[test]
 fn deviation_d069_two_nodes_share_history_and_sessions_through_redis() {
@@ -71,8 +71,8 @@ fn deviation_d069_two_nodes_share_history_and_sessions_through_redis() {
     drop((restored, witness));
     let out_b = ext::stop_gracefully(&mut b);
     let out_a = ext::stop_gracefully(&mut a);
-    let line = |how: &str| format!("Redis broker is ready (epoch {epoch}, {how})");
-    assert!(out_a.contains(&line("new")), "no {:?} in A's output:\n{out_a}", line("new"));
-    assert!(out_b.contains(&line("existing")), "no {:?} in B's output:\n{out_b}", line("existing"));
+    for out in [&out_a, &out_b] {
+        assert!(out.contains("Redis broker is ready (Redis "), "no startup line in:\n{out}");
+    }
     assert!(out_a.contains("context=broker") && out_a.contains("provider=redis"), "{out_a}");
 }

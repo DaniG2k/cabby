@@ -4,24 +4,32 @@
 //! Every node reads and writes the same Redis, so history and sessions are
 //! shared without a node-local copy:
 //!
-//! * `<prefix>:epoch`: the epoch, created once (`SET NX` semantics) and read
-//!   back by every operation that hands out or checks offsets, so all nodes
-//!   use the same one. When Redis loses it (a restart without persistence, an
-//!   eviction), the next operation creates a new one and clients resync.
-//! * `<prefix>:{s:<stream>}:seq` and `<prefix>:{s:<stream>}:hist`: a stream's
-//!   last offset (`INCR`) and its history (a Redis Stream with the explicit
-//!   IDs `<offset>-0`). The hash tag keeps both in one Redis Cluster slot, so
-//!   one Lua script assigns the offset, appends and sets the expiries.
+//! * `<prefix>:{s:<stream>}:meta`: a hash with the stream's last offset, its
+//!   epoch and the Redis instance (`run_id:master_replid`) that wrote it last.
+//! * `<prefix>:{s:<stream>}:hist`: the stream's history, a Redis Stream with
+//!   the explicit IDs `<offset>-0`; every entry records the epoch it was
+//!   written in.
 //! * `<prefix>:sess:<sid>`: a session's cached state.
 //!
-//! History reads apply the memory broker's contract at read time: the newest
+//! The hash tag keeps a stream's keys in one Redis Cluster slot, so one Lua
+//! script assigns the offset, appends and sets the expiries atomically.
+//!
+//! Epochs are per stream. A stream gets a new one whenever its offsets could
+//! repeat: when it is created, when its state was lost (an eviction, a
+//! restart without persistence), and when the Redis instance that holds it
+//! changed (a restart from a snapshot, which brings the counter back; a
+//! failover, which may lose the newest writes). Old entries keep their old
+//! epoch and are never served under the new one, so a client holding an old
+//! position gets `unknown epoch` and resyncs instead of missing messages.
+//!
+//! History reads apply the memory broker's contract: the newest
 //! `history_limit` entries (`MAXLEN ~` may keep more), without the entries
 //! older than `history_ttl`. Timestamps come from the Redis server's clock
 //! (`TIME`), so every node agrees on what has expired.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cabby_core::broker::{
     Broadcaster, Broker, BrokerError, Cacheable, Config, Entry, PresenceInfoOptions, StreamsTracker,
@@ -40,6 +48,12 @@ use crate::redis::connect::{self, Commands, ConnectSpec};
 pub const DEFAULT_KEY_PREFIX: &str = "__cabby__";
 /// The default per-operation timeout in seconds (`[redis_broker] timeout`).
 pub const DEFAULT_TIMEOUT: i64 = 5;
+
+/// The Redis commands the broker uses, as ACL rules (`ACL SETUSER <user>
+/// ... <rules>`); with `~<prefix>:*` they are all a broker's user needs.
+/// `SELECT` is needed only for a database other than 0.
+pub const ACL_COMMANDS: &str =
+    "+eval +evalsha +script|load +info +time +hmget +hset +exists +xinfo|stream +xadd +xrevrange +expire +get +set";
 
 fn err(message: impl Into<String>) -> BrokerError {
     BrokerError { message: message.into() }
@@ -99,17 +113,13 @@ impl Keys {
         Self { prefix: prefix.to_owned() }
     }
 
-    pub(crate) fn epoch(&self) -> String {
-        format!("{}:epoch", self.prefix)
-    }
-
     pub(crate) fn session(&self, sid: &str) -> String {
         format!("{}:sess:{sid}", self.prefix)
     }
 
-    /// The stream's last assigned offset.
-    pub(crate) fn seq(&self, stream: &str) -> String {
-        format!("{}:{{s:{stream}}}:seq", self.prefix)
+    /// The stream's state: last offset, epoch and Redis instance.
+    pub(crate) fn meta(&self, stream: &str) -> String {
+        format!("{}:{{s:{stream}}}:meta", self.prefix)
     }
 
     /// The stream's history (a Redis Stream).
@@ -118,46 +128,41 @@ impl Keys {
     }
 }
 
-/// A stream as one read saw it: the Redis server's clock, whether the stream
-/// still exists (its offset counter outlives its entries), and its newest
-/// entries, newest first.
+/// A stream as one read saw it. `low` and `latest` bound the entries the
+/// memory broker would still hold (the newest `history_limit` of the current
+/// epoch, none older than `history_ttl`; 0 when there are none); `entries`
+/// are those of them the read asked for, oldest first.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct Snapshot {
-    /// Unix seconds.
-    pub now: i64,
     pub exists: bool,
-    pub newest_first: Vec<Entry>,
+    pub epoch: String,
+    pub low: u64,
+    pub latest: u64,
+    pub entries: Vec<Entry>,
 }
 
 impl Snapshot {
-    /// The entries the memory broker would still hold, oldest first: the
-    /// newest `limit`, without those older than `ttl` seconds.
-    pub(crate) fn visible(&self, ttl: i64, limit: usize) -> Vec<Entry> {
-        let cutoff = self.now.saturating_sub(ttl);
-        let mut out: Vec<Entry> = self.newest_first.iter().take(limit).cloned().collect();
-        out.reverse();
-        // Like the memory broker's expiry: drop the oldest entries while they
-        // are older than the TTL.
-        let expired = out.iter().take_while(|e| e.timestamp < cutoff).count();
-        out.drain(..expired);
-        out
+    /// `history_from`: the entries after `offset` (the read asked only for
+    /// those), with the memory broker's errors when the epoch is not the
+    /// stream's or the offset is no longer (or not yet) in the history.
+    pub(crate) fn after(self, epoch: &str, offset: u64) -> Result<Vec<Entry>, BrokerError> {
+        if !self.exists {
+            return Err(err("stream not found"));
+        }
+        if self.epoch != epoch {
+            return Err(err(format!("unknown epoch: {epoch}, current: {}", self.epoch)));
+        }
+        if self.low > offset {
+            return Err(err(format!("requested offset couldn't be found: {offset}, lowest: {}", self.low)));
+        }
+        if self.latest == 0 {
+            return Err(err("stream is empty"));
+        }
+        if offset > self.latest {
+            return Err(err(format!("requested offset couldn't be found: {offset}, latest: {}", self.latest)));
+        }
+        Ok(self.entries)
     }
-}
-
-/// The entries after `offset`, with the memory broker's errors when the
-/// offset is no longer (or not yet) in the history.
-pub(crate) fn entries_after(visible: &[Entry], offset: u64) -> Result<&[Entry], BrokerError> {
-    let low = visible.first().map_or(0, |e| e.offset);
-    if low > offset {
-        return Err(err(format!("requested offset couldn't be found: {offset}, lowest: {low}")));
-    }
-    let Some(latest) = visible.last() else {
-        return Err(err("stream is empty"));
-    };
-    if offset > latest.offset {
-        return Err(err(format!("requested offset couldn't be found: {offset}, latest: {}", latest.offset)));
-    }
-    Ok(&visible[visible.partition_point(|e| e.offset <= offset)..])
 }
 
 fn unexpected(what: &str, v: &Value) -> BrokerError {
@@ -179,6 +184,10 @@ fn bytes(v: &Value) -> Option<&[u8]> {
     }
 }
 
+fn text(v: &Value) -> Option<String> {
+    bytes(v).map(|b| String::from_utf8_lossy(b).into_owned())
+}
+
 fn int(v: &Value) -> Option<i64> {
     match v {
         Value::Int(n) => Some(*n),
@@ -186,45 +195,59 @@ fn int(v: &Value) -> Option<i64> {
     }
 }
 
-/// The epoch script's reply: the epoch, and whether this call created it.
-pub(crate) fn parse_epoch(v: &Value) -> Result<(String, bool), BrokerError> {
+fn uint(v: &Value) -> Option<u64> {
+    int(v).and_then(|n| u64::try_from(n).ok())
+}
+
+/// What a broadcast did to the stream's epoch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EpochChange {
+    /// The stream continued in its epoch.
+    Kept,
+    /// A new stream, in a new epoch.
+    NewStream,
+    /// The stream's state was lost or its Redis instance changed: new epoch.
+    Rotated,
+}
+
+/// The add script's reply: the offset, the epoch and what happened to it.
+pub(crate) fn parse_added(v: &Value) -> Result<(u64, String, EpochChange), BrokerError> {
     let parsed = items(v).and_then(|i| match i {
-        [epoch, created] => Some((String::from_utf8_lossy(bytes(epoch)?).into_owned(), int(created)? == 1)),
+        [offset, epoch, change] => {
+            let change = match int(change)? {
+                0 => EpochChange::Kept,
+                1 => EpochChange::NewStream,
+                2 => EpochChange::Rotated,
+                _ => return None,
+            };
+            Some((uint(offset)?, text(epoch)?, change))
+        }
         _ => None,
     });
-    parsed.ok_or_else(|| unexpected("epoch", v))
+    parsed.ok_or_else(|| unexpected("broadcast", v))
 }
 
-/// The add script's reply: the assigned offset.
-pub(crate) fn parse_offset(v: &Value) -> Result<u64, BrokerError> {
-    let offset = items(v).and_then(|i| i.first()).and_then(int).and_then(|n| u64::try_from(n).ok());
-    offset.ok_or_else(|| unexpected("offset", v))
-}
-
-/// One `XRANGE`-style entry: `[<offset>-0, [field, value, ...]]`.
+/// One entry of the read script's reply: `[offset, ts, data]`.
 fn parse_entry(v: &Value) -> Option<Entry> {
-    let [id, fields] = items(v)? else { return None };
-    let id = std::str::from_utf8(bytes(id)?).ok()?;
-    let offset = id.strip_suffix("-0")?.parse().ok()?;
-    let (mut data, mut timestamp) = (None, None);
-    for [field, value] in items(fields)?.as_chunks::<2>().0 {
-        match bytes(field)? {
-            b"d" => data = Some(String::from_utf8_lossy(bytes(value)?).into_owned()),
-            b"t" => timestamp = int(value),
-            _ => {}
-        }
-    }
-    Some(Entry { offset, timestamp: timestamp?, data: data? })
+    let [offset, timestamp, data] = items(v)? else { return None };
+    Some(Entry { offset: uint(offset)?, timestamp: int(timestamp)?, data: text(data)? })
 }
 
-/// The read script's reply.
+/// The read script's reply: `[exists, epoch, low, latest, entries]`, entries
+/// newest first.
 pub(crate) fn parse_snapshot(v: &Value) -> Result<Snapshot, BrokerError> {
     let parsed = items(v).and_then(|i| match i {
-        [now, exists, entries] => Some(Snapshot {
-            now: int(now)?,
-            exists: int(exists)? > 0,
-            newest_first: items(entries)?.iter().map(parse_entry).collect::<Option<_>>()?,
-        }),
+        [exists, epoch, low, latest, entries] => {
+            let mut entries = items(entries)?.iter().map(parse_entry).collect::<Option<Vec<_>>>()?;
+            entries.reverse();
+            Some(Snapshot {
+                exists: int(exists)? > 0,
+                epoch: text(epoch).unwrap_or_default(),
+                low: uint(low)?,
+                latest: uint(latest)?,
+                entries,
+            })
+        }
         _ => None,
     });
     parsed.ok_or_else(|| unexpected("history", v))
@@ -236,7 +259,8 @@ pub const METRIC_ERRORS: &str = "redis_broker_errors_total";
 pub const METRIC_TIMEOUTS: &str = "redis_broker_timeouts_total";
 /// `redis_broker_reconnects_total`: connections opened again after a failure.
 pub const METRIC_RECONNECTS: &str = "redis_broker_reconnects_total";
-/// `redis_broker_epoch_rotations_total`: epochs created because the key was missing.
+/// `redis_broker_epoch_rotations_total`: streams that got a new epoch because
+/// their state was lost or their Redis instance changed.
 pub const METRIC_EPOCH_ROTATIONS: &str = "redis_broker_epoch_rotations_total";
 /// `redis_broker_operation_ms`: the duration of the last operation.
 pub const METRIC_OPERATION_MS: &str = "redis_broker_operation_ms";
@@ -244,19 +268,14 @@ pub const METRIC_OPERATION_MS: &str = "redis_broker_operation_ms";
 /// How long a caller waits past the operation timeout for the Redis runtime
 /// to report (it always does unless the runtime is wedged).
 const REPORT_GRACE: Duration = Duration::from_secs(1);
+/// The least time between two warnings about rotated epochs (a restart
+/// rotates every stream it holds, at its next broadcast).
+const ROTATION_WARNING_INTERVAL: Duration = Duration::from_secs(60);
 
 /// The broker's logger (`context=broker provider=redis`).
 fn log() -> &'static Logger {
     static LOG: OnceLock<Logger> = OnceLock::new();
     LOG.get_or_init(|| Logger::default().with("context", "broker").with("provider", "redis"))
-}
-
-fn read<T>(l: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
-    l.read().unwrap_or_else(PoisonError::into_inner)
-}
-
-fn write<T>(l: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
-    l.write().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -273,66 +292,103 @@ fn count_arg(n: usize) -> i64 {
     i64::try_from(n).unwrap_or(i64::MAX)
 }
 
-/// The broker's Lua scripts. Each touches the keys of one Redis Cluster slot
-/// (the epoch key, or one stream's keys).
+fn unix_secs() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// The broker's Lua scripts. Each touches the keys of one stream (one Redis
+/// Cluster slot).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Lua {
-    /// KEYS: epoch. ARGV: a new epoch. Returns `{epoch, created}`: the stored
-    /// epoch, or the new one stored now when there was none (`SET NX`).
-    Epoch,
-    /// KEYS: seq, hist. ARGV: data, history limit, history TTL, offset TTL.
-    /// Returns `{offset}`. A counter lost while its history stayed (an
-    /// eviction) continues after the newest entry, so IDs keep increasing.
+    /// KEYS: meta, hist. ARGV: data, history limit, history TTL, state TTL,
+    /// a new epoch. Returns `{offset, epoch, change}` (see [`EpochChange`]).
     Add,
-    /// KEYS: seq, hist. ARGV: how many of the newest entries to read. Returns
-    /// `{now, exists, entries}`, entries newest first.
+    /// KEYS: meta, hist. ARGV: history limit, history TTL, `after` (offset),
+    /// `since` (unix seconds), the client's epoch (empty: any). Returns
+    /// `{exists, epoch, low, latest, entries}`: the window of the current
+    /// epoch, and its entries after `after`, at or after `since`, newest
+    /// first (none when the client's epoch is not the stream's).
     Read,
 }
 
-const EPOCH_LUA: &str = r#"
-local current = redis.call('GET', KEYS[1])
-if current then
-  return {current, 0}
-end
-redis.call('SET', KEYS[1], ARGV[1])
-return {ARGV[1], 1}
-"#;
-
+/// The instance is the Redis process (`run_id`, new at every start) and its
+/// replication history (`master_replid`, new after a failover).
 const ADD_LUA: &str = r#"
+local function info(section, name)
+  return string.match(redis.call('INFO', section), name .. ':(%x+)') or ''
+end
+local instance = info('server', 'run_id') .. ':' .. info('replication', 'master_replid')
 local now = tonumber(redis.call('TIME')[1])
-local offset = redis.call('INCR', KEYS[1])
-if offset == 1 then
-  local top = redis.call('XREVRANGE', KEYS[2], '+', '-', 'COUNT', 1)[1]
-  if top then
-    local last = tonumber(string.match(top[1], '^%d+'))
-    if last >= offset then
-      offset = last + 1
-      redis.call('SET', KEYS[1], string.format('%d', offset))
+local meta = redis.call('HMGET', KEYS[1], 'offset', 'epoch', 'instance')
+local offset = tonumber(meta[1])
+local epoch = meta[2]
+local change = 0
+if not offset or not epoch or meta[3] ~= instance then
+  -- A new epoch; offsets continue after the newest one the history saw.
+  change = (offset and epoch) and 2 or 1
+  offset = offset or 0
+  epoch = ARGV[5]
+  if redis.call('EXISTS', KEYS[2]) == 1 then
+    local stream = redis.call('XINFO', 'STREAM', KEYS[2])
+    for i = 1, #stream, 2 do
+      if stream[i] == 'last-generated-id' then
+        offset = math.max(offset, tonumber(string.match(stream[i + 1], '^%d+')))
+      end
     end
+    change = 2
   end
 end
-redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[2], string.format('%d-0', offset), 'd', ARGV[1], 't', now)
-redis.call('EXPIRE', KEYS[2], ARGV[3])
+offset = offset + 1
+redis.call('HSET', KEYS[1], 'offset', string.format('%d', offset), 'epoch', epoch, 'instance', instance)
 redis.call('EXPIRE', KEYS[1], ARGV[4])
-return {offset}
+if tonumber(ARGV[2]) > 0 then
+  redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[2], string.format('%d-0', offset), 'd', ARGV[1], 't', now, 'e', epoch)
+  redis.call('EXPIRE', KEYS[2], ARGV[3])
+end
+return {offset, epoch, change}
 "#;
 
 const READ_LUA: &str = r#"
-local now = tonumber(redis.call('TIME')[1])
-local exists = redis.call('EXISTS', KEYS[1], KEYS[2])
+local meta = redis.call('HMGET', KEYS[1], 'offset', 'epoch')
+local epoch = meta[2]
+if not meta[1] or not epoch then
+  return {0, '', 0, 0, {}}
+end
+local cutoff = tonumber(redis.call('TIME')[1]) - tonumber(ARGV[2])
+local after = tonumber(ARGV[3])
+local since = tonumber(ARGV[4])
+local wanted = ARGV[5] == '' or ARGV[5] == epoch
 local entries = {}
 if tonumber(ARGV[1]) > 0 then
   entries = redis.call('XREVRANGE', KEYS[2], '+', '-', 'COUNT', ARGV[1])
 end
-return {now, exists, entries}
+local low, latest, out = 0, 0, {}
+for _, entry in ipairs(entries) do
+  local fields = {}
+  for i = 1, #entry[2], 2 do
+    fields[entry[2][i]] = entry[2][i + 1]
+  end
+  local ts = tonumber(fields['t'])
+  if fields['e'] ~= epoch or ts < cutoff then
+    break
+  end
+  local offset = tonumber(string.match(entry[1], '^%d+'))
+  if latest == 0 then
+    latest = offset
+  end
+  low = offset
+  if wanted and offset > after and ts >= since then
+    out[#out + 1] = {offset, ts, fields['d']}
+  end
+end
+return {1, epoch, low, latest, out}
 "#;
 
 impl Lua {
-    const ALL: [Lua; 3] = [Lua::Epoch, Lua::Add, Lua::Read];
+    const ALL: [Lua; 2] = [Lua::Add, Lua::Read];
 
     fn body(self) -> &'static str {
         match self {
-            Lua::Epoch => EPOCH_LUA,
             Lua::Add => ADD_LUA,
             Lua::Read => READ_LUA,
         }
@@ -383,7 +439,7 @@ struct Inner {
     /// Whether a connection was opened before (later ones are reconnects).
     connected: AtomicBool,
     /// `SCRIPT LOAD` digests by [`Lua::index`]; unknown ones are sent with `EVAL`.
-    digests: [OnceLock<String>; 3],
+    digests: [OnceLock<String>; 2],
     metrics: Option<Arc<dyn Instrumenter>>,
     closed: AtomicBool,
 }
@@ -449,7 +505,7 @@ impl Inner {
     }
 
     /// Runs the calls in order: pipelined on one node, one after the other
-    /// in a cluster (their keys are in different slots).
+    /// in a cluster (their keys may be in different slots).
     async fn exec_on(&self, conn: &mut Commands, calls: &[Call]) -> redis::RedisResult<Vec<Value>> {
         let mut out = Vec::with_capacity(calls.len());
         if calls.len() == 1 || matches!(conn, Commands::Cluster(_)) {
@@ -502,8 +558,8 @@ pub struct RedisBroker {
     broadcaster: Option<Arc<dyn Broadcaster>>,
     conf: Config,
     tracker: StreamsTracker,
-    /// The epoch the last operation saw (empty before [`Broker::start`]).
-    epoch: RwLock<String>,
+    /// When the last rotation warning was logged (unix seconds, 0: never).
+    rotation_warned: AtomicU64,
     announce: String,
 }
 
@@ -535,11 +591,11 @@ impl RedisBroker {
             m.register_counter(METRIC_TIMEOUTS, "The total number of Redis broker operations that timed out");
             m.register_counter(
                 METRIC_RECONNECTS,
-                "The total number of Redis broker connections opened after a failure",
+                "The total number of Redis broker connections opened again after a failure",
             );
             m.register_counter(
                 METRIC_EPOCH_ROTATIONS,
-                "The total number of epochs the Redis broker created because the epoch key was missing",
+                "The total number of streams the Redis broker gave a new epoch because their state was lost or their Redis instance changed",
             );
             m.register_gauge(METRIC_OPERATION_MS, "The duration of the last Redis broker operation (milliseconds)");
         }
@@ -557,14 +613,9 @@ impl RedisBroker {
             broadcaster,
             conf: config.clone(),
             tracker: StreamsTracker::new(),
-            epoch: RwLock::new(String::new()),
+            rotation_warned: AtomicU64::new(0),
             announce,
         })
-    }
-
-    /// The epoch the last operation saw.
-    pub fn epoch(&self) -> String {
-        read(&self.epoch).clone()
     }
 
     /// Runs the calls within the operation timeout.
@@ -617,56 +668,52 @@ impl RedisBroker {
         })
     }
 
-    /// The epoch call that starts every offset-related operation.
-    fn epoch_call(&self) -> Call {
-        Call::Eval { lua: Lua::Epoch, keys: vec![self.inner.keys.epoch()], args: vec![connect::nanoid6().into_bytes()] }
-    }
-
-    /// Takes the epoch Redis returned; an epoch created outside start-up
-    /// means the key was lost, so clients resync.
-    fn observe_epoch(&self, epoch: &str, created: bool) {
-        let changed = {
-            let mut current = write(&self.epoch);
-            let changed = *current != epoch;
-            if changed {
-                epoch.clone_into(&mut current);
-            }
-            changed
-        };
-        if created {
-            self.inner.count(METRIC_EPOCH_ROTATIONS);
-            log_warn!(log(), "the epoch key was missing, created a new epoch", "epoch" => epoch);
-        } else if changed {
-            log_warn!(log(), "epoch updated", "epoch" => epoch);
+    /// Counts a rotated epoch; warns at most once a minute.
+    fn rotated(&self, stream: &str, epoch: &str) {
+        self.inner.count(METRIC_EPOCH_ROTATIONS);
+        let now = unix_secs();
+        let last = self.rotation_warned.load(Ordering::SeqCst);
+        if now.saturating_sub(last) >= ROTATION_WARNING_INTERVAL.as_secs()
+            && self.rotation_warned.compare_exchange(last, now, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+        {
+            log_warn!(
+                log(),
+                "a stream got a new epoch: its state was lost or its Redis instance changed (a restart, a failover); clients resync",
+                "stream" => stream,
+                "epoch" => epoch
+            );
+        } else {
+            log_debug!(log(), "a stream got a new epoch", "stream" => stream, "epoch" => epoch);
         }
     }
 
-    /// The stream's epoch and its newest `count` entries.
-    fn snapshot(&self, stream: &str, count: usize) -> Result<(String, Snapshot), BrokerError> {
+    /// The stream's window and the entries a read asks for (see [`Lua::Read`]).
+    fn snapshot(
+        &self,
+        stream: &str,
+        limit: usize,
+        after: u64,
+        since: i64,
+        epoch: &str,
+    ) -> Result<Snapshot, BrokerError> {
         let keys = &self.inner.keys;
-        let calls = vec![
-            self.epoch_call(),
-            Call::Eval {
-                lua: Lua::Read,
-                keys: vec![keys.seq(stream), keys.hist(stream)],
-                args: vec![count_arg(count).to_string().into_bytes()],
-            },
-        ];
+        let call = Call::Eval {
+            lua: Lua::Read,
+            keys: vec![keys.meta(stream), keys.hist(stream)],
+            args: vec![
+                count_arg(limit).to_string().into_bytes(),
+                self.conf.history_ttl.to_string().into_bytes(),
+                after.to_string().into_bytes(),
+                since.to_string().into_bytes(),
+                epoch.as_bytes().to_vec(),
+            ],
+        };
         let what = || format!("failed to read history from Redis: stream={stream}");
-        let ((epoch, created), snapshot) =
-            self.op(what, calls, true, |v| Ok((parse_epoch(&v[0])?, parse_snapshot(&v[1])?)))?;
-        self.observe_epoch(&epoch, created);
-        Ok((epoch, snapshot))
+        self.op(what, vec![call], true, |v| parse_snapshot(&v[0]))
     }
 
-    fn message(stream: &str, epoch: &str, e: &Entry) -> StreamMessage {
-        StreamMessage {
-            stream: stream.to_owned(),
-            data: e.data.clone(),
-            offset: e.offset,
-            epoch: epoch.to_owned(),
-            meta: None,
-        }
+    fn message(stream: &str, epoch: &str, e: Entry) -> StreamMessage {
+        StreamMessage { stream: stream.to_owned(), data: e.data, offset: e.offset, epoch: epoch.to_owned(), meta: None }
     }
 
     fn session_call(&self, cmd: &str, sid: &str) -> redis::Cmd {
@@ -677,8 +724,7 @@ impl RedisBroker {
 }
 
 impl Broker for RedisBroker {
-    /// Loads the scripts and reads (or creates) the epoch; fails when Redis
-    /// can't be reached within the timeout.
+    /// Loads the scripts; fails when Redis can't be reached within the timeout.
     fn start(&self) -> Result<(), BrokerError> {
         let mut calls: Vec<Call> = Lua::ALL
             .iter()
@@ -688,28 +734,27 @@ impl Broker for RedisBroker {
                 Call::Cmd(c)
             })
             .collect();
-        calls.push(self.epoch_call());
-        let (digests, (epoch, created)) = self.op(
+        let mut info = redis::cmd("INFO");
+        info.arg("server");
+        calls.push(Call::Cmd(info));
+        let (digests, version) = self.op(
             || "failed to start the Redis broker".to_owned(),
             calls,
             true,
             |v| {
                 let digests = v[..Lua::ALL.len()]
                     .iter()
-                    .map(|d| {
-                        let text = bytes(d).and_then(|b| std::str::from_utf8(b).ok());
-                        text.map(str::to_owned).ok_or_else(|| unexpected("SCRIPT LOAD", d))
-                    })
+                    .map(|d| text(d).ok_or_else(|| unexpected("SCRIPT LOAD", d)))
                     .collect::<Result<Vec<String>, _>>()?;
-                Ok((digests, parse_epoch(&v[Lua::ALL.len()])?))
+                let info = text(&v[Lua::ALL.len()]).unwrap_or_default();
+                let version = info.lines().find_map(|l| l.strip_prefix("redis_version:")).unwrap_or("unknown");
+                Ok((digests, version.trim().to_owned()))
             },
         )?;
         for (slot, digest) in self.inner.digests.iter().zip(digests) {
             let _ = slot.set(digest);
         }
-        epoch.clone_into(&mut write(&self.epoch));
-        let how = if created { "new" } else { "existing" };
-        log_info!(log(), &format!("Redis broker is ready (epoch {epoch}, {how})"));
+        log_info!(log(), &format!("Redis broker is ready (Redis {version}, epochs per stream)"));
         Ok(())
     }
 
@@ -733,24 +778,23 @@ impl Broker for RedisBroker {
         }
         let keys = &self.inner.keys;
         let ttl = ttl_secs(self.conf.history_ttl);
-        let calls = vec![
-            self.epoch_call(),
-            Call::Eval {
-                lua: Lua::Add,
-                keys: vec![keys.seq(&msg.stream), keys.hist(&msg.stream)],
-                args: vec![
-                    msg.data.as_bytes().to_vec(),
-                    count_arg(self.conf.history_limit).to_string().into_bytes(),
-                    ttl.to_string().into_bytes(),
-                    ttl.saturating_mul(10).to_string().into_bytes(),
-                ],
-            },
-        ];
+        let call = Call::Eval {
+            lua: Lua::Add,
+            keys: vec![keys.meta(&msg.stream), keys.hist(&msg.stream)],
+            args: vec![
+                msg.data.as_bytes().to_vec(),
+                count_arg(self.conf.history_limit).to_string().into_bytes(),
+                ttl.to_string().into_bytes(),
+                ttl.saturating_mul(10).to_string().into_bytes(),
+                connect::nanoid6().into_bytes(),
+            ],
+        };
         let what = || format!("failed to add message to Redis stream: stream={}", msg.stream);
         // Not retried: the offset may have been assigned before a connection error.
-        let ((epoch, created), offset) =
-            self.op(what, calls, false, |v| Ok((parse_epoch(&v[0])?, parse_offset(&v[1])?)))?;
-        self.observe_epoch(&epoch, created);
+        let (offset, epoch, change) = self.op(what, vec![call], false, |v| parse_added(&v[0]))?;
+        if change == EpochChange::Rotated {
+            self.rotated(&msg.stream, &epoch);
+        }
         let msg = StreamMessage { epoch, offset, ..msg.clone() };
         if let Some(b) = &self.broadcaster {
             b.broadcast(&msg);
@@ -784,26 +828,18 @@ impl Broker for RedisBroker {
     }
 
     fn history_from(&self, stream: &str, epoch: &str, offset: u64) -> Result<Vec<StreamMessage>, BrokerError> {
-        let limit = self.conf.history_limit;
-        let (current, snapshot) = self.snapshot(stream, limit)?;
-        if current != epoch {
-            return Err(err(format!("unknown epoch: {epoch}, current: {current}")));
-        }
-        if !snapshot.exists {
-            return Err(err("stream not found"));
-        }
-        let visible = snapshot.visible(self.conf.history_ttl, limit);
-        Ok(entries_after(&visible, offset)?.iter().map(|e| Self::message(stream, &current, e)).collect())
+        let snapshot = self.snapshot(stream, self.conf.history_limit, offset, i64::MIN, epoch)?;
+        let current = snapshot.epoch.clone();
+        Ok(snapshot.after(epoch, offset)?.into_iter().map(|e| Self::message(stream, &current, e)).collect())
     }
 
     fn history_since(&self, stream: &str, ts: i64) -> Result<Option<Vec<StreamMessage>>, BrokerError> {
-        let limit = self.conf.history_limit;
-        let (epoch, snapshot) = self.snapshot(stream, limit)?;
+        let snapshot = self.snapshot(stream, self.conf.history_limit, 0, ts, "")?;
         if !snapshot.exists {
             return Ok(None);
         }
-        let visible = snapshot.visible(self.conf.history_ttl, limit);
-        Ok(Some(visible.iter().filter(|e| e.timestamp >= ts).map(|e| Self::message(stream, &epoch, e)).collect()))
+        let epoch = snapshot.epoch;
+        Ok(Some(snapshot.entries.into_iter().map(|e| Self::message(stream, &epoch, e)).collect()))
     }
 
     fn commit_session(&self, sid: &str, session: &dyn Cacheable) -> Result<(), BrokerError> {
@@ -861,13 +897,12 @@ impl Broker for RedisBroker {
     }
 
     fn peak(&self, stream: &str) -> Result<Option<StreamMessage>, BrokerError> {
-        let limit = self.conf.history_limit;
-        let (epoch, snapshot) = self.snapshot(stream, limit.min(1))?;
-        if !snapshot.exists {
+        // The newest entry decides: no entries are needed back.
+        let snapshot = self.snapshot(stream, self.conf.history_limit.min(1), u64::MAX, i64::MIN, "")?;
+        if !snapshot.exists || snapshot.latest == 0 {
             return Ok(None);
         }
-        let visible = snapshot.visible(self.conf.history_ttl, limit.min(1));
-        Ok(visible.last().map(|e| StreamMessage { offset: e.offset, epoch, ..Default::default() }))
+        Ok(Some(StreamMessage { offset: snapshot.latest, epoch: snapshot.epoch, ..Default::default() }))
     }
 }
 
@@ -914,7 +949,6 @@ mod tests {
             "Using Redis broker: localhost:6379 (key prefix: __cabby__, history limit: 7, history ttl: 300s, sessions ttl: 300s)",
             broker.announce()
         );
-        assert_eq!("", broker.epoch(), "no epoch before start");
     }
 
     #[test]
@@ -939,16 +973,25 @@ mod tests {
     }
 
     /// The scripts only touch the keys they are given (so Redis Cluster can
-    /// route them, one slot each): every call but `TIME` names a `KEYS[n]`.
+    /// route them, one slot each): every call but `TIME` and `INFO` names a
+    /// `KEYS[n]`, and the commands they use are in [`ACL_COMMANDS`].
     #[test]
-    fn scripts_touch_only_their_keys() {
+    fn scripts_touch_only_their_keys_with_the_documented_commands() {
         for lua in Lua::ALL {
-            let calls: Vec<&str> = lua.body().split("redis.call('").skip(1).collect();
+            let calls: Vec<&str> = lua.body().split("redis.call(").skip(1).collect();
             assert!(!calls.is_empty(), "{lua:?}");
             for call in calls {
-                let (command, rest) = call.split_once('\'').unwrap_or((call, ""));
+                let args = call.split(')').next().unwrap_or("");
+                let command = args.split(',').next().unwrap_or("").trim_matches(['\'', ' ']).to_lowercase();
+                let rule = match command.as_str() {
+                    "xinfo" => "+xinfo|stream".to_owned(),
+                    // `INFO` gets its section from a variable.
+                    "" | "section" => "+info".to_owned(),
+                    other => format!("+{other}"),
+                };
+                assert!(ACL_COMMANDS.split(' ').any(|r| r == rule), "{lua:?} uses {rule}, not in ACL_COMMANDS");
                 assert!(
-                    command == "TIME" || rest.starts_with(", KEYS["),
+                    matches!(rule.as_str(), "+time" | "+info") || args.contains("KEYS["),
                     "{lua:?} calls {command} on a key it wasn't given: {call}"
                 );
             }
@@ -958,9 +1001,8 @@ mod tests {
     #[test]
     fn keys_share_the_prefix_and_a_hash_tag_per_stream() {
         let keys = Keys::new("__cabby__");
-        assert_eq!("__cabby__:epoch", keys.epoch());
         assert_eq!("__cabby__:sess:abc", keys.session("abc"));
-        assert_eq!("__cabby__:{s:chat/1}:seq", keys.seq("chat/1"));
+        assert_eq!("__cabby__:{s:chat/1}:meta", keys.meta("chat/1"));
         assert_eq!("__cabby__:{s:chat/1}:hist", keys.hist("chat/1"));
     }
 
@@ -971,15 +1013,15 @@ mod tests {
         let keys = Keys::new("app");
         for stream in ["", "a", "a}b", "{x}", "a{b}c", "}", "{", "{}", "chat:1:{room}", "ünïcode"] {
             assert_eq!(
-                Slot::for_key(keys.seq(stream)),
+                Slot::for_key(keys.meta(stream)),
                 Slot::for_key(keys.hist(stream)),
-                "seq and hist of {stream:?} in different slots"
+                "meta and hist of {stream:?} in different slots"
             );
             // Any other key of the stream would share it too: the tag lies in
             // the part the keys have in common, and is never empty.
-            assert_eq!(Slot::for_key(keys.seq(stream)), Slot::for_key(format!("{}:other", keys.seq(stream))));
+            assert_eq!(Slot::for_key(keys.meta(stream)), Slot::for_key(format!("{}:other", keys.meta(stream))));
         }
-        let slots: std::collections::HashSet<_> = (0..64).map(|i| Slot::for_key(keys.seq(&format!("s{i}")))).collect();
+        let slots: std::collections::HashSet<_> = (0..64).map(|i| Slot::for_key(keys.meta(&format!("s{i}")))).collect();
         assert!(slots.len() > 1, "streams are spread over slots");
     }
 
@@ -1018,26 +1060,22 @@ mod tests {
         assert_eq!(custom, back);
     }
 
-    #[test]
-    fn visible_entries_follow_limit_and_ttl() {
-        let snap = Snapshot {
-            now: 100,
+    /// What the read script returns for `visible` (the window, oldest first)
+    /// when asked for the entries after `after`.
+    fn read_reply(epoch: &str, visible: &[Entry], after: u64) -> Snapshot {
+        Snapshot {
             exists: true,
-            newest_first: vec![entry(5, 100, "e"), entry(4, 99, "d"), entry(3, 90, "c"), entry(2, 80, "b")],
-        };
-        let offsets = |v: Vec<Entry>| v.into_iter().map(|e| e.offset).collect::<Vec<_>>();
-        assert_eq!(vec![2, 3, 4, 5], offsets(snap.visible(60, 100)));
-        assert_eq!(vec![4, 5], offsets(snap.visible(60, 2)), "the newest `limit`");
-        assert_eq!(vec![3, 4, 5], offsets(snap.visible(10, 100)), "ts >= now - ttl stays");
-        assert_eq!(vec![4, 5], offsets(snap.visible(1, 100)));
-        assert!(snap.visible(60, 0).is_empty());
-        assert!(Snapshot { now: 500, ..snap }.visible(60, 100).is_empty(), "everything expired");
+            epoch: epoch.to_owned(),
+            low: visible.first().map_or(0, |e| e.offset),
+            latest: visible.last().map_or(0, |e| e.offset),
+            entries: visible.iter().filter(|e| e.offset > after).cloned().collect(),
+        }
     }
 
-    /// `entries_after` answers exactly as the memory broker's `history_from`
+    /// `Snapshot::after` answers exactly as the memory broker's `history_from`
     /// for every offset, including trimmed and future ones (same errors).
     #[test]
-    fn entries_after_matches_the_memory_broker() {
+    fn history_from_errors_match_the_memory_broker() {
         for limit in [1usize, 2, 3, 10] {
             let mut config = Config::new();
             config.history_limit = limit;
@@ -1047,59 +1085,57 @@ mod tests {
                 memory.add("s", data);
                 all.push(entry(i as u64 + 1, 0, data));
             }
-            let snap = Snapshot { now: 0, exists: true, newest_first: all.iter().rev().cloned().collect() };
-            let visible = snap.visible(60, limit);
+            let visible = &all[all.len().saturating_sub(limit)..];
             for offset in 0..8 {
                 let expected = memory
                     .history_from("s", &memory.epoch(), offset)
                     .map(|h| h.into_iter().map(|m| (m.offset, m.data)).collect::<Vec<_>>());
-                let actual = entries_after(&visible, offset)
-                    .map(|h| h.iter().map(|e| (e.offset, e.data.clone())).collect::<Vec<_>>());
+                let actual = read_reply("e1", visible, offset)
+                    .after("e1", offset)
+                    .map(|h| h.into_iter().map(|e| (e.offset, e.data)).collect::<Vec<_>>());
                 assert_eq!(expected, actual, "limit {limit}, offset {offset}");
             }
         }
-        assert_eq!("stream is empty", entries_after(&[], 0).unwrap_err().message);
+        assert_eq!("stream is empty", read_reply("e1", &[], 0).after("e1", 0).unwrap_err().message);
+        assert_eq!("stream not found", Snapshot::default().after("e1", 0).unwrap_err().message);
+        assert_eq!(
+            "unknown epoch: e0, current: e1",
+            read_reply("e1", &[entry(1, 0, "a")], 0).after("e0", 0).unwrap_err().message
+        );
     }
 
     #[test]
     fn parses_script_replies() {
-        let epoch = Value::Array(vec![bulk("abc123"), Value::Int(1)]);
-        assert_eq!(("abc123".to_owned(), true), parse_epoch(&epoch).unwrap());
-        let epoch = Value::Array(vec![bulk("abc123"), Value::Int(0)]);
-        assert_eq!(("abc123".to_owned(), false), parse_epoch(&epoch).unwrap());
-        assert!(parse_epoch(&Value::Nil).is_err());
+        let added = Value::Array(vec![Value::Int(42), bulk("abc123"), Value::Int(2)]);
+        assert_eq!((42, "abc123".to_owned(), EpochChange::Rotated), parse_added(&added).unwrap());
+        let added = Value::Array(vec![Value::Int(1), bulk("abc123"), Value::Int(1)]);
+        assert_eq!(EpochChange::NewStream, parse_added(&added).unwrap().2);
+        assert!(parse_added(&Value::Array(vec![Value::Int(1), bulk("e"), Value::Int(7)])).is_err());
+        assert!(parse_added(&Value::Nil).is_err());
 
-        assert_eq!(42, parse_offset(&Value::Array(vec![Value::Int(42)])).unwrap());
-        assert!(parse_offset(&Value::Array(vec![])).is_err());
-
-        let fields = |d: &str, t: &str| Value::Array(vec![bulk("d"), bulk(d), bulk("t"), bulk(t)]);
         let reply = Value::Array(vec![
-            Value::Int(1700000000),
             Value::Int(1),
+            bulk("e1"),
+            Value::Int(5),
+            Value::Int(7),
             Value::Array(vec![
-                Value::Array(vec![bulk("7-0"), fields("{\"x\":1}", "1699999999")]),
-                // Field order doesn't matter.
-                Value::Array(vec![
-                    bulk("6-0"),
-                    Value::Array(vec![bulk("t"), bulk("1699999998"), bulk("d"), bulk("b")]),
-                ]),
+                Value::Array(vec![Value::Int(7), Value::Int(1699999999), bulk("{\"x\":1}")]),
+                Value::Array(vec![Value::Int(6), Value::Int(1699999998), bulk("b")]),
             ]),
         ]);
         assert_eq!(
             Snapshot {
-                now: 1700000000,
                 exists: true,
-                newest_first: vec![entry(7, 1699999999, "{\"x\":1}"), entry(6, 1699999998, "b")],
+                epoch: "e1".into(),
+                low: 5,
+                latest: 7,
+                entries: vec![entry(6, 1699999998, "b"), entry(7, 1699999999, "{\"x\":1}")],
             },
             parse_snapshot(&reply).unwrap()
         );
-        let missing = Value::Array(vec![Value::Int(5), Value::Int(0), Value::Array(vec![])]);
-        assert_eq!(Snapshot { now: 5, exists: false, newest_first: vec![] }, parse_snapshot(&missing).unwrap());
-        let bad_id = Value::Array(vec![
-            Value::Int(5),
-            Value::Int(1),
-            Value::Array(vec![Value::Array(vec![bulk("x-0"), fields("a", "1")])]),
-        ]);
-        assert!(parse_snapshot(&bad_id).is_err());
+        let missing = Value::Array(vec![Value::Int(0), bulk(""), Value::Int(0), Value::Int(0), Value::Array(vec![])]);
+        assert_eq!(Snapshot::default(), parse_snapshot(&missing).unwrap());
+        let bad = Value::Array(vec![Value::Int(1), bulk("e"), Value::Int(0), Value::Int(0), Value::Int(3)]);
+        assert!(parse_snapshot(&bad).is_err());
     }
 }
