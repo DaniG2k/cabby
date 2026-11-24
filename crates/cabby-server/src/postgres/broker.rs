@@ -167,8 +167,10 @@ impl Sql {
                 )),
                 Prune::Streams {
                     streams: format!(
+                        // The outer condition is checked again on the locked row, so a
+                        // stream written meanwhile (deadline extended) is kept.
                         "DELETE FROM {streams} WHERE stream IN (SELECT stream FROM {streams} WHERE deadline_sec < {NOW_S} \
-                         LIMIT {PRUNE_BATCH}) RETURNING stream"
+                         LIMIT {PRUNE_BATCH}) AND deadline_sec < {NOW_S} RETURNING stream"
                     ),
                     history: format!("DELETE FROM {history} WHERE stream = ANY($1)"),
                 },
@@ -662,6 +664,16 @@ mod tests {
             "--broker=postgres needs a connection URL: set --postgres_url, CABBY_POSTGRES_URL or [postgres] url",
             e.message
         );
+    }
+
+    #[test]
+    fn expired_streams_are_checked_again_on_the_locked_row() {
+        let sql = Sql::new(&Names::from_config(&PostgresConfig::new()).unwrap());
+        let Some(Prune::Streams { streams, .. }) = sql.prune.iter().find(|p| matches!(p, Prune::Streams { .. })) else {
+            panic!("no stream pruning step");
+        };
+        let after_limit = streams.split_once("LIMIT").map(|(_, rest)| rest).unwrap();
+        assert!(after_limit.contains(&format!("AND deadline_sec < {NOW_S}")), "{streams}");
     }
 
     #[test]

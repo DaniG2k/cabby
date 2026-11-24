@@ -560,3 +560,40 @@ fn deviation_d071_postgres_a_slot_that_cannot_connect_does_not_fail_the_pool() {
     }
     assert!(failures.is_empty(), "{} of 40 calls failed: {:?}", failures.len(), failures.first());
 }
+
+/// regression-for: broker/memory_test.go#TestMemory_Expire
+/// note: Deviation D-071: a stream that is written (its deadline extended) while pruning is about to delete it as expired is kept: the delete checks the deadline again on the row it locks.
+#[test]
+fn deviation_d071_postgres_pruning_keeps_a_stream_written_meanwhile() {
+    let scope = scope();
+    let broker = broker(&scope, &new_config(), None);
+    let streams = scope.table("streams");
+    scope.execute(&format!(
+        "INSERT INTO {streams} (stream, max_seq, deadline_sec, last_ts_sec) VALUES ('live', 1, 0, 0)"
+    ));
+
+    // A broadcast in progress on another node: it holds the row while extending the deadline.
+    let writer = scope.other_session();
+    writer.execute(&format!(
+        "BEGIN; UPDATE {streams} SET max_seq = max_seq + 1, deadline_sec = EXTRACT(EPOCH FROM now())::bigint + 3000 WHERE stream = 'live';"
+    ));
+    thread::scope(|s| {
+        let pruning = s.spawn(|| broker.prune());
+        let app = format!("cabby broker-maintenance {}", scope.channel);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while scope.scalar(&format!(
+            "SELECT count(*) FROM pg_stat_activity WHERE application_name = '{app}' AND wait_event_type = 'Lock'"
+        )) != Some("1".to_owned())
+        {
+            assert!(std::time::Instant::now() < deadline, "pruning did not reach the locked row");
+            thread::sleep(Duration::from_millis(20));
+        }
+        writer.execute("COMMIT;");
+        assert!(pruning.join().unwrap().expect("prune"));
+    });
+    assert_eq!(
+        Some("2".to_owned()),
+        scope.scalar(&format!("SELECT max_seq FROM {streams} WHERE stream = 'live'")),
+        "the stream written meanwhile is kept"
+    );
+}
