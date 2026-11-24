@@ -546,7 +546,7 @@ impl Config {
             self.broadcast_adapters = vec!["http".to_owned()];
         }
 
-        if let Some(rpc_name) = env.get("ANYCABLE_FLY_RPC_APP_NAME")
+        if let Some(rpc_name) = env.get("CABBY_FLY_RPC_APP_NAME").or_else(|| env.get("ANYCABLE_FLY_RPC_APP_NAME"))
             && self.rpc.host == defaults.rpc.host
         {
             self.rpc.host = format!("dns:///{region}.{rpc_name}.internal:50051");
@@ -616,6 +616,25 @@ mod tests {
         let id = nanoid(6);
         assert_eq!(id.len(), 6);
         assert!(id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
+    }
+
+    /// Pins D-061: the Fly preset reads `CABBY_FLY_RPC_APP_NAME`, then
+    /// `ANYCABLE_FLY_RPC_APP_NAME`.
+    #[test]
+    fn deviation_d061_fly_rpc_app_name() {
+        let rpc_host = |extra: &[(&str, &str)]| {
+            let env: EnvMap = [("FLY_APP_NAME", "app"), ("FLY_ALLOC_ID", "1234"), ("FLY_REGION", "ams")]
+                .iter()
+                .chain(extra)
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect();
+            let mut c = Config::new();
+            c.load_presets(&env).expect("presets");
+            c.rpc.host
+        };
+        let both = [("CABBY_FLY_RPC_APP_NAME", "rpc-a"), ("ANYCABLE_FLY_RPC_APP_NAME", "rpc-b")];
+        assert_eq!(rpc_host(&both), "dns:///ams.rpc-a.internal:50051");
+        assert_eq!(rpc_host(&[("ANYCABLE_FLY_RPC_APP_NAME", "rpc-b")]), "dns:///ams.rpc-b.internal:50051");
     }
 
     #[test]

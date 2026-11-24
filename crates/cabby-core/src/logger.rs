@@ -6,9 +6,9 @@
 //! `Display` of a [`LogValue`] corresponds to Go's `slog.Value.String()`.
 //!
 //! Sensitive data filtering is a value ([`LogFilter`]) rather than a mutable package
-//! global: [`LogFilter::global`] reads `ANYCABLE_FILTER_LOGS` once per process (and
-//! never writes the environment), and everything else takes the policy explicitly, so
-//! tests can exercise both policies in parallel.
+//! global: [`LogFilter::global`] reads `CABBY_FILTER_LOGS` or `ANYCABLE_FILTER_LOGS`
+//! once per process (and never writes the environment), and everything else takes the
+//! policy explicitly, so tests can exercise both policies in parallel.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -41,6 +41,15 @@ pub const MAX_VALUE_LENGTH: usize = 100;
 
 /// Environment variable that disables sensitive data filtering when set to a false value.
 pub const FILTER_LOGS_ENV: &str = "ANYCABLE_FILTER_LOGS";
+
+/// Cabby's name for [`FILTER_LOGS_ENV`], read first (D-061).
+pub const CABBY_FILTER_LOGS_ENV: &str = "CABBY_FILTER_LOGS";
+
+/// The filtering setting from the environment: `CABBY_FILTER_LOGS`, then
+/// `ANYCABLE_FILTER_LOGS` (D-061); empty when neither is set.
+pub fn filter_logs_setting(get: impl Fn(&str) -> Option<String>) -> String {
+    get(CABBY_FILTER_LOGS_ENV).or_else(|| get(FILTER_LOGS_ENV)).unwrap_or_default()
+}
 
 /// A resolved log value (Go `slog.Value` after resolving `LogValuer`s).
 #[derive(Debug, Clone, PartialEq)]
@@ -173,11 +182,11 @@ pub struct LogFilter {
 
 impl LogFilter {
     /// The process-wide policy (upstream `FilteringEnabled()`), read from
-    /// `ANYCABLE_FILTER_LOGS` on first use.
+    /// `CABBY_FILTER_LOGS` or `ANYCABLE_FILTER_LOGS` on first use.
     pub fn global() -> LogFilter {
         static GLOBAL: OnceLock<LogFilter> = OnceLock::new();
         *GLOBAL.get_or_init(|| {
-            let val = std::env::var(FILTER_LOGS_ENV).unwrap_or_default();
+            let val = filter_logs_setting(|k| std::env::var(k).ok());
             LogFilter { enabled: filtering_enabled_from_env(&val) }
         })
     }
@@ -451,6 +460,17 @@ pub fn optional_value<T: LogValuer>(v: Option<&T>) -> LogValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pins D-061: `CABBY_FILTER_LOGS` first, then `ANYCABLE_FILTER_LOGS`.
+    #[test]
+    fn deviation_d061_filter_logs_setting() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| (*v).to_owned())
+        };
+        assert_eq!(filter_logs_setting(env(&[("CABBY_FILTER_LOGS", "0"), ("ANYCABLE_FILTER_LOGS", "1")])), "0");
+        assert_eq!(filter_logs_setting(env(&[("ANYCABLE_FILTER_LOGS", "1")])), "1");
+        assert_eq!(filter_logs_setting(env(&[])), "");
+    }
 
     #[test]
     fn displays_like_slog_values() {

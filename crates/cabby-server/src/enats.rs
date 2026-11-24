@@ -4,7 +4,8 @@
 //! maintained NATS server in Rust, so Cabby runs the official `nats-server`
 //! binary as a supervised child process configured from [`Config`] (see
 //! `docs/enats.md` for the strategy and its limits). The binary is found in
-//! `CABBY_NATS_SERVER`, next to the Cabby executable, or on `PATH`.
+//! `CABBY_NATS_SERVER_BIN` (or `CABBY_NATS_SERVER`), next to the Cabby
+//! executable, or on `PATH`.
 
 use std::io::{BufRead, BufReader, Read};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -201,11 +202,16 @@ fn random_suffix(size: usize) -> String {
     bytes.iter().map(|b| ALPHABET[usize::from(b & 63)] as char).collect()
 }
 
-/// The `nats-server` executable: `CABBY_NATS_SERVER`, a `nats-server` next to
+/// The variables naming the `nats-server` executable, in precedence order:
+/// `CABBY_NATS_SERVER_BIN` and its older spelling `CABBY_NATS_SERVER`. They are
+/// the only server variables that aren't flags (D-061).
+pub const SERVER_BINARY_ENV: [&str; 2] = ["CABBY_NATS_SERVER_BIN", "CABBY_NATS_SERVER"];
+
+/// The `nats-server` executable: [`SERVER_BINARY_ENV`], a `nats-server` next to
 /// the running executable, or `nats-server` on `PATH`.
 pub fn server_binary() -> PathBuf {
-    if let Some(p) = std::env::var_os("CABBY_NATS_SERVER").filter(|p| !p.is_empty()) {
-        return PathBuf::from(p);
+    if let Some(p) = configured_server_binary(|k| std::env::var_os(k)) {
+        return p;
     }
     if let Ok(exe) = std::env::current_exe() {
         let bundled = exe.with_file_name(format!("nats-server{}", std::env::consts::EXE_SUFFIX));
@@ -214,6 +220,11 @@ pub fn server_binary() -> PathBuf {
         }
     }
     PathBuf::from("nats-server")
+}
+
+/// The first non-empty [`SERVER_BINARY_ENV`] variable, as a path.
+fn configured_server_binary(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
+    SERVER_BINARY_ENV.iter().find_map(|k| get(k).filter(|p| !p.is_empty())).map(PathBuf::from)
 }
 
 struct Running {
@@ -643,6 +654,18 @@ impl Drop for Service {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nats_server_bin_is_preferred_over_the_older_name() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| std::ffi::OsString::from(v))
+        };
+        let both = env(&[("CABBY_NATS_SERVER_BIN", "/a/nats-server"), ("CABBY_NATS_SERVER", "/b/nats-server")]);
+        assert_eq!(configured_server_binary(both), Some(PathBuf::from("/a/nats-server")));
+        let old = env(&[("CABBY_NATS_SERVER_BIN", ""), ("CABBY_NATS_SERVER", "/b/nats-server")]);
+        assert_eq!(configured_server_binary(old), Some(PathBuf::from("/b/nats-server")));
+        assert_eq!(configured_server_binary(env(&[])), None);
+    }
 
     #[test]
     fn server_output_maps_to_log_levels() {
