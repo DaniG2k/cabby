@@ -73,8 +73,8 @@ impl SqliteObserver for NoopObserver {
 pub const LOCK_TIMEOUT: Duration = Duration::from_secs(10);
 /// The write queue's op-count bound.
 pub const QUEUE_CAPACITY: usize = 100_000;
-/// The write queue's payload byte bound (64 MiB), so large broadcast payloads
-/// cannot grow RAM without limit if disk writes stall.
+/// The write queue's payload byte bound (64 MiB): the most broadcast and
+/// session data that waits in memory while disk writes are slow.
 pub const QUEUE_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 /// Where the database lives and how the broker treats it.
