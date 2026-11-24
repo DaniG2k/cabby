@@ -35,6 +35,12 @@ pub use statsd::StatsdWriter;
 
 /// Default rotation interval (seconds).
 pub const DEFAULT_ROTATE_INTERVAL: u64 = 15;
+/// The connection cap of a dedicated metrics server when `server.max_conn` is
+/// 0 (D-067).
+pub const DEDICATED_MAX_CONN: usize = 1024;
+/// How long a dedicated metrics server keeps an idle keep-alive connection
+/// open (D-067).
+pub const DEDICATED_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Prefix of every Prometheus metric name.
 pub const PROMETHEUS_NAMESPACE: &str = "anycable_go";
 /// The main HTTP server's default bind host (upstream `server.Host`).
@@ -209,6 +215,34 @@ impl Metrics {
         self.writers.lock().unwrap_or_else(|e| e.into_inner()).push(writer);
     }
 
+    /// The dedicated metrics server, not started yet: an `HttpServer` (its
+    /// header timeout, header limits and accept backoff) with the server's TLS
+    /// settings, as upstream (`server.SSL`), `server.max_conn` connections or
+    /// [`DEDICATED_MAX_CONN`] when that is 0, and a [`DEDICATED_IDLE_TIMEOUT`]
+    /// for keep-alive connections (D-067).
+    fn dedicated_server(
+        &self,
+        host: &str,
+        port: i64,
+        path: &str,
+        defaults: &crate::server::ServerDefaults,
+    ) -> Result<Arc<crate::server::HttpServer>, MetricsError> {
+        let max_conn = if defaults.max_conn == 0 { DEDICATED_MAX_CONN } else { defaults.max_conn };
+        let server = crate::server::HttpServer::new(host, &port.to_string(), defaults.ssl.as_ref(), max_conn)
+            .map_err(|e| MetricsError(format!("metrics HTTP server at {host}:{port} stopped: {e}")))?;
+        server.set_idle_timeout(DEDICATED_IDLE_TIMEOUT);
+        let shared = Arc::clone(&self.shared);
+        server.setup_handler(path, move |_req: crate::server::Request| {
+            let shared = Arc::clone(&shared);
+            async move {
+                let resp = prometheus::response(shared.prometheus());
+                let (parts, body) = resp.into_parts();
+                http::Response::from_parts(parts, crate::server::full(body))
+            }
+        });
+        Ok(server)
+    }
+
     /// Starts the metrics server (if any) and the writers, then rotates every
     /// interval until [`Metrics::shutdown`]. Returns when shut down or the
     /// dedicated server fails.
@@ -216,24 +250,7 @@ impl Metrics {
         let mut has_server = false;
         if let Some(HttpEndpoint { path, port, dedicated_host: Some(host) }) = &self.http {
             has_server = true;
-            // Reuse `HttpServer` so the dedicated metrics listener inherits the
-            // same header timeout, header limits, accept backoff and connection
-            // cap as the main server.
-            let max_conn = match crate::server::current_defaults().max_conn {
-                0 => prometheus::DEFAULT_DEDICATED_MAX_CONN,
-                n => n,
-            };
-            let server = crate::server::HttpServer::new(host, &port.to_string(), None, max_conn)
-                .map_err(|e| MetricsError(format!("metrics HTTP server at {host}:{port} stopped: {e}")))?;
-            let shared = Arc::clone(&self.shared);
-            server.setup_handler(path, move |_req: crate::server::Request| {
-                let shared = Arc::clone(&shared);
-                async move {
-                    let resp = prometheus::response(shared.prometheus());
-                    let (parts, body) = resp.into_parts();
-                    http::Response::from_parts(parts, crate::server::full(body))
-                }
-            });
+            let server = self.dedicated_server(host, *port, path, &crate::server::current_defaults())?;
             server.start().map_err(|e| MetricsError(format!("metrics HTTP server at {host}:{port} stopped: {e}")))?;
             let addr = server.local_addr();
             *self.server_addr.lock().unwrap_or_else(|e| e.into_inner()) = addr;
@@ -447,5 +464,64 @@ mod duration_tests {
         assert_eq!("1m0s", super::go_duration_secs(60));
         assert_eq!("1h1m5s", super::go_duration_secs(3665));
         assert_eq!("0s", super::go_duration_secs(0));
+    }
+}
+
+#[cfg(test)]
+mod dedicated_server_tests {
+    use std::io::Write as _;
+
+    use super::*;
+    use crate::server::tests::support::{connect, read_response, start};
+    use crate::server::{ServerDefaults, SslConfig};
+
+    fn get(addr: SocketAddr, path: &str) -> crate::server::tests::support::RawResponse {
+        let mut stream = connect(addr);
+        write!(stream, "GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").unwrap();
+        read_response(&mut stream)
+    }
+
+    /// Pins D-067: the dedicated listener serves the exposition at its path and
+    /// 404 elsewhere, and holds at most 1024 connections when `server.max_conn`
+    /// is 0, `server.max_conn` otherwise, closing idle keep-alive connections.
+    #[test]
+    fn deviation_d067_the_dedicated_metrics_server() {
+        let metrics = Metrics::new(Vec::new(), 0);
+        metrics.register_counter("clients_total", "Total clients");
+        metrics.counter_add("clients_total", 3);
+
+        let server = metrics.dedicated_server("127.0.0.1", 0, "/metrics", &ServerDefaults::default()).unwrap();
+        assert_eq!(DEDICATED_MAX_CONN, server.max_conn());
+        assert_eq!(1024, server.max_conn());
+        assert_eq!(Some(DEDICATED_IDLE_TIMEOUT), server.idle_timeout());
+        assert_eq!("http://127.0.0.1:0", server.address());
+        let addr = start(&server);
+
+        let ok = get(addr, "/metrics");
+        assert_eq!(200, ok.status);
+        assert_eq!(Some("text/plain; charset=utf-8"), ok.header("content-type"));
+        let body = String::from_utf8(ok.body).unwrap();
+        assert!(body.contains("anycable_go_clients_total"), "{body}");
+        for path in ["/", "/metrics/x", "/health", "/other"] {
+            assert_eq!(404, get(addr, path).status, "{path}");
+        }
+        server.shutdown();
+
+        let limited = ServerDefaults { max_conn: 7, ..ServerDefaults::default() };
+        let server = metrics.dedicated_server("127.0.0.1", 0, "/metrics", &limited).unwrap();
+        assert_eq!(7, server.max_conn());
+    }
+
+    /// The dedicated listener uses the server's TLS settings, as upstream.
+    #[test]
+    fn the_dedicated_metrics_server_uses_the_server_tls_settings() {
+        let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
+        let ssl = SslConfig { cert_path: format!("{fixtures}/server.crt"), key_path: format!("{fixtures}/server.key") };
+        let defaults = ServerDefaults { ssl: Some(ssl), ..ServerDefaults::default() };
+        let metrics = Metrics::new(Vec::new(), 0);
+
+        let server = metrics.dedicated_server("127.0.0.1", 0, "/metrics", &defaults).unwrap();
+
+        assert_eq!("https://127.0.0.1:0", server.address());
     }
 }

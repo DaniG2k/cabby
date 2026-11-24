@@ -335,6 +335,32 @@ fn idle_keep_alive_connections_stay_open() {
     server.shutdown();
 }
 
+/// With an idle timeout (the dedicated metrics server's), a keep-alive
+/// connection between requests is closed once it has been idle that long,
+/// while one that keeps sending requests stays open.
+#[test]
+fn an_idle_timeout_closes_idle_keep_alive_connections() {
+    let server = HttpServer::new("127.0.0.1", "0", None, 0).unwrap();
+    server.set_idle_timeout(Duration::from_millis(300));
+    server.setup_handler("/health", health_endpoint());
+    let addr = start(&server);
+
+    let mut busy = connect(addr);
+    for _ in 0..4 {
+        write!(busy, "GET /health HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+        assert_eq!(200, read_response(&mut busy).status);
+        std::thread::sleep(Duration::from_millis(100)); // inherent: less than the idle timeout
+    }
+
+    let mut idle = connect(addr);
+    write!(idle, "GET /health HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+    assert_eq!(200, read_response(&mut idle).status);
+    let (after, data) = closed_within(&mut idle, IO_DEADLINE).expect("the idle connection is closed");
+    assert!(after >= Duration::from_millis(250), "closed after {after:?}");
+    assert!(data.is_empty(), "nothing is sent: {data:?}");
+    server.shutdown();
+}
+
 /// H5: the header timeout covers the first request's head from the accept,
 /// and a later request's head from its first bytes; it closes the connection
 /// without a response, as Go does.

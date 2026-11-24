@@ -8,10 +8,6 @@ use cabby_core::common::StringMap;
 
 use super::{Counter, Gauge, PROMETHEUS_NAMESPACE, sorted};
 
-/// Default connection cap for a dedicated metrics server when `server.max_conn`
-/// is 0 (unlimited): prevents an exposed metrics port from exhausting FDs.
-pub(super) const DEFAULT_DEDICATED_MAX_CONN: usize = 1024;
-
 /// Escapes a Prometheus label value per the text exposition format (`\`, `"`, `\n`).
 fn escape_label_value(v: &str) -> String {
     if !v.contains(['\\', '"', '\n']) {

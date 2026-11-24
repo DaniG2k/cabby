@@ -273,6 +273,9 @@ struct State {
     started: bool,
     stopped: bool,
     local_addr: Option<SocketAddr>,
+    /// How long a keep-alive connection may wait for its next request; `None`
+    /// (the default, as upstream) keeps it open.
+    idle_timeout: Option<Duration>,
 }
 
 /// Open HTTP connections (not upgraded ones), for graceful shutdown.
@@ -393,6 +396,13 @@ impl HttpServer {
         self.inner.routes.store(Arc::new(routes));
     }
 
+    /// Closes keep-alive connections that wait longer than `timeout` for their
+    /// next request (Go `http.Server.IdleTimeout`). Takes effect for servers
+    /// started afterwards.
+    pub fn set_idle_timeout(&self, timeout: Duration) {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).idle_timeout = Some(timeout);
+    }
+
     /// Binds the listener and serves in the background (upstream `Start`, which
     /// blocks instead). Returns once listening; a second call is a no-op.
     pub fn start(&self) -> Result<(), ServerError> {
@@ -404,6 +414,7 @@ impl HttpServer {
             bind(&self.host, &self.port).map_err(|e| ServerError(format!("listen tcp {}: {e}", self.addr)))?;
         state.local_addr = listener.local_addr().ok();
         state.started = true;
+        let idle_timeout = state.idle_timeout;
         drop(state);
 
         let inner = Arc::clone(&self.inner);
@@ -412,7 +423,7 @@ impl HttpServer {
         let addr = self.addr.clone();
         runtime_handle().spawn(async move {
             match TcpListener::from_std(listener) {
-                Ok(listener) => accept_loop(listener, inner, tls, limit).await,
+                Ok(listener) => accept_loop(listener, inner, tls, limit, idle_timeout).await,
                 Err(e) => log(
                     Level::Error,
                     "HTTP server failed",
@@ -457,6 +468,16 @@ impl HttpServer {
     }
 
     /// The bound address once started (useful with port 0).
+    /// The connection cap (0: unlimited).
+    pub fn max_conn(&self) -> usize {
+        self.max_conn
+    }
+
+    /// The idle timeout of keep-alive connections, if any.
+    pub fn idle_timeout(&self) -> Option<Duration> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).idle_timeout
+    }
+
     pub fn local_addr(&self) -> Option<SocketAddr> {
         self.state.lock().unwrap_or_else(|e| e.into_inner()).local_addr
     }
@@ -536,6 +557,7 @@ async fn accept_loop(
     inner: Arc<Inner>,
     tls: Option<TlsAcceptor>,
     limit: Option<Arc<Semaphore>>,
+    idle_timeout: Option<Duration>,
 ) {
     let mut backoff = Duration::ZERO;
     loop {
@@ -571,9 +593,11 @@ async fn accept_loop(
         tokio::spawn(async move {
             let info = ConnInfo { remote_addr: Some(peer), tls: tls.is_some() };
             match tls {
-                None => serve_conn(Slotted { io: stream, _permit: permit }, info, inner).await,
+                None => serve_conn(Slotted { io: stream, _permit: permit }, info, inner, idle_timeout).await,
                 Some(acceptor) => match tokio::time::timeout(READ_HEADER_TIMEOUT, acceptor.accept(stream)).await {
-                    Ok(Ok(stream)) => serve_conn(Slotted { io: stream, _permit: permit }, info, inner).await,
+                    Ok(Ok(stream)) => {
+                        serve_conn(Slotted { io: stream, _permit: permit }, info, inner, idle_timeout).await;
+                    }
                     Ok(Err(e)) => {
                         log(
                             Level::Debug,
@@ -588,14 +612,14 @@ async fn accept_loop(
     }
 }
 
-async fn serve_conn<I>(io: I, info: ConnInfo, inner: Arc<Inner>)
+async fn serve_conn<I>(io: I, info: ConnInfo, inner: Arc<Inner>, idle_timeout: Option<Duration>)
 where
     I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let _active = ActiveGuard::new(&inner.active);
     let shutdown = inner.shutdown.clone();
     let state = Arc::new(ConnState::default());
-    let io = HeaderTimeout::new(io, Arc::clone(&state));
+    let io = HeaderTimeout::new(io, Arc::clone(&state), idle_timeout);
     let service = service_fn(move |mut req: Request| {
         state.phase.store(PHASE_REQUEST, Ordering::Release);
         req.extensions_mut().insert(info);
@@ -712,13 +736,17 @@ pub fn client_closed<B>(req: &http::Request<B>) -> Option<CancellationToken> {
 /// next head starts once its first 4 bytes are received (Go `bufr.Peek(4)`).
 /// When it expires, reading fails and the connection is closed without a
 /// response, as in Go. (hyper's own `header_read_timeout` also runs while a
-/// keep-alive connection waits for the next request.)
+/// keep-alive connection waits for the next request.) With an idle timeout
+/// (Go `IdleTimeout`), waiting between requests is bounded too.
 struct HeaderTimeout<I> {
     io: I,
     conn: Arc<ConnState>,
     /// The deadline of the head being read; `None` outside a head, so a
     /// long-lived (keep-alive or upgraded) connection holds no timer.
     sleep: Option<Pin<Box<tokio::time::Sleep>>>,
+    idle_timeout: Option<Duration>,
+    /// The idle deadline while between requests, when there is an idle timeout.
+    idle_sleep: Option<Pin<Box<tokio::time::Sleep>>>,
     /// Bytes received while idle.
     idle_bytes: usize,
     /// The client closed its side while a request was served (see
@@ -727,9 +755,17 @@ struct HeaderTimeout<I> {
 }
 
 impl<I> HeaderTimeout<I> {
-    fn new(io: I, conn: Arc<ConnState>) -> Self {
+    fn new(io: I, conn: Arc<ConnState>, idle_timeout: Option<Duration>) -> Self {
         let deadline = tokio::time::Instant::now() + READ_HEADER_TIMEOUT;
-        Self { io, conn, sleep: Some(Box::pin(tokio::time::sleep_until(deadline))), idle_bytes: 0, eof: false }
+        Self {
+            io,
+            conn,
+            sleep: Some(Box::pin(tokio::time::sleep_until(deadline))),
+            idle_timeout,
+            idle_sleep: None,
+            idle_bytes: 0,
+            eof: false,
+        }
     }
 
     fn arm(&mut self) {
@@ -739,6 +775,10 @@ impl<I> HeaderTimeout<I> {
 
 fn header_timeout_error() -> io::Error {
     io::Error::new(io::ErrorKind::TimedOut, "read header timeout")
+}
+
+fn idle_timeout_error() -> io::Error {
+    io::Error::new(io::ErrorKind::TimedOut, "idle timeout")
 }
 
 impl<I: AsyncRead + Unpin> AsyncRead for HeaderTimeout<I> {
@@ -767,8 +807,16 @@ impl<I: AsyncRead + Unpin> AsyncRead for HeaderTimeout<I> {
         } else {
             this.sleep = None;
         }
-        if phase != PHASE_IDLE {
+        if phase == PHASE_IDLE {
+            if let Some(timeout) = this.idle_timeout {
+                let idle = this.idle_sleep.get_or_insert_with(|| Box::pin(tokio::time::sleep(timeout)));
+                if idle.is_elapsed() {
+                    return Poll::Ready(Err(idle_timeout_error()));
+                }
+            }
+        } else {
             this.idle_bytes = 0;
+            this.idle_sleep = None;
         }
         let before = buf.filled().len();
         let r = Pin::new(&mut this.io).poll_read(cx, buf);
@@ -799,6 +847,19 @@ impl<I: AsyncRead + Unpin> AsyncRead for HeaderTimeout<I> {
             }
             (PHASE_HEAD, Poll::Pending) if this.sleep.as_mut().is_some_and(|s| s.as_mut().poll(cx).is_ready()) => {
                 return Poll::Ready(Err(header_timeout_error()));
+            }
+            (PHASE_IDLE, Poll::Pending)
+                if this.idle_sleep.as_mut().is_some_and(|s| s.as_mut().poll(cx).is_ready()) =>
+            {
+                return Poll::Ready(Err(idle_timeout_error()));
+            }
+            (PHASE_REQUEST, Poll::Pending) if this.idle_timeout.is_some() => {
+                // hyper may wait on this read through the response: have the
+                // end of the response poll again, so the idle timer starts.
+                *this.conn.reader.lock().unwrap_or_else(|e| e.into_inner()) = Some(cx.waker().clone());
+                if this.conn.phase.load(Ordering::Acquire) != PHASE_REQUEST {
+                    cx.waker().wake_by_ref();
+                }
             }
             _ => {}
         }
