@@ -574,10 +574,14 @@ impl RedisBroker {
             return Err(Failure::Closed);
         }
         let timeout = inner.timeout;
+        let expected = calls.len();
         let task = inner.clone().exec(calls, idempotent);
         let result = connect::wait_on(timeout + REPORT_GRACE, async move { tokio::time::timeout(timeout, task).await });
         match result {
-            Some(Ok(Ok(values))) => Ok(values),
+            Some(Ok(Ok(values))) if values.len() == expected => Ok(values),
+            Some(Ok(Ok(values))) => {
+                Err(Failure::Reply(err(format!("expected {expected} replies from Redis, got {}", values.len()))))
+            }
             Some(Ok(Err(e))) => Err(Failure::Redis(e)),
             Some(Err(_)) | None => {
                 // A connection that doesn't answer is not used again.
@@ -649,9 +653,8 @@ impl RedisBroker {
             },
         ];
         let what = || format!("failed to read history from Redis: stream={stream}");
-        let (epoch, created, snapshot) = self.op(what, calls, true, |v| {
-            Ok((parse_epoch(&v[0])?, parse_snapshot(&v[1])?)).map(|((e, c), s)| (e, c, s))
-        })?;
+        let ((epoch, created), snapshot) =
+            self.op(what, calls, true, |v| Ok((parse_epoch(&v[0])?, parse_snapshot(&v[1])?)))?;
         self.observe_epoch(&epoch, created);
         Ok((epoch, snapshot))
     }
