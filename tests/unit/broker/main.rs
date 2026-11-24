@@ -12,4 +12,5 @@ mod broker_test;
 mod config_test;
 mod memory_test;
 mod nats_test;
+mod postgres_test;
 mod redis_test;

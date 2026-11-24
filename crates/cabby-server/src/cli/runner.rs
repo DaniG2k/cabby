@@ -727,6 +727,16 @@ impl Runner {
                         )
                         .map_err(|e| CliError(e.message))?,
                     ),
+                    // Cabby only (D-071).
+                    "postgres" => Arc::new(
+                        crate::postgres::PostgresBroker::new(
+                            Some(br),
+                            &c.broker,
+                            &c.postgres,
+                            crate::postgres::Metrics::register_once(&self.metrics),
+                        )
+                        .map_err(|e| CliError(e.message))?,
+                    ),
                     other => return Err(illegal_argument(&format!("Unsupported broker adapter: {other}"))),
                 };
                 Ok((Arc::new(CoreBroker(inner.clone())), inner))

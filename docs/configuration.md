@@ -63,7 +63,7 @@ does nothing. The same goes for the Redis broker's `--redis_broker_key_prefix` a
 `--redis_broker_timeout` (`CABBY_REDIS_BROKER_KEY_PREFIX`, `CABBY_REDIS_BROKER_TIMEOUT`,
 `[redis_broker]`, deviation D-069; see [`redis-broker.md`](redis-broker.md)).
 So do the `--postgres_*` settings of the PostgreSQL adapters (`CABBY_POSTGRES_URL` and
-the others, the `[postgres]` section, deviation D-070; see
+the others, the `[postgres]` section, deviations D-070 and D-071; see
 [`postgres.md`](postgres.md)). In a configuration file, their keys work under any of the four file names.
 
 ### When both names are set

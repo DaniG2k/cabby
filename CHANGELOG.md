@@ -27,6 +27,8 @@ Differences from the AnyCable Go server are listed by ID in
 - PostgreSQL pub/sub and broadcasting (`--pubsub=postgres`, `--broadcast_adapter=postgres`):
   several nodes share broadcasts through the app's Postgres, and the app can broadcast by
   inserting into an outbox table inside its own transactions (`docs/postgres.md`).
+- The PostgreSQL broker (`--broker=postgres`): stream history, offsets and session recovery
+  shared by every node.
 
 ### Changed
 

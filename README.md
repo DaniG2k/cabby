@@ -65,9 +65,10 @@ subscriber. Several Cabby nodes can share broadcasts through Redis, NATS or Post
 - Redis broker (`--broker=redis`): stream history and sessions shared by several nodes through
   the Redis they already use, without NATS JetStream; see
   [`docs/redis-broker.md`](docs/redis-broker.md) (deviation D-069)
-- PostgreSQL adapters (`--pubsub=postgres`, `--broadcast_adapter=postgres`): several nodes
-  share broadcasts through the app's Postgres, with no Redis or NATS; the app can broadcast from
-  SQL, inside its own transactions ([`docs/postgres.md`](docs/postgres.md), deviation D-070)
+- PostgreSQL adapters (`--pubsub=postgres`, `--broadcast_adapter=postgres`,
+  `--broker=postgres`): several nodes share broadcasts, stream history and session recovery
+  through the app's Postgres, with no Redis or NATS; the app can broadcast from SQL, inside its
+  own transactions ([`docs/postgres.md`](docs/postgres.md), deviations D-070 and D-071)
 - Presence
 - JWT identification, signed streams and Turbo Streams
 - Server-Sent Events
@@ -164,12 +165,12 @@ run the gem's RPC server (`bundle exec anycable`) and leave out `--rpc_host` (it
 If the app already runs PostgreSQL, Cabby nodes can share everything through it:
 
 ```sh
-cabby --pubsub=postgres --broadcast_adapter=http,postgres \
+cabby --pubsub=postgres --broker=postgres --broadcast_adapter=http,postgres \
   --postgres_url="postgres://cabby:secret@db.internal:5432/app?sslmode=verify-full" \
   --rpc_host=http://localhost:3000/_anycable --secret=…
 ```
 
-Every node delivers every broadcast, and the app can
+Every node delivers every broadcast, clients resume their sessions on any node, and the app can
 broadcast by inserting a row into `cabby_broadcasts`, inside the transaction that makes the
 change, so a rollback broadcasts nothing. Cabby creates its tables on the first start. It needs a
 direct or session-mode connection (`LISTEN` does not survive PgBouncer transaction pooling).

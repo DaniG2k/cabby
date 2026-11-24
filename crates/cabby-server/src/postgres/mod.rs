@@ -24,11 +24,13 @@ use cabby_core::toml_config::{self, go_quote};
 use crate::metrics::Instrumenter;
 
 pub mod broadcast;
+pub mod broker;
 pub(crate) mod connect;
 pub mod pubsub;
 pub(crate) mod schema;
 
 pub use broadcast::PostgresBroadcaster;
+pub use broker::PostgresBroker;
 pub use pubsub::PostgresSubscriber;
 
 /// The longest identifier PostgreSQL keeps (`NAMEDATALEN - 1`).
