@@ -36,7 +36,7 @@ jobs:
       - run: cargo test -p cabby-mruby-sys --tests
       - run: cargo xtask check-inputs
       - run: cargo xtask reference-checkout
-      - name: Start Redis and NATS (pinned images)
+      - name: Start Redis, NATS and PostgreSQL (pinned images)
         run: compat/scripts/services.sh start | sed 's/^export //; s/ /\n/g' >> "$GITHUB_ENV"
       # Green while cases are pending; fails on any regression, crash or
       # abnormal exit of a test binary, missing or unmapped test, ignore, or
@@ -72,7 +72,7 @@ jobs:
       # libmruby 1.2.0 for the `mrb` tag, built in the pinned ruby:2.7 image (Docker).
       - run: cargo xtask reference-mruby
       - run: cargo xtask reference-build
-      - name: Start Redis and NATS (pinned images)
+      - name: Start Redis, NATS and PostgreSQL (pinned images)
         run: compat/scripts/services.sh start | sed 's/^export //; s/ /\n/g' >> "$GITHUB_ENV"
       # Every case must keep the reference status recorded in the manifest
       # (pass, not_observable, upstream_failure): any change fails the step.
