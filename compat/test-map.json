@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 174
+      "cases": 175
     },
     "translation": {
       "reviewed": 923
@@ -27695,6 +27695,15 @@
     },
     {
       "rust_case": "pubsub::postgres_test::deviation_d070_postgres_spilled_and_inline_messages_keep_their_order",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pubsub/redis_test.go#TestRedisCommon/Broadcast"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pubsub::postgres_test::deviation_d070_postgres_start_opens_the_publish_connection",
       "relation": "regression",
       "links": [
         "26a1a703:pubsub/redis_test.go#TestRedisCommon/Broadcast"
