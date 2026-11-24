@@ -288,3 +288,8 @@ connects as needs `SELECT`, `INSERT`, `UPDATE` and `DELETE` on them and `USAGE` 
 | `postgres_claimed_broadcasts_total` | counter | Rows claimed from `cabby_broadcasts` |
 
 With Prometheus they have the usual `anycable_go_` prefix.
+
+## Deploying
+
+[`deploy-kamal.md`](deploy-kamal.md) has a Kamal example with two Cabby nodes on the app's
+Postgres.

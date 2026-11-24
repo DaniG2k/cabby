@@ -26873,6 +26873,16 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "conformance::postgres::deviation_d070_d071_postgres_nodes_share_broadcasts_history_and_sessions",
+      "relation": "regression",
+      "links": [
+        "26a1a703:node/broker_integration_test.go#TestIntegrationHistory_Memory/Subscribe_+_History",
+        "26a1a703:node/broker_integration_test.go#TestIntegrationRestore_Memory/Restore_session_connection_and_channels_state"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
       "rust_case": "conformance::pusher::presence_subscription",
       "relation": "external",
       "links": [

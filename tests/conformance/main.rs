@@ -29,6 +29,7 @@ mod logging_server;
 mod logging_transport;
 mod origin;
 mod ping_intervals;
+mod postgres;
 mod pusher;
 mod redis_broker;
 mod rpc_sessions;

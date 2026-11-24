@@ -174,7 +174,8 @@ Every node delivers every broadcast, clients resume their sessions on any node, 
 broadcast by inserting a row into `cabby_broadcasts`, inside the transaction that makes the
 change, so a rollback broadcasts nothing. Cabby creates its tables on the first start. It needs a
 direct or session-mode connection (`LISTEN` does not survive PgBouncer transaction pooling).
-[`docs/postgres.md`](docs/postgres.md) covers the settings, TLS, the table DDL and the details.
+[`docs/postgres.md`](docs/postgres.md) covers the settings, TLS, the table DDL and the details;
+[`docs/deploy-kamal.md`](docs/deploy-kamal.md) has a Kamal example.
 
 Every flag has a `CABBY_*` environment variable (`ANYCABLE_*` also works), and Cabby reads
 `cabby.toml` (or `anycable.toml`) from the working directory or `/etc/cabby`. `cabby --help` lists
