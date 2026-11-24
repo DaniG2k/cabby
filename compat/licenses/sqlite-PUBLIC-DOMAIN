@@ -1,0 +1,11 @@
+SQLite (https://sqlite.org) is compiled into Cabby for the SQLite broker: the
+libsqlite3-sys crate bundles its C source (rusqlite's `bundled` feature; the
+version is the one libsqlite3-sys pins in Cargo.lock). SQLite is in the public
+domain (https://sqlite.org/copyright.html). Its source files carry this notice:
+
+The author disclaims copyright to this source code.  In place of
+a legal notice, here is a blessing:
+
+   May you do good and not evil.
+   May you find forgiveness for yourself and forgive others.
+   May you share freely, never taking more than you give.

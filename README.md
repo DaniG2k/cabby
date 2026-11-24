@@ -400,10 +400,11 @@ derive from AnyCable, AnyT (MIT, © palkan) and go-mruby (MIT, © Mitchell Hashi
 are in [`compat/licenses/`](compat/licenses/). Cabby is an independent implementation, not
 affiliated with the AnyCable project or Evil Martians.
 
-Cabby statically links a C dependency: mruby 1.2.0 (MIT, © mruby developers) with the mruby-env
-gem (MIT, © Internet Initiative Japan Inc.), vendored in
-[`crates/cabby-mruby-sys`](crates/cabby-mruby-sys) for the optional mruby scripting feature (cargo
-feature `mruby`, off by default and not in release builds). Their notices are
+Cabby statically links SQLite (public domain), whose C source the `libsqlite3-sys` crate bundles,
+for the SQLite broker; its notice is `compat/licenses/sqlite-PUBLIC-DOMAIN`. With the optional
+mruby scripting feature (cargo feature `mruby`, off by default and not in release builds) it also
+links mruby 1.2.0 (MIT, © mruby developers) with the mruby-env gem (MIT, © Internet Initiative
+Japan Inc.), vendored in [`crates/cabby-mruby-sys`](crates/cabby-mruby-sys). Their notices are
 `compat/licenses/mruby-MITL` and `compat/licenses/mruby-env-LICENSE`; the binding's API is modeled
 on go-mruby (see [`docs/mruby.md`](docs/mruby.md)).
 
