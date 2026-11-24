@@ -1,9 +1,14 @@
 //! `cabby-healthcheck`: a health probe for container images that have no shell
-//! or curl. It sends `GET <health path>` to `127.0.0.1:<port>` and succeeds on a
+//! or curl. It sends `GET <health path>` to `<host>:<port>` and succeeds on a
 //! 200 response; when the server serves TLS (`ssl_cert` and `ssl_key` set), it
-//! only checks that the port accepts connections. The port, the path and the TLS
-//! settings come from the variables the server's flags read (`CABBY_*`, then
-//! `ANYCABLE_*`); the probe can't see command-line flags.
+//! only checks that the port accepts connections. The host, the port, the path
+//! and the TLS settings come from the variables the server's flags read
+//! (`CABBY_*`, then `ANYCABLE_*`); the probe can't see command-line flags.
+//!
+//! The host (`CABBY_HOST`, then `ANYCABLE_HOST`) gives the addresses to try, in
+//! order, until one is healthy: `127.0.0.1` then `::1` when it is empty,
+//! `localhost` or an unspecified address (`0.0.0.0`, `::`); the address itself
+//! for an IP literal; every resolved address, IPv4 first, for a host name.
 
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream, ToSocketAddrs};
@@ -77,32 +82,55 @@ pub fn probe(addr: SocketAddr, path: &str) -> Result<(), String> {
     }
 }
 
-/// The host to probe: reads `CABBY_HOST`, then `ANYCABLE_HOST`. Wildcard bind
-/// addresses (`0.0.0.0`, `::`) and `localhost` map to their loopback address;
-/// explicit IP literals are probed directly.
-pub fn host(get: impl Fn(&str) -> Option<String>) -> IpAddr {
-    let raw = setting(&get, "HOST");
-    let trimmed = raw.trim().trim_start_matches('[').trim_end_matches(']');
-    if trimmed.is_empty() || trimmed == "0.0.0.0" || trimmed.eq_ignore_ascii_case("localhost") {
-        return IpAddr::V4(Ipv4Addr::LOCALHOST);
+/// The addresses to probe for the host setting (`CABBY_HOST`, then
+/// `ANYCABLE_HOST`), in order; see the module documentation.
+pub fn hosts(get: impl Fn(&str) -> Option<String>) -> Result<Vec<IpAddr>, String> {
+    candidates(&setting(&get, "HOST"), |name| {
+        (name, 0).to_socket_addrs().map(|addrs| addrs.map(|a| a.ip()).collect()).map_err(|e| e.to_string())
+    })
+}
+
+/// The addresses to probe for the host `raw`, with `resolve` looking up host names.
+fn candidates(
+    raw: &str,
+    resolve: impl Fn(&str) -> Result<Vec<IpAddr>, String>,
+) -> Result<Vec<IpAddr>, String> {
+    const LOOPBACK: [IpAddr; 2] = [IpAddr::V4(Ipv4Addr::LOCALHOST), IpAddr::V6(Ipv6Addr::LOCALHOST)];
+    let host = raw.trim();
+    let host = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
+    if host.is_empty() || host.eq_ignore_ascii_case("localhost") {
+        return Ok(LOOPBACK.to_vec());
     }
-    if trimmed == "::" {
-        return IpAddr::V6(Ipv6Addr::LOCALHOST);
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return Ok(if ip.is_unspecified() { LOOPBACK.to_vec() } else { vec![ip] });
     }
-    if let Ok(ip) = trimmed.parse::<IpAddr>() {
-        return ip;
+    let mut addrs = resolve(host).map_err(|e| format!("resolving {host:?}: {e}"))?;
+    if addrs.is_empty() {
+        return Err(format!("resolving {host:?}: no addresses"));
     }
-    (trimmed, 0)
-        .to_socket_addrs()
-        .ok()
-        .and_then(|mut addrs| addrs.next().map(|a| a.ip()))
-        .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST))
+    // Stable: keeps the resolver's order within each family.
+    addrs.sort_by_key(IpAddr::is_ipv6);
+    Ok(addrs)
+}
+
+/// Checks each of `addrs` in turn (a connection with `tls`, else `GET path`)
+/// and succeeds on the first healthy one; otherwise reports every failure.
+pub fn check_any(addrs: &[SocketAddr], tls: bool, path: &str) -> Result<(), String> {
+    let mut failures = Vec::with_capacity(addrs.len());
+    for &addr in addrs {
+        match if tls { connect(addr) } else { probe(addr, path) } {
+            Ok(()) => return Ok(()),
+            Err(e) => failures.push(e),
+        }
+    }
+    Err(failures.join("; "))
 }
 
 /// The whole probe, with `get` reading the environment.
 pub fn run(get: impl Fn(&str) -> Option<String>) -> Result<(), String> {
-    let addr = SocketAddr::new(host(&get), port(&get)?);
-    if tls(&get) { connect(addr) } else { probe(addr, &health_path(&get)) }
+    let port = port(&get)?;
+    let addrs: Vec<SocketAddr> = hosts(&get)?.into_iter().map(|ip| SocketAddr::new(ip, port)).collect();
+    check_any(&addrs, tls(&get), &health_path(&get))
 }
 
 #[cfg(test)]
@@ -130,12 +158,106 @@ mod tests {
         assert_eq!(health_path(env(&[])), "/health");
         assert_eq!(health_path(env(&[("ANYCABLE_HEALTH_PATH", "/up")])), "/up");
         assert_eq!(health_path(env(&[("CABBY_HEALTH_PATH", "/ok"), ("ANYCABLE_HEALTH_PATH", "/up")])), "/ok");
-        assert_eq!(host(env(&[])), IpAddr::V4(Ipv4Addr::LOCALHOST));
-        assert_eq!(host(env(&[("CABBY_HOST", "0.0.0.0")])), IpAddr::V4(Ipv4Addr::LOCALHOST));
-        assert_eq!(host(env(&[("CABBY_HOST", "localhost")])), IpAddr::V4(Ipv4Addr::LOCALHOST));
-        assert_eq!(host(env(&[("CABBY_HOST", "::")])), IpAddr::V6(Ipv6Addr::LOCALHOST));
-        assert_eq!(host(env(&[("CABBY_HOST", "[::1]")])), IpAddr::V6(Ipv6Addr::LOCALHOST));
-        assert_eq!(host(env(&[("ANYCABLE_HOST", "127.0.0.2")])), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)));
+    }
+
+    const V4_LOOPBACK: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    const V6_LOOPBACK: IpAddr = IpAddr::V6(Ipv6Addr::LOCALHOST);
+
+    fn no_lookups(name: &str) -> Result<Vec<IpAddr>, String> {
+        panic!("unexpected lookup of {name:?}")
+    }
+
+    #[test]
+    fn unspecified_empty_and_localhost_hosts_try_both_loopbacks() {
+        for raw in ["", " ", "0.0.0.0", "::", "[::]", "0:0:0:0:0:0:0:0", "localhost", "LocalHost", "[localhost]"] {
+            assert_eq!(candidates(raw, no_lookups), Ok(vec![V4_LOOPBACK, V6_LOOPBACK]), "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn an_ip_literal_is_probed_as_given() {
+        assert_eq!(candidates("127.0.0.2", no_lookups), Ok(vec![IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2))]));
+        assert_eq!(candidates("10.1.2.3", no_lookups), Ok(vec![IpAddr::V4(Ipv4Addr::new(10, 1, 2, 3))]));
+        assert_eq!(candidates("::1", no_lookups), Ok(vec![V6_LOOPBACK]));
+        assert_eq!(candidates("[::1]", no_lookups), Ok(vec![V6_LOOPBACK]));
+        assert_eq!(candidates("fd00::5", no_lookups), Ok(vec!["fd00::5".parse::<IpAddr>().unwrap()]));
+    }
+
+    #[test]
+    fn a_host_name_tries_every_resolved_address_ipv4_first() {
+        let v6a: IpAddr = "fd00::1".parse().unwrap();
+        let v6b: IpAddr = "fd00::2".parse().unwrap();
+        let v4a = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let v4b = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+        let resolve = |name: &str| {
+            assert_eq!("cabby.internal", name);
+            Ok(vec![v6a, v4a, v6b, v4b])
+        };
+        assert_eq!(candidates("cabby.internal", resolve), Ok(vec![v4a, v4b, v6a, v6b]));
+        assert_eq!(
+            candidates("nowhere.invalid", |_| Err("not found".to_owned())),
+            Err("resolving \"nowhere.invalid\": not found".to_owned())
+        );
+        assert_eq!(
+            candidates("empty.invalid", |_| Ok(Vec::new())),
+            Err("resolving \"empty.invalid\": no addresses".to_owned())
+        );
+    }
+
+    #[test]
+    fn hosts_reads_the_server_variables() {
+        assert_eq!(hosts(env(&[])), Ok(vec![V4_LOOPBACK, V6_LOOPBACK]));
+        assert_eq!(hosts(env(&[("ANYCABLE_HOST", "127.0.0.2")])), Ok(vec![IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2))]));
+        assert_eq!(hosts(env(&[("CABBY_HOST", "::1"), ("ANYCABLE_HOST", "127.0.0.2")])), Ok(vec![V6_LOOPBACK]));
+    }
+
+    #[test]
+    fn the_first_healthy_candidate_succeeds() {
+        let (_reserved, refusing) = refusing_addr();
+        let (unhealthy, first) = serve_once("HTTP/1.1 503 Service Unavailable");
+        let (healthy, second) = serve_once("HTTP/1.1 200 OK");
+        assert_eq!(check_any(&[refusing, unhealthy, healthy], false, "/health"), Ok(()));
+        first.join().expect("server");
+        second.join().expect("server");
+
+        let (one, first) = serve_once("HTTP/1.1 503 Service Unavailable");
+        let (two, second) = serve_once("HTTP/1.1 500 Internal Server Error");
+        let err = check_any(&[one, two], false, "/health").expect_err("no healthy candidate");
+        assert_eq!(
+            "GET /health answered \"HTTP/1.1 503 Service Unavailable\"; \
+             GET /health answered \"HTTP/1.1 500 Internal Server Error\"",
+            err
+        );
+        first.join().expect("server");
+        second.join().expect("server");
+    }
+
+    /// A server listening on `::1` only is found from an unspecified host
+    /// after `127.0.0.1` (skipped where IPv6 loopback is unavailable).
+    #[test]
+    fn an_unspecified_host_reaches_a_server_on_ipv6_loopback() {
+        let Ok(listener) = TcpListener::bind("[::1]:0") else { return };
+        let port = listener.local_addr().expect("addr").port();
+        let server = std::thread::spawn(move || {
+            // The probe may first reach whatever owns this port on 127.0.0.1.
+            let (mut conn, _) = listener.accept().expect("accept");
+            let mut request = Vec::new();
+            let mut buf = [0u8; 512];
+            while !request.ends_with(b"\r\n\r\n") {
+                let n = conn.read(&mut buf).expect("read");
+                assert!(n > 0, "the probe closed before finishing its request");
+                request.extend_from_slice(&buf[..n]);
+            }
+            conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").expect("write");
+        });
+        let port = port.to_string();
+        let get = move |k: &str| match k {
+            "CABBY_HOST" => Some("::".to_owned()),
+            "CABBY_PORT" => Some(port.clone()),
+            _ => None,
+        };
+        assert_eq!(run(get), Ok(()));
+        server.join().expect("server");
     }
 
     #[test]
@@ -148,14 +270,27 @@ mod tests {
         assert!(!tls(env(&[("CABBY_SSL_CERT", ""), ("ANYCABLE_SSL_CERT", "/c.pem"), ("ANYCABLE_SSL_KEY", "/k.pem")])));
     }
 
+    /// A loopback address whose port is bound but not listening, so connecting
+    /// fails (refused, or on macOS timed out); the port stays reserved while the
+    /// socket lives.
+    fn refusing_addr() -> (tokio::net::TcpSocket, SocketAddr) {
+        let socket = tokio::net::TcpSocket::new_v4().expect("socket");
+        socket.bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))).expect("bind");
+        let addr = socket.local_addr().expect("addr");
+        (socket, addr)
+    }
+
     /// With TLS the probe only connects: it can't speak HTTPS without a TLS stack.
     #[test]
     fn with_tls_a_connection_is_healthy() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
         assert_eq!(connect(addr), Ok(()));
+        assert_eq!(check_any(&[addr], true, "/health"), Ok(()));
+        let (_reserved, refusing) = refusing_addr();
+        assert_eq!(check_any(&[refusing, addr], true, "/health"), Ok(()));
+        assert!(connect(refusing).expect_err("nothing listens").starts_with("connecting to "));
         drop(listener);
-        assert!(connect(addr).expect_err("nothing listens").starts_with("connecting to "));
     }
 
     /// A one-shot server answering with `status_line`; the handle yields the
@@ -188,7 +323,7 @@ mod tests {
         assert_eq!(probe(addr, "/health"), Err("GET /health answered \"HTTP/1.1 503 Service Unavailable\"".to_owned()));
         server.join().expect("server");
 
-        let closed = TcpListener::bind("127.0.0.1:0").expect("bind").local_addr().expect("addr");
-        assert!(probe(closed, "/health").expect_err("nothing listens").starts_with("connecting to "));
+        let (_reserved, refusing) = refusing_addr();
+        assert!(probe(refusing, "/health").expect_err("nothing listens").starts_with("connecting to "));
     }
 }

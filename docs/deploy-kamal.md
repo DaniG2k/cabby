@@ -64,7 +64,8 @@ The log has a line like `Accept broadcast requests at http://…:8090/_broadcast
 - TLS for `wss://`: put a TLS proxy in front of port 8080. Recent Kamal versions can route an
   accessory through `kamal-proxy` with a `proxy:` block; check yours.
 - The image has a Docker health check (`cabby-healthcheck`, `GET /health` on the main port). It
-  reads the port from `CABBY_PORT`, so change the port with that variable rather than `--port`.
+  reads the host and the port from `CABBY_HOST` and `CABBY_PORT`, so change them with those
+  variables rather than `--host` and `--port`.
 - The image defaults to `ANYCABLE_HOST=0.0.0.0` and `ANYCABLE_BROADCAST_ADAPTER=http`; the
   snippet's `CABBY_BROADCAST_ADAPTER: http` repeats the second, so nothing is logged. To
   broadcast through Redis instead, set it to `http,redisx,redis` and add `CABBY_REDIS_URL`
