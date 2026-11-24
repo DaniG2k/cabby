@@ -72,3 +72,21 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# PostgreSQL's SCRAM authentication derives its key with 4096 rounds of
+# HMAC-SHA256 inside the connect future, on the adapters' runtime. Unoptimized,
+# that takes about 30 ms per connection on a small machine, and a test process
+# opening dozens of connections at once delays every other Postgres task by
+# hundreds of milliseconds. Optimizing these crates in dev builds keeps a
+# connect at a few milliseconds; release builds are optimized anyway.
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.hmac]
+opt-level = 3
+
+[profile.dev.package.digest]
+opt-level = 3
+
+[profile.dev.package.postgres-protocol]
+opt-level = 3
