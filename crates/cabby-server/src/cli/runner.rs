@@ -290,6 +290,8 @@ impl Runner {
     }
 
     fn serve(&mut self) -> Result<(), CliError> {
+        // Before anything starts (D-066).
+        check_pusher_secret(&self.config)?;
         let _guard = self.runtime.enter();
         let procs = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
         self.announce_debug_mode();
@@ -755,9 +757,6 @@ impl Runner {
     /// and the Pusher REST API (on the main port, or its own when `api_port` is set).
     fn mount_pusher(&mut self, node: &Arc<Node>, ws_server: &server::HttpServer) -> Result<(), CliError> {
         let c = self.config.clone();
-        if c.pusher.secret.is_empty() {
-            return Err(illegal_argument("Pusher requires a secret (--pusher_secret or --secret)"));
-        }
         let broker = self.node_broker.clone().ok_or_else(|| assertion_failed("broker is not initialized"))?;
 
         // The `$pusher` channel only accepts subscriptions from the Pusher endpoint.
@@ -1006,9 +1005,86 @@ impl Embedded {
     }
 }
 
+/// Pusher is mounted only with a secret, its own or the `--secret` fallback (D-066).
+fn check_pusher_secret(c: &Config) -> Result<(), CliError> {
+    if c.pusher.enabled() && c.pusher.secret.is_empty() {
+        return Err(illegal_argument("Pusher requires a secret (--pusher_secret or --secret)"));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use std::io::{Read as _, Write as _};
+
     use super::*;
+    use crate::server::tests::support;
+
+    fn cli_config(args: &[&str]) -> Config {
+        let (c, _) = super::super::options::new_config_from_cli(args, &EnvMap::new(), Vec::new()).expect("valid flags");
+        c
+    }
+
+    /// Pins D-066: Pusher without a secret stops the server at startup, before
+    /// any component starts.
+    #[test]
+    fn deviation_d066_pusher_without_a_secret_stops_the_server() {
+        let c = cli_config(&["cabby", "--pusher_app_id=app", "--pusher_app_key=key"]);
+        assert!(c.pusher.enabled() && c.pusher.secret.is_empty());
+        let mut runner = Runner::new(c, super::super::default_runner_options()).expect("a runner");
+
+        let err = runner.run().expect_err("the server must not start");
+
+        assert!(err.0.contains("Pusher requires a secret (--pusher_secret or --secret)"), "{}", err.0);
+        assert!(runner.node.is_none(), "nothing was started");
+        for args in [
+            &["cabby", "--pusher_app_id=app", "--pusher_app_key=key", "--secret=s3cr3t"][..],
+            &["cabby", "--pusher_app_id=app", "--pusher_app_key=key", "--pusher_secret=s3cr3t"],
+            &["cabby"],
+        ] {
+            assert!(check_pusher_secret(&cli_config(args)).is_ok(), "{args:?}");
+        }
+    }
+
+    /// Pins D-066: with `--secret` alone, Pusher is mounted with that secret.
+    #[test]
+    fn deviation_d066_the_secret_fallback_mounts_pusher() {
+        let c = cli_config(&["cabby", "--pusher_app_id=app", "--pusher_app_key=key", "--secret=s3cr3t"]);
+        assert_eq!("s3cr3t", c.pusher.secret);
+        let mut runner = Runner::new(c, super::super::default_runner_options()).expect("a runner");
+        let node = Node::new(crate::node::Config::new(), Vec::new());
+        let broker: Arc<dyn core_broker::Broker> = Arc::new(core_broker::Memory::new(
+            None,
+            Some(node.clone()),
+            &core_broker::Config::new(),
+            Arc::new(core_broker::SystemClock),
+        ));
+        broker.start().expect("broker");
+        node.set_broker(broker.clone());
+        node.set_controller(Arc::new(NullController));
+        node.start().expect("node");
+        runner.node_broker = Some(broker);
+        let server = HttpServer::new("127.0.0.1", "0", None, 0).expect("server");
+
+        runner.mount_pusher(&node, &server).expect("Pusher is mounted");
+
+        let addr = support::start(&server);
+        let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let path = "/apps/app/channels/presence-room/users";
+        let params = format!("auth_key=key&auth_timestamp={ts}&auth_version=1.0");
+        let signature = crate::pusher::Verifier::new("key", "s3cr3t").sign(&format!("GET\n{path}\n{params}"));
+        let mut stream = support::connect(addr);
+        write!(stream, "GET {path}?{params}&auth_signature={signature} HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
+        let response = support::read_response(&mut stream);
+        assert_eq!(200, response.status, "{}", String::from_utf8_lossy(&response.body));
+
+        let mut stream = support::connect(addr);
+        write!(stream, "GET {path}?{params}&auth_signature=00 HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        let mut text = String::new();
+        let _ = stream.read_to_string(&mut text);
+        assert!(text.starts_with("HTTP/1.1 401"), "{text}");
+    }
 
     /// Pins D-060: an ignored configuration file is logged at debug level.
     #[test]
