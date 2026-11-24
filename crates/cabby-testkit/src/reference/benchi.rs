@@ -512,7 +512,7 @@ impl Server {
 // ------------------------------------------------------------------ client.go
 
 pub enum Client {
-    Rust(rs::client::Client),
+    Rust(Box<rs::client::Client>),
     Go(GoObj),
 }
 
@@ -538,7 +538,7 @@ struct GoReceived {
 /// Upstream `BuildClient`.
 pub fn build_client(url: &str) -> Result<Client, String> {
     match backend() {
-        Backend::Rust => rs::client::Client::build(url).map(Client::Rust).map_err(|e| e.0),
+        Backend::Rust => rs::client::Client::build(url).map(|c| Client::Rust(Box::new(c))).map_err(|e| e.0),
         Backend::Go => {
             let s = session();
             let r: GoHandleOrError = s.call("BuildClient", json!({"URL": url}));
