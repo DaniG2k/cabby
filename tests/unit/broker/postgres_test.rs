@@ -531,3 +531,32 @@ fn deviation_d071_postgres_pruning_clears_a_large_backlog_in_batches() {
         );
     }
 }
+
+/// regression-for: broker/nats_test.go#TestNATSBroker_Sessions
+/// note: Deviation D-071: when the server refuses new connections (here a role at its CONNECTION LIMIT) but one pool connection is open, calls keep succeeding on it; only a pool with no open connection fails fast.
+#[test]
+fn deviation_d071_postgres_a_slot_that_cannot_connect_does_not_fail_the_pool() {
+    let scope = scope();
+    scope.migrate();
+    let mut pg = scope.config();
+    pg.url = scope.role_url(&[]);
+    pg.auto_migrate = false;
+    let role = format!("r_{}", scope.channel);
+    let broker = PostgresBroker::new(None, &new_config(), &pg, Metrics::none()).expect("new");
+    broker.start().expect("start");
+    broker.commit_session("sid", &TestCacheable("kept".into())).expect("commit");
+    // The broker's other connections are gone; no new one is allowed.
+    scope.execute(&format!(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = '{role}' AND application_name NOT LIKE 'cabby broker c%'; \
+         ALTER ROLE \"{role}\" CONNECTION LIMIT 1;"
+    ));
+
+    let mut failures = Vec::new();
+    for _ in 0..40 {
+        if let Err(e) = broker.restore_session("sid") {
+            failures.push(e.message);
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(failures.is_empty(), "{} of 40 calls failed: {:?}", failures.len(), failures.first());
+}

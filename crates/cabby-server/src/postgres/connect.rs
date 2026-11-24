@@ -631,11 +631,12 @@ pub(crate) fn refs(params: &Params) -> Vec<&(dyn ToSql + Sync)> {
 /// pipelines the queries sent to it.
 ///
 /// Every call has one deadline ([`QUERY_TIMEOUT`]) covering the connect and
-/// the query. No lock is held while connecting: callers of a slot being
-/// connected use another open connection, or wait for the connect to finish
-/// within their deadline. After a failed connect, calls fail at once for
-/// [`FAIL_FAST`], so an unreachable server costs one deadline, not one per
-/// queued caller.
+/// the query, and uses an open connection when there is one: the chosen slot,
+/// else any slot (the chosen one then reconnects in the background). Only a
+/// caller with no open connection connects itself, without holding a lock;
+/// others wait for that connect within their deadline. After such a connect
+/// fails, calls fail at once for [`FAIL_FAST`] while no connection is open,
+/// so an unreachable server costs one deadline, not one per queued caller.
 pub(crate) struct Pool {
     spec: Arc<ConnectSpec>,
     app: String,
@@ -643,7 +644,7 @@ pub(crate) struct Pool {
     next: AtomicUsize,
     /// Signalled whenever a connect finishes.
     connected: Notify,
-    /// Until when calls fail at once, and why.
+    /// Until when calls with no open connection fail at once, and why.
     failed: Mutex<Option<(Instant, String)>>,
     metrics: Metrics,
 }
@@ -652,13 +653,63 @@ pub(crate) struct Pool {
 struct Slot {
     conn: Option<Arc<Conn>>,
     connecting: bool,
+    /// No background reconnect before then (after one failed).
+    retry_after: Option<Instant>,
 }
 
-/// How long calls fail at once after a failed connect.
+/// How long calls fail at once after a failed connect (while no connection
+/// is open), and how long a slot waits before reconnecting in the background
+/// again.
 pub(crate) const FAIL_FAST: Duration = Duration::from_secs(1);
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A slot being connected; dropping it unfinished (a cancelled connect)
+/// frees the slot and wakes the waiters.
+struct Connecting<'a> {
+    pool: &'a Pool,
+    slot: usize,
+    done: bool,
+}
+
+impl Connecting<'_> {
+    /// Stores the outcome; `background` failures don't make callers fail fast.
+    fn finish(mut self, result: Result<Client, PgError>, background: bool) -> Result<Arc<Conn>, PgError> {
+        self.done = true;
+        let out = {
+            let mut slot = lock(&self.pool.slots[self.slot]);
+            slot.connecting = false;
+            match result {
+                Ok(client) => {
+                    let conn = Arc::new(Conn::new(client));
+                    slot.conn = Some(conn.clone());
+                    slot.retry_after = None;
+                    *lock(&self.pool.failed) = None;
+                    Ok(conn)
+                }
+                Err(e) => {
+                    slot.retry_after = Some(Instant::now() + FAIL_FAST);
+                    if !background {
+                        *lock(&self.pool.failed) = Some((Instant::now() + FAIL_FAST, e.0.clone()));
+                    }
+                    Err(e)
+                }
+            }
+        };
+        self.pool.connected.notify_waiters();
+        out
+    }
+}
+
+impl Drop for Connecting<'_> {
+    fn drop(&mut self) {
+        if !self.done {
+            lock(&self.pool.slots[self.slot]).connecting = false;
+            self.pool.connected.notify_waiters();
+        }
+    }
 }
 
 impl Pool {
@@ -678,61 +729,66 @@ impl Pool {
         slot.conn.as_ref().filter(|c| !c.client.is_closed()).cloned()
     }
 
-    /// A connection, opened if needed, by `deadline`.
-    pub async fn get(&self, deadline: tokio::time::Instant) -> Result<Arc<Conn>, PgError> {
+    /// Marks slot `i` as connecting if it is free (and, when `respect_retry`,
+    /// not waiting after a failed background connect).
+    fn claim(&self, i: usize, respect_retry: bool) -> Option<Connecting<'_>> {
+        let mut slot = lock(&self.slots[i]);
+        let waiting = respect_retry && slot.retry_after.is_some_and(|t| Instant::now() < t);
+        if slot.connecting || Self::open(&slot).is_some() || waiting {
+            return None;
+        }
+        slot.connecting = true;
+        slot.conn = None;
+        Some(Connecting { pool: self, slot: i, done: false })
+    }
+
+    /// Reconnects slot `i` on the runtime, unless it is already connecting.
+    fn reconnect_in_background(self: &Arc<Self>, i: usize) {
+        if self.claim(i, true).map(|mut c| c.done = true).is_none() {
+            return;
+        }
+        let pool = self.clone();
+        runtime().spawn(async move {
+            // Claimed above; the guard takes over here.
+            let guard = Connecting { pool: &pool, slot: i, done: false };
+            let result = pool.spec.connect(&pool.app, None).await;
+            if result.is_err() {
+                pool.metrics.error();
+            }
+            let _ = guard.finish(result, true);
+        });
+    }
+
+    /// A connection by `deadline`: an open one if any, else a new one.
+    pub async fn get(self: &Arc<Self>, deadline: tokio::time::Instant) -> Result<Arc<Conn>, PgError> {
         let first = self.next.fetch_add(1, Ordering::Relaxed) % self.slots.len();
         loop {
+            let notified = self.connected.notified();
+            if let Some(c) = Self::open(&lock(&self.slots[first])) {
+                return Ok(c);
+            }
+            if let Some(c) = self.slots.iter().find_map(|s| Self::open(&lock(s))) {
+                self.reconnect_in_background(first);
+                return Ok(c);
+            }
             if let Some((until, why)) = lock(&self.failed).as_ref()
                 && Instant::now() < *until
             {
                 return Err(PgError(why.clone()));
             }
-            // The chosen slot if open; else claim it for connecting; else any open slot.
-            let notified = self.connected.notified();
-            let mut claimed = false;
-            {
-                let mut slot = lock(&self.slots[first]);
-                if let Some(c) = Self::open(&slot) {
-                    return Ok(c);
-                }
-                if !slot.connecting {
-                    slot.connecting = true;
-                    slot.conn = None;
-                    claimed = true;
-                }
-            }
-            if !claimed {
-                if let Some(c) = self.slots.iter().find_map(|s| Self::open(&lock(s))) {
-                    return Ok(c);
-                }
-                // Wait for the connect in progress.
+            let order = (0..self.slots.len()).map(|k| (first + k) % self.slots.len());
+            let Some(guard) = order.into_iter().find_map(|i| self.claim(i, false)) else {
+                // Every slot is connecting: wait for one.
                 if tokio::time::timeout_at(deadline, notified).await.is_err() {
                     return Err(PgError(format!("timed out connecting to {}", self.spec.description)));
                 }
                 continue;
-            }
+            };
             let result = match tokio::time::timeout_at(deadline, self.spec.connect(&self.app, None)).await {
                 Ok(r) => r,
                 Err(_) => Err(PgError(format!("timed out connecting to {}", self.spec.description))),
             };
-            let out = {
-                let mut slot = lock(&self.slots[first]);
-                slot.connecting = false;
-                match result {
-                    Ok(client) => {
-                        let conn = Arc::new(Conn::new(client));
-                        slot.conn = Some(conn.clone());
-                        *lock(&self.failed) = None;
-                        Ok(conn)
-                    }
-                    Err(e) => {
-                        *lock(&self.failed) = Some((Instant::now() + FAIL_FAST, e.0.clone()));
-                        Err(e)
-                    }
-                }
-            };
-            self.connected.notify_waiters();
-            return out;
+            return guard.finish(result, false);
         }
     }
 
@@ -748,7 +804,7 @@ impl Pool {
 
     /// Runs one query within one deadline (connect included); failures are
     /// counted, and a connection that timed out or closed is dropped.
-    pub async fn query(&self, sql: &str, params: &Params) -> Result<Vec<Row>, PgError> {
+    pub async fn query(self: &Arc<Self>, sql: &str, params: &Params) -> Result<Vec<Row>, PgError> {
         let started = Instant::now();
         let deadline = tokio::time::Instant::now() + QUERY_TIMEOUT;
         let conn = match self.get(deadline).await {
@@ -1215,6 +1271,30 @@ mod tests {
         assert_eq!(3, registry.counter(super::super::DROPPED).unwrap().value());
         assert_eq!((Ok(0), Ok(1)), (rx.try_recv(), rx.try_recv()), "the first ones are kept");
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_cancelled_connect_frees_its_slot() {
+        // A server that accepts connections and never answers.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for s in listener.incoming().flatten() {
+                held.push(s);
+            }
+        });
+        let mut c = PostgresConfig::new();
+        c.url = format!("postgres://u@127.0.0.1:{port}/db?sslmode=disable");
+        let pool = Pool::new(Arc::new(ConnectSpec::from_config(&c, "test").unwrap()), "test", 1, Metrics::none());
+        let p = pool.clone();
+        let connecting = block_on(async move {
+            let far = tokio::time::Instant::now() + Duration::from_secs(30);
+            let cancelled = tokio::time::timeout(Duration::from_millis(200), p.get(far)).await;
+            assert!(cancelled.is_err(), "the connect was still running");
+            lock(&p.slots[0]).connecting
+        });
+        assert!(!connecting, "a dropped connect must free its slot");
     }
 
     #[test]
