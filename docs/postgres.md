@@ -104,7 +104,13 @@ milliseconds) reaches the node's clients through history, as with Redis pub/sub.
 
 `NOTIFY` payloads must stay under 8000 bytes. A message larger than 7500 bytes (after its
 envelope) is stored in `cabby_pubsub_overflow` for 60 seconds and the notification carries the
-row's ID; receivers read it from there. A node deletes expired rows every 30 seconds.
+row's ID; receivers read it from there. A node deletes expired rows every 30 seconds, so a node
+that falls more than 60 seconds behind skips such a message (with a warning).
+
+Each node keeps up to 8192 received messages waiting for delivery to its clients. A node that
+can't keep up drops the messages that find the queue full, counts them
+(`postgres_dropped_total`) and logs a warning; reading from the `LISTEN` connection itself never
+stops on that account.
 
 The `LISTEN` connection is checked with `SELECT 1` every `--postgres_keepalive_interval`, so a
 connection that died without closing is noticed. After any failure Cabby reconnects with backoff
@@ -296,6 +302,7 @@ connects as needs `SELECT`, `INSERT`, `UPDATE` and `DELETE` on them and `USAGE` 
 | `postgres_spillover_total` | counter | Pub/sub messages sent through `cabby_pubsub_overflow` |
 | `postgres_reconnects_total` | counter | `LISTEN` connections re-established |
 | `postgres_claimed_broadcasts_total` | counter | Rows from `cabby_broadcasts` handed to the broker |
+| `postgres_dropped_total` | counter | Received messages dropped because the node was not keeping up |
 
 With Prometheus they have the usual `anycable_go_` prefix.
 

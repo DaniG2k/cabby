@@ -112,16 +112,14 @@ impl PostgresBroadcaster {
 /// Routes notifications: row IDs wake the claimer, JSON goes to the node.
 struct Sink {
     wake: Arc<Notify>,
-    direct: mpsc::UnboundedSender<String>,
+    direct: connect::Inbox<String>,
 }
 
 impl ListenSink for Sink {
     fn notification(&self, _channel: &str, payload: &str) {
         match classify(payload) {
             Ingest::Claim => self.wake.notify_one(),
-            Ingest::Direct(json) => {
-                let _ = self.direct.send(json.to_owned());
-            }
+            Ingest::Direct(json) => self.direct.push(json.to_owned()),
         }
     }
 
@@ -330,7 +328,7 @@ pub fn claim_lock_key(n: &Names) -> i64 {
     i64::from_ne_bytes(hash.to_ne_bytes())
 }
 
-async fn direct_loop(node: Arc<dyn Handler>, mut rx: mpsc::UnboundedReceiver<String>, stop: CancellationToken) {
+async fn direct_loop(node: Arc<dyn Handler>, mut rx: mpsc::Receiver<String>, stop: CancellationToken) {
     loop {
         let json = tokio::select! {
             biased;
@@ -379,7 +377,7 @@ impl Broadcaster for PostgresBroadcaster {
             failing: None,
         };
         let claimer = connect::runtime().spawn(claimer.run(wake.clone(), stop.clone()));
-        let (dtx, drx) = mpsc::unbounded_channel();
+        let (dtx, drx) = connect::Inbox::new(connect::INBOX_CAPACITY, self.metrics.clone(), self.log.clone());
         connect::runtime().spawn(direct_loop(self.node.clone(), drx, stop.clone()));
 
         let listener = Listener::start(

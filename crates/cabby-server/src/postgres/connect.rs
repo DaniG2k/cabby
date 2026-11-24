@@ -37,6 +37,39 @@ pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long one query (or a pipelined batch) may take before its connection
 /// is considered broken and dropped.
 pub(crate) const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Notifications read from a `LISTEN` connection and not yet handed on.
+const NOTICES_CAPACITY: usize = 1024;
+/// Received messages waiting for the node (per adapter); beyond this they
+/// are dropped and counted.
+pub(crate) const INBOX_CAPACITY: usize = 8192;
+
+/// A bounded queue of received messages: pushing never blocks the `LISTEN`
+/// connection; a message that finds it full is dropped, counted
+/// (`postgres_dropped_total`) and logged (at the 1st, 2nd, 4th, 8th, ... drop).
+pub(crate) struct Inbox<T> {
+    tx: mpsc::Sender<T>,
+    dropped: AtomicUsize,
+    metrics: Metrics,
+    log: Logger,
+}
+
+impl<T> Inbox<T> {
+    pub fn new(capacity: usize, metrics: Metrics, log: Logger) -> (Self, mpsc::Receiver<T>) {
+        let (tx, rx) = mpsc::channel(capacity);
+        (Self { tx, dropped: AtomicUsize::new(0), metrics, log }, rx)
+    }
+
+    pub fn push(&self, item: T) {
+        if let Err(mpsc::error::TrySendError::Full(_)) = self.tx.try_send(item) {
+            self.metrics.dropped();
+            let n = self.dropped.fetch_add(1, Ordering::Relaxed) + 1;
+            if n.is_power_of_two() {
+                log_warn!(self.log, "the node is not keeping up with Postgres notifications; dropped messages", "dropped" => n);
+            }
+        }
+    }
+}
+
 /// How long a `LISTEN` connection must stay up before a loss reconnects
 /// without the accumulated backoff.
 pub(crate) const STABLE_CONNECTION: Duration = Duration::from_secs(30);
@@ -373,11 +406,7 @@ impl ConnectSpec {
     /// Opens a connection named `app` (`application_name`); its I/O runs on
     /// the Postgres runtime. Messages other than query results
     /// (notifications) go to `notices` when given.
-    pub async fn connect(
-        &self,
-        app: &str,
-        notices: Option<mpsc::UnboundedSender<(String, String)>>,
-    ) -> Result<Client, PgError> {
+    pub async fn connect(&self, app: &str, notices: Option<mpsc::Sender<(String, String)>>) -> Result<Client, PgError> {
         let mut config = self.config.clone();
         config.application_name(truncate(app, super::MAX_IDENTIFIER));
         config.connect_timeout(CONNECT_TIMEOUT);
@@ -394,8 +423,12 @@ impl ConnectSpec {
             while let Some(message) = std::future::poll_fn(|cx| conn.as_mut().poll_message(cx)).await {
                 match message {
                     Ok(AsyncMessage::Notification(n)) => {
-                        if let Some(tx) = &notices {
-                            let _ = tx.send((n.channel().to_owned(), n.payload().to_owned()));
+                        // A full queue stops reading the socket; PostgreSQL keeps
+                        // the notifications queued on its side meanwhile.
+                        if let Some(tx) = &notices
+                            && tx.send((n.channel().to_owned(), n.payload().to_owned())).await.is_err()
+                        {
+                            break;
                         }
                     }
                     Ok(_) => {}
@@ -795,7 +828,7 @@ async fn listen_loop(
     let mut attempt: u32 = 0;
     let mut ever_connected = false;
     loop {
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = mpsc::channel(NOTICES_CAPACITY);
         let client = tokio::select! {
             biased;
             () = stop.cancelled() => return,
@@ -853,7 +886,7 @@ async fn listen_loop(
 /// stopped).
 async fn serve(
     client: &Client,
-    rx: &mut mpsc::UnboundedReceiver<(String, String)>,
+    rx: &mut mpsc::Receiver<(String, String)>,
     shared: &ListenShared,
     sink: &dyn ListenSink,
     keepalive: Option<Duration>,
@@ -1012,6 +1045,18 @@ mod tests {
         let only_a: BTreeSet<String> = ["a".to_owned()].into();
         assert_eq!(only_a, st.confirmed, "b is no longer reported as listened to");
         assert_eq!(only_a, desired);
+    }
+
+    #[test]
+    fn a_full_inbox_drops_and_counts() {
+        let registry = Arc::new(crate::metrics::Metrics::new(Vec::new(), 0));
+        let (inbox, mut rx) = Inbox::new(2, Metrics::register(registry.clone()), Logger::default());
+        for i in 0..5 {
+            inbox.push(i);
+        }
+        assert_eq!(3, registry.counter(super::super::DROPPED).unwrap().value());
+        assert_eq!((Ok(0), Ok(1)), (rx.try_recv(), rx.try_recv()), "the first ones are kept");
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]

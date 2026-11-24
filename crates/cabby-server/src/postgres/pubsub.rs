@@ -212,11 +212,11 @@ impl PostgresSubscriber {
 }
 
 /// Hands notifications to the dispatcher task, in order.
-struct Forward(mpsc::UnboundedSender<(String, String)>);
+struct Forward(connect::Inbox<(String, String)>);
 
 impl ListenSink for Forward {
     fn notification(&self, channel: &str, payload: &str) {
-        let _ = self.0.send((channel.to_owned(), payload.to_owned()));
+        self.0.push((channel.to_owned(), payload.to_owned()));
     }
 }
 
@@ -229,7 +229,7 @@ struct Dispatcher {
 }
 
 impl Dispatcher {
-    async fn run(self, mut rx: mpsc::UnboundedReceiver<(String, String)>, stop: CancellationToken) {
+    async fn run(self, mut rx: mpsc::Receiver<(String, String)>, stop: CancellationToken) {
         loop {
             let (channel, payload) = tokio::select! {
                 biased;
@@ -443,7 +443,7 @@ impl Subscriber for PostgresSubscriber {
             stop.clone(),
         ));
 
-        let (ntx, nrx) = mpsc::unbounded_channel();
+        let (ntx, nrx) = connect::Inbox::new(connect::INBOX_CAPACITY, self.metrics.clone(), self.log.clone());
         let dispatcher = Dispatcher {
             node: self.node.clone(),
             pool,
