@@ -848,9 +848,7 @@ impl<I: AsyncRead + Unpin> AsyncRead for HeaderTimeout<I> {
             (PHASE_HEAD, Poll::Pending) if this.sleep.as_mut().is_some_and(|s| s.as_mut().poll(cx).is_ready()) => {
                 return Poll::Ready(Err(header_timeout_error()));
             }
-            (PHASE_IDLE, Poll::Pending)
-                if this.idle_sleep.as_mut().is_some_and(|s| s.as_mut().poll(cx).is_ready()) =>
-            {
+            (PHASE_IDLE, Poll::Pending) if this.idle_sleep.as_mut().is_some_and(|s| s.as_mut().poll(cx).is_ready()) => {
                 return Poll::Ready(Err(idle_timeout_error()));
             }
             (PHASE_REQUEST, Poll::Pending) if this.idle_timeout.is_some() => {

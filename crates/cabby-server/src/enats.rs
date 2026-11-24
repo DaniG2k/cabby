@@ -994,7 +994,10 @@ mod tests {
 
         let text = err.to_string();
         assert!(text.starts_with(&format!("{}: owned by uid ", dir.display())), "{text}");
-        assert!(text.ends_with(&format!("not by this user (uid {other}); remove it or set --enats_store_dir")), "{text}");
+        assert!(
+            text.ends_with(&format!("not by this user (uid {other}); remove it or set --enats_store_dir")),
+            "{text}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -91,10 +91,7 @@ pub fn hosts(get: impl Fn(&str) -> Option<String>) -> Result<Vec<IpAddr>, String
 }
 
 /// The addresses to probe for the host `raw`, with `resolve` looking up host names.
-fn candidates(
-    raw: &str,
-    resolve: impl Fn(&str) -> Result<Vec<IpAddr>, String>,
-) -> Result<Vec<IpAddr>, String> {
+fn candidates(raw: &str, resolve: impl Fn(&str) -> Result<Vec<IpAddr>, String>) -> Result<Vec<IpAddr>, String> {
     const LOOPBACK: [IpAddr; 2] = [IpAddr::V4(Ipv4Addr::LOCALHOST), IpAddr::V6(Ipv6Addr::LOCALHOST)];
     let host = raw.trim();
     let host = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
