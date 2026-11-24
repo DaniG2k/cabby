@@ -26,18 +26,35 @@ use crate::client_tls::ClientStream;
 pub(crate) const DEFAULT_MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Removes `userinfo@` from a URL string so credentials do not appear in errors
-/// or debug output.
+/// or debug output. The authority starts after `scheme://` (or, without `://`,
+/// after a `scheme:` followed by slashes, else at the start) and ends at the
+/// first `/`, `?` or `#`; everything in it up to its last `@` is removed.
 fn redact_url(raw: &str) -> String {
-    let Some(scheme_end) = raw.find("://") else { return raw.to_owned() };
-    let after_scheme = &raw[scheme_end + 3..];
-    let authority_end = after_scheme.find(['/', '?', '#']).unwrap_or(after_scheme.len());
-    let authority = &after_scheme[..authority_end];
-    let Some(at) = authority.rfind('@') else { return raw.to_owned() };
-    format!("{}://{}", &raw[..scheme_end], &after_scheme[at + 1..])
+    let start = match raw.find("://") {
+        Some(scheme_end) => scheme_end + 3,
+        None => scheme_with_slashes(raw),
+    };
+    let (prefix, rest) = raw.split_at(start);
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    match rest[..authority_end].rfind('@') {
+        Some(at) => format!("{prefix}{}", &rest[at + 1..]),
+        None => raw.to_owned(),
+    }
 }
 
-/// A parsed base URL.
-#[derive(Debug, Clone)]
+/// The length of a leading `scheme:/…/` (RFC 3986 scheme characters, then at
+/// least one slash), or 0.
+fn scheme_with_slashes(raw: &str) -> usize {
+    let Some(colon) = raw.find(':') else { return 0 };
+    let scheme = &raw[..colon];
+    let is_scheme = scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+    let slashes = raw[colon + 1..].len() - raw[colon + 1..].trim_start_matches('/').len();
+    if is_scheme && slashes > 0 { colon + 1 + slashes } else { 0 }
+}
+
+/// A parsed base URL. Its `Debug` leaves out the credentials.
+#[derive(Clone)]
 pub(crate) struct Origin {
     pub https: bool,
     pub host: String,
@@ -51,6 +68,20 @@ pub(crate) struct Origin {
     basic_auth: Option<String>,
     /// The URL as given (for error texts).
     raw: String,
+}
+
+impl std::fmt::Debug for Origin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Origin")
+            .field("https", &self.https)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("authority", &self.authority)
+            .field("base_path", &self.base_path)
+            .field("query", &self.query)
+            .field("raw", &self.raw)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Origin {
@@ -490,14 +521,65 @@ mod dial_error_tests {
         assert_eq!("lookup failed", super::go_dial_error(&other));
     }
 
+    /// Fails when `text` holds the password `s3cr3t` or the `Basic` value of `user:s3cr3t`.
+    fn assert_no_credentials(what: &str, text: &str) {
+        let basic = super::base64_encode(b"user:s3cr3t");
+        assert!(!text.contains("s3cr3t"), "password in {what}: {text}");
+        assert!(!text.contains(&basic), "Basic credentials in {what}: {text}");
+    }
+
     #[test]
     fn origin_redacts_credentials_in_errors_and_debug() {
-        let err = super::Origin::parse("http://user:s3cr3t@bad host").unwrap_err();
-        assert!(!err.contains("s3cr3t"), "secret leaked in error: {err}");
+        for raw in [
+            "http://user:s3cr3t@bad host",
+            "user:s3cr3t@localhost:3000",
+            "http:/user:s3cr3t@host/x",
+            "ftp://user:s3cr3t@host/x",
+            "user:s3cr3t@host/x?q",
+        ] {
+            let err = super::Origin::parse(raw).unwrap_err();
+            assert_no_credentials(&format!("the error for {raw:?}"), &err);
+        }
         let origin = super::Origin::parse("http://user:s3cr3t@127.0.0.1:8080/rpc").unwrap();
-        let dbg = format!("{origin:?}");
-        assert!(!dbg.contains("s3cr3t"), "secret leaked in Debug: {dbg}");
+        assert_eq!(Some(format!("Basic {}", super::base64_encode(b"user:s3cr3t"))), origin.basic_auth);
+        assert_no_credentials("Debug", &format!("{origin:?}"));
+        assert_no_credentials("Debug", &format!("{origin:#?}"));
         assert_eq!("http://127.0.0.1:8080/rpc", origin.raw());
+        assert_no_credentials("url", &origin.url("connect"));
+        let client = super::HttpClient::new(origin, None, 1, std::time::Duration::from_secs(5), None);
+        assert_no_credentials("the client's Debug", &format!("{client:?}"));
+    }
+
+    #[test]
+    fn redact_url_strips_userinfo_with_or_without_a_scheme() {
+        for (raw, want) in [
+            ("http://user:s3cr3t@host:3000/rpc", "http://host:3000/rpc"),
+            ("http://host/rpc/@x", "http://host/rpc/@x"),
+            ("user:s3cr3t@localhost:3000", "localhost:3000"),
+            ("user:s3cr3t@host/x@y", "host/x@y"),
+            ("a@b:s3cr3t@host?q=@", "host?q=@"),
+            ("http:/user:s3cr3t@host/x", "http:/host/x"),
+            ("localhost:3000/rpc", "localhost:3000/rpc"),
+        ] {
+            assert_eq!(want, super::redact_url(raw), "{raw}");
+        }
+    }
+
+    #[tokio::test]
+    async fn errors_of_a_failed_request_omit_credentials() {
+        // A server that closes every connection without an answer.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((sock, _)) = listener.accept().await {
+                drop(sock);
+            }
+        });
+        let origin = super::Origin::parse(&format!("http://user:s3cr3t@{addr}/rpc")).unwrap();
+        let client = super::HttpClient::new(origin, None, 1, std::time::Duration::from_secs(5), None);
+        let err = client.post("connect", &[], bytes::Bytes::new()).await.unwrap_err();
+        assert_no_credentials("the request error", &err.message);
+        assert_no_credentials("the request error's Debug", &format!("{err:?}"));
     }
 
     /// Pins D-068: HTTP RPC responses exceeding the configured limit fail
