@@ -22,6 +22,8 @@ Differences from the AnyCable Go server are listed by ID in
   the shutdown timeout. The conversion needs free disk space of about the file's size, for a
   temporary copy in SQLite's temp directory and for the WAL next to the file; if it fails,
   Cabby logs a warning and uses the file unconverted.
+- The Redis broker (`--broker=redis`): stream history and sessions shared by several nodes
+  through Redis ([`docs/redis-broker.md`](docs/redis-broker.md), D-069).
 
 ### Changed
 

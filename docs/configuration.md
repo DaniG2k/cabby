@@ -48,6 +48,7 @@ means `false`.
 | `--redis_url` | `CABBY_REDIS_URL`, `ANYCABLE_REDIS_URL`, `REDIS_URL` |
 | `--strict-config` | `CABBY_STRICT_CONFIG`, `ANYCABLE_STRICT_CONFIG` |
 | `--sqlite_path` | `CABBY_SQLITE_PATH` only |
+| `--redis_broker_key_prefix`, `--redis_broker_timeout` | `CABBY_REDIS_BROKER_KEY_PREFIX`, `CABBY_REDIS_BROKER_TIMEOUT` only |
 
 Two settings aren't flags and follow the same order: `CABBY_FILTER_LOGS` / `ANYCABLE_FILTER_LOGS`
 (set to `false` to log sensitive values unmasked) and `CABBY_FLY_RPC_APP_NAME` /
@@ -57,7 +58,9 @@ Two settings aren't flags and follow the same order: `CABBY_FILTER_LOGS` / `ANYC
 
 Settings the AnyCable server doesn't have read only their `CABBY_*` name. Today that is
 `--sqlite_path` (`CABBY_SQLITE_PATH`, the SQLite broker, deviation D-065): `ANYCABLE_SQLITE_PATH`
-does nothing. In a configuration file, their keys work under any of the four file names.
+does nothing. The same goes for the Redis broker's `--redis_broker_key_prefix` and
+`--redis_broker_timeout` (`CABBY_REDIS_BROKER_KEY_PREFIX`, `CABBY_REDIS_BROKER_TIMEOUT`,
+`[redis_broker]`, deviation D-069; see [`redis-broker.md`](redis-broker.md)). In a configuration file, their keys work under any of the four file names.
 
 ### When both names are set
 

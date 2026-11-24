@@ -62,6 +62,9 @@ subscriber. Several Cabby nodes can share broadcasts through Redis or NATS.
 - SQLite broker (`--broker=sqlite --sqlite_path=/var/lib/cabby/cabby.db`): stream history,
   offsets and sessions survive a graceful restart of a single node, with no Redis or NATS. After
   a crash, clients resync cleanly (deviation D-065)
+- Redis broker (`--broker=redis`): stream history and sessions shared by several nodes through
+  the Redis they already use, without NATS JetStream; see
+  [`docs/redis-broker.md`](docs/redis-broker.md) (deviation D-069)
 - Presence
 - JWT identification, signed streams and Turbo Streams
 - Server-Sent Events
