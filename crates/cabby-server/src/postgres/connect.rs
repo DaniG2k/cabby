@@ -160,7 +160,7 @@ fn parse_sslmode(v: &str) -> Result<SslMode, String> {
         "require" => SslMode::Require,
         "verify-ca" => SslMode::VerifyCa,
         "verify-full" => SslMode::VerifyFull,
-        other => return Err(format!("invalid sslmode {other:?}")),
+        _ => return Err("invalid sslmode (use disable, prefer, require, verify-ca or verify-full)".to_owned()),
     })
 }
 
@@ -177,14 +177,67 @@ fn tokio_sslmode(m: SslMode) -> &'static str {
 /// `verify-full` or `sslrootcert`; everything else is left to tokio-postgres's
 /// own parser. In a URI, the user name and password are percent-encoded
 /// again, so a literal `?`, `/` or `@` in a password parses.
+#[cfg(test)]
 pub(crate) fn parse_url(url: &str) -> Result<ParsedUrl, String> {
+    parse_url_with(url, false)
+}
+
+/// The URI schemes accepted (case-insensitive).
+const SCHEMES: [&str; 2] = ["postgres", "postgresql"];
+
+/// Parses a connection string as written, then, for a URI that doesn't
+/// parse, with the lenient user info split ([`split_userinfo`]). Errors never
+/// contain parts of the string: they could be credentials.
+pub(crate) fn parse(url: &str) -> Result<(ParsedUrl, tokio_postgres::Config), String> {
+    let invalid = |e: String| format!("invalid --postgres_url: {e}");
+    let is_uri = match url.find("://") {
+        Some(i) if SCHEMES.iter().any(|s| url[..i].eq_ignore_ascii_case(s)) => true,
+        Some(_) => return Err(invalid("the scheme must be postgres:// or postgresql://".to_owned())),
+        None => false,
+    };
+    let mut first_error = None;
+    for lenient in if is_uri { &[false, true][..] } else { &[false][..] } {
+        let parsed = parse_url_with(url, *lenient).map_err(invalid)?;
+        match parsed.conninfo.parse::<tokio_postgres::Config>() {
+            Ok(config) => return Ok((parsed, config)),
+            Err(e) => {
+                first_error.get_or_insert_with(|| sanitize(&error_text(&e)));
+            }
+        }
+    }
+    Err(invalid(first_error.unwrap_or_default()))
+}
+
+/// Replaces what an error quotes (`...` or "...") with an ellipsis.
+fn sanitize(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut quote: Option<char> = None;
+    for c in text.chars() {
+        match quote {
+            Some(q) if c == q => {
+                out.push(c);
+                quote = None;
+            }
+            Some(_) => {}
+            None if c == '`' || c == '"' => {
+                out.push(c);
+                out.push('\u{2026}');
+                quote = Some(c);
+            }
+            None => out.push(c),
+        }
+    }
+    out
+}
+
+fn parse_url_with(url: &str, lenient: bool) -> Result<ParsedUrl, String> {
     let mut sslmode = SslMode::Prefer;
     let mut sslrootcert = None;
-    let conninfo = if let Some(scheme_end) =
-        ["postgres://", "postgresql://"].iter().find_map(|p| url.starts_with(p).then_some(p.len()))
-    {
-        let (scheme, rest) = url.split_at(scheme_end);
-        let (userinfo, hostpart) = split_userinfo(rest);
+    let uri = url.find("://").filter(|i| SCHEMES.iter().any(|s| url[..*i].eq_ignore_ascii_case(s)));
+    let conninfo = if let Some(scheme_len) = uri {
+        let scheme = format!("{}://", url[..scheme_len].to_ascii_lowercase());
+        let rest = &url[scheme_len + 3..];
+        let (userinfo, hostpart) = if lenient { split_userinfo(rest) } else { split_userinfo_strict(rest) };
         let (base, query) = match hostpart.split_once('?') {
             Some((b, q)) => (b, Some(q)),
             None => (hostpart, None),
@@ -195,7 +248,9 @@ pub(crate) fn parse_url(url: &str) -> Result<ParsedUrl, String> {
             match k {
                 "sslmode" => sslmode = parse_sslmode(&percent_decode(v))?,
                 "sslrootcert" => sslrootcert = Some(percent_decode(v)),
-                _ => kept.push(pair.to_owned()),
+                // tokio-postgres reads up to the first `@` anywhere as user info;
+                // it percent-decodes parameters, so an encoded `@` is the same value.
+                _ => kept.push(pair.replace('@', "%40")),
             }
         }
         kept.push(format!("sslmode={}", tokio_sslmode(sslmode)));
@@ -225,7 +280,18 @@ pub(crate) fn parse_url(url: &str) -> Result<ParsedUrl, String> {
     Ok(ParsedUrl { conninfo, sslmode, sslrootcert })
 }
 
-/// Splits `[userinfo@]host...`: the user info ends at the last `@` before
+/// Splits `[userinfo@]host...` as RFC 3986 does: the authority ends at the
+/// first `/` or `?`, and the user info at its last `@`.
+fn split_userinfo_strict(rest: &str) -> (Option<&str>, &str) {
+    let end = rest.find(['/', '?']).unwrap_or(rest.len());
+    match rest[..end].rfind('@') {
+        Some(at) => (Some(&rest[..at]), &rest[at + 1..]),
+        None => (None, rest),
+    }
+}
+
+/// The lenient split, for strings the strict one can't parse (a literal
+/// `?`, `/` or `@` in a password): the user info ends at the last `@` before
 /// the first `/` or `?` that follows the first `@`, so `@`, `/` and `?` in a
 /// password are kept in it.
 fn split_userinfo(rest: &str) -> (Option<&str>, &str) {
@@ -275,7 +341,7 @@ fn key_values(s: &str) -> Result<Vec<(String, String, String)>, String> {
         let key: String = chars[start..i].iter().collect();
         skip_ws(&mut i);
         if i >= chars.len() || chars[i] != '=' {
-            return Err(format!("missing \"=\" after {key:?}"));
+            return Err("a key/value pair has no \"=\"".to_owned());
         }
         i += 1;
         skip_ws(&mut i);
@@ -284,7 +350,7 @@ fn key_values(s: &str) -> Result<Vec<(String, String, String)>, String> {
             i += 1;
             loop {
                 match chars.get(i) {
-                    None => return Err(format!("unterminated quoted value of {key:?}")),
+                    None => return Err("a quoted value is not terminated".to_owned()),
                     Some('\'') => {
                         i += 1;
                         break;
@@ -495,11 +561,7 @@ impl ConnectSpec {
                 "{flag} needs a connection URL: set --postgres_url, CABBY_POSTGRES_URL or [postgres] url"
             ));
         }
-        let parsed = parse_url(c.url.trim()).map_err(|e| format!("invalid --postgres_url: {e}"))?;
-        let config: tokio_postgres::Config = parsed
-            .conninfo
-            .parse()
-            .map_err(|e: tokio_postgres::Error| format!("invalid --postgres_url: {}", error_text(&e)))?;
+        let (parsed, config) = parse(c.url.trim())?;
         let ca_path = if c.tls_ca_cert_path.is_empty() {
             parsed.sslrootcert.unwrap_or_default()
         } else {
@@ -577,7 +639,8 @@ fn truncate(s: &str, max: usize) -> &str {
 }
 
 /// `host:port[,host:port]/database`: what a connection string points at,
-/// without user name or password.
+/// without user name, password or parameters (a missing database name stays
+/// empty rather than showing the user name it defaults to).
 pub(crate) fn describe(config: &tokio_postgres::Config) -> String {
     let ports = config.get_ports();
     let hosts: Vec<String> = config
@@ -600,7 +663,7 @@ pub(crate) fn describe(config: &tokio_postgres::Config) -> String {
         })
         .collect();
     let hosts = if hosts.is_empty() { "localhost:5432".to_owned() } else { hosts.join(",") };
-    format!("{hosts}/{}", config.get_dbname().or(config.get_user()).unwrap_or_default())
+    format!("{hosts}/{}", config.get_dbname().unwrap_or_default())
 }
 
 /// A command connection with its prepared statements.
@@ -1149,8 +1212,7 @@ mod tests {
     }
 
     fn parsed(url: &str) -> (SslMode, tokio_postgres::Config) {
-        let p = parse_url(url).unwrap_or_else(|e| panic!("{url}: {e}"));
-        let config = p.conninfo.parse().unwrap_or_else(|e| panic!("{url}: {e}"));
+        let (p, config) = parse(url).unwrap_or_else(|e| panic!("{url}: {e}"));
         (p.sslmode, config)
     }
 
@@ -1177,6 +1239,102 @@ mod tests {
         assert_eq!(Some("app"), c.get_dbname());
         let p = parse_url(r"host=db sslrootcert='/etc/my ca.pem'").unwrap();
         assert_eq!(Some("/etc/my ca.pem".to_owned()), p.sslrootcert);
+    }
+
+    fn spec(url: &str) -> Result<ConnectSpec, String> {
+        let mut c = PostgresConfig::new();
+        c.url = url.into();
+        c.tls_verify = false;
+        ConnectSpec::from_config(&c, "--pubsub=postgres")
+    }
+
+    #[test]
+    fn other_schemes_are_rejected_without_echoing_the_url() {
+        for url in [
+            "postgis://u:s3cret@db/app",
+            "postgress://u:s3cret@db/app?sslmode=require",
+            "jdbc:postgresql://u:s3cret@db/app",
+        ] {
+            let err = spec(url).err().unwrap_or_else(|| panic!("{url} was accepted"));
+            assert_eq!("invalid --postgres_url: the scheme must be postgres:// or postgresql://", err, "{url}");
+        }
+    }
+
+    #[test]
+    fn errors_never_echo_the_connection_string() {
+        for url in [
+            "u:s3cret@host",
+            "host=db user=u password=my s3cret dbname=app",
+            "host=db password='s3cret dbname=app",
+            "postgres://u:s3cret@db:54a32/app",
+            "postgres://u:s3cret@db/app?connect_timeout=s3cret",
+            "postgres://u:s3cret@db:5432/app?sslmode=require&bogus=s3cret",
+            "postgres://u:s3cret@db/app?sslmode=s3cret",
+        ] {
+            let err = spec(url).err().unwrap_or_else(|| panic!("{url} was accepted"));
+            assert!(err.starts_with("invalid --postgres_url"), "{url}: {err}");
+            assert!(!err.contains("s3cret") && !err.contains("u:"), "{url}: {err}");
+        }
+    }
+
+    /// Every connection string from the review: accepted or not, neither the
+    /// description nor the error shows a secret or the user name.
+    #[test]
+    fn no_connection_string_leaks_into_messages() {
+        let cases = [
+            "postgres://u:s3cret@[::1]:5433/app",
+            "postgres://u:s3cret@h1:5432,h2:5433/app?target_session_attrs=read-write",
+            "postgres://u:s3cret@db/app?options=-c%20statement_timeout%3D5s",
+            "postgres:///app?host=/var/run/postgresql&user=u&password=s3cret",
+            "postgres://db/app?user=u&password=s3cret/x?y",
+            "postgres://u@db/app?password=s3cret",
+            "postgres://u:s3cret@db/app?bogus=1",
+            "postgres://u:s3cret@db:notaport/app",
+            "host=db password='s3 cret' dbname=app sslmode = verify-full",
+            "host=db password='s3cret dbname=app",
+            "host=db password=s3cret dbname",
+            "host=db user=u password=s3cret dbname=app sslmode=nope",
+            "host=db user=u password=s3cret dbname=app bogus=1",
+            "postgis://u:s3cret@db/app?sslmode=require",
+            "u:s3cret@db/app",
+            "host=db user=u password=s3cret, dbname=app port=x",
+            "postgres://db/app?user=u&password=p@s3cret",
+            "postgres://db:5432/app?user=u&password=s3cret&application_name=a@b",
+            "postgres://u:s3cret@db/app?options=-c%20search_path%3Da@b",
+            "postgres://u:s3cret@db/app@x",
+            "postgres://u:s3cret@db/app?port=abc",
+        ];
+        for url in cases {
+            let shown = match spec(url) {
+                Ok(s) => s.description,
+                Err(e) => e,
+            };
+            assert!(!shown.contains("s3cret") && !shown.contains("s3 cret") && !shown.contains("u:"), "{url}: {shown}");
+        }
+    }
+
+    #[test]
+    fn the_scheme_is_case_insensitive() {
+        let s = spec("POSTGRES://u:s3cret@db/app").unwrap();
+        assert_eq!("db:5432/app", s.description);
+        let s = spec("PostgreSQL://u:s3cret@db/app").unwrap();
+        assert_eq!("db:5432/app", s.description);
+    }
+
+    #[test]
+    fn credentials_in_the_query_stay_out_of_the_host() {
+        let s = spec("postgres://db/app?user=u&password=s3cret@x").unwrap();
+        assert_eq!("db:5432/app", s.description);
+        assert_eq!(Some(&b"s3cret@x"[..]), s.config.get_password());
+        assert_eq!(Some("u"), s.config.get_user());
+    }
+
+    #[test]
+    fn descriptions_never_show_the_user_name() {
+        let s = spec("host=db user=cabby_user password=s3cret").unwrap();
+        assert_eq!("db:5432/", s.description);
+        let s = spec("postgres://cabby_user:s3cret@db").unwrap();
+        assert!(!s.description.contains("cabby_user"), "{}", s.description);
     }
 
     #[test]
