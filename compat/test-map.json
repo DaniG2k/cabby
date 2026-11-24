@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 123
+      "cases": 126
     },
     "translation": {
       "reviewed": 923
@@ -26273,6 +26273,24 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "broker::redis_test::a_node_that_stays_read_only_starts_the_back_off",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Sessions"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broker::redis_test::a_resent_broadcast_is_stored_once",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/nats_test.go#TestNATSBroker_HistoryFrom"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
       "rust_case": "broker::redis_test::a_restart_from_a_snapshot_rotates_the_stream_epoch",
       "relation": "regression",
       "links": [
@@ -26466,6 +26484,16 @@
       "relation": "regression",
       "links": [
         "26a1a703:broker/memory_test.go#TestMemory_Peak"
+      ],
+      "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broker::redis_test::positions_are_unknown_after_an_instance_change_until_the_next_broadcast",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/memory_test.go#TestMemory_FromOffset/With_unknown_epoch",
+        "26a1a703:broker/nats_test.go#TestNATSBroker_HistoryFrom/With_unknown_epoch"
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"
