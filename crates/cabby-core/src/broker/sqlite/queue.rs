@@ -1,11 +1,14 @@
 //! The bounded write queue between the broker and the persister thread.
 //!
-//! Enqueueing never blocks the broadcast path. When the queue would hold more
-//! than `capacity` ops, it drops the oldest history op; only if none is
-//! queued, the oldest session touch, then the oldest session commit. The
-//! incoming op counts as queued, so a history op arriving at a queue full of
-//! session ops is itself the one dropped. `push` returns the kind it dropped,
-//! so the broker counts every drop.
+//! Enqueueing never blocks the broadcast path. The queue is bounded twice: by
+//! `capacity` ops and by `max_bytes` of payload ([`WriteOp::approx_bytes`],
+//! 64 MiB by default). When it would exceed either bound, it drops the oldest
+//! history op; only if none is queued, the oldest session touch, then the
+//! oldest session commit, until it is within both. The incoming op counts as
+//! queued, so a history op arriving at a queue full of session ops is itself
+//! the one dropped; an op larger than `max_bytes` on its own is dropped
+//! without evicting anything. Taken ops no longer count toward either bound.
+//! Every drop is reported to the caller, so the broker counts it.
 //!
 //! A dropped history op leaves a gap the file can't fill, so the queue also
 //! remembers that history was dropped during this run (the shutdown is then
@@ -252,6 +255,11 @@ impl WriteQueue {
     /// Whether a history op was dropped during this run.
     pub(crate) fn history_dropped(&self) -> bool {
         lock(&self.lanes).history_dropped
+    }
+
+    #[cfg(test)]
+    fn bytes(&self) -> usize {
+        lock(&self.lanes).bytes
     }
 
     #[cfg(test)]
@@ -511,5 +519,54 @@ mod tests {
         });
         assert_eq!(vec![OpKind::History], drops);
         assert_eq!(2, q.len());
+    }
+
+    fn session_commit(sid: &str, data_len: usize) -> WriteOp {
+        WriteOp::SessionCommit { sid: sid.into(), data: vec![b'x'; data_len], expires_at_ms: 1 }
+    }
+
+    #[test]
+    fn taken_ops_release_their_bytes() {
+        let q = WriteQueue::with_max_bytes(100, 10, 2);
+        let mut drops = Vec::new();
+        for offset in 1..=3 {
+            q.push_with_drops(history("s", offset), |k| drops.push(k)); // 3 bytes each
+        }
+        assert_eq!(9, q.bytes());
+
+        assert_eq!(2, q.take_batch(Duration::ZERO).len());
+        assert_eq!(3, q.bytes(), "a batch gives its bytes back");
+        assert_eq!(1, q.take_all().len());
+        assert_eq!(0, q.bytes());
+
+        // A full byte budget again, with nothing dropped.
+        for offset in 4..=6 {
+            q.push_with_drops(history("s", offset), |k| drops.push(k));
+        }
+        assert!(drops.is_empty(), "{drops:?}");
+        assert!(!q.history_dropped());
+        assert_eq!(9, q.bytes());
+    }
+
+    #[test]
+    fn the_byte_bound_drops_touches_before_commits() {
+        let q = WriteQueue::with_max_bytes(100, 10, 1000);
+        let mut drops = Vec::new();
+        q.push_with_drops(session_commit("c1", 3), |k| drops.push(k)); // 5 bytes
+        q.push_with_drops(touch("t1", 1), |k| drops.push(k)); // 2 bytes
+        assert!(drops.is_empty());
+
+        // 5 + 2 + 4 = 11: the touch goes, although the first commit is older.
+        q.push_with_drops(session_commit("c2", 2), |k| drops.push(k));
+        assert_eq!(vec![OpKind::SessionTouch], drops);
+        assert_eq!(9, q.bytes());
+
+        // With no touch left, the oldest commit goes: 5 + 4 + 4 = 13 -> 8.
+        drops.clear();
+        q.push_with_drops(session_commit("c3", 2), |k| drops.push(k));
+        assert_eq!(vec![OpKind::SessionCommit], drops);
+        assert_eq!(8, q.bytes());
+        assert!(!q.history_dropped(), "dropping session ops is not dropped history");
+        assert_eq!(vec![session_commit("c2", 2), session_commit("c3", 2)], q.take_all());
     }
 }

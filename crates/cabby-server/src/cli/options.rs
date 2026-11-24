@@ -1017,7 +1017,7 @@ fn rpc_flags(c: &Config) -> Vec<Flag> {
             hidden(int_flag(
                 "rpc_max_call_recv_size",
                 r.max_recv_size,
-                "Override default MaxCallRecvMsgSize for the gRPC client, and the response body limit of the HTTP RPC client (16 MiB by default) (bytes)",
+                "Override default MaxCallRecvMsgSize for the gRPC client and the HTTP RPC response body limit, 16 MiB by default (bytes)",
                 |s, v| s.c.rpc.max_recv_size = v,
             )),
             hidden(int_flag(

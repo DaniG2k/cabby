@@ -16,10 +16,12 @@ pub use message_verifier::{MessageVerifier, VerifierError};
 pub use priority_queue::{ItemId, PriorityQueue, PriorityQueueItem};
 pub use queue::{Item, PushResult, Queue};
 
-/// Constant-time byte-slice comparison backed by `subtle::ConstantTimeEq`.
+/// Byte-slice comparison through `subtle::ConstantTimeEq`.
 ///
-/// The time depends only on whether the lengths match, never on the contents,
-/// and the compiler cannot optimize it back into an early-exit loop.
+/// Slices of different lengths compare unequal right away. For equal lengths
+/// the comparison is constant-time on a best-effort basis: `subtle` uses
+/// optimization barriers so the compiler is unlikely to turn it back into an
+/// early-exit loop, but neither it nor Rust guarantees constant-time code.
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     subtle::ConstantTimeEq::ct_eq(a, b).into()
 }
