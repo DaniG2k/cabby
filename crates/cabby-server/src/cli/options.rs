@@ -1910,7 +1910,10 @@ mod tests {
             "CABBY_POSTGRES_TLS_CA_CERT_PATH",
             "CABBY_POSTGRES_UNLOGGED",
         ];
-        let expected: Vec<&str> = ["CABBY_SQLITE_PATH", "CABBY_REDIS_BROKER_KEY_PREFIX", "CABBY_REDIS_BROKER_TIMEOUT"].into_iter().chain(postgres).collect();
+        let expected: Vec<&str> = ["CABBY_SQLITE_PATH", "CABBY_REDIS_BROKER_KEY_PREFIX", "CABBY_REDIS_BROKER_TIMEOUT"]
+            .into_iter()
+            .chain(postgres)
+            .collect();
         assert_eq!(cabby_only, expected);
         for v in &cabby_only {
             let named = ENV_FOOTER.contains(v.as_str())

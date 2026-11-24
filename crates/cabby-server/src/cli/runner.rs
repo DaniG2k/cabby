@@ -972,7 +972,7 @@ fn redis_broadcast_warning(c: &Config) -> Option<String> {
 /// adapters deliver to the node directly, as upstream does, so their
 /// messages are delivered live but not stored in history.
 fn live_only_broadcast_warning(c: &Config) -> Option<String> {
-    if !matches!(c.broker.adapter.as_str(), "memory" | "sqlite" | "nats" | "redis") {
+    if !matches!(c.broker.adapter.as_str(), "memory" | "sqlite" | "nats" | "redis" | "postgres") {
         return None;
     }
     let live: Vec<&str> =
@@ -1261,9 +1261,12 @@ mod tests {
                 "broadcasts through the redis adapter are delivered live and not stored in history; use http or redisx to keep history"
             )
         );
-        for broker in ["sqlite", "nats", "redis"] {
+        for broker in ["sqlite", "nats", "redis", "postgres"] {
             assert!(live_only_broadcast_warning(&config(broker, &["redis"])).is_some(), "{broker}");
         }
+        // The Postgres outbox goes through the broker (D-070).
+        assert_eq!(live_only_broadcast_warning(&config("postgres", &["http", "postgres"])), None);
+        assert_eq!(live_only_broadcast_warning(&config("memory", &["postgres"])), None);
         assert_eq!(
             live_only_broadcast_warning(&config("nats", &["http", "redis", "nats"])).as_deref(),
             Some(
