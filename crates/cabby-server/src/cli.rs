@@ -14,7 +14,7 @@ mod session_options;
 mod signals;
 mod sqlite;
 
-pub use options::{new_config_from_cli, new_config_from_cli_to, parse_tags};
+pub use options::{ConfigSearch, new_config_from_cli, new_config_from_cli_to, new_config_from_cli_with, parse_tags};
 pub use runner::{Embedded, Runner};
 pub use session_options::{
     ACTION_CABLE_V1_EXT_JSON, ACTION_CABLE_V1_JSON, action_cable_protocols, is_extended_action_cable_protocol,

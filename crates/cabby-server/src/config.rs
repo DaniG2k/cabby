@@ -200,6 +200,17 @@ pub struct Config {
     pub config_file_path: Option<PathBuf>,
     /// Configuration file keys that match no setting (dotted paths).
     pub unknown_config_keys: Vec<String>,
+    /// Start-up messages found while the configuration is parsed, before the
+    /// logger exists; the runner logs them (D-060, D-061). Never written to a
+    /// configuration file.
+    pub startup_notes: Vec<StartupNote>,
+}
+
+/// A start-up message recorded while parsing (see [`Config::startup_notes`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartupNote {
+    /// `path` exists but ranks below the configuration file in use (D-060).
+    IgnoredConfigFile { path: String, used: String },
 }
 
 // Untagged upstream fields decode by their Go names (case-insensitively);

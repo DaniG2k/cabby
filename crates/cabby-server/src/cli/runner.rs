@@ -33,7 +33,7 @@ use super::{
     BroadcastHandler, Broadcaster, BroadcastersFactory, Broker, BrokerFactory, CliError, ControllerFactory, LogSink,
     RunnerOption, Shutdownable, Subscriber, SubscriberFactory, SubscriberHandler,
 };
-use crate::config::{Config, EnvMap};
+use crate::config::{Config, EnvMap, StartupNote};
 use crate::metrics::{Instrumenter, Metrics, StatsdWriter};
 use crate::node::{DisconnectQueue, Disconnector, Node, NodeOption, NoopDisconnectQueue, NullController};
 use crate::rpc::Context;
@@ -314,6 +314,10 @@ impl Runner {
                     &[],
                 );
             }
+        }
+        for note in &self.config.startup_notes {
+            let (level, message, attrs) = note_record(note);
+            crate::metrics::log(level, &message, &attrs);
         }
 
         if self.config.public_mode {
@@ -885,6 +889,22 @@ fn default_rpc_controller() -> ControllerFactory {
     })
 }
 
+/// The log record of a start-up note (D-060, D-061).
+fn note_record(note: &StartupNote) -> (Level, String, Vec<Attr>) {
+    let context = Attr::new("context", LogValue::String("config".into()));
+    match note {
+        StartupNote::IgnoredConfigFile { path, used } => (
+            Level::Debug,
+            "configuration file ignored".to_owned(),
+            vec![
+                Attr::new("path", LogValue::String(path.clone())),
+                Attr::new("used", LogValue::String(used.clone())),
+                context,
+            ],
+        ),
+    }
+}
+
 /// Upstream `initMRuby`: the mruby version suffix of the start line, e.g.
 /// ` (with mruby 1.2.0 (2015-11-17))`; empty without mruby support.
 fn mruby_support() -> String {
@@ -956,5 +976,28 @@ impl Embedded {
             shutdownable.shutdown()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pins D-060: an ignored configuration file is logged at debug level.
+    #[test]
+    fn startup_notes_are_logged() {
+        let (level, message, attrs) = note_record(&StartupNote::IgnoredConfigFile {
+            path: "./anycable.toml".into(),
+            used: "/etc/cabby/cabby.toml".into(),
+        });
+        assert_eq!((level, message.as_str()), (Level::Debug, "configuration file ignored"));
+        assert_eq!(
+            attrs,
+            vec![
+                Attr::new("path", LogValue::String("./anycable.toml".into())),
+                Attr::new("used", LogValue::String("/etc/cabby/cabby.toml".into())),
+                Attr::new("context", LogValue::String("config".into())),
+            ]
+        );
     }
 }

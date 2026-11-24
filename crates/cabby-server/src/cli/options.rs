@@ -6,8 +6,9 @@
 //! 1. defaults (`config.NewConfig`), then every flag's own default written to its
 //!    destination when the flag is defined (flags without a default reset the
 //!    setting to its zero value, as upstream's `withDefaults` does);
-//! 2. the configuration file (`./anycable.toml`, else `/etc/anycable/anycable.toml`,
-//!    or `--config-path`), loaded in the `Before` hook;
+//! 2. the configuration file (`--config-path`, else the first of `./cabby.toml`,
+//!    `/etc/cabby/cabby.toml`, `./anycable.toml` and `/etc/anycable/anycable.toml`,
+//!    D-060), loaded in the `Before` hook;
 //! 3. flags set on the command line or through their environment variables
 //!    (`ANYCABLE_<NAME>`, plus `PORT` and `REDIS_URL`), applied by flag actions
 //!    after the file; the command line wins over the environment.
@@ -15,13 +16,47 @@
 //! Presets are applied later, by the runner (`Config::load_presets`).
 
 use std::io::Write;
+use std::path::PathBuf;
 
 use super::flags::{self, App, Binding, Flag, Setter, Val, env_var_name};
 use super::{CliError, CliOption};
-use crate::config::{Config, EnvMap};
+use crate::config::{Config, EnvMap, StartupNote};
 
-const DEFAULT_CONFIG_PATH: &str = "/etc/anycable/anycable.toml";
-const CURRENT_CONFIG_PATH: &str = "./anycable.toml";
+/// Where configuration files are looked for when `--config-path` isn't given
+/// (D-060). Tests point it at temporary directories.
+#[derive(Debug, Clone)]
+pub struct ConfigSearch {
+    /// The working directory: `./cabby.toml`, `./anycable.toml`.
+    pub cwd: PathBuf,
+    /// The system configuration directory: `/etc/cabby/cabby.toml`,
+    /// `/etc/anycable/anycable.toml`.
+    pub etc: PathBuf,
+}
+
+impl Default for ConfigSearch {
+    fn default() -> Self {
+        Self { cwd: PathBuf::from("."), etc: PathBuf::from("/etc") }
+    }
+}
+
+impl ConfigSearch {
+    /// The candidates, highest rank first: Cabby's names, wherever they are,
+    /// before AnyCable's.
+    pub fn candidates(&self) -> [PathBuf; 4] {
+        [
+            self.cwd.join("cabby.toml"),
+            self.etc.join("cabby").join("cabby.toml"),
+            self.cwd.join("anycable.toml"),
+            self.etc.join("anycable").join("anycable.toml"),
+        ]
+    }
+
+    /// The first existing candidate, and the existing candidates ranked below it.
+    pub fn find(&self) -> (Option<PathBuf>, Vec<PathBuf>) {
+        let mut existing = self.candidates().into_iter().filter(|p| std::fs::metadata(p).is_ok());
+        (existing.next(), existing.collect())
+    }
+}
 
 const SERVER: &str = "SERVER:";
 const SSL: &str = "SSL:";
@@ -106,13 +141,26 @@ pub fn new_config_from_cli_to(
     opts: Vec<CliOption>,
     out: &mut dyn Write,
 ) -> Result<(Config, bool), CliError> {
+    new_config_from_cli_with(args, env, opts, out, &ConfigSearch::default())
+}
+
+/// [`new_config_from_cli_to`] looking for configuration files where `search` says.
+pub fn new_config_from_cli_with(
+    args: &[&str],
+    env: &EnvMap,
+    opts: Vec<CliOption>,
+    out: &mut dyn Write,
+    search: &ConfigSearch,
+) -> Result<(Config, bool), CliError> {
     let program = args.first().copied().unwrap_or_default();
 
     // A discovered configuration file comes first, so `--config-path` on the
     // command line (the last occurrence wins) overrides it.
+    let (discovered, ranked_below) = search.find();
+    let discovered = discovered.map(|p| p.display().to_string());
     let mut flag_args: Vec<&str> = Vec::with_capacity(args.len() + 2);
-    if let Some(path) = [CURRENT_CONFIG_PATH, DEFAULT_CONFIG_PATH].into_iter().find(|p| std::fs::metadata(p).is_ok()) {
-        flag_args.extend(["--config-path", path]);
+    if let Some(path) = &discovered {
+        flag_args.extend(["--config-path", path.as_str()]);
     }
     flag_args.extend(args.iter().skip(1));
 
@@ -191,11 +239,19 @@ pub fn new_config_from_cli_to(
     }
 
     // Before: the configuration file.
+    let mut file_notes: Vec<StartupNote> = Vec::new();
     if !parsed.bool(&flags, "ignore-config-path") {
         let path = parsed.string(&flags, "config-path");
         if !path.is_empty() {
             state.c.config_file_path = Some(path.clone().into());
             state.c.load_from_file().map_err(|e| CliError(e.0))?;
+            if discovered.as_deref() == Some(path.as_str()) {
+                file_notes.extend(
+                    ranked_below
+                        .iter()
+                        .map(|p| StartupNote::IgnoredConfigFile { path: p.display().to_string(), used: path.clone() }),
+                );
+            }
 
             if parsed.bool(&flags, "strict-config") && !state.c.unknown_config_keys.is_empty() {
                 return Err(CliError(format!(
@@ -209,7 +265,8 @@ pub fn new_config_from_cli_to(
     flags::run_actions(&flags, &parsed, &mut state);
 
     let print_config = state.print_config;
-    let c = finalize(state, &mut emit);
+    let mut c = finalize(state, &mut emit);
+    c.startup_notes = file_notes;
 
     if print_config {
         emit(&c.to_toml());
@@ -1524,5 +1581,101 @@ mod tests {
         assert_eq!(Some(vec!["broker".to_owned()]), c.user_presets);
         c.load_presets(&EnvMap::new()).unwrap();
         assert_eq!("sqlite", c.broker.adapter);
+    }
+
+    /// A fresh directory for configuration-file tests, removed on drop.
+    struct TempTree(PathBuf);
+
+    impl TempTree {
+        fn new(tag: &str) -> Self {
+            static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let dir = std::env::temp_dir().join(format!("cabby-{tag}-{}-{n}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("temp dir");
+            Self(dir)
+        }
+
+        fn search(&self) -> ConfigSearch {
+            ConfigSearch { cwd: self.0.join("app"), etc: self.0.join("etc") }
+        }
+
+        /// Writes a configuration file whose `secret` names the file.
+        fn write(&self, path: &std::path::Path) {
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
+            std::fs::write(path, format!("secret = \"{}\"\n", path.display())).expect("config file");
+        }
+    }
+
+    impl Drop for TempTree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Pins D-060: `./cabby.toml`, `/etc/cabby/cabby.toml`, `./anycable.toml`,
+    /// `/etc/anycable/anycable.toml`; the first that exists is loaded and the
+    /// others are noted as ignored. Every subset of the four files.
+    #[test]
+    fn deviation_d060_cabby_toml_is_found_first() {
+        for subset in 0u8..16 {
+            let tree = TempTree::new("d060");
+            let search = tree.search();
+            let candidates = search.candidates();
+            let present: Vec<&PathBuf> =
+                candidates.iter().enumerate().filter(|(i, _)| subset & (1 << i) != 0).map(|(_, p)| p).collect();
+            for p in &present {
+                tree.write(p);
+            }
+
+            let mut out = Vec::new();
+            let (c, _) =
+                new_config_from_cli_with(&["cabby"], &EnvMap::new(), vec![], &mut out, &search).expect("config");
+            match present.split_first() {
+                None => {
+                    assert_eq!(c.config_file_path, None, "subset {subset:04b}");
+                    assert!(c.startup_notes.is_empty(), "subset {subset:04b}");
+                }
+                Some((used, ignored)) => {
+                    assert_eq!(c.secret, used.display().to_string(), "subset {subset:04b}");
+                    let want: Vec<StartupNote> = ignored
+                        .iter()
+                        .map(|p| StartupNote::IgnoredConfigFile {
+                            path: p.display().to_string(),
+                            used: used.display().to_string(),
+                        })
+                        .collect();
+                    assert_eq!(c.startup_notes, want, "subset {subset:04b}");
+                }
+            }
+        }
+    }
+
+    /// Pins D-060: `--config-path` and `--ignore-config-path` are unchanged and
+    /// leave nothing to note.
+    #[test]
+    fn deviation_d060_explicit_paths_win() {
+        let tree = TempTree::new("d060-explicit");
+        let search = tree.search();
+        let [cabby, _, anycable, _] = search.candidates();
+        tree.write(&cabby);
+        tree.write(&anycable);
+        let anycable_path = anycable.display().to_string();
+
+        let mut out = Vec::new();
+        let (c, _) = new_config_from_cli_with(
+            &["cabby", "--config-path", &anycable_path],
+            &EnvMap::new(),
+            vec![],
+            &mut out,
+            &search,
+        )
+        .expect("config");
+        assert_eq!((c.secret.as_str(), c.startup_notes.len()), (anycable_path.as_str(), 0));
+
+        let (c, _) =
+            new_config_from_cli_with(&["cabby", "--ignore-config-path"], &EnvMap::new(), vec![], &mut out, &search)
+                .expect("config");
+        assert_eq!((c.config_file_path, c.startup_notes.len()), (None, 0));
     }
 }
