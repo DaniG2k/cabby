@@ -1,0 +1,35 @@
+# cargo-deny (https://embarkstudios.github.io/cargo-deny/): licenses and bans
+# for every dependency Cabby can ship. Run `compat/scripts/check-deps.sh`
+# (`cargo deny check licenses bans` with the pinned cargo-deny) before a release.
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+all-features = true
+
+[licenses]
+# Permissive licenses only. Adding one is a deliberate change, reviewed with the
+# dependency that needs it.
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.93
+
+[licenses.private]
+# The workspace crates are MIT (Cargo.toml) and never published.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
