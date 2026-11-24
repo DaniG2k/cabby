@@ -84,9 +84,10 @@ impl From<rusqlite::Error> for StoreError {
     }
 }
 
-/// Opens (creating if needed) the database: incremental auto-vacuum (set on
-/// fresh files, converted once on older ones), WAL, `synchronous=NORMAL`, a
-/// busy timeout, `quick_check`, then migrations up to the current version.
+/// Opens (creating if needed) the database: incremental auto-vacuum for fresh
+/// files, WAL, `synchronous=NORMAL`, a busy timeout, `quick_check`,
+/// migrations up to the current version, then the one-time auto-vacuum
+/// conversion of an older file (only once the file passed every check).
 pub(super) fn open(path: &Path) -> Result<Connection, StoreError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let conn = Connection::open_with_flags(path, flags)?;
@@ -101,28 +102,50 @@ pub(super) fn open(path: &Path) -> Result<Connection, StoreError> {
     }
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     quick_check(&conn)?;
-    match convert_to_incremental_auto_vacuum(&conn) {
-        Ok(None) => {}
-        Ok(Some((before, after))) => log_info!(log(), "converted the SQLite database to incremental auto-vacuum",
-            "path" => path.display().to_string(), "pages_before" => before, "pages_after" => after),
-        // The file works without it; the next start tries again.
-        Err(e) => log_warn!(log(), "failed to convert the SQLite database to incremental auto-vacuum",
-            "path" => path.display().to_string(), "error" => e.to_string()),
-    }
     migrate(&conn, MIGRATIONS)?;
+    convert_at_open(&conn, path);
     Ok(conn)
 }
 
+/// The auto-vacuum conversion at open, logged before it starts (it blocks
+/// for a while on a large file) and after it ends, then checkpointed so the
+/// space comes back at once. A failure is logged and the file is used
+/// unconverted; the next start tries again.
+fn convert_at_open(conn: &Connection, path: &Path) {
+    let shown = path.display().to_string();
+    let starting = |pages: i64| {
+        log_info!(log(), "converting the SQLite database to incremental auto-vacuum (a one-time VACUUM)",
+            "path" => shown.clone(), "pages" => pages);
+    };
+    match convert_to_incremental_auto_vacuum(conn, starting) {
+        Ok(None) => {}
+        Ok(Some((before, after))) => {
+            log_info!(log(), "converted the SQLite database to incremental auto-vacuum",
+                "path" => shown.clone(), "pages_before" => before, "pages_after" => after);
+            if let Err(e) = checkpoint(conn) {
+                log_warn!(log(), "failed to checkpoint the SQLite WAL after the conversion",
+                    "path" => shown, "error" => e.to_string());
+            }
+        }
+        Err(e) => log_warn!(log(), "failed to convert the SQLite database to incremental auto-vacuum",
+            "path" => shown, "error" => e.to_string()),
+    }
+}
+
 /// Switches a non-empty file that has no auto-vacuum (files written before
-/// Cabby set it) to `auto_vacuum=INCREMENTAL`, which takes a full `VACUUM`.
-/// Returns the page counts before and after, or `None` when there was
-/// nothing to convert.
-pub(super) fn convert_to_incremental_auto_vacuum(conn: &Connection) -> Result<Option<(i64, i64)>, StoreError> {
+/// Cabby set it) to `auto_vacuum=INCREMENTAL`, which takes a full `VACUUM`;
+/// `starting` gets the page count just before it. Returns the page counts
+/// before and after, or `None` when there was nothing to convert.
+pub(super) fn convert_to_incremental_auto_vacuum(
+    conn: &Connection,
+    starting: impl FnOnce(i64),
+) -> Result<Option<(i64, i64)>, StoreError> {
     let auto_vacuum: i64 = conn.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;
     let before: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0))?;
     if auto_vacuum != 0 || before == 0 {
         return Ok(None);
     }
+    starting(before);
     conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL; VACUUM;")?;
     let after: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0))?;
     Ok(Some((before, after)))
@@ -800,13 +823,20 @@ mod tests {
         let pages_before = pragma_i64(&conn, "page_count");
         assert!(pragma_i64(&conn, "freelist_count") > 0);
 
-        let converted = convert_to_incremental_auto_vacuum(&conn).unwrap();
+        let mut announced = None;
+        let converted = convert_to_incremental_auto_vacuum(&conn, |pages| {
+            // Called before the VACUUM: the file is still unconverted.
+            announced = Some((pages, pragma_i64(&conn, "auto_vacuum")));
+        })
+        .unwrap();
 
+        assert_eq!(Some((pages_before, 0)), announced, "announced before converting, with the page count");
         let pages_after = pragma_i64(&conn, "page_count");
         assert_eq!(Some((pages_before, pages_after)), converted);
         assert!(pages_after < pages_before, "{pages_before} -> {pages_after}");
         assert_eq!(2, pragma_i64(&conn, "auto_vacuum"), "auto_vacuum=INCREMENTAL");
-        assert_eq!(None, convert_to_incremental_auto_vacuum(&conn).unwrap(), "converted only once");
+        let again = convert_to_incremental_auto_vacuum(&conn, |_| panic!("nothing to convert")).unwrap();
+        assert_eq!(None, again, "converted only once");
         drop(conn);
 
         let conn = open(&path).unwrap();
@@ -832,5 +862,66 @@ mod tests {
         let conn = open(&path).unwrap();
 
         assert_eq!(2, pragma_i64(&conn, "auto_vacuum"));
+    }
+
+    /// A file written before Cabby set auto_vacuum: the SQLite default (NONE),
+    /// in WAL mode, with `n` history entries of 4 KiB and its WAL checkpointed.
+    fn unconverted_file(path: &Path, n: u64, configure: impl FnOnce(&Connection)) {
+        let mut conn = Connection::open(path).unwrap();
+        let _: String = conn.pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0)).unwrap();
+        migrate(&conn, MIGRATIONS).unwrap();
+        write_expired_history(&mut conn, n);
+        configure(&conn);
+        checkpoint(&conn).unwrap();
+        assert_eq!(0, pragma_i64(&conn, "auto_vacuum"));
+    }
+
+    fn wal_len(path: &Path) -> u64 {
+        let mut wal = path.as_os_str().to_owned();
+        wal.push("-wal");
+        std::fs::metadata(wal).map_or(0, |m| m.len())
+    }
+
+    #[test]
+    fn the_conversion_at_open_is_checkpointed_at_once() {
+        let dir = TempDir::new();
+        let path = dir.file("cabby.db");
+        unconverted_file(&path, 200, |conn| {
+            conn.execute("DELETE FROM history WHERE seq > 100", []).unwrap();
+        });
+        let size_before = std::fs::metadata(&path).unwrap().len();
+        assert!(size_before > 600 * 1024, "size_before={size_before}");
+
+        let conn = open(&path).unwrap();
+
+        assert_eq!(2, pragma_i64(&conn, "auto_vacuum"));
+        assert!(wal_len(&path) < 64 * 1024, "the VACUUM copy is still in the WAL: {} bytes", wal_len(&path));
+        let size_after = std::fs::metadata(&path).unwrap().len();
+        assert!(size_after < size_before * 3 / 4, "the space comes back at once: {size_before} -> {size_after}");
+    }
+
+    #[test]
+    fn a_file_that_open_refuses_is_never_converted() {
+        for (version, newer) in [("99", true), ("one", false)] {
+            let dir = TempDir::new();
+            let path = dir.file("cabby.db");
+            unconverted_file(&path, 20, |conn| {
+                conn.execute("DELETE FROM history WHERE seq > 10", []).unwrap();
+                meta_set(conn, "schema_version", version).unwrap();
+            });
+            let bytes_before = std::fs::read(&path).unwrap();
+
+            match open(&path) {
+                Err(StoreError::NewerSchema { found: 99, .. }) if newer => {}
+                Err(StoreError::Other(why)) if !newer => assert!(why.contains("invalid schema_version"), "{why}"),
+                other => panic!("schema_version {version}: expected a refusal, got {other:?}"),
+            }
+
+            let conn = Connection::open(&path).unwrap();
+            assert_eq!(0, pragma_i64(&conn, "auto_vacuum"), "schema_version {version}: not converted");
+            assert!(pragma_i64(&conn, "freelist_count") > 0, "schema_version {version}: not vacuumed");
+            drop(conn);
+            assert_eq!(bytes_before, std::fs::read(&path).unwrap(), "schema_version {version}: file unchanged");
+        }
     }
 }
