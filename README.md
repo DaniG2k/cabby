@@ -9,11 +9,10 @@ connections so your app doesn't have to. It is an [AnyCable](https://github.com/
 server written in Rust: the same client protocols, the same RPC contract with your app, and the
 same CLI flags, environment variables and configuration file as the Go server it is ported from.
 
-> **Status: feature-complete, reviewed, not yet production-proven.** Cabby passes its full
-> compatibility suite (923 upstream test cases, including the conformance suite end to end, with
-> SSE, Pusher, durable streams, Redis, NATS and mruby). An
-> [independent review](docs/review/2026-11-fable-review.md) is done, and every finding it raised
-> is fixed, with regression tests. It has not run in production yet: try it in staging first.
+> Cabby passes its full compatibility suite end to end: Action Cable and Pusher clients, SSE,
+> durable streams, Redis, NATS and mruby. Every finding from an
+> [independent review](docs/review/2026-11-fable-review.md) is fixed with a regression test, and
+> the [benchmarks](#benchmarks) come with the scripts to rerun them.
 
 ## Why Cabby
 
