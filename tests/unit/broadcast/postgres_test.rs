@@ -281,3 +281,30 @@ fn deviation_d070_postgres_broker_errors_never_drop_rows() {
     assert!(registry.counter("postgres_broadcast_retries_total").expect("retries metric").value() >= 1);
     assert_eq!(Some("0".to_owned()), outbox_rows(&scope));
 }
+
+/// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/With_multiple_subscribers
+/// note: Deviation D-070: a batch the node is slow to handle (100 rows at 650 ms each, 65 s) is committed in parts within a 10 s handling budget, so every row is delivered exactly once, in order, and only one handler call runs at a time; a handler call is never abandoned.
+#[test]
+fn deviation_d070_postgres_slow_batches_are_committed_in_parts() {
+    let scope = scope();
+    scope.migrate();
+    let handler = MockHandler::new();
+    handler.delay_broadcasts(Duration::from_millis(650));
+    scope.execute(&format!(
+        "INSERT INTO {} (payload) SELECT '{{\"stream\":\"s\",\"data\":\"' || i || '\"}}' FROM generate_series(1, 100) i",
+        scope.table("broadcasts")
+    ));
+    let _b = start(&scope, &handler, Metrics::none());
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(120);
+    let mut calls = Vec::new();
+    while payloads(&calls, "HandleBroadcast").len() < 100 {
+        assert!(std::time::Instant::now() < deadline, "{} of 100 delivered", payloads(&calls, "HandleBroadcast").len());
+        calls.extend(handler.drain(Duration::from_secs(1)));
+    }
+    calls.extend(handler.drain(Duration::from_secs(2)));
+    let expected: Vec<String> = (1..=100).map(|i| payload("s", &i.to_string())).collect();
+    assert_eq!(expected, payloads(&calls, "HandleBroadcast"), "each row once, in order");
+    assert_eq!(1, handler.max_concurrent_broadcasts(), "one handler call at a time");
+    assert_eq!(Some("0".to_owned()), outbox_rows(&scope));
+}

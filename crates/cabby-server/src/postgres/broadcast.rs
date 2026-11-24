@@ -20,6 +20,9 @@
 //! it. A row that is not JSON is deleted with an error log without reaching
 //! the node. A node that finds the lock taken retries a
 //! second later; the server ends a claim transaction left idle for 60 s.
+//! A batch hands rows to the broker for at most 10 s, then commits what it
+//! handled and goes on in a new transaction; only SQL statements time out,
+//! never a handler call, so one handler call runs at a time.
 //! This is not a fan-out broadcaster.
 //!
 //! A JSON payload sent directly with `NOTIFY <channel>_in, '<json>'` (no
@@ -49,8 +52,19 @@ const BUSY_RETRY: Duration = Duration::from_secs(1);
 /// The server ends a claim transaction idle this long (a node that died
 /// mid-batch releases the lock and its rows).
 const IDLE_IN_TRANSACTION: Duration = Duration::from_secs(60);
-/// The longest one batch (claim, handle, delete, commit) may take.
-const BATCH_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a batch hands rows to the broker before it commits what it
+/// handled and goes on in a new transaction (well below
+/// [`IDLE_IN_TRANSACTION`]; one handler call is bounded by the broker's own
+/// timeouts).
+const HANDLING_BUDGET: Duration = Duration::from_secs(10);
+
+/// A claim statement with [`connect::QUERY_TIMEOUT`].
+async fn sql<T>(fut: impl std::future::Future<Output = Result<T, tokio_postgres::Error>>) -> Result<T, PgError> {
+    match tokio::time::timeout(connect::QUERY_TIMEOUT, fut).await {
+        Ok(r) => r.map_err(PgError::from),
+        Err(_) => Err(PgError("a claim statement timed out".into())),
+    }
+}
 /// How long `start` waits for the `LISTEN` connection.
 const START_WAIT: Duration = Duration::from_secs(10);
 
@@ -221,32 +235,31 @@ impl Claimer {
     async fn drain(&mut self, client: &mut tokio_postgres::Client, stop: &CancellationToken) -> Result<Round, PgError> {
         while !stop.is_cancelled() {
             let started = std::time::Instant::now();
-            let round = tokio::time::timeout(BATCH_TIMEOUT, self.batch(client)).await;
+            let round = self.batch(client).await;
             self.metrics.took(started.elapsed());
-            match round {
-                Ok(Ok(Some(round))) => return Ok(round),
-                Ok(Ok(None)) => {}
-                Ok(Err(e)) => return Err(e),
-                Err(_) => return Err(PgError("claiming broadcasts timed out".into())),
+            if let Some(round) = round? {
+                return Ok(round);
             }
         }
         Ok(Round::Drained)
     }
 
-    /// One batch; `None` when it was full and more rows may be waiting.
+    /// One batch; `None` when more rows may be waiting (the batch was full,
+    /// or the handling budget ran out). Only SQL statements have timeouts:
+    /// a handler call is never abandoned, so one runs at a time.
     async fn batch(&mut self, client: &mut tokio_postgres::Client) -> Result<Option<Round>, PgError> {
-        let tx = client.transaction().await?;
-        tx.batch_execute(&format!(
+        let tx = sql(client.transaction()).await?;
+        sql(tx.batch_execute(&format!(
             "SET LOCAL idle_in_transaction_session_timeout = '{}s'",
             IDLE_IN_TRANSACTION.as_secs()
-        ))
+        )))
         .await?;
-        let locked: bool = tx.query_one("SELECT pg_try_advisory_xact_lock($1)", &[&self.lock_key]).await?.get(0);
+        let locked: bool = sql(tx.query_one("SELECT pg_try_advisory_xact_lock($1)", &[&self.lock_key])).await?.get(0);
         if !locked {
-            tx.rollback().await?;
+            sql(tx.rollback()).await?;
             return Ok(Some(Round::Busy));
         }
-        let rows = tx.query(self.select_sql.as_str(), &[&CLAIM_BATCH]).await?;
+        let rows = sql(tx.query(self.select_sql.as_str(), &[&CLAIM_BATCH])).await?;
         let claimed: Vec<(i64, String)> = rows.iter().map(|r| (r.get(0), r.get(1))).collect();
         if claimed.is_empty() {
             tx.commit().await?;
@@ -267,17 +280,24 @@ impl Claimer {
             }
         }
         let node = self.node.clone();
+        let budget = std::time::Instant::now() + HANDLING_BUDGET;
         // The handler may wait for the broker (another Postgres query). It
-        // stops at the first failure: (handled IDs, the failed ID and error).
-        let (handled, failed) = tokio::task::spawn_blocking(move || {
+        // stops at the first failure, or once the budget is used up:
+        // (handled IDs, the failed ID and error, rows left over).
+        let (handled, failed, left_over) = tokio::task::spawn_blocking(move || {
             let mut handled = Vec::new();
+            let total = valid.len();
             for (id, payload) in valid {
+                if !handled.is_empty() && std::time::Instant::now() >= budget {
+                    break;
+                }
                 if let Err(e) = node.handle_broadcast(payload.as_bytes()) {
-                    return (handled, Some((id, e.0)));
+                    return (handled, Some((id, e.0)), false);
                 }
                 handled.push(id);
             }
-            (handled, None)
+            let left_over = handled.len() < total;
+            (handled, None, left_over)
         })
         .await
         .map_err(|_| PgError("broadcast handler panicked".into()))?;
@@ -303,12 +323,12 @@ impl Claimer {
             }
         };
         if !done.is_empty() {
-            tx.execute(self.delete_sql.as_str(), &[&done]).await?;
+            sql(tx.execute(self.delete_sql.as_str(), &[&done])).await?;
         }
-        tx.commit().await?;
+        sql(tx.commit()).await?;
         Ok(match round {
             Some(r) => Some(r),
-            None if full => None,
+            None if full || left_over => None,
             None => Some(Round::Drained),
         })
     }

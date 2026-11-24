@@ -158,7 +158,9 @@ inserted while a node was reconnecting is not left behind.
   the failed one are broadcast again on the retry).
 - **In order.** One node drains the table at a time (a transaction advisory lock; the server
   ends a claim transaction left idle for 60 s), so committed rows are broadcast in order of
-  their `id`, and offsets follow that order. A node that finds the lock taken tries again a
+  their `id`, and offsets follow that order. A batch hands rows to the broker for at most
+  10 seconds, then commits the rows it handled and goes on in a new transaction, so a slow
+  broker never makes a batch roll back and start over. A node that finds the lock taken tries again a
   second later.
 - **Transactional.** The row and its notification only exist once the transaction commits. A
   transaction that rolls back broadcasts nothing.
