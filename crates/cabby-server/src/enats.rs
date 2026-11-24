@@ -202,8 +202,10 @@ fn random_suffix(size: usize) -> String {
     bytes.iter().map(|b| ALPHABET[usize::from(b & 63)] as char).collect()
 }
 
-/// Creates `dir` (and any missing parents) with mode 0700 on Unix.
-fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+/// Creates `dir` (and any missing parents) and makes it private: on Unix it
+/// must be a directory (not a symlink) owned by `owner`, and gets mode 0700,
+/// set through an open handle that is checked to be that directory.
+fn create_private_dir(dir: &Path, owner: u32) -> std::io::Result<()> {
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]
@@ -214,19 +216,39 @@ fn create_private_dir(dir: &Path) -> std::io::Result<()> {
     builder.create(dir)?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let refuse = |why: String| std::io::Error::other(format!("{}: {why}", dir.display()));
+        let link = std::fs::symlink_metadata(dir)?;
+        if !link.file_type().is_dir() {
+            return Err(refuse("not a directory (a symlink or another file)".into()));
+        }
+        if link.uid() != owner {
+            return Err(refuse(format!(
+                "owned by uid {}, not by this user (uid {owner}); remove it or set --enats_store_dir",
+                link.uid()
+            )));
+        }
+        let handle = std::fs::File::open(dir)?;
+        let opened = handle.metadata()?;
+        if (opened.dev(), opened.ino()) != (link.dev(), link.ino()) {
+            return Err(refuse("replaced while it was being opened".into()));
+        }
+        handle.set_permissions(std::fs::Permissions::from_mode(0o700))?;
     }
+    #[cfg(not(unix))]
+    let _ = owner;
     Ok(())
 }
 
-/// Writes the `nats-server` config to a freshly created 0600 file with a
-/// random suffix, refusing to follow pre-existing paths or symlinks in `/tmp`.
-fn write_private_config(port: u16, conf: &str) -> std::io::Result<PathBuf> {
-    use std::io::Write as _;
-
-    let path =
-        std::env::temp_dir().join(format!("cabby-enats-{}-{}-{}.conf", std::process::id(), port, random_suffix(12)));
+/// Creates `path` as a new file (mode 0600 on Unix, never through an existing
+/// path or symlink) and fills it with `fill`; removes it again if that fails.
+/// Errors name the path.
+fn create_private_file(
+    path: &Path,
+    fill: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+) -> std::io::Result<std::fs::File> {
+    let named = |e: std::io::Error| std::io::Error::new(e.kind(), format!("{}: {e}", path.display()));
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create_new(true);
     #[cfg(unix)]
@@ -234,9 +256,41 @@ fn write_private_config(port: u16, conf: &str) -> std::io::Result<PathBuf> {
         use std::os::unix::fs::OpenOptionsExt;
         opts.mode(0o600);
     }
-    let mut file = opts.open(&path)?;
-    file.write_all(conf.as_bytes())?;
-    Ok(path)
+    let mut file = opts.open(path).map_err(named)?;
+    if let Err(e) = fill(&mut file) {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(named(e));
+    }
+    Ok(file)
+}
+
+/// Writes the `nats-server` config to a new private file with a random
+/// suffix in the temp dir; returns its path and its owner (this process's
+/// user, on Unix).
+fn write_private_config(port: u16, conf: &str) -> std::io::Result<(PathBuf, u32)> {
+    use std::io::Write as _;
+
+    let path =
+        std::env::temp_dir().join(format!("cabby-enats-{}-{}-{}.conf", std::process::id(), port, random_suffix(12)));
+    let file = create_private_file(&path, |f| f.write_all(conf.as_bytes()))?;
+    #[cfg(unix)]
+    let owner = {
+        use std::os::unix::fs::MetadataExt;
+        file.metadata().map(|m| m.uid())
+    };
+    #[cfg(not(unix))]
+    let owner: std::io::Result<u32> = {
+        drop(file);
+        Ok(0)
+    };
+    match owner {
+        Ok(owner) => Ok((path, owner)),
+        Err(e) => {
+            let _ = std::fs::remove_file(&path);
+            Err(std::io::Error::new(e.kind(), format!("{}: {e}", path.display())))
+        }
+    }
 }
 
 /// The variables naming the `nats-server` executable, in precedence order:
@@ -355,8 +409,20 @@ impl Service {
         name.clone()
     }
 
+    /// The default JetStream store directory (`nats-data/<server name>` in the
+    /// temp dir), when JetStream is on without `store_dir`.
+    fn default_store_dir(&self) -> Option<PathBuf> {
+        (self.config.jetstream && self.config.store_dir.is_empty())
+            .then(|| std::env::temp_dir().join("nats-data").join(self.server_name()))
+    }
+
     /// The nats-server configuration equivalent to upstream's `server.Options`.
     pub fn server_config(&self) -> Result<String, EnatsError> {
+        self.config_text(self.default_store_dir().as_deref())
+    }
+
+    /// [`Service::server_config`] with the default store directory, if any.
+    fn config_text(&self, default_store: Option<&Path>) -> Result<String, EnatsError> {
         let c = &self.config;
         let (host, port) = match parse_host_port(&c.service_addr) {
             Ok((host, Some(port))) => (host, port),
@@ -374,11 +440,7 @@ impl Service {
             out.push_str(&format!("max_payload: {}\n", c.max_payload));
         }
         if c.jetstream {
-            let store = if c.store_dir.is_empty() {
-                std::env::temp_dir().join("nats-data").join(&name).display().to_string()
-            } else {
-                c.store_dir.clone()
-            };
+            let store = default_store.map_or_else(|| c.store_dir.clone(), |p| p.display().to_string());
             out.push_str(&format!("jetstream: {{\n  store_dir: {}\n}}\n", quote(&store)));
         }
         let cluster = if !c.cluster_addr.is_empty() && !c.cluster_name.is_empty() {
@@ -438,20 +500,21 @@ impl Service {
 
     /// [`Service::start`] with an explicit `nats-server` executable.
     pub fn start_with(&self, bin: &Path) -> Result<(), EnatsError> {
-        let conf = self.server_config()?;
+        let default_store = self.default_store_dir();
+        let conf = self.config_text(default_store.as_deref())?;
         let (host, port) = match parse_host_port(&self.config.service_addr)? {
             (h, Some(p)) => (h, p),
             (_, None) => return Err(EnatsError("failed to parse NATS server URL, can not fetch port".into())),
         };
-        if self.config.jetstream && self.config.store_dir.is_empty() {
-            let store = std::env::temp_dir().join("nats-data").join(self.server_name());
-            create_private_dir(&store).map_err(|e| {
-                EnatsError(format!("failed to start NATS server, cause: creating store dir {store:?}: {e}"))
-            })?;
-        }
 
-        let conf_path = write_private_config(port, &conf)
+        let (conf_path, owner) = write_private_config(port, &conf)
             .map_err(|e| EnatsError(format!("failed to start NATS server, cause: writing config: {e}")))?;
+        if let Some(store) = &default_store
+            && let Err(e) = create_private_dir(store, owner)
+        {
+            let _ = std::fs::remove_file(&conf_path);
+            return Err(EnatsError(format!("failed to start NATS server, cause: creating store dir: {e}")));
+        }
 
         let mut child = match Command::new(bin)
             .arg("-c")
@@ -847,21 +910,91 @@ mod tests {
     }
 
     #[cfg(unix)]
+    fn scratch(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("cabby-enats-{tag}-{}-{}", std::process::id(), random_suffix(8)))
+    }
+
+    #[cfg(unix)]
+    fn mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).expect("metadata").permissions().mode() & 0o777
+    }
+
+    #[cfg(unix)]
+    fn my_uid() -> u32 {
+        let (path, owner) = write_private_config(1, "").expect("a config file");
+        let _ = std::fs::remove_file(path);
+        owner
+    }
+
+    #[cfg(unix)]
     #[test]
     fn config_file_and_store_dir_are_private() {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::MetadataExt;
 
-        let path = write_private_config(4222, "port: 4222\n").expect("write private config");
-        let mode = std::fs::metadata(&path).expect("metadata").permissions().mode() & 0o777;
-        assert_eq!(0o600, mode);
+        let (path, owner) = write_private_config(4222, "port: 4222\n").expect("write private config");
+        assert_eq!(0o600, mode(&path));
+        assert_eq!(owner, std::fs::metadata(&path).unwrap().uid());
         assert_eq!("port: 4222\n", std::fs::read_to_string(&path).expect("read"));
         let _ = std::fs::remove_file(&path);
 
-        let dir =
-            std::env::temp_dir().join(format!("cabby-enats-dir-test-{}-{}", std::process::id(), random_suffix(6)));
-        create_private_dir(&dir).expect("create private dir");
-        let dir_mode = std::fs::metadata(&dir).expect("metadata").permissions().mode() & 0o777;
-        assert_eq!(0o700, dir_mode);
+        let dir = scratch("dir").join("store");
+        create_private_dir(&dir, owner).expect("create private dir");
+        assert_eq!(0o700, mode(&dir));
+
+        // An existing directory of this user is made private.
+        std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        create_private_dir(&dir, owner).expect("an existing directory");
+        assert_eq!(0o700, mode(&dir));
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_config_write_removes_the_file_and_names_it() {
+        let path = scratch("failed-write");
+        let err = create_private_file(&path, |_| Err(std::io::Error::other("disk full"))).expect_err("the fill fails");
+        assert!(!path.exists(), "the file is removed");
+        assert_eq!(format!("{}: disk full", path.display()), err.to_string());
+
+        // An existing path is never reused.
+        std::fs::write(&path, "x").unwrap();
+        let err = create_private_file(&path, |_| Ok(())).expect_err("the path exists");
+        assert!(err.to_string().starts_with(&format!("{}: ", path.display())), "{err}");
+        assert_eq!("x", std::fs::read_to_string(&path).unwrap());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_store_dir_is_refused_and_its_target_left_alone() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let base = scratch("symlink");
+        let target = base.join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let link = base.join("store");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let err = create_private_dir(&link, my_uid()).expect_err("a symlink");
+        assert!(err.to_string().contains("not a directory"), "{err}");
+        assert_eq!(0o755, mode(&target), "the target keeps its mode");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_store_dir_owned_by_another_user_is_refused() {
+        let dir = scratch("owner");
+        std::fs::create_dir_all(&dir).unwrap();
+        let other = my_uid().wrapping_add(1);
+
+        let err = create_private_dir(&dir, other).expect_err("owned by someone else");
+
+        let text = err.to_string();
+        assert!(text.starts_with(&format!("{}: owned by uid ", dir.display())), "{text}");
+        assert!(text.ends_with(&format!("not by this user (uid {other}); remove it or set --enats_store_dir")), "{text}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
