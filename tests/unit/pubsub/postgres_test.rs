@@ -399,14 +399,20 @@ fn deviation_d070_postgres_a_notification_burst_does_not_stall_listen() {
     h.wait(&other);
     let took = started.elapsed();
 
-    let mut delivered = 0u64;
-    while handler.receive().is_some() {
-        delivered += 1;
-    }
+    // Every notification ends up delivered or counted as dropped; a pause in
+    // deliveries (a busy machine) doesn't end the count, only the deadline does.
     let count = |name: &str| registry.counter(name).map_or(0, |c| c.value());
+    let mut delivered = 0u64;
+    let deadline = std::time::Instant::now() + WAIT * 3;
+    while delivered + count("postgres_dropped_total") < 20000 && std::time::Instant::now() < deadline {
+        if handler.receive().is_some() {
+            delivered += 1;
+        }
+    }
     assert!(took < Duration::from_secs(5), "the LISTEN took {took:?}");
     assert_eq!(0, count("postgres_reconnects_total"), "no reconnect");
     assert_eq!(20000, delivered + count("postgres_dropped_total"), "delivered {delivered}");
+    assert!(handler.receive().is_none(), "nothing beyond the 20000");
 }
 
 /// regression-for: pubsub/redis_test.go#TestRedisCommon/Broadcast
