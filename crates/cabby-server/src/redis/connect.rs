@@ -35,7 +35,8 @@ pub(crate) fn runtime() -> &'static Runtime {
 
 /// Runs `fut` on the Redis runtime and waits (synchronously) up to `timeout`
 /// for its result; `None` if it did not finish in time. Safe to call from any
-/// thread except the Redis runtime's own workers.
+/// thread; a worker of a multi-threaded Tokio runtime tells it first
+/// (`block_in_place`).
 pub(crate) fn wait_on<F>(timeout: Duration, fut: F) -> Option<F::Output>
 where
     F: std::future::Future + Send + 'static,
@@ -45,7 +46,7 @@ where
     runtime().spawn(async move {
         let _ = tx.send(fut.await);
     });
-    rx.recv_timeout(timeout).ok()
+    cabby_core::nats::client::blocking(move || rx.recv_timeout(timeout).ok())
 }
 
 /// A one-shot flag that threads can wait for.

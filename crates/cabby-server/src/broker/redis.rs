@@ -19,7 +19,6 @@
 //! older than `history_ttl`. Timestamps come from the Redis server's clock
 //! (`TIME`), so every node agrees on what has expired.
 
-use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
 use std::time::{Duration, Instant};
@@ -496,19 +495,6 @@ impl Inner {
     }
 }
 
-/// Runs `fut` on the Redis runtime and waits for it at most `timeout`.
-fn wait<F>(timeout: Duration, fut: F) -> Option<F::Output>
-where
-    F: Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    let (tx, rx) = std::sync::mpsc::sync_channel(1);
-    connect::runtime().spawn(async move {
-        let _ = tx.send(fut.await);
-    });
-    cabby_core::nats::client::blocking(move || rx.recv_timeout(timeout).ok())
-}
-
 /// The Redis broker (see the module docs): multi-node stream history and
 /// session cache in one Redis, shared by every node using the same key prefix.
 pub struct RedisBroker {
@@ -589,7 +575,7 @@ impl RedisBroker {
         }
         let timeout = inner.timeout;
         let task = inner.clone().exec(calls, idempotent);
-        let result = wait(timeout + REPORT_GRACE, async move { tokio::time::timeout(timeout, task).await });
+        let result = connect::wait_on(timeout + REPORT_GRACE, async move { tokio::time::timeout(timeout, task).await });
         match result {
             Some(Ok(Ok(values))) => Ok(values),
             Some(Ok(Err(e))) => Err(Failure::Redis(e)),
