@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use bytes::Bytes;
+use cabby_core::utils::redact_refused_url;
 use http::header::{AUTHORIZATION, HOST, HeaderName, HeaderValue};
 use http::{Method, Request, Uri};
 use http_body_util::{BodyExt, Full, LengthLimitError, Limited};
@@ -33,19 +34,6 @@ fn redact_url(raw: &str) -> String {
     let (prefix, rest) = raw.split_at(authority_start(raw));
     let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     match rest[..authority_end].rfind('@') {
-        Some(at) => format!("{prefix}{}", &rest[at + 1..]),
-        None => raw.to_owned(),
-    }
-}
-
-/// [`redact_url`] for the error text of a URL that is refused: it may not be
-/// well formed (a `/` in the password ends the authority early), so
-/// everything from the start of the authority up to the last `@` before any
-/// `?` or `#` is removed.
-fn redact_refused_url(raw: &str) -> String {
-    let (prefix, rest) = raw.split_at(authority_start(raw));
-    let end = rest.find(['?', '#']).unwrap_or(rest.len());
-    match rest[..end].rfind('@') {
         Some(at) => format!("{prefix}{}", &rest[at + 1..]),
         None => raw.to_owned(),
     }
@@ -597,12 +585,18 @@ pub(crate) mod dial_error_tests {
         }
     }
 
-    /// A `/` in the password ends the authority early, so the URL does not
+    /// A `/`, `?` or `#` in the password ends the authority early, so the URL does not
     /// parse (its port is not a number, as Go also reports); the error leaves
     /// out everything up to the last `@`.
     #[test]
-    fn a_slash_in_the_password_is_refused_without_the_password() {
-        for raw in ["http://user:s3/cr3t@host/rpc", "http://user:s3/cr3t@host:3000/rpc?x=1", "user:s3/cr3t@host/rpc"] {
+    fn a_delimiter_in_the_password_is_refused_without_the_password() {
+        for raw in [
+            "http://user:s3/cr3t@host/rpc",
+            "http://user:s3/cr3t@host:3000/rpc?x=1",
+            "user:s3/cr3t@host/rpc",
+            "http://user:s3?cr3t@host/rpc",
+            "http://user:s3#cr3t@host/rpc",
+        ] {
             let err = super::Origin::parse(raw).unwrap_err();
             assert!(!err.contains("cr3t") && !err.contains("user:s3"), "credentials in the error for {raw:?}: {err}");
         }

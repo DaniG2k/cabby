@@ -69,6 +69,7 @@ embedding API are breaking (see "Changed").
   unregistered independently (D-077).
 - Check a JWT's signature before reading its claims, and limit tokens to 128 KiB and their header
   segment to 8 KiB (D-079).
+- Errors about an invalid Redis or NATS URL leave out its user and password (D-080).
 
 ## [0.3.0] - 2026-11-24
 

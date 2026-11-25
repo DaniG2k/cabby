@@ -40,7 +40,7 @@ use tokio::runtime::{Handle, Runtime, RuntimeFlavor};
 
 use super::{NatsConfig, NatsError};
 use crate::logger::{LogValuer, Logger, filtered_url};
-use crate::utils::backpressure;
+use crate::utils::{backpressure, redact_refused_url};
 use crate::{log_error, log_info, log_warn};
 
 /// The process-wide runtime that runs NATS I/O.
@@ -83,13 +83,17 @@ pub fn blocking<R>(f: impl FnOnce() -> R) -> R {
 /// just tried (the first attempt after a disconnect is immediate).
 const RECONNECT_WAIT: Duration = Duration::from_secs(2);
 
-/// Parses the comma-separated server list (`nats.Connect(servers)`).
+/// Parses the comma-separated server list (`nats.Connect(servers)`). Errors leave
+/// out credentials (D-080).
 pub fn server_addrs(servers: &str) -> Result<Vec<ServerAddr>, NatsError> {
     servers
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(|s| s.parse::<ServerAddr>().map_err(|e| NatsError(format!("nats: invalid server URL {s:?}: {e}"))))
+        .map(|s| {
+            s.parse::<ServerAddr>()
+                .map_err(|e| NatsError(format!("nats: invalid server URL {:?}: {e}", redact_refused_url(s))))
+        })
         .collect()
 }
 
@@ -436,6 +440,24 @@ mod tests {
         let addrs = server_addrs("nats://a:4222, nats://b:4223").unwrap();
         assert_eq!(2, addrs.len());
         assert!(server_addrs("nats://a:4222,::bad::").is_err());
+    }
+
+    /// Pins D-080: errors leave out the user and password, wherever the URL is cut.
+    #[test]
+    fn deviation_d080_errors_leave_out_credentials() {
+        let invalid_port = "NATS server URL is invalid: invalid port number";
+        for (servers, url, reason) in [
+            ("nats://u:s3cret@host:bad", "nats://host:bad", invalid_port),
+            ("nats://u:s3cret/ZQX@host:4222", "nats://host:4222", invalid_port),
+            ("nats://u:s3cret#ZQX@host:4222", "nats://host:4222", invalid_port),
+            ("u:s3cret?ZQX@host:4222", "host:4222", invalid_port),
+            ("nats://ok:4222, nats://u:s3cret,ZQX@host:4222", "nats://u", invalid_port),
+            ("bogus://u:s3cret@h:4222", "bogus://h:4222", "invalid scheme for NATS server URL: bogus"),
+        ] {
+            let err = server_addrs(servers).unwrap_err().to_string();
+            assert_eq!(format!("nats: invalid server URL {url:?}: {reason}"), err, "{servers}");
+            assert!(!err.contains("s3cret") && !err.contains("ZQX"), "{servers}: {err}");
+        }
     }
 
     #[test]

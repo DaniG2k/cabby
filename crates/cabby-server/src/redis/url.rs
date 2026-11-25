@@ -3,6 +3,8 @@
 
 use std::time::Duration;
 
+use cabby_core::utils::redact_refused_url;
+
 /// The parts of a Go `*url.URL` that rueidis reads.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct GoUrl {
@@ -75,8 +77,18 @@ fn unhex(c: u8) -> Option<u8> {
     }
 }
 
+/// An invalid percent escape (Go `url.EscapeError`).
+struct EscapeError(String);
+
+impl EscapeError {
+    /// Go's text, or without the escape.
+    fn reason(&self, quote: bool) -> String {
+        if quote { format!("invalid URL escape {:?}", self.0) } else { "invalid URL escape".to_owned() }
+    }
+}
+
 /// Go `url.unescape` (percent-decoding; `+` becomes a space in query components).
-fn unescape(s: &str, query: bool) -> Result<String, String> {
+fn unescape(s: &str, query: bool) -> Result<String, EscapeError> {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
@@ -86,7 +98,7 @@ fn unescape(s: &str, query: bool) -> Result<String, String> {
                 let hex = b.get(i + 1).copied().and_then(unhex).zip(b.get(i + 2).copied().and_then(unhex));
                 let Some((h, l)) = hex else {
                     let end = (i + 3).min(b.len());
-                    return Err(format!("invalid URL escape {:?}", String::from_utf8_lossy(&b[i..end])));
+                    return Err(EscapeError(String::from_utf8_lossy(&b[i..end]).into_owned()));
                 };
                 out.push(h << 4 | l);
                 i += 3;
@@ -142,27 +154,43 @@ fn valid_optional_port(port: &str) -> bool {
     }
 }
 
-/// Go `parseHost` (bracketed IPv6 and port validation).
-fn parse_host(host: &str) -> Result<String, String> {
+/// Go `parseHost` (bracketed IPv6 and port validation). Errors quote what is
+/// invalid, as Go's do, when `quote`.
+fn parse_host(host: &str, quote: bool) -> Result<String, String> {
+    let invalid_port = |colon_port: &str| {
+        let port = if quote { format!(" {colon_port:?}") } else { String::new() };
+        Err(format!("invalid port{port} after host"))
+    };
     if host.starts_with('[') {
         let Some(end) = host.rfind(']') else { return Err("missing ']' in host".to_owned()) };
         let colon_port = &host[end + 1..];
         if !valid_optional_port(colon_port) {
-            return Err(format!("invalid port {colon_port:?} after host"));
+            return invalid_port(colon_port);
         }
     } else if let Some(i) = host.rfind(':') {
         let colon_port = &host[i..];
         if !valid_optional_port(colon_port) {
-            return Err(format!("invalid port {colon_port:?} after host"));
+            return invalid_port(colon_port);
         }
     }
-    unescape(host, false)
+    unescape(host, false).map_err(|e| e.reason(quote))
+}
+
+/// Whether errors may quote what comes after the user and password of `raw`.
+/// Not when part of them may be there: when an `@` follows the authority (a
+/// `/`, `?` or `#` in the password ended it early), or when there is no `@` and
+/// something other than a port follows the host's colon.
+fn quotable(raw: &str) -> bool {
+    let Some(at) = raw.rfind('@') else { return redact_refused_url(raw) == raw };
+    let Some(start) = raw.find("//").map(|i| i + 2) else { return false };
+    raw[start..].find(['/', '?', '#']).is_none_or(|end| at < start + end)
 }
 
 /// Go `url.Parse` (the subset rueidis reads). Errors read like Go's
-/// (`parse "<url>": <reason>`).
+/// (`parse "<url>": <reason>`), without credentials (D-080).
 pub(crate) fn parse(raw: &str) -> Result<GoUrl, String> {
-    let wrap = |e: String| format!("parse {raw:?}: {e}");
+    let wrap = |e: String| format!("parse {:?}: {e}", redact_refused_url(raw));
+    let quote = quotable(raw);
     let without_fragment = raw.split_once('#').map_or(raw, |(u, _)| u);
     if without_fragment.bytes().any(|b| b < 0x20 || b == 0x7f) {
         return Err(wrap("net/url: invalid control character in URL".to_owned()));
@@ -184,15 +212,16 @@ pub(crate) fn parse(raw: &str) -> Result<GoUrl, String> {
         let host_part = match authority.rfind('@') {
             Some(i) => {
                 let userinfo = &authority[..i];
+                let decode = |s: &str| unescape(s, false).map_err(|e| wrap(e.reason(false)));
                 url.user = Some(match userinfo.split_once(':') {
-                    Some((u, p)) => (unescape(u, false).map_err(wrap)?, Some(unescape(p, false).map_err(wrap)?)),
-                    None => (unescape(userinfo, false).map_err(wrap)?, None),
+                    Some((u, p)) => (decode(u)?, Some(decode(p)?)),
+                    None => (decode(userinfo)?, None),
                 });
                 &authority[i + 1..]
             }
             None => authority,
         };
-        url.host = parse_host(host_part).map_err(wrap)?;
+        url.host = parse_host(host_part, quote).map_err(wrap)?;
         path
     } else {
         if url.scheme.is_empty() && rest.split('/').next().is_some_and(|seg| seg.contains(':')) {
@@ -200,7 +229,7 @@ pub(crate) fn parse(raw: &str) -> Result<GoUrl, String> {
         }
         rest
     };
-    url.path = unescape(path_part, false).map_err(wrap)?;
+    url.path = unescape(path_part, false).map_err(|e| wrap(e.reason(quote)))?;
     Ok(url)
 }
 
@@ -226,9 +255,13 @@ pub(crate) struct ParsedRedisUrl {
     pub client_name: String,
 }
 
-/// rueidis `ParseURL`, with its error texts.
+/// rueidis `ParseURL`, with its error texts (without credentials, D-080).
 pub(crate) fn parse_rueidis(raw: &str) -> Result<ParsedRedisUrl, String> {
     let u = parse(raw)?;
+    let invalid = |what: &str, value: &str| {
+        if quotable(raw) { format!("redis: invalid {what}: {value}") } else { format!("redis: invalid {what}") }
+    };
+    let invalid_quoted = |what: &str, value: &str| invalid(what, &format!("{value:?}"));
     let mut opt = ParsedRedisUrl::default();
     let parse_addr = |hostport: &str| -> (String, String) {
         let (mut host, mut port) = split_host_port(hostport).unwrap_or_default();
@@ -267,19 +300,19 @@ pub(crate) fn parse_rueidis(raw: &str) -> Result<ParsedRedisUrl, String> {
     if u.scheme != "unix" {
         let ps: Vec<&str> = u.path.split('/').collect();
         if ps.len() == 2 {
-            opt.select_db = go_atoi(ps[1]).ok_or_else(|| format!("redis: invalid database number: {:?}", ps[1]))?;
+            opt.select_db = go_atoi(ps[1]).ok_or_else(|| invalid_quoted("database number", ps[1]))?;
         } else if ps.len() > 2 {
-            return Err(format!("redis: invalid URL path: {}", u.path));
+            return Err(invalid("URL path", &u.path));
         }
     }
     if let Some(db) = u.query_get("db") {
-        opt.select_db = go_atoi(db).ok_or_else(|| format!("redis: invalid database number: {db:?}"))?;
+        opt.select_db = go_atoi(db).ok_or_else(|| invalid_quoted("database number", db))?;
     }
     if let Some(t) = u.query_get("dial_timeout") {
-        opt.dial_timeout = parse_duration(t).ok_or_else(|| format!("redis: invalid dial timeout: {t:?}"))?;
+        opt.dial_timeout = parse_duration(t).ok_or_else(|| invalid_quoted("dial timeout", t))?;
     }
     if let Some(t) = u.query_get("write_timeout") {
-        opt.write_timeout = parse_duration(t).ok_or_else(|| format!("redis: invalid write timeout: {t:?}"))?;
+        opt.write_timeout = parse_duration(t).ok_or_else(|| invalid_quoted("write timeout", t))?;
     }
     for addr in u.query_all("addr") {
         let (_, addr) = parse_addr(addr);
@@ -288,11 +321,8 @@ pub(crate) fn parse_rueidis(raw: &str) -> Result<ParsedRedisUrl, String> {
     if opt.tls
         && let Some(v) = u.query_get("skip_verify")
     {
-        opt.skip_verify = if v.is_empty() {
-            true
-        } else {
-            go_parse_bool(v).ok_or_else(|| format!("redis: invalid skip verify: {v:?}"))?
-        };
+        opt.skip_verify =
+            if v.is_empty() { true } else { go_parse_bool(v).ok_or_else(|| invalid_quoted("skip verify", v))? };
     }
     opt.client_name = u.query_get("client_name").unwrap_or("").to_owned();
     opt.master_set = u.query_get("master_set").unwrap_or("").to_owned();
@@ -375,7 +405,7 @@ mod tests {
         assert_eq!(Some((String::new(), Some("data_pass".to_owned()))), u.user);
         assert_eq!("mymaster", u.host);
 
-        assert!(parse("redis://host:abc").unwrap_err().contains("invalid port \":abc\" after host"));
+        assert!(parse("redis://u@host:abc").unwrap_err().contains("invalid port \":abc\" after host"));
         assert!(parse("://x").unwrap_err().contains("missing protocol scheme"));
     }
 
@@ -393,6 +423,35 @@ mod tests {
         assert_eq!("redis: invalid database number: \"\"", parse_rueidis("redis://h/").unwrap_err());
         assert_eq!("redis: invalid URL path: /1/2", parse_rueidis("redis://h/1/2").unwrap_err());
         assert_eq!("m", parse_rueidis("redis://h?master_set=m").unwrap().master_set);
+    }
+
+    /// Pins D-080: errors leave out the user and password, wherever the URL is
+    /// cut, and otherwise read like Go's.
+    #[test]
+    fn deviation_d080_errors_leave_out_credentials() {
+        for (raw, want) in [
+            ("redis://u:s3cret@host:bad", r#"parse "redis://host:bad": invalid port ":bad" after host"#),
+            ("redis://:s3cret/ZQX@host:6379", r#"parse "redis://host:6379": invalid port after host"#),
+            ("redis://:s3cret?ZQX@host:6379", r#"parse "redis://host:6379": invalid port after host"#),
+            ("redis://:s3cret#ZQX@host:6379/1", r#"parse "redis://host:6379/1": invalid port after host"#),
+            ("redis://:s3cret%zz@host:6379/1", r#"parse "redis://host:6379/1": invalid URL escape"#),
+            ("redis://u:s3cret@host/%zz", r#"parse "redis://host/%zz": invalid URL escape "%zz""#),
+            ("redis://:1/s3cret%zz@host", r#"parse "redis://host": invalid URL escape"#),
+            ("redis://u:s3cret@ho\nst", r#"parse "redis://ho\nst": net/url: invalid control character in URL"#),
+            ("u_s:s3cret@host", r#"parse "host": first path segment in URL cannot contain colon"#),
+            (":s3cret@host", r#"parse "host": missing protocol scheme"#),
+            // A comma in the password cuts it in a list of URLs.
+            ("redis://u:s3cret", r#"parse "redis://u": invalid port after host"#),
+            ("redis://:1/s3cret@host", "redis: invalid database number"),
+            ("redis://:1/s3cret/ZQX@host", "redis: invalid URL path"),
+            ("redis://u:s3cret@host/x", r#"redis: invalid database number: "x""#),
+            ("redis://u:s3cret@host/1/2", "redis: invalid URL path: /1/2"),
+            ("redis://u:s3cret@host?dial_timeout=x", r#"redis: invalid dial timeout: "x""#),
+        ] {
+            let err = parse_rueidis(raw).unwrap_err();
+            assert_eq!(want, err, "{raw}");
+            assert!(!err.contains("s3cret") && !err.contains("ZQX"), "{raw}: {err}");
+        }
     }
 
     #[test]
