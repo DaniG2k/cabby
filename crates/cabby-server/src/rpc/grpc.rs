@@ -19,6 +19,7 @@
 use std::convert::Infallible;
 use std::io;
 use std::net::SocketAddr;
+use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -29,6 +30,7 @@ use arc_swap::{ArcSwap, ArcSwapOption};
 use cabby_core::logger::Level;
 use cabby_core::protos;
 use cabby_core::protos::rpc_client::RpcClient as Stub;
+use futures_util::FutureExt as _;
 use hyper_util::rt::TokioIo;
 use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -120,6 +122,9 @@ fn system_resolver() -> Resolver {
 /// grpc-go's `minConnectTimeout`: how long a background connection attempt may
 /// take (or its backoff, if longer); then it has failed.
 const MIN_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// How long reconnecting pauses after a panic.
+const RESTART_DELAY: Duration = Duration::from_secs(1);
 
 /// grpc-go `backoff.DefaultExponential.Backoff(retries)`: 1 s base, factor
 /// 1.6, jitter 0.2, at most 120 s.
@@ -402,9 +407,24 @@ impl Inner {
         let reconnect = self.reconnect.clone();
         tokio::spawn(async move {
             let removed = s.removed.clone();
+            let connections = async {
+                loop {
+                    let run = Self::keep_connecting(&s, &state, &tls, &endpoint, &reconnect);
+                    // It only ends by a panic (reported by the panic hook).
+                    let Err(panic) = AssertUnwindSafe(run).catch_unwind().await;
+                    let why = panic
+                        .downcast_ref::<&str>()
+                        .copied()
+                        .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                        .unwrap_or("unknown panic");
+                    cabby_core::log_error!(grpc_logger(), "reconnecting panicked, restarting it",
+                        "addr" => &s.authority, "error" => why);
+                    tokio::time::sleep(RESTART_DELAY).await;
+                }
+            };
             tokio::select! {
                 () = removed.cancelled() => {}
-                never = Self::keep_connecting(&s, &state, &tls, &endpoint, &reconnect) => match never {},
+                () = connections => {}
             }
         });
     }
@@ -1048,6 +1068,28 @@ mod tests {
         assert!(!client.inner.transient_failure());
         client.close();
         b.task.abort();
+    }
+
+    /// A panic while reconnecting does not end it.
+    #[tokio::test]
+    async fn reconnecting_survives_a_panic() {
+        let refusing = Refusing::new().await;
+        let config = Config { host: refusing.addr.to_string(), ..Config::default() };
+        let panicked = Arc::new(AtomicBool::new(false));
+        let seen = Arc::clone(&panicked);
+        let reconnect = fast_reconnect(move |_| {
+            assert!(seen.swap(true, Ordering::SeqCst), "the first retry panics");
+            Duration::from_millis(10)
+        });
+        let client = client_with(&config, system_resolver(), reconnect);
+        call(&client).await;
+        until("the retry panics", || panicked.load(Ordering::SeqCst)).await;
+        assert!(client.inner.transient_failure());
+
+        let listener = refusing.listen().await;
+        until("the client reconnects", || !client.inner.transient_failure()).await;
+        let _ = listener.accept().await.expect("a connection");
+        client.close();
     }
 
     #[test]
