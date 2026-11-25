@@ -267,6 +267,8 @@ struct Settings {
 struct Lifecycle {
     closed: bool,
     disconnect_interest: bool,
+    /// An undecodable message ended the reading of commands (D-074).
+    discarding: bool,
     internal_state: Option<HashMap<String, Value>>,
 }
 
@@ -1237,6 +1239,7 @@ impl Session {
                 state: Mutex::new(ReaderState {
                     events: VecDeque::new(),
                     running: false,
+                    discarding: false,
                     finished: false,
                     callback: Some(callback),
                     parked: None,
@@ -1568,9 +1571,12 @@ impl Session {
         self.settings().prev_sid.clone()
     }
 
-    /// Native pong received (upstream `HandleNativePong`).
+    /// Native pong received (upstream `HandleNativePong`). As upstream, where
+    /// nothing reads them, they no longer count after an undecodable message.
     pub fn handle_native_pong(&self) {
-        self.reset_pong();
+        if !lock(&self.lifecycle).discarding {
+            self.reset_pong();
+        }
     }
 
     pub fn write_internal_state(&self, key: &str, val: Value) {
@@ -1595,11 +1601,14 @@ struct ReaderState {
     events: VecDeque<ReadEvent>,
     /// A drain is scheduled or running on the command pool.
     running: bool,
+    /// A message could not be decoded: later messages are read and dropped, so
+    /// the end of the connection is still noticed (D-074).
+    discarding: bool,
     /// Reading ended (upstream's reader goroutine returned): later events are dropped.
     finished: bool,
     callback: Option<Box<dyn FnOnce() + Send>>,
-    /// The permit of the message that ended reading: kept, so the transport
-    /// reads no further (as nothing reads after upstream's reader returned).
+    /// The permit of a message that found the session closed: kept, so the
+    /// transport reads no further (as nothing reads after upstream's reader returned).
     parked: Option<ReadPermit>,
 }
 
@@ -1647,7 +1656,7 @@ impl SessionReader {
     fn try_inline(&self, msg: &[u8]) -> bool {
         {
             let mut state = lock(&self.inner.state);
-            if state.running || state.finished || !state.events.is_empty() {
+            if state.running || state.discarding || state.finished || !state.events.is_empty() {
                 return false;
             }
             state.running = true;
@@ -1676,7 +1685,7 @@ impl SessionReader {
 
     fn push(&self, event: ReadEvent) {
         let mut state = lock(&self.inner.state);
-        if state.finished {
+        if state.finished || (state.discarding && matches!(event, ReadEvent::Message(..))) {
             return;
         }
         state.events.push_back(event);
@@ -1700,10 +1709,10 @@ impl ReaderInner {
                 super::tasks::execute(Box::new(move || self.drain()));
                 return;
             }
-            let event = {
+            let (event, discarding) = {
                 let mut state = lock(&self.state);
                 match state.events.pop_front() {
-                    Some(event) if !state.finished => event,
+                    Some(event) if !state.finished => (event, state.discarding),
                     _ => {
                         state.events.clear();
                         state.running = false;
@@ -1721,16 +1730,37 @@ impl ReaderInner {
                     }
                     if let Err(e) = session.read_message(&msg) {
                         log_debug!(session.logger(), "WebSocket read failed", "error" => e.0);
-                        self.finish(Some(permit));
-                        continue;
+                        self.discard();
                     }
                     drop(permit);
                 }
                 ReadEvent::End(err) => {
-                    session.read_ended(&err);
+                    if !discarding || !session.is_closed() {
+                        session.read_ended(&err);
+                    }
                     self.finish(None);
                 }
             }
+        }
+    }
+
+    /// A message could not be decoded: no later message is executed (upstream's
+    /// reader returns) and the callback runs, but the transport keeps reading, so
+    /// a closed connection still ends the session (D-074).
+    fn discard(&self) {
+        lock(&self.session.lifecycle).discarding = true;
+        let (callback, dropped) = {
+            let mut state = lock(&self.state);
+            state.discarding = true;
+            let (messages, ends) =
+                std::mem::take(&mut state.events).into_iter().partition(|e| matches!(e, ReadEvent::Message(..)));
+            state.events = ends;
+            let dropped: VecDeque<ReadEvent> = messages;
+            (state.callback.take(), dropped)
+        };
+        drop(dropped);
+        if let Some(callback) = callback {
+            callback();
         }
     }
 
@@ -2160,22 +2190,67 @@ mod tests {
         assert!(commands.recv_timeout(Duration::from_millis(100)).is_err());
     }
 
+    /// Deviation D-074: after an undecodable message later ones are read and
+    /// dropped, and the end of the connection ends the session.
     #[test]
-    fn reader_stops_at_an_undecodable_message_and_keeps_its_permit() {
+    fn deviation_d074_reader_discards_after_an_undecodable_message() {
         let clock = TestClock::new();
-        let (s, _frames) = session(&clock, vec![]);
+        let (s, frames) = session(&clock, vec![]);
         let (tx, commands) = channel();
         s.set_executor(Arc::new(Commands(Mutex::new(tx))));
+        s.set_connected(true);
         let (done_tx, done) = channel();
         let reader = s.reader(Box::new(move || done_tx.send(()).unwrap()));
         let released = Arc::new(AtomicU64::new(0));
 
         reader.message(Bytes::from_static(b"not json"), Box::new(Permit(released.clone())));
-        reader.message(Bytes::from_static(br#"{"command":"message","identifier":"1"}"#), Box::new(()));
+        reader.message(
+            Bytes::from_static(br#"{"command":"message","identifier":"1"}"#),
+            Box::new(Permit(released.clone())),
+        );
 
-        done.recv_timeout(Duration::from_secs(5)).expect("reading ends (upstream's reader returns)");
-        assert!(commands.recv_timeout(Duration::from_millis(100)).is_err());
-        assert_eq!(0, released.load(Ordering::SeqCst), "the transport reads no further");
+        done.recv_timeout(Duration::from_secs(5)).expect("the callback runs (upstream's reader returns)");
+        reader.message(Bytes::from_static(br#"{"command":"ping"}"#), Box::new(Permit(released.clone())));
+        assert!(commands.recv_timeout(Duration::from_millis(100)).is_err(), "nothing is executed");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while released.load(Ordering::SeqCst) < 3 {
+            assert!(Instant::now() < deadline, "the transport reads on");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!s.is_closed(), "the session stays");
+
+        reader.end(ConnectionError("websocket: close 1006 (abnormal closure): unexpected EOF".into()));
+        assert!(next(&frames).starts_with("close:"), "the end of the connection ends the session");
+        assert!(s.is_closed());
+        assert!(!s.is_connected());
+    }
+
+    /// Deviation D-074: native pongs do not count after an undecodable message.
+    #[test]
+    fn deviation_d074_native_pongs_do_not_count_after_an_undecodable_message() {
+        for (message, count) in [(&br#"{"command":"message","identifier":"1"}"#[..], true), (b"not json", false)] {
+            let clock = TestClock::new();
+            let opts = vec![
+                SessionOption::PingInterval(Duration::from_secs(1)),
+                SessionOption::PongTimeout(Duration::from_secs(4)),
+            ];
+            let (s, _frames) = session(&clock, opts);
+            s.start_timers();
+            let deadline = lock(&s.timers).pong.expect("a pong deadline");
+            let reader = s.reader(Box::new(|| {}));
+            let (released_tx, released) = channel();
+            struct Signal(Sender<()>);
+            impl Drop for Signal {
+                fn drop(&mut self) {
+                    let _ = self.0.send(());
+                }
+            }
+            reader.message(Bytes::from_static(message), Box::new(Signal(released_tx)));
+            released.recv_timeout(Duration::from_secs(5)).expect("the message is handled");
+
+            s.handle_native_pong();
+            assert_eq!(count, lock(&s.timers).pong.expect("a pong deadline") > deadline);
+        }
     }
 
     /// A non-blocking transport that takes `capacity` frames, then refuses until

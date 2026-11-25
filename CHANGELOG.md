@@ -53,6 +53,9 @@ embedding API are breaking (see "Changed").
 
 - The depth of presence info is bounded: info nested deeper than 126 levels is kept and sent as
   its JSON text (D-073).
+- A session whose client sent a message that cannot be decoded ends when its connection does.
+  Before, the connection was no longer read, and its end was only noticed by a later write
+  (D-074).
 
 ## [0.3.0] - 2026-11-24
 
