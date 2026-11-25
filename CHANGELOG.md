@@ -79,6 +79,9 @@ embedding API are breaking (see "Changed").
   A start no longer locks tables and indexes that exist, and one that needs a lock another session
   holds stops after a few seconds with an error naming the statement (see
   [`docs/postgres.md`](docs/postgres.md)).
+- Postgres broadcaster: a connection that went silent while the claim of an empty outbox was being
+  committed could stop the node from claiming broadcasts; the commit now has the same timeout as
+  the other claim statements.
 
 ## [0.3.0] - 2026-11-24
 

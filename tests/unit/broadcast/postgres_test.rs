@@ -12,7 +12,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cabby_server::postgres::Metrics;
-use cabby_testkit::postgres::{PgScope, rust_only};
+use cabby_testkit::fault_proxy::FaultProxy;
+use cabby_testkit::postgres::{PgScope, rust_only, without_tls};
 use cabby_testkit::reference::broadcast::{Broadcaster, HandlerCall, MockHandler};
 
 /// Stop collecting after this long without a call.
@@ -307,4 +308,33 @@ fn deviation_d070_postgres_slow_batches_are_committed_in_parts() {
     assert_eq!(expected, payloads(&calls, "HandleBroadcast"), "each row once, in order");
     assert_eq!(1, handler.max_concurrent_broadcasts(), "one handler call at a time");
     assert_eq!(Some("0".to_owned()), outbox_rows(&scope));
+}
+
+/// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts
+/// note: Deviation D-070: a claim connection that goes silent at the commit of an empty batch is given up after the statement timeout (10 s), as at any other claim statement; the next row is claimed on a new connection.
+#[test]
+fn deviation_d070_postgres_a_silent_commit_of_an_empty_batch_is_given_up() {
+    let scope = scope();
+    let proxy = FaultProxy::start(scope.addr());
+    let mut config = scope.config();
+    config.url = without_tls(scope.url_via(proxy.addr()));
+    let handler = MockHandler::new();
+    let b = Broadcaster::postgres(&handler, &config, Metrics::none()).expect("PostgresBroadcaster::new");
+    b.start().expect("start");
+    let _b = ShutdownGuard(b);
+
+    proxy.sever_on(b"COMMIT");
+    // Wakes the claimer (it also polls every 5 s): the outbox is empty.
+    scope.notify(&format!("{}_in", scope.channel), "");
+    assert!(proxy.await_severed(Duration::from_secs(15)), "no empty batch was committed");
+    scope.insert_broadcast(&payload("s", "after"));
+
+    // The statement timeout (10 s), then the next poll (5 s), and a margin.
+    let deadline = std::time::Instant::now() + Duration::from_secs(40);
+    let mut calls = Vec::new();
+    while payloads(&calls, "HandleBroadcast").is_empty() {
+        assert!(std::time::Instant::now() < deadline, "the claimer is stuck");
+        calls.extend(handler.drain(Duration::from_millis(200)));
+    }
+    assert_eq!(vec![payload("s", "after")], payloads(&calls, "HandleBroadcast"));
 }

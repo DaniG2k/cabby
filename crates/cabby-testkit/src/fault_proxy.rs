@@ -12,6 +12,9 @@
 //! [`FaultProxy::freeze`] stalls every connection (a black hole: nothing is
 //! forwarded either way, sockets stay open) until [`FaultProxy::thaw`]; it works
 //! for any TCP protocol (Redis, NATS).
+//!
+//! [`FaultProxy::sever_on`] severs one connection at the moment the server
+//! sends given bytes: they never arrive, and its socket stays half-open.
 
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
@@ -32,6 +35,8 @@ pub struct FaultProxy {
     conns: Arc<Mutex<Vec<Arc<Conn>>>>,
     stop: Arc<AtomicBool>,
     frozen: Arc<AtomicBool>,
+    /// See [`FaultProxy::sever_on`]; taken when it happens.
+    sever_on: Arc<Mutex<Option<Vec<u8>>>>,
 }
 
 /// Waits while the proxy is frozen.
@@ -47,6 +52,26 @@ fn is_subscribe(chunk: &[u8]) -> bool {
     upper.windows(9).enumerate().any(|(i, w)| w == b"SUBSCRIBE" && !(i >= 2 && &upper[i - 2..i] == b"UN"))
 }
 
+/// Whether the chunk contains the awaited bytes, which are then awaited no more.
+fn take_match(sever_on: &Mutex<Option<Vec<u8>>>, chunk: &[u8]) -> bool {
+    let mut awaited = sever_on.lock().unwrap_or_else(|e| e.into_inner());
+    let found = awaited.as_ref().is_some_and(|b| chunk.windows(b.len()).any(|w| w == b));
+    if found {
+        *awaited = None;
+    }
+    found
+}
+
+impl Conn {
+    /// Closes the upstream side; the client's stays open and silent.
+    fn sever(&self) {
+        self.severed.store(true, Ordering::SeqCst);
+        if let Some(s) = self.upstream.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = s.shutdown(Shutdown::Both);
+        }
+    }
+}
+
 impl FaultProxy {
     /// Starts forwarding `127.0.0.1:<ephemeral>` to `upstream`.
     pub fn start(upstream: SocketAddr) -> Self {
@@ -55,7 +80,9 @@ impl FaultProxy {
         let conns: Arc<Mutex<Vec<Arc<Conn>>>> = Arc::default();
         let stop = Arc::new(AtomicBool::new(false));
         let frozen = Arc::new(AtomicBool::new(false));
+        let sever_on: Arc<Mutex<Option<Vec<u8>>>> = Arc::default();
         let (c, st, fz) = (Arc::clone(&conns), Arc::clone(&stop), Arc::clone(&frozen));
+        let sv = Arc::clone(&sever_on);
         std::thread::spawn(move || {
             for client in listener.incoming() {
                 if st.load(Ordering::SeqCst) {
@@ -75,13 +102,17 @@ impl FaultProxy {
                 c.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::clone(&conn));
                 // client -> Redis
                 let (mut from_client, cn) = (client.try_clone().expect("clone client"), Arc::clone(&conn));
-                let f = Arc::clone(&fz);
+                let (f, sv) = (Arc::clone(&fz), Arc::clone(&sv));
                 std::thread::spawn(move || {
                     let mut buf = [0u8; 16 * 1024];
                     while let Ok(n @ 1..) = from_client.read(&mut buf) {
                         hold(&f);
                         if cn.severed.load(Ordering::SeqCst) {
                             continue; // half-open: swallow everything
+                        }
+                        if take_match(&sv, &buf[..n]) {
+                            cn.sever();
+                            continue;
                         }
                         if is_subscribe(&buf[..n]) {
                             cn.subscriber.store(true, Ordering::SeqCst);
@@ -117,7 +148,7 @@ impl FaultProxy {
                 });
             }
         });
-        Self { addr, conns, stop, frozen }
+        Self { addr, conns, stop, frozen, sever_on }
     }
 
     /// Stops forwarding on every connection, both ways, and holds new
@@ -129,6 +160,25 @@ impl FaultProxy {
     /// Resumes forwarding (data held meanwhile is delivered).
     pub fn thaw(&self) {
         self.frozen.store(false, Ordering::SeqCst);
+    }
+
+    /// Severs the connection on which the server next sends `bytes` (in one
+    /// chunk), once: the upstream side closes without getting them, the
+    /// server's side stays open and silent.
+    pub fn sever_on(&self, bytes: &[u8]) {
+        *self.sever_on.lock().unwrap_or_else(|e| e.into_inner()) = Some(bytes.to_vec());
+    }
+
+    /// Waits until [`FaultProxy::sever_on`] has happened.
+    pub fn await_severed(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        while self.sever_on.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        true
     }
 
     pub fn addr(&self) -> SocketAddr {
@@ -182,10 +232,7 @@ impl FaultProxy {
     pub fn sever_subscribers(&self) -> usize {
         let subs = self.subscribers();
         for c in &subs {
-            c.severed.store(true, Ordering::SeqCst);
-            if let Some(s) = c.upstream.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                let _ = s.shutdown(Shutdown::Both);
-            }
+            c.sever();
         }
         subs.len()
     }

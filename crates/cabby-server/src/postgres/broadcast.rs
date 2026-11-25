@@ -262,7 +262,7 @@ impl Claimer {
         let rows = sql(tx.query(self.select_sql.as_str(), &[&CLAIM_BATCH])).await?;
         let claimed: Vec<(i64, String)> = rows.iter().map(|r| (r.get(0), r.get(1))).collect();
         if claimed.is_empty() {
-            tx.commit().await?;
+            sql(tx.commit()).await?;
             return Ok(Some(Round::Drained));
         }
         let full = claimed.len() as i64 >= CLAIM_BATCH;
