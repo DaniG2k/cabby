@@ -16,6 +16,7 @@
 //! backends are ready early (grpc-go connects all subchannels when the channel
 //! leaves idle). Connections are counted for `grpc_active_conn_num`.
 
+use std::convert::Infallible;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -117,7 +118,7 @@ fn system_resolver() -> Resolver {
 }
 
 /// grpc-go's `minConnectTimeout`: how long a background connection attempt may
-/// take (or its backoff, if longer).
+/// take (or its backoff, if longer); then it has failed.
 const MIN_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// grpc-go `backoff.DefaultExponential.Backoff(retries)`: 1 s base, factor
@@ -178,6 +179,24 @@ struct Subchannel {
     failed: Notify,
     /// The address is no longer listed, or the client is closed.
     removed: CancellationToken,
+}
+
+impl Subchannel {
+    fn attempt_failed(&self, state: &State) {
+        self.failing.store(true, Ordering::Relaxed);
+        self.failed.notify_one();
+        state.resolve_now.notify_one();
+    }
+
+    /// A background attempt got no answer. A call's attempt may have fared better:
+    /// with a connection open, it decides.
+    fn attempt_timed_out(&self, state: &State) {
+        if state.active.load(Ordering::Relaxed) == 0 {
+            self.attempt_failed(state);
+        } else {
+            state.resolve_now.notify_one();
+        }
+    }
 }
 
 /// A connection counted in [`State::active`] while open.
@@ -383,35 +402,52 @@ impl Inner {
         let reconnect = self.reconnect.clone();
         tokio::spawn(async move {
             let removed = s.removed.clone();
-            let connect = || endpoint.connect_with_connector(Self::connector(&s, &state, &tls));
-            let connections = async {
-                if let Ok(channel) = connect().await {
-                    let channel = Arc::new(channel);
-                    s.channel.rcu(|cur| cur.clone().or_else(|| Some(Arc::clone(&channel))));
-                }
-                loop {
-                    s.failed.notified().await;
-                    let mut retries = 0;
-                    while s.failing.load(Ordering::Relaxed) {
-                        let backoff = (reconnect.backoff)(retries);
-                        retries += 1;
-                        tokio::time::sleep(backoff).await;
-                        // A call may have reconnected it meanwhile.
-                        if !s.failing.load(Ordering::Relaxed) {
-                            break;
-                        }
-                        let limit = reconnect.connect_timeout.max(backoff);
-                        if let Ok(Ok(channel)) = tokio::time::timeout(limit, connect()).await {
-                            s.channel.store(Some(Arc::new(channel)));
-                        }
-                    }
-                }
-            };
             tokio::select! {
                 () = removed.cancelled() => {}
-                () = connections => {}
+                never = Self::keep_connecting(&s, &state, &tls, &endpoint, &reconnect) => match never {},
             }
         });
+    }
+
+    async fn keep_connecting(
+        s: &Arc<Subchannel>,
+        state: &Arc<State>,
+        tls: &Option<Arc<ClientConfig>>,
+        endpoint: &Endpoint,
+        reconnect: &Reconnect,
+    ) -> Infallible {
+        // `None`: the attempt failed, or took longer than `limit`.
+        let connect = async |limit: Duration| match tokio::time::timeout(
+            limit,
+            endpoint.connect_with_connector(Self::connector(s, state, tls)),
+        )
+        .await
+        {
+            Ok(channel) => channel.ok().map(Arc::new),
+            Err(_) => {
+                s.attempt_timed_out(state);
+                None
+            }
+        };
+        if let Some(channel) = connect(reconnect.connect_timeout).await {
+            s.channel.rcu(|cur| cur.clone().or_else(|| Some(Arc::clone(&channel))));
+        }
+        loop {
+            s.failed.notified().await;
+            let mut retries = 0;
+            while s.failing.load(Ordering::Relaxed) {
+                let backoff = (reconnect.backoff)(retries);
+                retries += 1;
+                tokio::time::sleep(backoff).await;
+                // A call may have reconnected it meanwhile.
+                if !s.failing.load(Ordering::Relaxed) {
+                    break;
+                }
+                if let Some(channel) = connect(reconnect.connect_timeout.max(backoff)).await {
+                    s.channel.store(Some(channel));
+                }
+            }
+        }
     }
 
     /// First use: resolve, connect every subchannel, and start the DNS
@@ -529,9 +565,7 @@ impl Inner {
                         Ok(TokioIo::new(Counted { inner, state, lost: false, addr }))
                     }
                     Err(e) => {
-                        s.failing.store(true, Ordering::Relaxed);
-                        s.failed.notify_one();
-                        state.resolve_now.notify_one();
+                        s.attempt_failed(&state);
                         Err(e)
                     }
                 }
@@ -973,6 +1007,47 @@ mod tests {
         assert!(tokio::time::timeout(Duration::from_millis(500), listener.accept()).await.is_err());
         client.close();
         new.task.abort();
+    }
+
+    /// TLS to a backend that accepts connections and never answers, with
+    /// attempts that may take 30 ms.
+    fn unanswered(b: &Backend, lookups: &Arc<AtomicUsize>) -> GrpcClient {
+        let config = Config { host: "rpc.test:50051".into(), enable_tls: true, tls_verify: false, ..Config::default() };
+        let resolver = counting_resolver(&Arc::new(Mutex::new(b.addr)), lookups);
+        let backoff = Arc::new(|_| Duration::from_millis(10));
+        client_with(&config, resolver, Reconnect { backoff, connect_timeout: Duration::from_millis(30) })
+    }
+
+    /// Background attempts that get no answer, the first one too, have failed:
+    /// the client is not ready, goes on trying, and resolves the name again.
+    #[tokio::test]
+    async fn background_attempts_without_an_answer_fail() {
+        let b = backend().await;
+        let lookups = Arc::new(AtomicUsize::new(0));
+        let client = unanswered(&b, &lookups);
+        call(&client).await;
+
+        until("the client is not ready", || client.ready().is_err()).await;
+        until("the client goes on trying", || b.accepts.load(Ordering::SeqCst) >= 5).await;
+        until("the client re-resolves", || lookups.load(Ordering::SeqCst) >= 5).await;
+        client.close();
+        b.task.abort();
+    }
+
+    /// While a connection is open, an unanswered attempt does not fail it.
+    #[tokio::test]
+    async fn an_unanswered_attempt_does_not_fail_an_open_connection() {
+        let b = backend().await;
+        let lookups = Arc::new(AtomicUsize::new(0));
+        let client = unanswered(&b, &lookups);
+        client.inner.state.active.store(1, Ordering::Relaxed);
+        call(&client).await;
+
+        until("the attempt timed out", || lookups.load(Ordering::SeqCst) >= 2).await;
+        assert_eq!(Ok(()), client.ready());
+        assert!(!client.inner.transient_failure());
+        client.close();
+        b.task.abort();
     }
 
     #[test]
