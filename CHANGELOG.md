@@ -30,8 +30,10 @@ Differences from the AnyCable Go server are listed by ID in
   batch within the timeout is still disconnected. The earliest limit of a batch's frames bounds
   it: a native ping (`--enable_native_pings`) keeps its own deadline, half the ping interval
   from when it is sent, and never gives the data written with it more than the write timeout.
-- A WebSocket connection ends when a pong cannot be written within a second, as in AnyCable.
-  Before, the failure was ignored.
+- A WebSocket connection ends when writing a pong fails or takes more than a second, and
+  messages behind that ping are not executed, as in AnyCable when nothing else is being
+  written. Before, the failure was ignored. (While other frames are being written, Cabby
+  answers pings after them.)
 - **Breaking (Rust embedding API):** `cabby_server::node::Connection::try_write_frame` takes the
   write timeout (a `Duration`, from the start of the write) instead of a deadline.
 

@@ -855,8 +855,11 @@ where
         Some(Ok(Message::Binary(data))) => deliver(data),
         Some(Ok(Message::Ping(_))) => {
             // The pong is queued by tungstenite: send it now. One that is not
-            // written within gorilla's `writeWait` ends the connection, as in Go;
-            // nothing may be written after a part of it (see the module docs).
+            // written within gorilla's `writeWait` ends the connection: nothing may
+            // be written after a part of it (see the module docs). gorilla's ping
+            // handler also fails the read then. (It only skips a pong that cannot
+            // have the writer within `writeWait`; the io loop never has a ping in
+            // hand while it writes a batch.)
             return match tokio::time::timeout(PONG_DEADLINE, ws.flush()).await {
                 Ok(res) => res.err().map(|e| e.to_string()),
                 Err(_) => Some(ERR_TIMEOUT.to_owned()),
