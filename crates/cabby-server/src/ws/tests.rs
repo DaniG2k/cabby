@@ -812,3 +812,60 @@ fn frames_stay_intact_over_tls() {
     writer.join().unwrap();
     server.shutdown();
 }
+
+/// Offers `frame` without blocking until the connection takes it, as a session does
+/// when the transport is writable again.
+fn offer(conn: &WsConnection, frame: &Arc<SentFrame>, timeout: Duration) -> Result<(), ConnectionError> {
+    while !conn.try_write_frame(frame, timeout)? {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_client_that_stops_reading_is_dropped_after_the_write_timeout() {
+    let (server, addr, rx) = ws_server(&Config::new());
+    let _client = client(addr, "");
+    let (conn, _) = session(&rx);
+
+    let timeout = Duration::from_millis(500);
+    let frame = Arc::new(SentFrame::text(vec![b'x'; 64 * 1024]));
+    let started = Instant::now();
+    let err = loop {
+        if let Err(e) = offer(&conn, &frame, timeout) {
+            break e;
+        }
+        assert!(started.elapsed() < Duration::from_secs(30), "writes never blocked");
+    };
+    assert_eq!("i/o timeout", err.0);
+    assert!(started.elapsed() >= timeout, "dropped after {:?}", started.elapsed());
+    assert_eq!(Err(err), conn.read());
+    server.shutdown();
+}
+
+/// A client that reads all along, but slower than the server writes: the whole
+/// transfer takes more than the write timeout, each batch much less.
+#[test]
+fn a_slow_reader_is_not_dropped() {
+    const FRAMES: usize = 125;
+    let (server, addr, rx) = ws_server(&Config::new());
+    let (mut stream, conn) = raw_session(addr, &rx);
+
+    let timeout = Duration::from_secs(2);
+    let started = Instant::now();
+    let writer = std::thread::spawn(move || {
+        let frame = Arc::new(SentFrame::text(vec![b'x'; 64 * 1024]));
+        for i in 0..FRAMES {
+            offer(&conn, &frame, timeout).unwrap_or_else(|e| panic!("frame {i}: {e}"));
+        }
+        conn
+    });
+    for _ in 0..FRAMES {
+        std::thread::sleep(Duration::from_millis(20));
+        let (opcode, payload) = read_server_frame(&mut stream).expect("a frame");
+        assert!(opcode == 1 && payload.len() == 64 * 1024);
+    }
+    assert!(started.elapsed() > timeout);
+    assert!(!writer.join().unwrap().is_closed());
+    server.shutdown();
+}

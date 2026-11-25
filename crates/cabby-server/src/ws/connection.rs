@@ -40,9 +40,15 @@
 //!   `Bytes` payload (`SentFrame::payload`), which is copied only by the kernel (or
 //!   encrypted). The `&[u8]` methods of the node interface must copy once into a
 //!   `Bytes`.
-//! * **Deadlines.** Each frame carries its deadline; [`write_batch`] enforces
-//!   the last frame's deadline across the batch and its flush, failing the
-//!   connection when writing takes longer.
+//! * **Deadlines.** Each frame carries how long its write may take, and a batch
+//!   has one deadline, the last frame's, across its write and flush: the connection
+//!   fails when they take longer, whether or not the client takes some bytes.
+//!   Frames queued by [`Connection::try_write_frame`] carry a timeout that starts
+//!   when the io loop starts writing their batch, as Go sets the deadline when it
+//!   writes: producers do not read the clock, and a batch reads it once. A frame
+//!   that waits in the queue does so behind the batch being written (or a pong),
+//!   whose own deadline bounds that wait. Blocking writers, which wait for space in
+//!   the queue, bring a deadline that covers that wait as well.
 //! * **Close.** [`WsConnection::close`] queues the close frame behind the frames
 //!   already queued, then waits (at most 1s, upstream `CloseWithReason`) until it
 //!   is written and the socket is closed, so a shutdown flushes close frames before
@@ -240,26 +246,44 @@ impl FrameHeader {
     }
 }
 
+/// How long writing a frame may take.
+#[derive(Clone, Copy)]
+enum WriteLimit {
+    /// Until then (a blocking writer's deadline, which started with its wait for space).
+    Until(Instant),
+    /// This long, from the start of its batch's write.
+    Within(Duration),
+}
+
+impl WriteLimit {
+    /// The deadline of a write that starts now.
+    fn deadline(self) -> Instant {
+        match self {
+            WriteLimit::Until(deadline) => deadline,
+            WriteLimit::Within(timeout) => {
+                let now = Instant::now();
+                // A timeout beyond what the clock can represent is none in practice.
+                now.checked_add(timeout).unwrap_or_else(|| now + Duration::from_secs(u64::from(u32::MAX)))
+            }
+        }
+    }
+}
+
 /// A queued frame: its header and the shared payload, ready to be written.
 struct Outbound {
     header: FrameHeader,
     payload: Bytes,
-    deadline: Instant,
+    limit: WriteLimit,
 }
 
 impl Outbound {
-    fn data(text: bool, payload: Bytes, deadline: Instant) -> Self {
+    fn data(text: bool, payload: Bytes, limit: WriteLimit) -> Self {
         let b0 = if text { FrameHeader::TEXT } else { FrameHeader::BINARY };
-        Self { header: FrameHeader::new(b0, payload.len()), payload, deadline }
+        Self { header: FrameHeader::new(b0, payload.len()), payload, limit }
     }
 
-    /// A shared text or binary frame, without copying its payload.
-    fn frame(frame: &SentFrame, deadline: Instant) -> Self {
-        Self::data(frame.frame_type == FrameType::Text, frame.payload.clone(), deadline)
-    }
-
-    fn ping(deadline: Instant) -> Self {
-        Self { header: FrameHeader::PING, payload: Bytes::new(), deadline }
+    fn ping(limit: WriteLimit) -> Self {
+        Self { header: FrameHeader::PING, payload: Bytes::new(), limit }
     }
 
     /// The bytes on the wire.
@@ -444,10 +468,10 @@ impl WsConnection {
         self.shared().lock().done.is_some()
     }
 
-    /// Queues `item`, waiting until `deadline` for space.
-    fn push(&self, item: Outbound) -> Result<(), ConnectionError> {
+    /// Queues a data frame that must be written by `deadline`, waiting until then
+    /// for space.
+    fn push(&self, text: bool, payload: Bytes, deadline: Instant) -> Result<(), ConnectionError> {
         let shared = self.shared();
-        let deadline = item.deadline;
         let mut state = shared.lock();
         let was_empty;
         loop {
@@ -459,7 +483,7 @@ impl WsConnection {
             }
             if state.out.len() < MAX_QUEUED {
                 was_empty = state.out.is_empty();
-                state.out.push_back(item);
+                state.out.push_back(Outbound::data(text, payload, WriteLimit::Until(deadline)));
                 break;
             }
             let now = Instant::now();
@@ -495,12 +519,12 @@ impl WsConnection {
 impl Connection for WsConnection {
     /// Queues a text frame (upstream `Write`).
     fn write(&self, msg: &[u8], deadline: Instant) -> Result<(), ConnectionError> {
-        self.push(Outbound::data(true, Bytes::copy_from_slice(msg), deadline))
+        self.push(true, Bytes::copy_from_slice(msg), deadline)
     }
 
     /// Queues a binary frame (upstream `WriteBinary`).
     fn write_binary(&self, msg: &[u8], deadline: Instant) -> Result<(), ConnectionError> {
-        self.push(Outbound::data(false, Bytes::copy_from_slice(msg), deadline))
+        self.push(false, Bytes::copy_from_slice(msg), deadline)
     }
 
     /// Queues a ping control frame (upstream `WritePing`), even when the queue is
@@ -515,7 +539,7 @@ impl Connection for WsConnection {
             return Err(ConnectionError(ERR_CLOSE_SENT.to_owned()));
         }
         let was_empty = state.out.is_empty();
-        state.out.push_back(Outbound::ping(deadline));
+        state.out.push_back(Outbound::ping(WriteLimit::Until(deadline)));
         drop(state);
         if was_empty {
             shared.wake.notify_one();
@@ -529,7 +553,8 @@ impl Connection for WsConnection {
 
     /// Queues a shared text or binary frame (`Ok(false)` when the queue is full;
     /// see the module docs), or requests the close frame without waiting.
-    fn try_write_frame(&self, frame: &Arc<SentFrame>, deadline: Instant) -> Result<bool, ConnectionError> {
+    /// `timeout` starts when the io loop starts writing the frame.
+    fn try_write_frame(&self, frame: &Arc<SentFrame>, timeout: Duration) -> Result<bool, ConnectionError> {
         if frame.frame_type == FrameType::Close {
             self.request_close(frame.close_code, &frame.close_reason);
             return Ok(true);
@@ -547,7 +572,8 @@ impl Connection for WsConnection {
             return Ok(false);
         }
         let was_empty = state.out.is_empty();
-        state.out.push_back(Outbound::frame(frame, deadline));
+        let text = frame.frame_type == FrameType::Text;
+        state.out.push_back(Outbound::data(text, frame.payload.clone(), WriteLimit::Within(timeout)));
         drop(state);
         if was_empty {
             shared.wake.notify_one();
@@ -590,7 +616,9 @@ impl Connection for WsConnection {
                 self.close(frame.close_code, &frame.close_reason);
                 Ok(())
             }
-            FrameType::Text | FrameType::Binary => self.push(Outbound::frame(frame, deadline)),
+            FrameType::Text | FrameType::Binary => {
+                self.push(frame.frame_type == FrameType::Text, frame.payload.clone(), deadline)
+            }
         }
     }
 
@@ -699,16 +727,16 @@ where
 }
 
 /// Writes the batch to the socket, then flushes it (TLS needs that); the batch uses
-/// the last frame's deadline across both, so a fan-out burst registers one Tokio
-/// timer instead of one per frame. Empties the batch.
+/// the last frame's limit across both, so a fan-out burst reads the clock once and
+/// registers one Tokio timer instead of one per frame. Empties the batch.
 async fn write_batch<W>(io: &mut W, batch: &mut VecDeque<Outbound>) -> Result<(), String>
 where
     W: AsyncWrite + Unpin,
 {
-    let Some(deadline) = batch.back().map(|frame| frame.deadline) else {
+    let Some(limit) = batch.back().map(|frame| frame.limit) else {
         return Ok(());
     };
-    let deadline = tokio::time::Instant::from_std(deadline);
+    let deadline = tokio::time::Instant::from_std(limit.deadline());
     match tokio::time::timeout_at(deadline, async {
         write_frames(io, batch).await?;
         io.flush().await
@@ -1182,6 +1210,8 @@ mod tests {
         allowed: usize,
         broken: bool,
         waker: Option<Waker>,
+        /// Writes attempted.
+        writes: usize,
     }
 
     impl Gate {
@@ -1214,11 +1244,15 @@ mod tests {
             self.wire().out.clone()
         }
 
-        /// The io loop over this socket, running.
-        async fn connection(&self) -> WsConnection {
+        /// A connection over this socket and its io loop, not running yet.
+        async fn connect(&self) -> (WsConnection, impl Future<Output = ()> + Send + use<>) {
             let stream = GorillaFrames::new(self.clone());
             let ws = WebSocketStream::from_raw_socket(stream, Role::Server, None).await;
-            let (conn, io_loop) = connect(ws, String::new());
+            connect(ws, String::new())
+        }
+
+        async fn connection(&self) -> WsConnection {
+            let (conn, io_loop) = self.connect().await;
             tokio::spawn(io_loop);
             conn
         }
@@ -1241,6 +1275,7 @@ mod tests {
     impl AsyncWrite for Gate {
         fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
             let mut wire = self.wire();
+            wire.writes += 1;
             if wire.broken {
                 return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
             }
@@ -1282,13 +1317,11 @@ mod tests {
     }
 
     fn queue(conn: &WsConnection, payload: &'static str) {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        assert_eq!(Ok(true), conn.try_write_frame(&text(payload), deadline));
+        assert_eq!(Ok(true), conn.try_write_frame(&text(payload), Duration::from_secs(10)));
     }
 
-    fn soon() -> Instant {
-        Instant::now() + Duration::from_secs(10)
-    }
+    /// Long enough.
+    const LIMIT: WriteLimit = WriteLimit::Within(Duration::from_secs(10));
 
     /// The frames tungstenite writes for `messages`.
     fn tungstenite_bytes(messages: impl IntoIterator<Item = Message>) -> Vec<u8> {
@@ -1317,14 +1350,14 @@ mod tests {
                     Message::Binary(payload(len))
                 };
                 let mut out = Vec::new();
-                let mut batch = VecDeque::from([Outbound::data(text, payload(len), soon())]);
+                let mut batch = VecDeque::from([Outbound::data(text, payload(len), LIMIT)]);
                 write_batch(&mut out, &mut batch).await.unwrap();
                 assert!(batch.is_empty());
                 assert!(tungstenite_bytes([message]) == out, "text={text} len={len}");
             }
         }
         let mut out = Vec::new();
-        write_batch(&mut out, &mut VecDeque::from([Outbound::ping(soon())])).await.unwrap();
+        write_batch(&mut out, &mut VecDeque::from([Outbound::ping(LIMIT)])).await.unwrap();
         assert_eq!(tungstenite_bytes([Message::Ping(Bytes::new())]), out);
         assert_eq!(vec![0x89, 0x00], out);
     }
@@ -1399,7 +1432,7 @@ mod tests {
         [[0, 1, 125, 126, 300, 0, 2, 127], [70_000, 3, 126, 0, 65_536, 65_535, 1, 5], [5; MAX_QUEUED]];
 
     fn batch_of(lens: &[usize]) -> (VecDeque<Outbound>, Vec<u8>) {
-        let batch = lens.iter().enumerate().map(|(i, len)| Outbound::data(i % 2 == 1, payload(*len), soon())).collect();
+        let batch = lens.iter().enumerate().map(|(i, len)| Outbound::data(i % 2 == 1, payload(*len), LIMIT)).collect();
         let messages = lens.iter().enumerate().map(|(i, len)| match i % 2 {
             1 => Message::Text(Utf8Bytes::try_from(payload(*len)).unwrap()),
             _ => Message::Binary(payload(*len)),
@@ -1458,7 +1491,7 @@ mod tests {
 
         let (mut batch, mut expected) = batch_of(&BATCHES[0]);
         for _ in 0..2 * MAX_WRITE_FRAMES {
-            batch.push_back(Outbound::ping(soon()));
+            batch.push_back(Outbound::ping(LIMIT));
             expected.extend([0x89, 0]);
         }
         let mut io = Choppy::new(usize::MAX, true);
@@ -1522,6 +1555,81 @@ mod tests {
             let err = write_batch(&mut Choppy::new(0, vectored), &mut batch).await;
             assert_eq!(Err("IO error: Connection reset while sending".to_owned()), err);
         }
+    }
+
+    /// The timeout of a queued frame starts with its write, not while it waits.
+    #[tokio::test]
+    async fn write_timeouts_start_with_the_write() {
+        let timeout = Duration::from_millis(200);
+        let gate = Gate::default();
+        let (conn, io_loop) = gate.connect().await;
+        assert_eq!(Ok(true), conn.try_write_frame(&text("data"), timeout));
+        tokio::time::sleep(2 * timeout).await;
+
+        tokio::spawn(io_loop);
+        until("a write", || gate.wire().writes > 0).await;
+        gate.allow(usize::MAX);
+        until("the data", || gate.out() == b"\x81\x04data").await;
+        assert!(!conn.is_closed());
+    }
+
+    /// Each batch has the whole timeout: a client that keeps taking them is not
+    /// dropped, however long a frame waited behind another batch.
+    #[tokio::test]
+    async fn a_slow_client_that_takes_every_batch_in_time_stays() {
+        let timeout = Duration::from_secs(1);
+        let stall = Duration::from_millis(600);
+        let gate = Gate::default();
+        let conn = gate.connection().await;
+        assert_eq!(Ok(true), conn.try_write_frame(&text("first"), timeout));
+        until("a write", || gate.wire().writes > 0).await;
+        for _ in 0..MAX_QUEUED {
+            assert_eq!(Ok(true), conn.try_write_frame(&text("more"), timeout));
+        }
+        assert_eq!(Ok(false), conn.try_write_frame(&text("full"), timeout));
+
+        let mut expected = b"\x81\x05first".to_vec();
+        tokio::time::sleep(stall).await;
+        gate.allow(expected.len());
+        until("the first frame", || gate.out() == expected).await;
+        tokio::time::sleep(stall).await;
+        gate.allow(usize::MAX);
+        expected.extend(b"\x81\x04more".repeat(MAX_QUEUED));
+        until("the other frames", || gate.out() == expected).await;
+        assert!(!conn.is_closed());
+    }
+
+    /// A client that does not take a batch within the timeout is dropped, with the
+    /// frames behind it, even if it takes some bytes all along.
+    #[tokio::test]
+    async fn a_client_that_does_not_take_a_batch_in_time_is_dropped() {
+        let timeout = Duration::from_millis(400);
+        for trickle in [false, true] {
+            let gate = Gate::default();
+            let conn = gate.connection().await;
+            let started = Instant::now();
+            assert_eq!(Ok(true), conn.try_write_frame(&text("a frame with a few bytes"), timeout));
+            until("a write", || gate.wire().writes > 0).await;
+            assert_eq!(Ok(true), conn.try_write_frame(&text("behind"), timeout));
+            while !conn.is_closed() && started.elapsed() < Duration::from_secs(5) {
+                tokio::time::sleep(Duration::from_millis(40)).await;
+                gate.allow(usize::from(trickle));
+            }
+            assert_eq!("i/o timeout", ended(&conn).await, "trickle={trickle}");
+            let after = started.elapsed();
+            assert!(after >= timeout && after < timeout + Duration::from_secs(2), "dropped after {after:?}");
+            assert_eq!(trickle, !gate.out().is_empty());
+            assert_eq!(
+                Err(ConnectionError("i/o timeout".into())),
+                conn.try_write_frame(&text("late"), timeout),
+                "trickle={trickle}"
+            );
+        }
+    }
+
+    #[test]
+    fn endless_write_timeouts_do_not_overflow() {
+        assert!(WriteLimit::Within(Duration::MAX).deadline() > Instant::now() + Duration::from_secs(3600));
     }
 
     /// A pong that is not written within a second (gorilla's `writeWait`) ends the

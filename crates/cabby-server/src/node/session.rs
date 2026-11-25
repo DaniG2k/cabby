@@ -122,9 +122,10 @@ pub trait Connection: Send + Sync {
 
     /// Queues a text or binary frame without blocking: `Ok(false)` when the
     /// transport cannot take it now, in which case it calls the writable handler
-    /// once it can (or once it has failed).
-    fn try_write_frame(&self, frame: &Arc<SentFrame>, deadline: Instant) -> Result<bool, ConnectionError> {
-        self.write_frame(frame, deadline).map(|()| true)
+    /// once it can (or once it has failed). `timeout` bounds the write, from when the
+    /// transport starts it (producers do not read the clock).
+    fn try_write_frame(&self, frame: &Arc<SentFrame>, timeout: Duration) -> Result<bool, ConnectionError> {
+        self.write_frame(frame, Instant::now() + timeout).map(|()| true)
     }
 
     /// Sets the handler [`Connection::try_write_frame`] promises to call after
@@ -728,8 +729,7 @@ impl Session {
         }
 
         self.writable.store(false, Ordering::SeqCst);
-        let deadline = Instant::now() + hot.write_timeout;
-        match self.conn.try_write_frame(&frame, deadline) {
+        match self.conn.try_write_frame(&frame, hot.write_timeout) {
             Ok(true) => {
                 hot.record_sent(frame.payload.len() as u64);
                 NonblockingSend::Sent
@@ -2183,6 +2183,8 @@ mod tests {
         /// Runs once when the transport next refuses a frame, before the writer
         /// learns about it.
         on_refusal: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+        /// The last write's.
+        timeout: Mutex<Duration>,
     }
 
     impl Valve {
@@ -2228,7 +2230,8 @@ mod tests {
         fn nonblocking(&self) -> bool {
             true
         }
-        fn try_write_frame(&self, frame: &Arc<SentFrame>, _deadline: Instant) -> Result<bool, ConnectionError> {
+        fn try_write_frame(&self, frame: &Arc<SentFrame>, timeout: Duration) -> Result<bool, ConnectionError> {
+            *lock(&self.timeout) = timeout;
             let mut capacity = lock(&self.capacity);
             if *capacity == 0 {
                 drop(capacity);
@@ -2273,6 +2276,21 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(Some(&format!("close:{CLOSE_NORMAL_CLOSURE}")), valve.frames().last());
+    }
+
+    #[test]
+    fn nonblocking_transports_get_the_write_timeout() {
+        let valve = Arc::new(Valve { capacity: Mutex::new(3), ..Default::default() });
+        let s = Session::build(valve.clone(), SessionEnv::new("/cable", None));
+        s.send_json_transmission("queued before the writer is attached");
+        s.send_messages();
+        assert_eq!(DEFAULT_WRITE_TIMEOUT, *lock(&valve.timeout));
+        s.apply(vec![SessionOption::WriteTimeout(Duration::from_secs(7))]);
+        s.send_json_transmission("written straight");
+        assert_eq!(Duration::from_secs(7), *lock(&valve.timeout));
+        s.apply(vec![SessionOption::WriteTimeout(Duration::MAX)]);
+        s.send_json_transmission("clamped");
+        assert_eq!(MAX_TIMER_INTERVAL, *lock(&valve.timeout));
     }
 
     #[test]
