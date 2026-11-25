@@ -90,6 +90,12 @@ pub const MAX_QUEUED: usize = 8;
 /// How long writing a close frame may take (upstream `CloseWithReason`).
 const CLOSE_DEADLINE: Duration = Duration::from_secs(1);
 
+/// How long writing a pong may take (gorilla `writeWait`).
+const PONG_DEADLINE: Duration = Duration::from_secs(1);
+
+/// A write missed its deadline (Go network errors).
+const ERR_TIMEOUT: &str = "i/o timeout";
+
 /// gorilla `ErrCloseSent`.
 const ERR_CLOSE_SENT: &str = "websocket: close sent";
 
@@ -381,7 +387,7 @@ impl WsConnection {
             }
             let now = Instant::now();
             if now >= deadline {
-                return Err(ConnectionError("i/o timeout".to_owned()));
+                return Err(ConnectionError(ERR_TIMEOUT.to_owned()));
             }
             state.cond_waiters += 1;
             state = shared.cond.wait_timeout(state, deadline - now).unwrap_or_else(|e| e.into_inner()).0;
@@ -644,7 +650,7 @@ where
     {
         Ok(Ok(())) => Ok(()),
         Ok(Err(e)) => Err(e.to_string()),
-        Err(_) => Err("i/o timeout".to_owned()),
+        Err(_) => Err(ERR_TIMEOUT.to_owned()),
     }
 }
 
@@ -680,8 +686,12 @@ where
         Some(Ok(Message::Text(text))) => deliver(Bytes::from(text)),
         Some(Ok(Message::Binary(data))) => deliver(data),
         Some(Ok(Message::Ping(_))) => {
-            // The pong is queued by tungstenite; send it now.
-            let _ = tokio::time::timeout(CLOSE_DEADLINE, ws.flush()).await;
+            // The pong is queued by tungstenite: send it now. One that is not
+            // written within gorilla's `writeWait` ends the connection, as in Go.
+            return match tokio::time::timeout(PONG_DEADLINE, ws.flush()).await {
+                Ok(res) => res.err().map(|e| e.to_string()),
+                Err(_) => Some(ERR_TIMEOUT.to_owned()),
+            };
         }
         Some(Ok(Message::Pong(_))) => {
             let handler = shared.lock().pong_handler.clone();
@@ -1003,6 +1013,13 @@ fn close_frame(code: i32, reason: &str) -> Option<CloseFrame> {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+    use std::pin::Pin;
+    use std::task::{Context, Poll, Waker};
+
+    use tokio::io::ReadBuf;
+    use tungstenite::protocol::Role;
+
     use super::*;
 
     #[test]
@@ -1026,5 +1043,165 @@ mod tests {
         let frame = close_frame(1000, &long).unwrap();
         assert!(frame.reason.len() <= 123);
         assert!(close_frame(1005, "x").is_none());
+    }
+
+    /// A socket under the test's control: what the client sends and how many bytes
+    /// the server may write.
+    #[derive(Clone, Default)]
+    struct Gate(Arc<Mutex<Wire>>);
+
+    #[derive(Default)]
+    struct Wire {
+        input: VecDeque<u8>,
+        out: Vec<u8>,
+        allowed: usize,
+        broken: bool,
+        waker: Option<Waker>,
+    }
+
+    impl Gate {
+        fn wire(&self) -> MutexGuard<'_, Wire> {
+            self.0.lock().unwrap()
+        }
+
+        fn update(&self, f: impl FnOnce(&mut Wire)) {
+            let mut wire = self.wire();
+            f(&mut wire);
+            if let Some(waker) = wire.waker.take() {
+                waker.wake();
+            }
+        }
+
+        /// A client frame (masked with zeros).
+        fn client_sends(&self, opcode: u8, payload: &[u8]) {
+            self.update(|w| {
+                w.input.extend([0x80 | opcode, 0x80 | u8::try_from(payload.len()).unwrap(), 0, 0, 0, 0]);
+                w.input.extend(payload);
+            });
+        }
+
+        /// Lets the server write `n` more bytes.
+        fn allow(&self, n: usize) {
+            self.update(|w| w.allowed = w.allowed.saturating_add(n));
+        }
+
+        fn out(&self) -> Vec<u8> {
+            self.wire().out.clone()
+        }
+
+        /// The io loop over this socket, running.
+        async fn connection(&self) -> WsConnection {
+            let stream = GorillaFrames::new(self.clone());
+            let ws = WebSocketStream::from_raw_socket(stream, Role::Server, None).await;
+            let (conn, io_loop) = connect(ws, String::new());
+            tokio::spawn(io_loop);
+            conn
+        }
+    }
+
+    impl AsyncRead for Gate {
+        fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+            let mut wire = self.wire();
+            if wire.input.is_empty() {
+                wire.waker = Some(cx.waker().clone());
+                return Poll::Pending;
+            }
+            let n = buf.remaining().min(wire.input.len());
+            let bytes: Vec<u8> = wire.input.drain(..n).collect();
+            buf.put_slice(&bytes);
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    impl AsyncWrite for Gate {
+        fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+            let mut wire = self.wire();
+            if wire.broken {
+                return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
+            }
+            let n = wire.allowed.min(buf.len());
+            if n == 0 {
+                wire.waker = Some(cx.waker().clone());
+                return Poll::Pending;
+            }
+            wire.allowed -= n;
+            wire.out.extend_from_slice(&buf[..n]);
+            Poll::Ready(Ok(n))
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    async fn until(what: &str, cond: impl Fn() -> bool) {
+        let started = Instant::now();
+        while !cond() {
+            assert!(started.elapsed() < Duration::from_secs(10), "not reached: {what}");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    /// The error the connection ended with.
+    async fn ended(conn: &WsConnection) -> String {
+        until("the end of the connection", || conn.is_closed()).await;
+        conn.read().unwrap_err().0
+    }
+
+    fn text(payload: &'static str) -> Arc<SentFrame> {
+        Arc::new(SentFrame::text(payload.as_bytes().to_vec()))
+    }
+
+    fn queue(conn: &WsConnection, payload: &'static str) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        assert_eq!(Ok(true), conn.try_write_frame(&text(payload), deadline));
+    }
+
+    /// A pong that is not written within a second (gorilla's `writeWait`) ends the
+    /// connection, as in Go: nothing may follow the part that was written.
+    #[tokio::test]
+    async fn a_pong_that_cannot_be_written_ends_the_connection() {
+        let gate = Gate::default();
+        gate.allow(1);
+        let conn = gate.connection().await;
+        gate.client_sends(9, b"hi");
+        until("the start of the pong", || gate.out() == [0x8a]).await;
+        queue(&conn, "data");
+
+        assert_eq!("i/o timeout", ended(&conn).await);
+        gate.allow(usize::MAX);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(vec![0x8a], gate.out(), "no frame inside the pong");
+    }
+
+    #[tokio::test]
+    async fn a_pong_that_fails_ends_the_connection() {
+        let gate = Gate::default();
+        gate.update(|w| w.broken = true);
+        let conn = gate.connection().await;
+        gate.client_sends(9, b"hi");
+        assert_eq!("IO error: broken pipe", ended(&conn).await);
+        assert!(gate.out().is_empty());
+    }
+
+    /// Frames queued while a pong is written follow it.
+    #[tokio::test]
+    async fn frames_follow_a_slow_pong() {
+        let gate = Gate::default();
+        gate.allow(1);
+        let conn = gate.connection().await;
+        gate.client_sends(9, b"hi");
+        until("the start of the pong", || gate.out() == [0x8a]).await;
+        queue(&conn, "data");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(vec![0x8a], gate.out());
+
+        gate.allow(usize::MAX);
+        until("the data", || gate.out() == b"\x8a\x02hi\x81\x04data").await;
+        assert!(!conn.is_closed());
     }
 }
