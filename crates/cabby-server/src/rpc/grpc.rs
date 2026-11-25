@@ -137,6 +137,21 @@ fn exponential_backoff(retries: u32) -> Duration {
     Duration::from_secs_f64((backoff.min(max) * (1.0 + 0.2 * (unit * 2.0 - 1.0))).max(0.0))
 }
 
+/// How the background reconnects (injectable for tests).
+#[derive(Clone)]
+struct Reconnect {
+    /// The wait before retry `n` (from 0).
+    backoff: Arc<dyn Fn(u32) -> Duration + Send + Sync>,
+    /// How long an attempt may take (or its backoff, if longer).
+    connect_timeout: Duration,
+}
+
+impl Default for Reconnect {
+    fn default() -> Self {
+        Self { backoff: Arc::new(exponential_backoff), connect_timeout: MIN_CONNECT_TIMEOUT }
+    }
+}
+
 /// Connection bookkeeping shared with the connectors.
 #[derive(Debug, Default)]
 struct State {
@@ -252,7 +267,8 @@ struct Inner {
     max_send: Option<usize>,
     resolver: Resolver,
     min_resolution_interval: Duration,
-    /// Stops the re-resolution task.
+    reconnect: Reconnect,
+    /// Stops the re-resolution and reconnection tasks.
     stop: CancellationToken,
 }
 
@@ -305,6 +321,7 @@ impl GrpcClient {
                 max_send: size(config.max_send_size),
                 resolver,
                 min_resolution_interval,
+                reconnect: Reconnect::default(),
                 stop: CancellationToken::new(),
             }),
         })
@@ -363,6 +380,7 @@ impl Inner {
     fn connect_in_background(&self, s: &Arc<Subchannel>) {
         let endpoint = self.endpoint(s);
         let (s, state, tls) = (Arc::clone(s), Arc::clone(&self.state), self.tls.clone());
+        let reconnect = self.reconnect.clone();
         tokio::spawn(async move {
             let removed = s.removed.clone();
             let connect = || endpoint.connect_with_connector(Self::connector(&s, &state, &tls));
@@ -375,14 +393,14 @@ impl Inner {
                     s.failed.notified().await;
                     let mut retries = 0;
                     while s.failing.load(Ordering::Relaxed) {
-                        let backoff = exponential_backoff(retries);
+                        let backoff = (reconnect.backoff)(retries);
                         retries += 1;
                         tokio::time::sleep(backoff).await;
                         // A call may have reconnected it meanwhile.
                         if !s.failing.load(Ordering::Relaxed) {
                             break;
                         }
-                        let limit = MIN_CONNECT_TIMEOUT.max(backoff);
+                        let limit = reconnect.connect_timeout.max(backoff);
                         if let Ok(Ok(channel)) = tokio::time::timeout(limit, connect()).await {
                             s.channel.store(Some(Arc::new(channel)));
                         }
@@ -821,16 +839,140 @@ mod tests {
     /// Reconnecting ends when the client is closed.
     #[tokio::test]
     async fn does_not_reconnect_once_closed() {
-        let b = backend().await;
-        b.task.abort();
-        let _ = b.task.await;
-        let config = Config { host: b.addr.to_string(), ..Config::default() };
+        let refusing = Refusing::new().await;
+        let config = Config { host: refusing.addr.to_string(), ..Config::default() };
         let client = GrpcClient::new(&config).expect("client");
-        let _ = client.connect(&call_context(), protos::ConnectionRequest::default()).await;
+        call(&client).await;
         client.close();
 
-        let listener = TcpListener::bind(b.addr).await.expect("bind the same address");
+        let listener = refusing.listen().await;
         assert!(tokio::time::timeout(Duration::from_secs(2), listener.accept()).await.is_err());
+    }
+
+    /// An address that refuses connections until it listens. A connection holds
+    /// its port meanwhile, so that no other test gets it.
+    struct Refusing {
+        addr: SocketAddr,
+        holder: TcpStream,
+        _peer: TcpStream,
+    }
+
+    impl Refusing {
+        async fn new() -> Self {
+            let helper = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+            let holder = TcpStream::connect(helper.local_addr().expect("addr")).await.expect("connect");
+            let (peer, addr) = helper.accept().await.expect("accept");
+            Self { addr, holder, _peer: peer }
+        }
+
+        async fn listen(self) -> TcpListener {
+            self.holder.set_zero_linger().expect("no TIME_WAIT");
+            drop(self.holder);
+            TcpListener::bind(self.addr).await.expect("bind the same address")
+        }
+    }
+
+    /// A client for `config` that re-resolves at most every 20 ms.
+    fn client_with(config: &Config, resolver: Resolver, reconnect: Reconnect) -> GrpcClient {
+        let mut client = GrpcClient::with_resolver(config, resolver, Duration::from_millis(20)).expect("client");
+        Arc::get_mut(&mut client.inner).expect("not shared yet").reconnect = reconnect;
+        client
+    }
+
+    fn fast_reconnect(backoff: impl Fn(u32) -> Duration + Send + Sync + 'static) -> Reconnect {
+        Reconnect { backoff: Arc::new(backoff), ..Reconnect::default() }
+    }
+
+    async fn call(client: &GrpcClient) {
+        let _ = client.connect(&call_context(), protos::ConnectionRequest::default()).await;
+    }
+
+    /// Waits (up to 10 s) until `done`.
+    async fn until(what: &str, done: impl Fn() -> bool) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while !done() {
+            assert!(tokio::time::Instant::now() < deadline, "{what}");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    fn only_subchannel(client: &GrpcClient) -> Arc<Subchannel> {
+        Arc::clone(&client.inner.subchannels.get().expect("initialized").load()[0])
+    }
+
+    /// The background goes on until an attempt succeeds, waiting longer each time.
+    #[tokio::test]
+    async fn keeps_reconnecting_with_growing_backoff() {
+        let refusing = Refusing::new().await;
+        let waits = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&waits);
+        let reconnect = fast_reconnect(move |n| {
+            seen.lock().expect("lock").push(n);
+            Duration::from_millis(10)
+        });
+        let config = Config { host: refusing.addr.to_string(), ..Config::default() };
+        let client = client_with(&config, system_resolver(), reconnect);
+        call(&client).await;
+
+        until("the background keeps retrying", || waits.lock().expect("lock").len() >= 5).await;
+        assert_eq!([0, 1, 2, 3, 4], waits.lock().expect("lock")[..5]);
+        client.close();
+    }
+
+    /// Calls use the connection the background opened.
+    #[tokio::test]
+    async fn calls_use_the_connection_opened_in_the_background() {
+        let refusing = Refusing::new().await;
+        let config = Config { host: refusing.addr.to_string(), ..Config::default() };
+        let client = client_with(&config, system_resolver(), fast_reconnect(|_| Duration::from_millis(10)));
+        call(&client).await;
+        let subchannel = only_subchannel(&client);
+        let refused = subchannel.channel.load_full();
+
+        let listener = refusing.listen().await;
+        let accepts = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&accepts);
+        let server = tokio::spawn(async move {
+            let mut conns = Vec::new();
+            while let Ok((c, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                conns.push(c);
+            }
+        });
+        until("the new connection is stored", || match (&refused, subchannel.channel.load_full()) {
+            (Some(old), Some(new)) => !Arc::ptr_eq(old, &new),
+            (old, new) => old.is_some() != new.is_some(),
+        })
+        .await;
+        assert_eq!(Ok(()), client.ready());
+        for _ in 0..3 {
+            call(&client).await;
+        }
+        assert_eq!(1, accepts.load(Ordering::SeqCst), "every call uses the same connection");
+        client.close();
+        server.abort();
+    }
+
+    /// Reconnecting to an address ends when it is no longer listed.
+    #[tokio::test]
+    async fn does_not_reconnect_to_a_removed_address() {
+        let refusing = Refusing::new().await;
+        let (old, new) = (refusing.addr, backend().await);
+        let current = Arc::new(Mutex::new(old));
+        let lookups = Arc::new(AtomicUsize::new(0));
+        let config = Config { host: "rpc.test:50051".into(), ..Config::default() };
+        let resolver = counting_resolver(&current, &lookups);
+        let client = client_with(&config, resolver, fast_reconnect(|_| Duration::from_millis(50)));
+        call(&client).await;
+        let removed = only_subchannel(&client);
+        assert_eq!(Some(old), removed.addr);
+
+        *current.lock().expect("lock") = new.addr;
+        until("connected to the new address", || new.accepts.load(Ordering::SeqCst) > 0).await;
+        let listener = refusing.listen().await;
+        assert!(tokio::time::timeout(Duration::from_millis(500), listener.accept()).await.is_err());
+        client.close();
+        new.task.abort();
     }
 
     #[test]
