@@ -34,9 +34,10 @@
 //!   disconnects (a session closing while it authenticates never stays in the hub).
 //! * **Timers.** Upstream's single-timer scheme: the ping, pong, handshake, cache
 //!   and presence deadlines share one cancellable timer from the injected
-//!   [`Clock`], armed for the earliest deadline. A fired timer only acts if it is
-//!   still the current one (a generation check), and a closed session never
-//!   re-arms. Callbacks hold a weak reference, so timers never keep a session alive.
+//!   [`Clock`], armed for the earliest deadline; a pong that leaves the earliest deadline
+//!   as it is does not touch the timer. A fired timer only acts if it is still the
+//!   current one (a generation check), and a closed session never re-arms. Callbacks
+//!   hold a weak reference, so timers never keep a session alive.
 //! * **Env and subscriptions** have their own locks; controller calls get a
 //!   snapshot of the env, never a guard.
 
@@ -293,7 +294,8 @@ struct Timers {
     started: bool,
     /// The session closed: nothing is armed again.
     stopped: bool,
-    next_event: Option<TimerEvent>,
+    /// The deadline the timer was last armed for. It may have fired meanwhile.
+    armed: Option<(TimerEvent, Instant)>,
     timer: Option<Box<dyn Timer>>,
     generation: u64,
 }
@@ -317,6 +319,15 @@ impl Timers {
             }
         }
         best
+    }
+}
+
+impl Drop for Timers {
+    /// A session dropped without having been closed leaves no timer behind.
+    fn drop(&mut self) {
+        if let Some(timer) = self.timer.take() {
+            timer.stop();
+        }
     }
 }
 
@@ -872,8 +883,8 @@ impl Session {
         if !t.started || t.stopped {
             return;
         }
-        let Some((ev, at)) = t.earliest() else { return };
-        t.next_event = Some(ev);
+        t.armed = t.earliest();
+        let Some((_, at)) = t.armed else { return };
         t.generation += 1;
         let generation = t.generation;
         let me = self.me.clone();
@@ -886,6 +897,15 @@ impl Session {
                 }
             }),
         ));
+    }
+
+    /// Re-arms after the pong deadline changed, unless the timer is armed for another
+    /// deadline that stays the earliest: pongs come at the client's pace. A timer that has
+    /// just fired for that deadline is re-armed by its event, with the new pong deadline.
+    fn arm_pong(&self, t: &mut Timers, clock: &Arc<dyn Clock>) {
+        if t.armed.is_none() || t.armed != t.earliest() {
+            self.arm(t, clock);
+        }
     }
 
     /// Re-arms after a deadline changed (upstream `timers.Schedule()`).
@@ -901,9 +921,9 @@ impl Session {
             if t.generation != generation || t.stopped {
                 return;
             }
-            t.next_event
+            t.armed
         };
-        if let Some(ev) = ev {
+        if let Some((ev, _)) = ev {
             self.handle_timer_event(ev);
         }
     }
@@ -1022,7 +1042,7 @@ impl Session {
         let clock = self.settings().clock.clone();
         let mut t = lock(&self.timers);
         if t.pong.take().is_some() {
-            self.arm(&mut t, &clock);
+            self.arm_pong(&mut t, &clock);
         }
     }
 
@@ -1035,7 +1055,7 @@ impl Session {
         let mut t = lock(&self.timers);
         let Some(pong) = t.pong else { return };
         t.pong = Some(pong.checked_add(pong_timeout).unwrap_or(pong));
-        self.arm(&mut t, &clock);
+        self.arm_pong(&mut t, &clock);
     }
 
     fn handle_no_pong(self: &Arc<Self>) {
@@ -1884,6 +1904,7 @@ mod tests {
     use std::sync::mpsc::{Receiver, Sender, channel};
 
     use crate::node::Ticker;
+    use crate::node::clock::TestWheel;
 
     thread_local! {
         /// Runs once when this thread next parks a refused frame, before it checks
@@ -1954,6 +1975,11 @@ mod tests {
         fn pending(&self) -> usize {
             lock(&self.state).2.len()
         }
+
+        /// Timers armed so far.
+        fn armed(&self) -> u64 {
+            lock(&self.state).1
+        }
     }
 
     impl Clock for TestClock {
@@ -1997,9 +2023,13 @@ mod tests {
     }
 
     fn session(clock: &TestClock, opts: Vec<SessionOption>) -> (Arc<Session>, Receiver<String>) {
+        session_on(Arc::new(clock.clone()), opts)
+    }
+
+    fn session_on(clock: Arc<dyn Clock>, opts: Vec<SessionOption>) -> (Arc<Session>, Receiver<String>) {
         let (tx, rx) = channel();
         let s = Session::build(Arc::new(Recorder { tx: Mutex::new(tx) }), SessionEnv::new("/cable", None));
-        write(&s.settings).clock = Arc::new(clock.clone());
+        write(&s.settings).clock = clock;
         s.apply(opts);
         s.send_messages();
         (s, rx)
@@ -2081,6 +2111,150 @@ mod tests {
         assert_eq!(Some(&format!("close:{CLOSE_NORMAL_CLOSURE}")), frames.last());
         assert!(s.is_closed());
         assert_eq!(0, clock.pending(), "a closed session arms no timer");
+    }
+
+    /// A pong moves the pong deadline only. While another deadline is the earliest, the
+    /// timer that is armed for it stays.
+    #[test]
+    fn pongs_arm_no_timer_while_another_deadline_is_earlier() {
+        const PONGS: u32 = 10_000;
+        let clock = TestClock::new();
+        let pong_timeout = Duration::from_secs(6);
+        let (s, rx) = session(
+            &clock,
+            vec![SessionOption::PingInterval(Duration::from_secs(3)), SessionOption::PongTimeout(pong_timeout)],
+        );
+        s.set_connected(true);
+        s.start_timers();
+        let deadline = lock(&s.timers).pong.unwrap();
+        for _ in 0..PONGS {
+            s.handle_native_pong();
+        }
+        assert_eq!(Some(deadline + pong_timeout * PONGS), lock(&s.timers).pong, "each pong adds a timeout");
+        assert_eq!(1, clock.armed(), "timers armed since the start");
+
+        // The ping comes on time all the same, and the next one is armed.
+        clock.advance(Duration::from_millis(4500));
+        assert!(next(&rx).starts_with(r#"{"type":"ping","message":"#));
+        assert_eq!((2, 1), (clock.armed(), clock.pending()));
+    }
+
+    /// The pong deadline is the earliest: a pong re-arms the timer, so the session is not
+    /// disconnected at the old deadline but at the new one.
+    #[test]
+    fn a_pong_moves_the_armed_deadline() {
+        let clock = TestClock::new();
+        let (s, _rx) = session(
+            &clock,
+            vec![
+                SessionOption::PingInterval(Duration::from_secs(100)),
+                SessionOption::PongTimeout(Duration::from_secs(6)),
+            ],
+        );
+        s.set_connected(true);
+        s.start_timers();
+        // Up to the first ping (within 150s), then just before its pong deadline.
+        let ping = lock(&s.timers).ping.unwrap();
+        clock.advance(ping - clock.now() + Duration::from_millis(5900));
+        assert_eq!(Some(TimerEvent::Pong), lock(&s.timers).earliest().map(|(ev, _)| ev));
+        s.handle_native_pong();
+        clock.advance(Duration::from_millis(6000));
+        assert!(!s.is_closed(), "the old deadline passed");
+        clock.advance(Duration::from_millis(101));
+        assert!(s.is_closed(), "the new deadline passed");
+        assert_eq!(0, clock.pending());
+    }
+
+    /// `pong_timeout` with clients that answer every ping (with a native pong or with a
+    /// message) and one that stops answering.
+    #[test]
+    fn pong_timeout_spares_clients_that_answer() {
+        // (Native pongs add timeouts to the deadline, as upstream: with a longer ping interval
+        // they cannot keep up with it.)
+        for (interval, native) in [(3, true), (3, false), (10, false)] {
+            let clock = TestClock::new();
+            let interval = Duration::from_secs(interval);
+            let pong_timeout = Duration::from_secs(6);
+            let (s, _rx) =
+                session(&clock, vec![SessionOption::PingInterval(interval), SessionOption::PongTimeout(pong_timeout)]);
+            s.set_connected(true);
+            s.start_timers();
+            let mut ping = lock(&s.timers).ping.unwrap();
+            for i in 0..50 {
+                clock.advance(ping - clock.now());
+                assert!(!s.is_closed(), "ping {i} of {interval:?}, native={native}");
+                let due = lock(&s.timers).ping.unwrap();
+                assert_eq!(interval, due - ping, "pings stay on schedule");
+                ping = due;
+                clock.advance(Duration::from_millis(50));
+                if native {
+                    s.handle_native_pong();
+                } else {
+                    s.keepalive();
+                    s.reset_pong();
+                }
+            }
+            // It stops answering: gone once its deadline passed, not before. (Without a
+            // deadline, the next ping sets it.)
+            let deadline = lock(&s.timers).pong.unwrap_or(ping + pong_timeout);
+            clock.advance(deadline - clock.now() - Duration::from_millis(1));
+            assert!(!s.is_closed(), "{interval:?}, native={native}");
+            clock.advance(Duration::from_millis(1));
+            assert!(s.is_closed(), "{interval:?}, native={native}");
+        }
+    }
+
+    /// What a session leaves in the timer queue does not depend on how many pongs arrive,
+    /// also when the pong deadline is the earliest and each one re-arms the timer.
+    #[test]
+    fn a_session_keeps_one_timer_however_many_pongs_arrive() {
+        for ping in [3, 86400] {
+            let wheel = TestWheel::new();
+            let (s, _rx) = session_on(
+                Arc::new(wheel.clone()),
+                vec![
+                    SessionOption::PingInterval(Duration::from_secs(ping)),
+                    SessionOption::PongTimeout(Duration::from_secs(600)),
+                ],
+            );
+            s.set_connected(true);
+            s.start_timers();
+            s.schedule_ping();
+            lock(&s.timers).pong = Some(Instant::now() + Duration::from_secs(600));
+            s.schedule();
+            for _ in 0..10_000 {
+                s.handle_native_pong();
+            }
+            assert_eq!(1, wheel.entries(), "ping interval {ping}");
+        }
+    }
+
+    /// Sessions that come and go leave no timer behind, whether they are closed or dropped
+    /// without that (a client that leaves before its session is connected).
+    #[test]
+    fn sessions_that_are_gone_leave_no_timer() {
+        let wheel = TestWheel::new();
+        for i in 0..1000 {
+            let (s, _rx) = session_on(
+                Arc::new(wheel.clone()),
+                vec![
+                    SessionOption::PingInterval(Duration::from_secs(86400)),
+                    SessionOption::PongTimeout(Duration::from_secs(6)),
+                ],
+            );
+            s.start_timers();
+            s.handle_native_pong();
+            if i % 2 == 0 {
+                s.set_connected(true);
+                s.disconnect_now("Read closed", CLOSE_NORMAL_CLOSURE);
+            }
+        }
+        // The last reference to some is a drain's, on the task pool.
+        let started = Instant::now();
+        while wheel.entries() > 0 && started.elapsed() < Duration::from_secs(60) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(0, wheel.entries());
     }
 
     #[test]

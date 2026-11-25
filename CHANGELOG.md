@@ -84,6 +84,10 @@ embedding API are breaking (see "Changed").
   the other claim statements.
 - Redis pub/sub and the legacy `redis` broadcast adapter couldn't connect with an implicit Sentinel
   URL (`redis://sentinel:26379?master_set=mymaster`) (D-082).
+- The timer queue is bounded by the timers that can still fire: a session's timer that is
+  stopped or re-armed leaves the queue at once instead of at its old deadline, also when a
+  connection ends before its session is set up. With `--pong_timeout`, a pong that does not change
+  which deadline comes first no longer touches the queue.
 
 ## [0.3.0] - 2026-11-24
 
