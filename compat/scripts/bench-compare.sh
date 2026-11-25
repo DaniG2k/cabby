@@ -15,6 +15,9 @@
 #
 # Usage: [SUTS="actioncable anycable-go cabby"] compat/scripts/bench-compare.sh [OUT]
 #        SUTS="cabby-memory cabby-sqlite" compares the memory and SQLite brokers (bench/sqlite).
+#        WORKLOADS=ceiling runs only the rate ladder (Go and Cabby, SERVER_CPUS=0-1: one physical
+#        core, so that the generator is not the limit). The server's limit is the highest rate
+#        with no message lost and a p99 latency of at most 50 ms.
 #        (default OUT: docs/benchmarks/results)
 set -euo pipefail
 
@@ -104,6 +107,15 @@ run() { # run <workload-name> <scenario> <args...>
   done
 }
 
+if [[ "${WORKLOADS:-standard}" == ceiling ]]; then
+  export CABBY_BENCH_THREADS=8
+  for r in 1000 1500 2000 2500 3000 3500 4000; do
+    run "core1-$((r * 50 / 1000))k" stress_publications -c 1000 -S 100 -s 5 -r "${r}" -d 20s
+  done
+  echo "results in ${OUT}" >&2
+  exit
+fi
+
 # Idle connections: memory per connection from the difference between 1k and 10k clients.
 run idle-1k   stress_publications -c 1000  -S 100 -s 1 -r 1 -d 10s
 run idle-10k  stress_publications -c 10000 -S 100 -s 1 -r 1 -d 10s
@@ -113,6 +125,10 @@ run fanout-100k stress_publications -c 1000 -S 100 -s 5 -r 2000 -d 20s
 run fanout-150k stress_publications -c 1000 -S 100 -s 5 -r 3000 -d 20s
 # Large room: 5000 clients on one stream.
 CABBY_BENCH_THREADS=8 run room-5k stress_publications -c 5000 -S 1 -s 1 -r 20 -d 20s
+# Realistic payloads: 1 and 8 KiB fan-out, and 32 KiB to the large room (memory per connection).
+run payload-1k stress_publications -c 1000 -S 100 -s 5 -r 800 -d 20s --payload-bytes 1024
+run payload-8k stress_publications -c 1000 -S 100 -s 5 -r 200 -d 20s --payload-bytes 8192
+CABBY_BENCH_THREADS=8 run room-5k-32k stress_publications -c 5000 -S 1 -s 1 -r 1 -d 20s --payload-bytes 32768
 # Churn: reconnect floods against a 5 ms RPC (connect + subscribe + disconnect over RPC). Action
 # Cable makes no RPC calls: it sleeps the same jittered 5 ms in its connect, subscribed and
 # disconnect callbacks (the harness exports the latency to the server process).
