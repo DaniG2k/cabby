@@ -11,8 +11,10 @@ Differences from the AnyCable Go server are listed by ID in
 ## [0.4.0] - 2026-11-26
 
 Cabby 0.4.0 delivers broadcasts with less CPU and lower latency, and uses far less memory when
-messages are large. It stays compatible with AnyCable server 1.6.21. Two changes to the Rust
-embedding API are breaking (see "Changed").
+messages are large. It also fixes how Cabby handles gRPC backend restarts, slow readers, presence
+with deeply nested info, `--pong_timeout` and starting with busy PostgreSQL tables. It stays
+compatible with AnyCable server 1.6.21. Two changes to the Rust embedding API are breaking (see
+"Changed").
 
 ### Changed
 
