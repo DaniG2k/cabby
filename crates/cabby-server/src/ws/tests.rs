@@ -814,9 +814,12 @@ fn frames_stay_intact_over_tls() {
 }
 
 /// Offers `frame` without blocking until the connection takes it, as a session does
-/// when the transport is writable again.
+/// when the transport is writable again. Panics if the connection neither takes it nor
+/// fails for a long time.
 fn offer(conn: &WsConnection, frame: &Arc<SentFrame>, timeout: Duration) -> Result<(), ConnectionError> {
+    let deadline = Instant::now() + timeout + Duration::from_secs(20);
     while !conn.try_write_frame(frame, timeout)? {
+        assert!(Instant::now() < deadline, "the write timeout ({timeout:?}) did not end the connection");
         std::thread::sleep(Duration::from_millis(1));
     }
     Ok(())
@@ -843,8 +846,11 @@ fn a_client_that_stops_reading_is_dropped_after_the_write_timeout() {
     server.shutdown();
 }
 
-/// A client that reads all along, but slower than the server writes: the whole
-/// transfer takes more than the write timeout, each batch much less.
+/// Over a real socket, a client that reads steadily but slower than the server writes
+/// stays, and gets every frame, although the whole transfer takes longer than one
+/// write timeout: the timeout is not one for the connection's backlog. Socket buffers
+/// sit between its reads and the batches, so it says nothing about when a batch's
+/// timeout starts or how a batch is bounded (`ws::connection::tests` does).
 #[test]
 fn a_slow_reader_is_not_dropped() {
     const FRAMES: usize = 125;

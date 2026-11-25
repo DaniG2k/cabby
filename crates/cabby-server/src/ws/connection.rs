@@ -1385,11 +1385,13 @@ mod tests {
         writes: usize,
         /// Bytes written before the last flush.
         flushed: usize,
+        /// Flushing never completes.
+        stuck: bool,
     }
 
     impl Choppy {
         fn new(chunk: usize, vectored: bool) -> Self {
-            Self { out: Vec::new(), first: chunk, chunk, vectored, ready: false, writes: 0, flushed: 0 }
+            Self { out: Vec::new(), first: chunk, chunk, vectored, ready: false, writes: 0, flushed: 0, stuck: false }
         }
 
         fn take(&mut self, cx: &mut Context<'_>, slices: &[IoSlice<'_>]) -> Poll<io::Result<usize>> {
@@ -1431,7 +1433,7 @@ mod tests {
 
         fn poll_flush(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
             self.flushed = self.out.len();
-            Poll::Ready(Ok(()))
+            if self.stuck { Poll::Pending } else { Poll::Ready(Ok(())) }
         }
 
         fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -1648,6 +1650,19 @@ mod tests {
         started.elapsed()
     }
 
+    /// The flush (where TLS writes what the socket did not take) counts.
+    #[tokio::test]
+    async fn the_limit_covers_the_flush() {
+        let limit = Duration::from_millis(200);
+        let started = Instant::now();
+        let mut io = Choppy { stuck: true, ..Choppy::new(usize::MAX, true) };
+        let mut batch = [Outbound::data(true, payload(4), WriteLimit::within(limit))].into();
+        let res = tokio::time::timeout(Duration::from_secs(10), write_batch(&mut io, &mut batch)).await;
+        assert_eq!(Ok(Err("i/o timeout".to_owned())), res, "the flush ends with the limit");
+        assert!(started.elapsed() >= limit);
+        assert_eq!(b"\x81\x04abcd".to_vec(), io.out, "only the flush was pending");
+    }
+
     /// The earliest limit of a batch bounds it, wherever its frame is.
     #[tokio::test]
     async fn the_earliest_limit_bounds_a_batch() {
@@ -1711,17 +1726,30 @@ mod tests {
     /// connection, as in Go: nothing may follow the part that was written.
     #[tokio::test]
     async fn a_pong_that_cannot_be_written_ends_the_connection() {
-        let gate = Gate::default();
-        gate.allow(1);
-        let conn = gate.connection().await;
-        gate.client_sends(9, b"hi");
-        until("the start of the pong", || gate.out() == [0x8a]).await;
-        queue(&conn, "data");
+        let mut fastest = Duration::MAX;
+        // Again only if the machine was too busy to tell one second from two.
+        for _ in 0..3 {
+            let gate = Gate::default();
+            gate.allow(1);
+            let conn = gate.connection().await;
+            let started = Instant::now();
+            gate.client_sends(9, b"hi");
+            until("the start of the pong", || gate.out() == [0x8a]).await;
+            queue(&conn, "data");
 
-        assert_eq!("i/o timeout", ended(&conn).await);
-        gate.allow(usize::MAX);
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert_eq!(vec![0x8a], gate.out(), "no frame inside the pong");
+            assert_eq!("i/o timeout", ended(&conn).await);
+            let after = started.elapsed();
+            assert!(after >= Duration::from_secs(1), "ended after {after:?}");
+            gate.allow(usize::MAX);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            assert_eq!(vec![0x8a], gate.out(), "no frame inside the pong");
+
+            fastest = fastest.min(after);
+            if fastest < Duration::from_millis(1250) {
+                return;
+            }
+        }
+        panic!("ended after {fastest:?} at best, not a second");
     }
 
     #[tokio::test]
