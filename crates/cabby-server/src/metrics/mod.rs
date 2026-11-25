@@ -68,6 +68,10 @@ pub trait Instrumenter: Send + Sync {
     fn gauge_set(&self, name: &str, value: u64);
     fn register_counter(&self, name: &str, desc: &str);
     fn register_gauge(&self, name: &str, desc: &str);
+    /// Direct handle to a registered counter for lookup-free hot-path updates.
+    fn counter_handle(&self, _name: &str) -> Option<Arc<Counter>> {
+        None
+    }
 }
 
 /// Discards everything (upstream `NoopMetrics`).
@@ -441,6 +445,9 @@ impl Instrumenter for Metrics {
     }
     fn register_gauge(&self, name: &str, desc: &str) {
         self.register(&self.shared.gauges, name, Gauge::new(name, desc));
+    }
+    fn counter_handle(&self, name: &str) -> Option<Arc<Counter>> {
+        self.counter(name)
     }
 }
 

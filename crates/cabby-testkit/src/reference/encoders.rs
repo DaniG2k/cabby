@@ -22,17 +22,17 @@ struct GoSentFrame {
 
 impl From<GoSentFrame> for SentFrame {
     fn from(g: GoSentFrame) -> Self {
-        SentFrame {
-            frame_type: match g.frame_type {
+        SentFrame::new(
+            match g.frame_type {
                 0 => FrameType::Text,
                 1 => FrameType::Close,
                 2 => FrameType::Binary,
                 other => panic!("unknown Go frame type {other}"),
             },
-            payload: g.payload.into_bytes(),
-            close_code: g.close_code,
-            close_reason: g.close_reason,
-        }
+            g.payload.into_bytes(),
+            g.close_code,
+            g.close_reason,
+        )
     }
 }
 
@@ -106,11 +106,7 @@ pub fn encoding_cache_fetch_mock(value: &str, encoders: &[&str]) -> MockFetches 
                 let mut callback = |m: &dyn EncodedMessage| -> Result<Option<SentFrame>, EncodeError> {
                     if std::ptr::eq(m as *const dyn EncodedMessage as *const (), target) {
                         msg.encoded.set(msg.encoded.get() + 1);
-                        Ok(Some(SentFrame {
-                            frame_type: FrameType::Text,
-                            payload: msg.value.as_bytes().to_vec(),
-                            ..SentFrame::default()
-                        }))
+                        Ok(Some(SentFrame::text(msg.value.as_bytes().to_vec())))
                     } else {
                         Ok(None)
                     }

@@ -7,23 +7,24 @@
 //! mutable state has exactly one owner and lock, and no lock is held while
 //! another component is called:
 //!
-//! * **Send path.** Producers (commands, the hub, timers) encode a frame and push
-//!   an `Arc<SentFrame>` into the session's write queue: a mutex-guarded ring
-//!   buffer, so `send` never blocks on the connection. Broadcast frames are
-//!   encoded once per encoder and shared between sessions (the hub's
-//!   [`CachedEncodedMessage`]). The queue accounts payload bytes; when the bytes
+//! * **Send path.** Producers (commands, the hub, timers) encode a frame into an
+//!   `Arc<SentFrame>`. Broadcast frames are encoded once per encoder and shared
+//!   between sessions (the hub's [`CachedEncodedMessage`]). On a non-blocking
+//!   transport, when the writer is idle and nothing is queued, the frame goes
+//!   straight to the transport without passing through the write queue; otherwise
+//!   it is pushed into the session's mutex-guarded ring buffer so `send` never
+//!   blocks on the connection. The queue accounts payload bytes; when the bytes
 //!   still waiting reach `max_pending_size` the client is too slow: the queue is
 //!   cleared and the session is disconnected with `too_slow` (upstream
 //!   semantics).
 //! * **Writer.** Upstream runs a writer goroutine per session. Here the writer
-//!   is a drain: when a frame is queued and no drain is running, one starts and
-//!   writes until the queue is empty. At most one drain runs per session (an
-//!   atomic writer state), so frames keep their order, and idle sessions cost no
-//!   thread. Over a non-blocking transport (the WebSocket connection, which
-//!   queues frames for its I/O task) the drain runs right on the producer's
-//!   thread: a broadcast fan-out hands each session's frame to its connection
-//!   without a thread switch, and when a connection's queue is full the frame
-//!   waits in the session until the connection signals space. Close frames,
+//!   is driven by an atomic state machine (`DETACHED`, `IDLE`, `BUSY`,
+//!   `WAIT_WRITABLE`, `DONE`), so at most one write/drain runs per session,
+//!   frames keep their FIFO order, and idle sessions cost no thread. Over a
+//!   non-blocking transport (the WebSocket connection, which queues frames for
+//!   its I/O task) writes run on the producer's thread without a thread switch;
+//!   when a connection's queue is full the refused frame is parked and the writer
+//!   waits in `WAIT_WRITABLE` until the connection signals space. Close frames,
 //!   failed writes, and blocking transports use a drain on the node's task pool.
 //!   Pings over a non-blocking transport are queued like other frames; over a
 //!   blocking one they share a write lock with the drain.
@@ -44,6 +45,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use arc_swap::ArcSwap;
 use bytes::Bytes;
 use cabby_core::broker::{Broker, BrokerError, Cacheable};
 use cabby_core::common::{
@@ -64,7 +66,7 @@ use super::{
     METRICS_DISCONNECTED_SLOW_CLIENTS, METRICS_FAILED_COMMAND_RECEIVED, METRICS_FAILED_SENT, METRICS_RECEIVED_MSG,
     METRICS_SENT_MSG, METRICS_WRITE_TIMEOUT, Node, NodeError, SubscriptionState, SystemClock, Timer,
 };
-use crate::metrics::{Instrumenter, NoopMetrics};
+use crate::metrics::{Counter, Instrumenter, NoopMetrics};
 
 /// A connection write or read failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -181,12 +183,26 @@ pub enum SessionOption {
 // Writer states.
 /// No writer attached yet: frames wait in the queue.
 const WRITER_DETACHED: u8 = 0;
-/// Attached, nothing to write.
+/// Attached, `refused` is empty and no drain is running.
 const WRITER_IDLE: u8 = 1;
-/// A drain is scheduled or running.
+/// A drain (or fast-path direct write) is running.
 const WRITER_BUSY: u8 = 2;
 /// Stopped after a close frame or a failed write (upstream's writer returned).
 const WRITER_DONE: u8 = 3;
+/// A non-blocking write was refused (`refused` holds the frame); waiting for
+/// the transport's writable callback to resume draining.
+const WRITER_WAIT_WRITABLE: u8 = 4;
+
+/// Outcome of one non-blocking write attempt while the caller holds `WRITER_BUSY`.
+enum NonblockingSend {
+    /// Accepted by the transport; caller still owns `WRITER_BUSY`.
+    Sent,
+    /// Refused, then the transport immediately became writable again and this
+    /// caller re-acquired `WRITER_BUSY` with the frame parked in `refused`.
+    RetryNow,
+    /// Ownership handed off (`WRITER_WAIT_WRITABLE` or pool drain spawned).
+    HandedOff,
+}
 
 /// Initial capacity of the write queue (upstream `NewQueue(16)`).
 const WRITE_QUEUE_CAPACITY: usize = 16;
@@ -294,12 +310,50 @@ impl Timers {
     }
 }
 
+/// Hot-path collaborators and settings read on every delivered broadcast frame
+/// through a lock-free [`ArcSwap`]: avoids taking the `settings` RwLock, cloning
+/// `Arc`s, or looking up hot metric names in the registry map.
+struct HotConfig {
+    encoder: Arc<dyn Encoder + Send + Sync>,
+    metrics: Arc<dyn Instrumenter>,
+    sent_msg: Option<Arc<Counter>>,
+    data_sent: Option<Arc<Counter>>,
+    write_timeout: Duration,
+}
+
+impl HotConfig {
+    fn from_settings(s: &Settings) -> Self {
+        Self {
+            encoder: Arc::clone(&s.encoder),
+            metrics: Arc::clone(&s.metrics),
+            sent_msg: s.metrics.counter_handle(METRICS_SENT_MSG),
+            data_sent: s.metrics.counter_handle(METRICS_DATA_SENT),
+            write_timeout: s.write_timeout,
+        }
+    }
+
+    #[inline]
+    fn record_sent(&self, bytes: u64) {
+        if let Some(c) = &self.data_sent {
+            c.add(bytes);
+        } else {
+            self.metrics.counter_add(METRICS_DATA_SENT, bytes);
+        }
+        if let Some(c) = &self.sent_msg {
+            c.inc();
+        } else {
+            self.metrics.counter_increment(METRICS_SENT_MSG);
+        }
+    }
+}
+
 /// A client session (upstream `node.Session`). Shared as `Arc<Session>` between
 /// the transport, the node, the hub and the disconnect queue.
 pub struct Session {
     me: Weak<Session>,
     conn: Arc<dyn Connection>,
     settings: RwLock<Settings>,
+    hot: ArcSwap<HotConfig>,
     env: Mutex<SessionEnv>,
     subscriptions: SubscriptionState,
     lifecycle: Mutex<Lifecycle>,
@@ -412,30 +466,33 @@ impl Session {
     /// `BuildSession`). Neither the writer nor the timers are started.
     pub fn build(conn: Arc<dyn Connection>, env: SessionEnv) -> Arc<Session> {
         let nonblocking = conn.nonblocking();
+        let initial_settings = Settings {
+            uid: String::new(),
+            encoder: Arc::new(Json),
+            executor: None,
+            broker: None,
+            metrics: Arc::new(NoopMetrics),
+            clock: Arc::new(SystemClock),
+            write_timeout: DEFAULT_WRITE_TIMEOUT,
+            ping_interval: Duration::ZERO,
+            ping_precision: String::new(),
+            native_ping: false,
+            pong_timeout: Duration::ZERO,
+            presence_interval: Duration::ZERO,
+            resume_interval: Duration::ZERO,
+            prev_sid: String::new(),
+            inactive: false,
+            log: Logger::default(),
+        };
+        let hot = ArcSwap::from_pointee(HotConfig::from_settings(&initial_settings));
         let session = Arc::new_cyclic(|me| Session {
             me: me.clone(),
             nonblocking,
             refused: Mutex::new(None),
             writable: AtomicBool::new(false),
             conn,
-            settings: RwLock::new(Settings {
-                uid: String::new(),
-                encoder: Arc::new(Json),
-                executor: None,
-                broker: None,
-                metrics: Arc::new(NoopMetrics),
-                clock: Arc::new(SystemClock),
-                write_timeout: DEFAULT_WRITE_TIMEOUT,
-                ping_interval: Duration::ZERO,
-                ping_precision: String::new(),
-                native_ping: false,
-                pong_timeout: Duration::ZERO,
-                presence_interval: Duration::ZERO,
-                resume_interval: Duration::ZERO,
-                prev_sid: String::new(),
-                inactive: false,
-                log: Logger::default(),
-            }),
+            settings: RwLock::new(initial_settings),
+            hot,
             env: Mutex::new(env),
             subscriptions: SubscriptionState::new(),
             lifecycle: Mutex::new(Lifecycle::default()),
@@ -454,7 +511,13 @@ impl Session {
             session.conn.set_writable_handler(Box::new(move || {
                 if let Some(session) = me.upgrade() {
                     session.writable.store(true, Ordering::SeqCst);
-                    session.kick_writer();
+                    if session
+                        .writer
+                        .compare_exchange(WRITER_WAIT_WRITABLE, WRITER_BUSY, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+                    {
+                        session.drain_nonblocking();
+                    }
                 }
             }));
         }
@@ -484,6 +547,7 @@ impl Session {
             s.native_ping = config.enable_native_ping;
             s.uid = uid.to_owned();
             s.log = node.logger().with("sid", uid);
+            session.hot.store(Arc::new(HotConfig::from_settings(&s)));
         }
         session.apply(opts);
 
@@ -543,23 +607,36 @@ impl Session {
                 SessionOption::MaxPendingSize(size) => self.max_pending_size.store(size, Ordering::Release),
                 opt => {
                     let mut s = write(&self.settings);
+                    let mut hot_changed = false;
                     match opt {
                         SessionOption::PingInterval(d) => s.ping_interval = bounded(d),
                         SessionOption::PingPrecision(p) => s.ping_precision = p,
-                        SessionOption::Encoder(e) => s.encoder = e,
+                        SessionOption::Encoder(e) => {
+                            s.encoder = e;
+                            hot_changed = true;
+                        }
                         SessionOption::Executor(e) => Self::adopt_executor(&mut s, e),
-                        SessionOption::Metrics(m) => s.metrics = m,
+                        SessionOption::Metrics(m) => {
+                            s.metrics = m;
+                            hot_changed = true;
+                        }
                         SessionOption::KeepaliveIntervals { sessions_ttl, presence_ttl } => {
                             s.resume_interval = bounded(sessions_ttl);
                             s.presence_interval = bounded(presence_ttl);
                         }
                         SessionOption::PrevSid(sid) => s.prev_sid = sid,
                         SessionOption::PongTimeout(d) => s.pong_timeout = bounded(d),
-                        SessionOption::WriteTimeout(d) => s.write_timeout = bounded(d),
+                        SessionOption::WriteTimeout(d) => {
+                            s.write_timeout = bounded(d);
+                            hot_changed = true;
+                        }
                         SessionOption::Inactive => s.inactive = true,
                         SessionOption::HandshakeMessageDeadline(_) | SessionOption::MaxPendingSize(_) => {
                             unreachable!()
                         }
+                    }
+                    if hot_changed {
+                        self.hot.store(Arc::new(HotConfig::from_settings(&s)));
                     }
                 }
             }
@@ -586,8 +663,12 @@ impl Session {
     /// before are written first. Returns immediately: the writing happens on
     /// the node's task pool (see the module documentation).
     pub fn send_messages(&self) {
-        if self.writer.compare_exchange(WRITER_DETACHED, WRITER_IDLE, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
-            self.kick_writer();
+        if self.writer.compare_exchange(WRITER_DETACHED, WRITER_BUSY, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            if self.nonblocking {
+                self.drain_nonblocking();
+            } else {
+                self.spawn_drain();
+            }
         }
     }
 
@@ -616,16 +697,66 @@ impl Session {
         self.write_queue.remove().map(|item| item.data)
     }
 
+    /// Parks a refused frame and transitions the writer to wait for the
+    /// transport's writable callback, returning `true` if it already became
+    /// writable and this caller re-acquired `WRITER_BUSY`.
+    fn park_refused(&self, frame: Arc<SentFrame>) -> bool {
+        *lock(&self.refused) = Some(frame);
+        self.writer.store(WRITER_WAIT_WRITABLE, Ordering::SeqCst);
+        // The transport may have become writable since it refused the frame,
+        // while the writer was still busy: take it back if so. Use `load`
+        // (never `swap`) so a losing racer cannot consume a wakeup meant for
+        // the current `WRITER_BUSY` owner; only the winner clears `writable`
+        // before calling `try_write_frame`.
+        self.writable.load(Ordering::SeqCst)
+            && self
+                .writer
+                .compare_exchange(WRITER_WAIT_WRITABLE, WRITER_BUSY, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+    }
+
+    /// Writes one frame to a non-blocking transport while holding `WRITER_BUSY`.
+    /// Close frames and failures hand off to the pool drain so disconnecting
+    /// never runs on a producer's thread (a hub gate, a command).
+    fn try_send_nonblocking(&self, frame: Arc<SentFrame>, hot: &HotConfig) -> NonblockingSend {
+        if frame.frame_type == FrameType::Close {
+            *lock(&self.refused) = Some(frame);
+            self.spawn_drain();
+            return NonblockingSend::HandedOff;
+        }
+
+        self.writable.store(false, Ordering::SeqCst);
+        let deadline = Instant::now() + hot.write_timeout;
+        match self.conn.try_write_frame(&frame, deadline) {
+            Ok(true) => {
+                hot.record_sent(frame.payload.len() as u64);
+                NonblockingSend::Sent
+            }
+            Ok(false) => {
+                if self.park_refused(frame) {
+                    NonblockingSend::RetryNow
+                } else {
+                    NonblockingSend::HandedOff
+                }
+            }
+            Err(_) => {
+                // The pool drain writes it again and handles the failure.
+                *lock(&self.refused) = Some(frame);
+                self.spawn_drain();
+                NonblockingSend::HandedOff
+            }
+        }
+    }
+
     /// Hands frames to a non-blocking transport on the producer's thread while
     /// it takes them; the writer is busy. When the transport is full, the frame
     /// is kept and the drain stops: the transport's writable handler resumes it.
-    /// Close frames and failures go to the pool drain, so disconnecting never
-    /// runs on a producer's thread (a hub gate, a command).
     fn drain_nonblocking(&self) {
+        let hot = self.hot.load();
         loop {
             let Some(frame) = self.next_frame() else {
                 self.writer.store(WRITER_IDLE, Ordering::SeqCst);
-                if self.write_queue.is_empty()
+                if self.write_queue.is_empty_atomic()
                     || self
                         .writer
                         .compare_exchange(WRITER_IDLE, WRITER_BUSY, Ordering::SeqCst, Ordering::SeqCst)
@@ -635,40 +766,9 @@ impl Session {
                 }
                 continue;
             };
-            if frame.frame_type == FrameType::Close {
-                *lock(&self.refused) = Some(frame);
-                self.spawn_drain();
-                return;
-            }
-
-            self.writable.store(false, Ordering::SeqCst);
-            let deadline = Instant::now() + self.settings().write_timeout;
-            match self.conn.try_write_frame(&frame, deadline) {
-                Ok(true) => {
-                    let metrics = self.metrics();
-                    metrics.counter_add(METRICS_DATA_SENT, frame.payload.len() as u64);
-                    metrics.counter_increment(METRICS_SENT_MSG);
-                }
-                Ok(false) => {
-                    *lock(&self.refused) = Some(frame);
-                    self.writer.store(WRITER_IDLE, Ordering::SeqCst);
-                    // The transport may have become writable since it refused the
-                    // frame, while the drain was still busy: go on then.
-                    if !self.writable.swap(false, Ordering::SeqCst)
-                        || self
-                            .writer
-                            .compare_exchange(WRITER_IDLE, WRITER_BUSY, Ordering::SeqCst, Ordering::SeqCst)
-                            .is_err()
-                    {
-                        return;
-                    }
-                }
-                Err(_) => {
-                    // The pool drain writes it again and handles the failure.
-                    *lock(&self.refused) = Some(frame);
-                    self.spawn_drain();
-                    return;
-                }
+            match self.try_send_nonblocking(frame, &hot) {
+                NonblockingSend::Sent | NonblockingSend::RetryNow => {}
+                NonblockingSend::HandedOff => return,
             }
         }
     }
@@ -1250,17 +1350,72 @@ impl Session {
     }
 
     fn push_frame(&self, frame: Arc<SentFrame>) {
+        let hot = self.hot.load();
+        self.push_frame_hot(frame, &hot);
+    }
+
+    fn push_frame_hot(&self, frame: Arc<SentFrame>, hot: &HotConfig) {
+        // Fast path for non-blocking transports (WebSocket): when the writer is
+        // idle and nothing is queued, hand the frame straight to the transport
+        // without touching `write_queue` or `refused`.
+        if self.nonblocking
+            && frame.frame_type != FrameType::Close
+            && self.writer.compare_exchange(WRITER_IDLE, WRITER_BUSY, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+        {
+            if self.write_queue.is_closed_atomic() {
+                self.writer.store(WRITER_DONE, Ordering::SeqCst);
+                return;
+            }
+            if !self.write_queue.is_empty_atomic() {
+                // Another thread enqueued before releasing the writer; preserve
+                // FIFO order by queuing behind it and draining while we hold
+                // `WRITER_BUSY`.
+                if self.enqueue_frame(frame) {
+                    self.drain_nonblocking();
+                } else {
+                    self.writer.store(WRITER_IDLE, Ordering::SeqCst);
+                    if !self.write_queue.is_empty_atomic() {
+                        self.kick_writer();
+                    }
+                }
+                return;
+            }
+
+            match self.try_send_nonblocking(frame, hot) {
+                NonblockingSend::Sent => {
+                    if !self.write_queue.is_empty_atomic() {
+                        self.drain_nonblocking();
+                        return;
+                    }
+                    self.writer.store(WRITER_IDLE, Ordering::SeqCst);
+                    if !self.write_queue.is_empty_atomic() {
+                        self.kick_writer();
+                    }
+                }
+                NonblockingSend::RetryNow => self.drain_nonblocking(),
+                NonblockingSend::HandedOff => {}
+            }
+            return;
+        }
+
+        if self.enqueue_frame(frame) {
+            self.kick_writer();
+        }
+    }
+
+    fn enqueue_frame(&self, frame: Arc<SentFrame>) -> bool {
         let max_pending = self.max_pending_size.load(Ordering::Acquire);
         let size = frame.payload.len() as u64;
         match self.write_queue.push(Item { size, data: frame }, max_pending) {
-            PushResult::Ok => self.kick_writer(),
-            PushResult::Closed => {}
+            PushResult::Ok => true,
+            PushResult::Closed => false,
             PushResult::Overflow => {
                 self.max_pending_size.store(0, Ordering::Release);
                 log_debug!(self.logger(), "slow client detected, disconnecting", "max" => max_pending);
                 self.metrics().counter_increment(METRICS_DISCONNECTED_SLOW_CLIENTS);
                 self.me()
                     .disconnect_with_message(&DisconnectMessage::new(SLOW_CLIENT_REASON, true), SLOW_CLIENT_REASON);
+                false
             }
         }
     }
@@ -1305,12 +1460,7 @@ impl Session {
         self.close();
 
         self.disconnect_from_node();
-        let _ = self.write_frame(&Arc::new(SentFrame {
-            frame_type: FrameType::Close,
-            close_reason: reason.to_owned(),
-            close_code: code,
-            ..Default::default()
-        }));
+        let _ = self.write_frame(&Arc::new(SentFrame::close(code, reason)));
 
         self.write_queue.close();
     }
@@ -1351,12 +1501,7 @@ impl Session {
     }
 
     fn send_close(&self, reason: &str, code: i32) {
-        self.send_frame(SentFrame {
-            frame_type: FrameType::Close,
-            close_reason: reason.to_owned(),
-            close_code: code,
-            ..Default::default()
-        });
+        self.send_frame(SentFrame::close(code, reason));
     }
 
     fn write_frame(&self, frame: &Arc<SentFrame>) -> Result<(), ConnectionError> {
@@ -1657,9 +1802,9 @@ impl cabby_core::hub::HubSession for Session {
     }
 
     fn send(&self, msg: &cabby_core::hub::EncodedMessage) {
-        let encoder = self.encoder();
-        if let Ok(frame) = msg.fetch_with(encoder.as_ref()) {
-            self.push_frame(frame);
+        let hot = self.hot.load();
+        if let Ok(frame) = msg.fetch_with(hot.encoder.as_ref()) {
+            self.push_frame_hot(frame, &hot);
         }
     }
 
@@ -2018,12 +2163,21 @@ mod tests {
         frames: Mutex<Vec<String>>,
         capacity: Mutex<usize>,
         refused: AtomicBool,
+        refusals: AtomicU64,
         handler: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
     }
 
     impl Valve {
         fn frames(&self) -> Vec<String> {
             lock(&self.frames).clone()
+        }
+
+        fn is_refused(&self) -> bool {
+            self.refused.load(Ordering::SeqCst)
+        }
+
+        fn refusals(&self) -> u64 {
+            self.refusals.load(Ordering::SeqCst)
         }
 
         fn release(&self, n: usize) {
@@ -2059,6 +2213,7 @@ mod tests {
         fn try_write_frame(&self, frame: &Arc<SentFrame>, _deadline: Instant) -> Result<bool, ConnectionError> {
             let mut capacity = lock(&self.capacity);
             if *capacity == 0 {
+                self.refusals.fetch_add(1, Ordering::SeqCst);
                 self.refused.store(true, Ordering::SeqCst);
                 return Ok(false);
             }
@@ -2095,6 +2250,91 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(Some(&format!("close:{CLOSE_NORMAL_CLOSURE}")), valve.frames().last());
+    }
+
+    #[test]
+    fn nonblocking_fast_path_preserves_order_and_metrics_under_concurrent_backpressure() {
+        let metrics = Arc::new(crate::metrics::Metrics::new(Vec::new(), 0));
+        metrics.register_counter(METRICS_SENT_MSG, "sent");
+        metrics.register_counter(METRICS_DATA_SENT, "bytes");
+
+        let valve = Arc::new(Valve { capacity: Mutex::new(1), ..Default::default() });
+        let s = Session::build(valve.clone(), SessionEnv::new("/cable", None));
+        s.apply(vec![SessionOption::Metrics(metrics.clone())]);
+        s.send_messages();
+        s.set_connected(true);
+
+        const THREADS: usize = 4;
+        const PER_THREAD: usize = 50;
+        const TOTAL: usize = THREADS * PER_THREAD;
+        let expected_bytes: u64 =
+            (0..THREADS).flat_map(|t| (0..PER_THREAD).map(move |i| format!("{t}:{i}").len() as u64)).sum();
+
+        let releaser = {
+            let valve = valve.clone();
+            std::thread::spawn(move || {
+                let mut n = 1usize;
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while valve.frames().len() < TOTAL && Instant::now() < deadline {
+                    if valve.is_refused() {
+                        valve.release(n);
+                        n = (n % 3) + 1;
+                    } else {
+                        std::thread::yield_now();
+                    }
+                }
+            })
+        };
+
+        let producers: Vec<_> = (0..THREADS)
+            .map(|t| {
+                let s = s.clone();
+                std::thread::spawn(move || {
+                    for i in 0..PER_THREAD {
+                        s.send_json_transmission(&format!("{t}:{i}"));
+                    }
+                })
+            })
+            .collect();
+
+        for p in producers {
+            p.join().unwrap();
+        }
+        releaser.join().unwrap();
+
+        let frames = valve.frames();
+        assert!(valve.refusals() > 0, "transport must refuse frames to exercise backpressure/resume");
+        assert_eq!(TOTAL, frames.len(), "writer stalled after {} refusals", valve.refusals());
+        let mut last = [None::<usize>; THREADS];
+        for f in &frames {
+            let (t, i) = f.split_once(':').unwrap();
+            let (t, i): (usize, usize) = (t.parse().unwrap(), i.parse().unwrap());
+            assert_eq!(last[t].map_or(0, |prev| prev + 1), i, "out-of-order frame for producer {t}: {frames:?}");
+            last[t] = Some(i);
+        }
+        assert_eq!(last, [Some(PER_THREAD - 1); THREADS]);
+        assert_eq!(TOTAL as u64, metrics.counter(METRICS_SENT_MSG).unwrap().value());
+        assert_eq!(expected_bytes, metrics.counter(METRICS_DATA_SENT).unwrap().value());
+    }
+
+    #[test]
+    fn nonblocking_slow_client_overflows_while_waiting_for_writable() {
+        let metrics = Arc::new(crate::metrics::Metrics::new(Vec::new(), 0));
+        metrics.register_counter(METRICS_DISCONNECTED_SLOW_CLIENTS, "slow");
+
+        let valve = Arc::new(Valve { capacity: Mutex::new(1), ..Default::default() });
+        let s = Session::build(valve.clone(), SessionEnv::new("/cable", None));
+        s.apply(vec![SessionOption::Metrics(metrics.clone()), SessionOption::MaxPendingSize(20)]);
+        s.send_messages();
+        s.set_connected(true);
+
+        // First frame passes straight through; second parks in `refused`;
+        // subsequent frames fill `write_queue` past 20 bytes and trigger overflow.
+        for _ in 0..5 {
+            s.send_json_transmission("0123456789");
+        }
+        assert!(s.is_closed(), "slow client must be closed on pending overflow");
+        assert_eq!(1, metrics.counter(METRICS_DISCONNECTED_SLOW_CLIENTS).unwrap().value());
     }
 
     #[test]

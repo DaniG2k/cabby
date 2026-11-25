@@ -511,6 +511,11 @@ impl NodeEncoder for NoopEncoder {
         DS_NOOP_ENCODER_ID.to_owned()
     }
 
+    #[inline]
+    fn id_str(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(DS_NOOP_ENCODER_ID)
+    }
+
     fn encode(&self, _msg: &dyn EncodedMessageJson) -> Result<SentFrame, EncodeError> {
         Err(no_frame())
     }
@@ -539,6 +544,11 @@ pub struct PollEncoder;
 impl NodeEncoder for PollEncoder {
     fn id(&self) -> String {
         DS_POLL_ENCODER_ID.to_owned()
+    }
+
+    #[inline]
+    fn id_str(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(DS_POLL_ENCODER_ID)
     }
 
     fn encode(&self, msg: &dyn EncodedMessageJson) -> Result<SentFrame, EncodeError> {
@@ -577,6 +587,11 @@ pub struct SseEncoder {
 impl NodeEncoder for SseEncoder {
     fn id(&self) -> String {
         DS_SSE_ENCODER_ID.to_owned()
+    }
+
+    #[inline]
+    fn id_str(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(DS_SSE_ENCODER_ID)
     }
 
     fn encode(&self, msg: &dyn EncodedMessageJson) -> Result<SentFrame, EncodeError> {

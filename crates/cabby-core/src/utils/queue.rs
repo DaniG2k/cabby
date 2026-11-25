@@ -15,6 +15,7 @@
 //! * Slots are `Option`s: a removed item is moved out and its slot cleared, so payloads
 //!   are released as soon as they leave the queue.
 
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard};
 
 /// A queued element with its accounted size (upstream `utils.Item`).
@@ -93,6 +94,10 @@ pub struct Queue<T> {
     ring: Mutex<Ring<T>>,
     cond: Condvar,
     init_cap: usize,
+    /// Mirrors `ring.cnt` (updated under `ring`) for lock-free empty checks.
+    cnt: AtomicUsize,
+    /// Mirrors `ring.closed` (updated under `ring`) for lock-free closed checks.
+    closed: AtomicBool,
 }
 
 impl<T: Send> Queue<T> {
@@ -109,6 +114,8 @@ impl<T: Send> Queue<T> {
             }),
             cond: Condvar::new(),
             init_cap: initial_capacity,
+            cnt: AtomicUsize::new(0),
+            closed: AtomicBool::new(false),
         }
     }
 
@@ -130,6 +137,7 @@ impl<T: Send> Queue<T> {
             return false;
         }
         ring.append(item);
+        self.cnt.store(ring.cnt, Ordering::SeqCst);
         self.signal(&ring);
         true
     }
@@ -142,9 +150,12 @@ impl<T: Send> Queue<T> {
         }
         if max_size > 0 && ring.size >= max_size {
             ring.clear(self.init_cap);
+            self.cnt.store(0, Ordering::SeqCst);
+            self.closed.store(false, Ordering::SeqCst);
             return PushResult::Overflow;
         }
         ring.append(item);
+        self.cnt.store(ring.cnt, Ordering::SeqCst);
         self.signal(&ring);
         PushResult::Ok
     }
@@ -156,6 +167,8 @@ impl<T: Send> Queue<T> {
         ring.cnt = 0;
         ring.nodes = Vec::new();
         ring.size = 0;
+        self.cnt.store(0, Ordering::SeqCst);
+        self.closed.store(true, Ordering::SeqCst);
         if ring.waiters > 0 {
             self.cond.notify_all();
         }
@@ -165,10 +178,25 @@ impl<T: Send> Queue<T> {
         self.lock().closed
     }
 
+    /// Lock-free check of whether [`Queue::close`] has been called.
+    #[inline]
+    pub fn is_closed_atomic(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+
+    /// Lock-free check of whether the queue currently has no queued items.
+    #[inline]
+    pub fn is_empty_atomic(&self) -> bool {
+        self.cnt.load(Ordering::SeqCst) == 0
+    }
+
     /// Removes all items without closing (upstream `Clear`; like upstream, this also
     /// reopens a closed queue).
     pub fn clear(&self) {
-        self.lock().clear(self.init_cap);
+        let mut ring = self.lock();
+        ring.clear(self.init_cap);
+        self.cnt.store(0, Ordering::SeqCst);
+        self.closed.store(false, Ordering::SeqCst);
     }
 
     /// Blocks until an item is available (`true`) or the queue is closed (`false`).
@@ -193,6 +221,7 @@ impl<T: Send> Queue<T> {
         ring.head = (head + 1) % ring.nodes.len();
         ring.cnt -= 1;
         ring.size -= item.size;
+        self.cnt.store(ring.cnt, Ordering::SeqCst);
 
         let n = ring.nodes.len() / 2;
         if n >= self.init_cap && ring.cnt <= n && n > 0 {

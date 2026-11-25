@@ -3,8 +3,11 @@
 //! The frame types live here (upstream `ws.FrameType` / `ws.SentFrame`) so that
 //! encoders stay in `cabby-core`; `cabby_server::ws` re-exports them.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
+
+use bytes::Bytes;
 
 use crate::common::{self, DisconnectMessage, Message, PingMessage, Reply};
 use crate::gojson;
@@ -22,15 +25,30 @@ pub enum FrameType {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SentFrame {
     pub frame_type: FrameType,
-    pub payload: Vec<u8>,
+    pub payload: Bytes,
     pub close_code: i32,
     pub close_reason: String,
 }
 
 impl SentFrame {
+    /// Constructs a frame with explicit fields.
+    pub fn new(frame_type: FrameType, payload: impl Into<Bytes>, close_code: i32, close_reason: String) -> Self {
+        SentFrame { frame_type, payload: payload.into(), close_code, close_reason }
+    }
+
     /// A text frame with the given payload.
-    pub fn text(payload: Vec<u8>) -> Self {
-        SentFrame { frame_type: FrameType::Text, payload, ..SentFrame::default() }
+    pub fn text(payload: impl Into<Bytes>) -> Self {
+        SentFrame { frame_type: FrameType::Text, payload: payload.into(), ..SentFrame::default() }
+    }
+
+    /// A close frame with the given WebSocket status code and reason.
+    pub fn close(close_code: i32, close_reason: impl Into<String>) -> Self {
+        SentFrame {
+            frame_type: FrameType::Close,
+            close_code,
+            close_reason: close_reason.into(),
+            ..SentFrame::default()
+        }
     }
 }
 
@@ -84,6 +102,10 @@ pub struct EncodeError(pub String);
 /// semantics (send nothing, report nothing) use the optional variants.
 pub trait Encoder {
     fn id(&self) -> String;
+    /// Borrowed encoder ID for allocation-free cache lookups on the hot path.
+    fn id_str(&self) -> Cow<'_, str> {
+        Cow::Owned(self.id())
+    }
     fn encode(&self, msg: &dyn EncodedMessageJson) -> Result<SentFrame, EncodeError>;
     fn encode_transmission(&self, msg: &str) -> Result<SentFrame, EncodeError>;
     fn decode(&self, payload: &[u8]) -> Result<Message, EncodeError>;
@@ -191,6 +213,11 @@ pub struct Json;
 impl Encoder for Json {
     fn id(&self) -> String {
         JSON_ENCODER_ID.to_owned()
+    }
+
+    #[inline]
+    fn id_str(&self) -> Cow<'_, str> {
+        Cow::Borrowed(JSON_ENCODER_ID)
     }
 
     fn encode(&self, msg: &dyn EncodedMessageJson) -> Result<SentFrame, EncodeError> {
@@ -328,8 +355,9 @@ impl CachedEncodedMessage {
 
     /// [`fetch`](Self::fetch) with `encoder.encode` as the callback (its nil
     /// frames included, see [`Encoder::encode_optional`]).
+    #[inline]
     pub fn fetch_with(&self, encoder: &dyn Encoder) -> SharedFrame {
-        self.fetch(&encoder.id(), |msg| encoder.encode_optional(msg))
+        self.fetch(&encoder.id_str(), |msg| encoder.encode_optional(msg))
     }
 
     /// The [`Json`] encoder's (shared) frame for this message.
@@ -340,7 +368,7 @@ impl CachedEncodedMessage {
     /// The `encoders.JSON` payload (upstream `MarshalJSON`), encoded once.
     pub fn to_json(&self) -> Vec<u8> {
         match self.json_frame() {
-            Ok(frame) => frame.payload.clone(),
+            Ok(frame) => frame.payload.to_vec(),
             Err(_) => self.target.to_json(),
         }
     }

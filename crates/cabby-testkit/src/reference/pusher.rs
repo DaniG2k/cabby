@@ -214,15 +214,18 @@ impl GoFrameResult {
         if let Some(e) = self.error {
             return Err(e);
         }
-        Ok(self.frame.map(|f| SentFrame {
-            frame_type: match f.frame_type {
-                0 => cabby_core::common::FrameType::Text,
-                1 => cabby_core::common::FrameType::Close,
-                2 => cabby_core::common::FrameType::Binary,
-                other => panic!("unknown Go frame type {other}"),
-            },
-            payload: f.payload.into_bytes(),
-            ..Default::default()
+        Ok(self.frame.map(|f| {
+            SentFrame::new(
+                match f.frame_type {
+                    0 => cabby_core::common::FrameType::Text,
+                    1 => cabby_core::common::FrameType::Close,
+                    2 => cabby_core::common::FrameType::Binary,
+                    other => panic!("unknown Go frame type {other}"),
+                },
+                f.payload.into_bytes(),
+                0,
+                String::new(),
+            )
         }))
     }
 }

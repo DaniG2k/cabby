@@ -53,7 +53,7 @@ mod test_poll_encoder_encode {
         });
         let frame = poll_encoder_encode(&reply).expect("no error").expect("a frame");
 
-        assert_eq!(String::from_utf8(frame.payload).unwrap(), "123::epoch1\n{\"data\":\"test\"}");
+        assert_eq!(String::from_utf8(frame.payload.to_vec()).unwrap(), "123::epoch1\n{\"data\":\"test\"}");
     }
 }
 

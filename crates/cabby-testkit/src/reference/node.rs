@@ -25,7 +25,7 @@ use cabby_core::common::{
     CommandResult, ConnectResult, Controller, ControllerError, Message, MessageData, Outcome, PresenceEvent, Reply,
     SessionEnv, StreamMessage, StringMap,
 };
-use cabby_core::encoders::{FrameType, SentFrame};
+use cabby_core::encoders::SentFrame;
 use cabby_server::metrics::{Instrumenter, Metrics};
 use cabby_server::node::{self as rs, Disconnector, LegacySubscriber, Node, NodeOption, Session, SessionOption};
 pub use cabby_server::node::{
@@ -1994,7 +1994,7 @@ impl TestSession {
 }
 
 fn text_frame(payload: &str) -> SentFrame {
-    SentFrame { frame_type: FrameType::Text, payload: payload.as_bytes().to_vec(), ..Default::default() }
+    SentFrame::text(payload.as_bytes().to_vec())
 }
 
 /// Runs `f` on a detached thread and waits for it with a deadline, so a hung

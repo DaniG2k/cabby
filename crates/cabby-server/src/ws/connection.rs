@@ -31,12 +31,13 @@
 //!   pushes back on the client through TCP, as with Go's `ReadMessage`.
 //! * **Batching.** The io loop takes every queued frame at once, feeds them to the
 //!   WebSocket and flushes once: a fan-out burst becomes one socket write.
-//! * **Zero-copy frames.** [`Connection::write_frame`] and `try_write_frame` take
-//!   the hub's shared `Arc<SentFrame>` and queue it as is; the payload is referenced (not cloned)
-//!   until it is copied into the socket write buffer. The `&[u8]` methods of the
+//! * **Zero-copy frames.** [`Connection::write_frame`] and `try_write_frame` clone
+//!   the hub's shared `Bytes` payload (`SentFrame::payload`) without copying it
+//!   until it is written into the socket buffer. The `&[u8]` methods of the
 //!   node interface must copy once into a `Bytes`.
-//! * **Deadlines.** Each frame carries its deadline: the io loop fails the
-//!   connection when writing it takes longer (upstream `SetWriteDeadline`).
+//! * **Deadlines.** Each frame carries its deadline; [`write_batch`] enforces
+//!   the last frame's deadline across the batch and its flush, failing the
+//!   connection when writing takes longer.
 //! * **Close.** [`WsConnection::close`] queues the close frame behind the frames
 //!   already queued, then waits (at most 1s, upstream `CloseWithReason`) until it
 //!   is written and the socket is closed, so a shutdown flushes close frames before
@@ -159,32 +160,8 @@ impl Drop for ReadPermit {
     }
 }
 
-/// A frame payload: copied bytes, or the hub's shared frame.
-enum Payload {
-    Bytes(Bytes),
-    Shared(Arc<SentFrame>),
-}
-
-/// Lets `Bytes` reference a shared frame's payload without copying it.
-struct SharedPayload(Arc<SentFrame>);
-
-impl AsRef<[u8]> for SharedPayload {
-    fn as_ref(&self) -> &[u8] {
-        &self.0.payload
-    }
-}
-
-impl Payload {
-    fn into_bytes(self) -> Bytes {
-        match self {
-            Payload::Bytes(b) => b,
-            Payload::Shared(frame) => Bytes::from_owner(SharedPayload(frame)),
-        }
-    }
-}
-
 enum Outbound {
-    Data { text: bool, payload: Payload, deadline: Instant },
+    Data { text: bool, payload: Bytes, deadline: Instant },
     Ping { deadline: Instant },
 }
 
@@ -201,7 +178,7 @@ impl Outbound {
                 // Text payloads are produced by our encoders (valid UTF-8); sending
                 // a raw frame skips re-validating them.
                 let opcode = OpCode::Data(if text { Data::Text } else { Data::Binary });
-                Message::Frame(Frame::message(payload.into_bytes(), opcode, true))
+                Message::Frame(Frame::message(payload, opcode, true))
             }
             Outbound::Ping { .. } => Message::Ping(Bytes::new()),
         }
@@ -220,6 +197,9 @@ struct State {
     abandoned: bool,
     /// The io loop has ended; the error reads return.
     done: Option<String>,
+    /// Synchronous callers parked on `Shared::cond` (avoids waking on every
+    /// write batch when no blocking caller is waiting).
+    cond_waiters: usize,
     /// Released when the connection ends: it usually holds the session, which
     /// holds this connection.
     pong_handler: Option<Arc<dyn Fn() + Send + Sync>>,
@@ -386,6 +366,7 @@ impl WsConnection {
         let shared = self.shared();
         let deadline = item.deadline();
         let mut state = shared.lock();
+        let was_empty;
         loop {
             if let Some(err) = &state.done {
                 return Err(ConnectionError(err.clone()));
@@ -394,6 +375,7 @@ impl WsConnection {
                 return Err(ConnectionError(ERR_CLOSE_SENT.to_owned()));
             }
             if state.out.len() < MAX_QUEUED {
+                was_empty = state.out.is_empty();
                 state.out.push_back(item);
                 break;
             }
@@ -401,10 +383,14 @@ impl WsConnection {
             if now >= deadline {
                 return Err(ConnectionError("i/o timeout".to_owned()));
             }
+            state.cond_waiters += 1;
             state = shared.cond.wait_timeout(state, deadline - now).unwrap_or_else(|e| e.into_inner()).0;
+            state.cond_waiters -= 1;
         }
         drop(state);
-        shared.wake.notify_one();
+        if was_empty {
+            shared.wake.notify_one();
+        }
         Ok(())
     }
 
@@ -426,12 +412,12 @@ impl WsConnection {
 impl Connection for WsConnection {
     /// Queues a text frame (upstream `Write`).
     fn write(&self, msg: &[u8], deadline: Instant) -> Result<(), ConnectionError> {
-        self.push(Outbound::Data { text: true, payload: Payload::Bytes(Bytes::copy_from_slice(msg)), deadline })
+        self.push(Outbound::Data { text: true, payload: Bytes::copy_from_slice(msg), deadline })
     }
 
     /// Queues a binary frame (upstream `WriteBinary`).
     fn write_binary(&self, msg: &[u8], deadline: Instant) -> Result<(), ConnectionError> {
-        self.push(Outbound::Data { text: false, payload: Payload::Bytes(Bytes::copy_from_slice(msg)), deadline })
+        self.push(Outbound::Data { text: false, payload: Bytes::copy_from_slice(msg), deadline })
     }
 
     /// Queues a ping control frame (upstream `WritePing`), even when the queue is
@@ -445,9 +431,12 @@ impl Connection for WsConnection {
         if state.closing {
             return Err(ConnectionError(ERR_CLOSE_SENT.to_owned()));
         }
+        let was_empty = state.out.is_empty();
         state.out.push_back(Outbound::Ping { deadline });
         drop(state);
-        shared.wake.notify_one();
+        if was_empty {
+            shared.wake.notify_one();
+        }
         Ok(())
     }
 
@@ -474,13 +463,16 @@ impl Connection for WsConnection {
             state.want_writable = true;
             return Ok(false);
         }
+        let was_empty = state.out.is_empty();
         state.out.push_back(Outbound::Data {
             text: frame.frame_type == FrameType::Text,
-            payload: Payload::Shared(Arc::clone(frame)),
+            payload: frame.payload.clone(),
             deadline,
         });
         drop(state);
-        shared.wake.notify_one();
+        if was_empty {
+            shared.wake.notify_one();
+        }
         Ok(true)
     }
 
@@ -505,7 +497,9 @@ impl Connection for WsConnection {
             if let Some(err) = &state.done {
                 return Err(ConnectionError(err.clone()));
             }
+            state.cond_waiters += 1;
             state = shared.cond.wait(state).unwrap_or_else(|e| e.into_inner());
+            state.cond_waiters -= 1;
         }
     }
 
@@ -519,7 +513,7 @@ impl Connection for WsConnection {
             }
             FrameType::Text | FrameType::Binary => self.push(Outbound::Data {
                 text: frame.frame_type == FrameType::Text,
-                payload: Payload::Shared(Arc::clone(frame)),
+                payload: frame.payload.clone(),
                 deadline,
             }),
         }
@@ -542,7 +536,9 @@ impl Connection for WsConnection {
             if now >= deadline {
                 return;
             }
+            state.cond_waiters += 1;
             state = shared.cond.wait_timeout(state, deadline - now).unwrap_or_else(|e| e.into_inner()).0;
+            state.cond_waiters -= 1;
         }
     }
 }
@@ -552,6 +548,7 @@ struct Work {
     close: Option<(i32, String)>,
     abandoned: bool,
     can_read: bool,
+    notify_cond: bool,
 }
 
 /// A connection over an established WebSocket stream: the handle, and the io
@@ -589,6 +586,7 @@ where
                 close: state.close.take(),
                 abandoned: state.abandoned,
                 can_read: state.inbound.is_none() && !state.inflight,
+                notify_cond: state.cond_waiters > 0,
             }
         };
         if work.abandoned {
@@ -596,7 +594,9 @@ where
         }
         let wrote = !batch.is_empty();
         if wrote {
-            shared.cond.notify_all();
+            if work.notify_cond {
+                shared.cond.notify_all();
+            }
             shared.signal_writable();
             if let Err(err) = write_batch(&mut ws, &mut batch).await {
                 break err;
@@ -623,29 +623,29 @@ where
     // Dropping the stream closes the socket.
 }
 
-/// Writes the batch, then flushes; each frame within its deadline.
+/// Writes the batch, then flushes; the batch uses the last frame's deadline
+/// (matching the flush deadline) so a fan-out burst registers one Tokio timer
+/// instead of one per frame.
 async fn write_batch<S>(ws: &mut WebSocketStream<S>, batch: &mut VecDeque<Outbound>) -> Result<(), String>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let mut last = None;
-    for item in batch.drain(..) {
-        let deadline = tokio::time::Instant::from_std(item.deadline());
-        last = Some(deadline);
-        match tokio::time::timeout_at(deadline, ws.feed(item.into_message())).await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e.to_string()),
-            Err(_) => return Err("i/o timeout".to_owned()),
+    let Some(deadline) = batch.back().map(Outbound::deadline) else {
+        return Ok(());
+    };
+    let deadline = tokio::time::Instant::from_std(deadline);
+    match tokio::time::timeout_at(deadline, async {
+        for item in batch.drain(..) {
+            ws.feed(item.into_message()).await?;
         }
+        ws.flush().await
+    })
+    .await
+    {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err("i/o timeout".to_owned()),
     }
-    if let Some(deadline) = last {
-        match tokio::time::timeout_at(deadline, ws.flush()).await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e.to_string()),
-            Err(_) => return Err("i/o timeout".to_owned()),
-        }
-    }
-    Ok(())
 }
 
 /// Handles one read result; `Some(error)` ends the connection.

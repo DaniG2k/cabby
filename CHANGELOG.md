@@ -8,6 +8,18 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
+## [Unreleased]
+
+### Changed
+
+- Lower CPU and allocation overhead on the broadcast fan-out hot path (thin LTO and
+  `codegen-units = 1` in release builds, borrowed encoder IDs, cached hot metric counter
+  handles and session config, single-hop non-blocking writes, single batch write timer, and
+  fewer wakeups).
+- **Breaking (Rust embedding API):** `cabby_core::encoders::SentFrame.payload` is now
+  `bytes::Bytes` instead of `Vec<u8>`, so broadcast frames are shared across WebSocket
+  connections with a reference-count bump instead of copying or re-boxing.
+
 ## [0.3.0] - 2026-11-24
 
 Cabby 0.3.0 adds multi-node history and session recovery without NATS: a Redis broker for

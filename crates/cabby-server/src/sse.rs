@@ -231,17 +231,22 @@ impl Encoder {
 
 impl NodeEncoder for Encoder {
     fn id(&self) -> String {
-        let mut id = SSE_ENCODER_ID.to_owned();
-        if self.unwrap_data {
-            id.push_str(":u");
-        }
-        if self.raw_data {
-            id.push_str(":r");
-        }
-        if self.comment_pings {
-            id.push_str(":c");
-        }
-        id
+        self.id_str().into_owned()
+    }
+
+    #[inline]
+    fn id_str(&self) -> std::borrow::Cow<'_, str> {
+        let s = match (self.unwrap_data, self.raw_data, self.comment_pings) {
+            (false, false, false) => SSE_ENCODER_ID,
+            (true, false, false) => "sse:u",
+            (false, true, false) => "sse:r",
+            (false, false, true) => "sse:c",
+            (true, true, false) => "sse:u:r",
+            (true, false, true) => "sse:u:c",
+            (false, true, true) => "sse:r:c",
+            (true, true, true) => "sse:u:r:c",
+        };
+        std::borrow::Cow::Borrowed(s)
     }
 
     fn encode(&self, msg: &dyn EncodedMessageJson) -> Result<SentFrame, EncodeError> {

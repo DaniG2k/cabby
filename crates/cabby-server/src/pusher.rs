@@ -659,6 +659,11 @@ impl NodeEncoder for Encoder {
         ENCODER_ID.to_owned()
     }
 
+    #[inline]
+    fn id_str(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(ENCODER_ID)
+    }
+
     fn encode(&self, msg: &dyn EncodedMessageJson) -> Result<SentFrame, EncodeError> {
         self.encode_message(msg)?.ok_or_else(no_frame)
     }

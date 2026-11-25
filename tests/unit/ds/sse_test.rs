@@ -23,7 +23,7 @@ mod test_sse_encoder_encode {
 
         let frame = sse_encoder_encode(&encoder, &msg).expect("no error").expect("a frame");
 
-        let payload = String::from_utf8(frame.payload).unwrap();
+        let payload = String::from_utf8(frame.payload.to_vec()).unwrap();
 
         assert!(payload.contains("event: data"), "{payload}");
         assert!(payload.contains(r#""id":"1""#), "{payload}");
@@ -43,7 +43,7 @@ mod test_sse_encoder_encode {
 
         let frame = sse_encoder_encode(&encoder, &msg).expect("no error").expect("a frame");
 
-        assert_eq!(String::from_utf8(frame.payload).unwrap(), ": ping");
+        assert_eq!(String::from_utf8(frame.payload.to_vec()).unwrap(), ": ping");
     }
 
     /// upstream: ds/sse_test.go#TestSSEEncoder_Encode/skips_non-data_messages

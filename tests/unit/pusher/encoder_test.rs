@@ -15,7 +15,7 @@ const PRESENCE_IDENTIFIER: &str = r#"{"channel":"$pusher","stream":"presence-cha
 /// `string(actual.Payload)` after `require.NoError`.
 fn payload(res: Result<Option<SentFrame>, String>) -> String {
     let frame = res.expect("no error").expect("a frame");
-    String::from_utf8(frame.payload).expect("UTF-8 payload")
+    String::from_utf8(frame.payload.to_vec()).expect("UTF-8 payload")
 }
 
 fn reply(r: Reply) -> EncodedMessage {
