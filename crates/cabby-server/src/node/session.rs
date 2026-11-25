@@ -703,6 +703,8 @@ impl Session {
     fn park_refused(&self, frame: Arc<SentFrame>) -> bool {
         *lock(&self.refused) = Some(frame);
         self.writer.store(WRITER_WAIT_WRITABLE, Ordering::SeqCst);
+        #[cfg(test)]
+        tests::pause_park_refused();
         // The transport may have become writable since it refused the frame,
         // while the writer was still busy: take it back if so. Use `load`
         // (never `swap`) so a losing racer cannot consume a wakeup meant for
@@ -1846,6 +1848,19 @@ mod tests {
 
     use crate::node::Ticker;
 
+    thread_local! {
+        /// Runs once when this thread next parks a refused frame, before it checks
+        /// whether the transport became writable (see `park_refused`).
+        static PARK_PAUSE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    }
+
+    /// The pause point in [`Session::park_refused`].
+    pub(super) fn pause_park_refused() {
+        if let Some(pause) = PARK_PAUSE.take() {
+            pause();
+        }
+    }
+
     type Callback = Box<dyn FnOnce() + Send>;
     /// Elapsed time, last timer id, pending timers (id, due, callback).
     type ClockState = (Duration, u64, Vec<(u64, Duration, Callback)>);
@@ -2165,6 +2180,9 @@ mod tests {
         refused: AtomicBool,
         refusals: AtomicU64,
         handler: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+        /// Runs once when the transport next refuses a frame, before the writer
+        /// learns about it.
+        on_refusal: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     }
 
     impl Valve {
@@ -2213,8 +2231,13 @@ mod tests {
         fn try_write_frame(&self, frame: &Arc<SentFrame>, _deadline: Instant) -> Result<bool, ConnectionError> {
             let mut capacity = lock(&self.capacity);
             if *capacity == 0 {
+                drop(capacity);
                 self.refusals.fetch_add(1, Ordering::SeqCst);
                 self.refused.store(true, Ordering::SeqCst);
+                let on_refusal = lock(&self.on_refusal).take();
+                if let Some(f) = on_refusal {
+                    f();
+                }
                 return Ok(false);
             }
             *capacity -= 1;
@@ -2315,6 +2338,54 @@ mod tests {
         assert_eq!(last, [Some(PER_THREAD - 1); THREADS]);
         assert_eq!(TOTAL as u64, metrics.counter(METRICS_SENT_MSG).unwrap().value());
         assert_eq!(expected_bytes, metrics.counter(METRICS_DATA_SENT).unwrap().value());
+    }
+
+    /// The interleaving in which a parking thread that lost the writer must not
+    /// consume a wakeup meant for its current owner (`load`, never `swap`, in
+    /// [`Session::park_refused`]): with `swap` the second frame stays parked
+    /// although the transport is writable.
+    #[test]
+    fn a_parking_thread_that_lost_the_writer_leaves_the_wakeup_to_its_owner() {
+        let valve = Arc::new(Valve::default());
+        let s = Session::build(valve.clone(), SessionEnv::new("/cable", None));
+        s.send_messages();
+        s.set_connected(true);
+
+        let (refused_tx, refused) = channel::<()>();
+        let (resume_tx, resume) = channel::<()>();
+        let (producer_tx, producer) = channel();
+        // This thread (T) is paused after it parked "a"; everything below happens
+        // before it checks the flag.
+        let (valve2, s2, s3) = (valve.clone(), s.clone(), s.clone());
+        PARK_PAUSE.set(Some(Box::new(move || {
+            // The io loop signals writable: its handler takes the writer over, sends
+            // "a" and goes idle.
+            valve2.release(1);
+            assert_eq!(vec!["a"], valve2.frames());
+
+            // Another producer (P) takes the writer and is refused; it is held
+            // before it can park "b".
+            *lock(&valve2.on_refusal) = Some(Box::new(move || {
+                refused_tx.send(()).unwrap();
+                resume.recv_timeout(Duration::from_secs(5)).unwrap();
+            }));
+            let p = std::thread::spawn(move || s2.send_json_transmission("b"));
+            refused.recv_timeout(Duration::from_secs(5)).expect("P is refused");
+
+            // The io loop signals writable again. P still owns the writer, so the
+            // handler only sets the flag.
+            valve2.release(1);
+            assert_eq!(WRITER_BUSY, s3.writer.load(Ordering::SeqCst));
+            producer_tx.send(p).unwrap();
+        })));
+        s.send_json_transmission("a");
+
+        // T resumed, looked at the flag and lost the race. Now P parks "b": it must
+        // find the flag and write it, as no other signal is coming.
+        resume_tx.send(()).unwrap();
+        producer.recv_timeout(Duration::from_secs(5)).unwrap().join().unwrap();
+        assert_eq!(vec!["a", "b"], valve.frames(), "the wakeup was consumed by the thread that lost the writer");
+        assert_eq!(WRITER_IDLE, s.writer.load(Ordering::SeqCst));
     }
 
     #[test]
