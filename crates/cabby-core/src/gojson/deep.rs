@@ -238,20 +238,23 @@ mod tests {
         fn objects(depth: usize) -> String {
             format!("{}1{}", r#"{"a":"#.repeat(depth), "}".repeat(depth))
         }
+        // (whether it became a string, its text), read on the deep thread.
+        let kept = |text: String| {
+            with_deep_nesting(|| {
+                let mut de = deserializer(text.as_bytes()).unwrap();
+                match bounded(&<Value as serde::Deserialize>::deserialize(&mut de).unwrap()) {
+                    Value::String(text) => (true, text),
+                    json => (false, crate::gojson::to_string(&json)),
+                }
+            })
+            .unwrap()
+        };
         for doc in [nested, objects] {
-            let kept = |depth: usize| {
-                let text = doc(depth);
-                with_deep_nesting(|| {
-                    let mut de = deserializer(text.as_bytes()).unwrap();
-                    bounded(&<Value as serde::Deserialize>::deserialize(&mut de).unwrap())
-                })
-                .unwrap()
-            };
-            let ordinary = kept(MAX_KEPT_DEPTH);
-            assert!(!ordinary.is_string());
-            assert_eq!(doc(MAX_KEPT_DEPTH), crate::gojson::to_string(&ordinary));
-            for depth in [MAX_KEPT_DEPTH + 1, MAX_NESTING_DEPTH] {
-                assert_eq!(Value::String(doc(depth)), kept(depth));
+            for depth in [1, 125, 126] {
+                assert_eq!((false, doc(depth)), kept(doc(depth)), "{depth} levels stay JSON");
+            }
+            for depth in [127, 128, 4_999, 5_000, 5_001, 10_000] {
+                assert_eq!((true, doc(depth)), kept(doc(depth)), "{depth} levels become text");
             }
         }
     }
