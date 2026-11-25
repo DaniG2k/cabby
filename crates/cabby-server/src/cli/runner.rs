@@ -339,12 +339,8 @@ impl Runner {
             crate::metrics::log(Level::Warn, "Server is running in the public mode", &[]);
         }
 
-        if self.config.redis.tls_verification_skipped() {
-            crate::metrics::log(
-                Level::Warn,
-                "Redis server TLS certificate is not verified; set --redis_tls_verify=true to enable verification",
-                &[],
-            );
+        if let Some(warning) = redis_tls_warning(&self.config) {
+            crate::metrics::log(Level::Warn, warning, &[]);
         }
 
         let node = self.build_node()?;
@@ -943,6 +939,20 @@ fn default_rpc_controller() -> ControllerFactory {
     })
 }
 
+/// A warning when connections to Redis use TLS without verification, or do not
+/// use TLS although a URL asks for it (D-081).
+fn redis_tls_warning(c: &Config) -> Option<&'static str> {
+    if c.redis.tls_verification_skipped() {
+        Some("Redis server TLS certificate is not verified; set --redis_tls_verify=true to enable verification")
+    } else if !c.redis.tls_request_unused() {
+        None
+    } else if c.redis.is_sentinel() {
+        Some("Redis connections do not use TLS; use rediss:// in the first of --redis_sentinels to enable it")
+    } else {
+        Some("Redis connections do not use TLS; use rediss:// in the first URL of --redis_url to enable it")
+    }
+}
+
 /// A warning when a Redis URL is configured (after presets) but no broadcast
 /// adapter reads from Redis: the release image defaults to HTTP-only
 /// broadcasts, so an AnyCable set-up that broadcasts through Redis would
@@ -1200,6 +1210,23 @@ mod tests {
         assert_eq!(level, Level::Warn);
         assert_eq!(message, "both CABBY_SECRET and ANYCABLE_SECRET are set; using CABBY_SECRET");
         assert_eq!(attrs, vec![Attr::new("context", LogValue::String("config".into()))]);
+    }
+
+    /// Pins D-081: TLS without verification, and TLS asked for but not used, are
+    /// reported.
+    #[test]
+    fn deviation_d081_redis_tls_settings_are_reported() {
+        let warning = |url: &str, sentinels: &str| {
+            let mut c = Config::new();
+            c.redis.url = url.to_owned();
+            c.redis.sentinels = sentinels.to_owned();
+            redis_tls_warning(&c).unwrap_or_default()
+        };
+        assert_eq!("", warning("redis://redis", ""));
+        assert!(warning("valkeys://redis", "").contains("set --redis_tls_verify=true"));
+        assert!(warning("REDISS://redis", "").contains("set --redis_tls_verify=true"));
+        assert!(warning("rediss://master", "redis://sentinel").contains("first of --redis_sentinels"));
+        assert!(warning("redis://a,rediss://b", "").contains("first URL of --redis_url"));
     }
 
     /// A Redis URL without a Redis broadcast adapter is reported once: the

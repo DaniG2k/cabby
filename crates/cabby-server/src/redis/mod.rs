@@ -124,8 +124,27 @@ impl RedisConfig {
         !self.sentinels.is_empty() || !self.sentinel_master.is_empty()
     }
 
+    /// Whether connections use TLS without verifying the server's certificate.
     pub fn tls_verification_skipped(&self) -> bool {
-        !self.tls_verify && (self.url.contains("rediss://") || self.sentinels.contains("rediss://"))
+        !self.tls_verify && self.tls_used().unwrap_or_else(|| self.tls_requested())
+    }
+
+    /// Whether some URL asks for TLS but connections to Redis do not use it: the
+    /// first URL decides for all, and with sentinels, the first sentinel's.
+    pub fn tls_request_unused(&self) -> bool {
+        self.tls_requested() && self.tls_used() == Some(false)
+    }
+
+    /// Whether connections to Redis use TLS; `None` when the settings are invalid.
+    fn tls_used(&self) -> Option<bool> {
+        self.connect_spec().ok().map(|spec| spec.tls.is_some())
+    }
+
+    /// Whether the scheme of some URL (of Redis or a sentinel) asks for TLS.
+    fn tls_requested(&self) -> bool {
+        [&self.url, &self.sentinels].iter().flat_map(|urls| urls.split(',')).any(|raw| {
+            url::parse(&ensure_redis_scheme(raw)).is_ok_and(|u| matches!(u.scheme.as_str(), "rediss" | "valkeys"))
+        })
     }
 
     pub fn hostnames(&self) -> Vec<String> {
@@ -405,4 +424,47 @@ pub(crate) fn log(level: cabby_core::logger::Level, context: &str, msg: &str, at
     all.push(Attr::new("context", LogValue::String(context.to_owned())));
     all.extend(attrs.iter().map(|(k, v)| Attr::new(k, LogValue::String(v.clone()))));
     crate::metrics::log(level, msg, &all);
+}
+
+#[cfg(test)]
+mod tls_warning_tests {
+    use super::RedisConfig;
+
+    fn config(url: &str, sentinels: &str) -> RedisConfig {
+        RedisConfig { url: url.to_owned(), sentinels: sentinels.to_owned(), ..RedisConfig::new() }
+    }
+
+    /// Pins D-081: the warnings follow the TLS setting connections have.
+    #[test]
+    fn deviation_d081_tls_warnings_follow_the_parsed_urls() {
+        for (url, sentinels, skipped, unused) in [
+            ("redis://h", "", false, false),
+            ("h:6379", "", false, false),
+            ("rediss://h", "", true, false),
+            ("valkeys://h", "", true, false),
+            ("REDISS://h", "", true, false),
+            ("valkey://h", "", false, false),
+            ("rediss://h,redis://i", "", true, false),
+            ("redis://h,rediss://i", "", false, true),
+            ("redis://master", "rediss://s", true, false),
+            ("redis://master", "VALKEYS://s", true, false),
+            ("rediss://master", "rediss://s", true, false),
+            ("rediss://master", "s:26379", false, true),
+            ("Valkeys://master", "redis://s", false, true),
+            ("redis://master", "s:26379,rediss://t", false, true),
+            ("redis://u:p@h/1?x=rediss://", "", false, false),
+        ] {
+            let mut c = config(url, sentinels);
+            assert_eq!(skipped, c.tls_verification_skipped(), "{url} {sentinels}");
+            assert_eq!(unused, c.tls_request_unused(), "{url} {sentinels}");
+            c.tls_verify = true;
+            assert!(!c.tls_verification_skipped(), "{url} {sentinels}");
+            assert_eq!(unused, c.tls_request_unused(), "{url} {sentinels}");
+        }
+
+        // Settings that cannot be used: the URLs decide.
+        let mut c = config("rediss://h", "");
+        c.tls_ca_cert_path = "/nonexistent/ca.pem".to_owned();
+        assert!(c.tls_verification_skipped() && !c.tls_request_unused());
+    }
 }
