@@ -1781,4 +1781,76 @@ mod tests {
         until("the data", || gate.out() == b"\x8a\x02hi\x81\x04data").await;
         assert!(!conn.is_closed());
     }
+
+    /// Records the messages delivered, and what the client had been sent by then.
+    struct Inbox {
+        gate: Gate,
+        messages: Mutex<Vec<(Bytes, Vec<u8>)>>,
+    }
+
+    impl Inbox {
+        fn of(gate: &Gate, conn: &WsConnection) -> Arc<Inbox> {
+            let inbox = Arc::new(Inbox { gate: gate.clone(), messages: Mutex::default() });
+            conn.set_inbound_handler(inbox.clone());
+            inbox
+        }
+
+        fn messages(&self) -> Vec<(Bytes, Vec<u8>)> {
+            self.messages.lock().unwrap().clone()
+        }
+    }
+
+    impl InboundHandler for Inbox {
+        fn on_message(&self, msg: Bytes, _permit: ReadPermit) {
+            let sent = self.gate.out();
+            self.messages.lock().unwrap().push((msg, sent));
+        }
+
+        fn on_end(&self, _err: ConnectionError) {}
+    }
+
+    /// Deviation D-072: while frames for a client are queued or being written, its
+    /// messages stay unread; they are delivered after those frames.
+    #[tokio::test]
+    async fn deviation_d072_messages_wait_until_queued_frames_are_written() {
+        let gate = Gate::default();
+        let conn = gate.connection().await;
+        let inbox = Inbox::of(&gate, &conn);
+        queue(&conn, "one");
+        until("a write", || gate.wire().writes > 0).await;
+        queue(&conn, "two");
+        gate.client_sends(1, b"hello");
+        let unread = gate.wire().input.len();
+
+        // "one" is being written, then "two" is.
+        for sent in [b"".as_slice(), b"\x81\x03one"] {
+            gate.allow(sent.len());
+            until("the frames before", || gate.out() == sent).await;
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            assert_eq!((vec![], unread), (inbox.messages(), gate.wire().input.len()), "after {sent:?}");
+        }
+
+        gate.allow(usize::MAX);
+        until("the message", || !inbox.messages().is_empty()).await;
+        let sent = b"\x81\x03one\x81\x03two".to_vec();
+        assert_eq!(vec![(Bytes::from_static(b"hello"), sent)], inbox.messages());
+    }
+
+    /// Deviation D-072: messages received while a write is blocked are not delivered
+    /// if that write fails.
+    #[tokio::test]
+    async fn deviation_d072_messages_behind_a_failed_write_are_not_delivered() {
+        let gate = Gate::default();
+        let conn = gate.connection().await;
+        let inbox = Inbox::of(&gate, &conn);
+        assert_eq!(Ok(true), conn.try_write_frame(&text("data"), Duration::from_millis(100)));
+        until("a write", || gate.wire().writes > 0).await;
+        gate.client_sends(1, b"hello");
+        let unread = gate.wire().input.len();
+
+        assert_eq!("i/o timeout", ended(&conn).await);
+        gate.allow(usize::MAX);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!((vec![], unread), (inbox.messages(), gate.wire().input.len()));
+    }
 }
