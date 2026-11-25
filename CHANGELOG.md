@@ -19,6 +19,19 @@ Differences from the AnyCable Go server are listed by ID in
 - **Breaking (Rust embedding API):** `cabby_core::encoders::SentFrame.payload` is now
   `bytes::Bytes` instead of `Vec<u8>`, so broadcast frames are shared across WebSocket
   connections with a reference-count bump instead of copying or re-boxing.
+- WebSocket data frames and server pings are written straight to the socket, already framed,
+  with one vectored write per batch: payloads are no longer copied into a per-connection write
+  buffer, and a batch over 1 KiB is no longer split into several writes.
+  `--write_buffer_size` is still accepted, but only control frames (pongs, close frames) go
+  through that buffer.
+- The write timeout (`--ws_write_timeout`) of a WebSocket batch starts when the batch is
+  written, as in AnyCable, instead of when its last frame is queued: frames that wait behind
+  another batch, or for a busy CPU, keep their whole timeout. A client that does not take a
+  batch within the timeout is still disconnected.
+- A WebSocket connection ends when a pong cannot be written within a second, as in AnyCable.
+  Before, the failure was ignored.
+- **Breaking (Rust embedding API):** `cabby_server::node::Connection::try_write_frame` takes the
+  write timeout (a `Duration`, from the start of the write) instead of a deadline.
 
 ## [0.3.0] - 2026-11-24
 
