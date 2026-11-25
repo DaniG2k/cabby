@@ -7,7 +7,8 @@
 //! threads and handles the rare deeper message on a short-lived thread with a
 //! stack sized for Go's limit ([`with_deep_nesting`]). On that thread, the
 //! decoders built with [`deserializer`] (client messages) accept up to Go's limit.
-//! A value decoded there must not leave the thread: drop it there.
+//! A value decoded there must not leave the thread: drop it there, or keep
+//! [`bounded`] of it.
 //!
 //! At most [`MAX_CONCURRENT_DEEP_THREADS`] such threads run at once (D-056): a
 //! message that finds them all busy waits up to [`DEEP_PERMIT_WAIT`] and is
@@ -18,8 +19,14 @@ use std::cell::Cell;
 use std::sync::{Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
+
 /// Go's `encoding/json` nesting limit (`maxNestingDepth`).
 pub const MAX_NESTING_DEPTH: usize = 10_000;
+
+/// The nesting of a value that any thread may keep: what serde_json decodes by
+/// default (127 levels), inside an object of its own (a presence event).
+pub const MAX_KEPT_DEPTH: usize = 126;
 
 /// Stack of a deep-nesting thread. Measured on a debug build, decoding, handling
 /// (a perform that formats the data in its error) and dropping a client message
@@ -159,6 +166,23 @@ fn check_depth(raw: &[u8], limit: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether arrays and objects in `value` nest deeper than `limit` (looks at no
+/// more than `limit` levels).
+fn nests_deeper(value: &Value, limit: usize) -> bool {
+    match value {
+        Value::Array(items) => limit == 0 || items.iter().any(|v| nests_deeper(v, limit - 1)),
+        Value::Object(map) => limit == 0 || map.values().any(|v| nests_deeper(v, limit - 1)),
+        _ => false,
+    }
+}
+
+/// A copy of `value` that may leave a deep-nesting thread: nested deeper than
+/// [`MAX_KEPT_DEPTH`], it becomes its JSON text, a string (as other data nested
+/// too deep does, D-011).
+pub fn bounded(value: &Value) -> Value {
+    if nests_deeper(value, MAX_KEPT_DEPTH) { Value::String(super::to_string(value)) } else { value.clone() }
+}
+
 /// A serde_json deserializer over `raw` with the current thread's nesting limit:
 /// serde_json's default (128), or Go's on a [`with_deep_nesting`] thread, where
 /// a deeper document fails with Go's error text.
@@ -205,6 +229,31 @@ mod tests {
             (v.is_ok(), deserializer(too_deep.as_bytes()).err())
         });
         assert_eq!(Ok((true, Some("invalid character '[' exceeded max depth".into()))), ok);
+    }
+
+    /// Deviation D-073: a value kept beyond its deep-nesting thread is its JSON
+    /// text when it nests deeper than 126 levels.
+    #[test]
+    fn deviation_d073_kept_values_are_bounded() {
+        fn objects(depth: usize) -> String {
+            format!("{}1{}", r#"{"a":"#.repeat(depth), "}".repeat(depth))
+        }
+        for doc in [nested, objects] {
+            let kept = |depth: usize| {
+                let text = doc(depth);
+                with_deep_nesting(|| {
+                    let mut de = deserializer(text.as_bytes()).unwrap();
+                    bounded(&<Value as serde::Deserialize>::deserialize(&mut de).unwrap())
+                })
+                .unwrap()
+            };
+            let ordinary = kept(MAX_KEPT_DEPTH);
+            assert!(!ordinary.is_string());
+            assert_eq!(doc(MAX_KEPT_DEPTH), crate::gojson::to_string(&ordinary));
+            for depth in [MAX_KEPT_DEPTH + 1, MAX_NESTING_DEPTH] {
+                assert_eq!(Value::String(doc(depth)), kept(depth));
+            }
+        }
     }
 
     /// Deviation D-056: at most `max` deep threads run at once; a call that finds

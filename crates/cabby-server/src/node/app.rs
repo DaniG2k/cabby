@@ -1369,7 +1369,8 @@ impl Node {
                 let Some(presence) = presence else {
                     return Err(NodeError("presence data is missing".into()));
                 };
-                let info = presence.info.clone().unwrap_or(serde_json::Value::Null);
+                // The broker keeps the info beyond this message.
+                let info = presence.info.as_ref().map_or(serde_json::Value::Null, cabby_core::gojson::deep::bounded);
                 broker.presence_add(&stream, &sid, &presence.id, info).map(|_| ()).map_err(broker_error)
             }
             PRESENCE_LEAVE_TYPE => broker.presence_remove(&stream, &sid).map(|_| ()).map_err(broker_error),
@@ -1552,6 +1553,53 @@ mod tests {
             r#"{"type":"presence","identifier":"chat_1","message":{"type":"error","total":0}}"#,
             String::from_utf8(out).unwrap()
         );
+    }
+
+    struct Discard;
+
+    impl Connection for Discard {
+        fn write(&self, _msg: &[u8], _deadline: Instant) -> Result<(), ConnectionError> {
+            Ok(())
+        }
+        fn write_binary(&self, _msg: &[u8], _deadline: Instant) -> Result<(), ConnectionError> {
+            Ok(())
+        }
+        fn write_ping(&self, _deadline: Instant) -> Result<(), ConnectionError> {
+            Ok(())
+        }
+        fn read(&self) -> Result<Vec<u8>, ConnectionError> {
+            Err(ConnectionError("websocket: close 1000 (normal)".into()))
+        }
+        fn close(&self, _code: i32, _reason: &str) {}
+    }
+
+    /// Deviation D-073: presence info nested deeper than 126 levels is kept as
+    /// its JSON text.
+    #[test]
+    fn deviation_d073_deep_presence_info_is_kept_as_text() {
+        use cabby_core::broker::{Config as BrokerConfig, Memory, SystemClock as BrokerClock};
+
+        let node = Node::new(Config::new(), Vec::new());
+        let broker = Arc::new(Memory::new(None, None, &BrokerConfig::new(), Arc::new(BrokerClock)));
+        node.set_broker(broker.clone());
+        let s = Session::new(&node, Arc::new(Discard), "/cable", None, "sid", Vec::new());
+        s.subscriptions().add_channel("chat");
+        let state = StringMap::from([(PRESENCE_STREAM_STATE.to_owned(), "room".to_owned())]);
+        s.update_env(&mut |env| env.merge_channel_state("chat", &state));
+
+        let kept = |depth: usize| {
+            let text = format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+            let join = format!(r#"{{"command":"join","identifier":"chat","presence":{{"id":"1","info":{text}}}}}"#);
+            s.read_message(join.as_bytes()).expect("handled");
+            let mut records = broker.presence_info("room", None).expect("presence info").records;
+            (text, records.pop().expect("a record").info.expect("info"))
+        };
+        let (text, info) = kept(126);
+        assert_eq!(text, info.to_string());
+        for depth in [127, 500] {
+            let (text, info) = kept(depth);
+            assert_eq!(json!(text), info);
+        }
     }
 
     /// Deviation D-016: `goroutines_num` and `mem_sys_bytes` report the process's

@@ -49,6 +49,11 @@ embedding API are breaking (see "Changed").
 - **Breaking (Rust embedding API):** `cabby_server::node::Connection::try_write_frame` takes the
   write timeout (a `Duration`, from the start of the write) instead of a deadline.
 
+### Fixed
+
+- The depth of presence info is bounded: info nested deeper than 126 levels is kept and sent as
+  its JSON text (D-073).
+
 ## [0.3.0] - 2026-11-24
 
 Cabby 0.3.0 adds multi-node history and session recovery without NATS: a Redis broker for
