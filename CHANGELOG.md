@@ -38,8 +38,13 @@ embedding API are breaking (see "Changed").
   from when it is sent, and never gives the data written with it more than the write timeout.
 - A WebSocket connection ends when writing a pong fails or takes more than a second, and
   messages behind that ping are not executed, as in AnyCable when nothing else is being
-  written. Before, the failure was ignored. (While other frames are being written, Cabby
-  answers pings after them.)
+  written. Before, the failure was ignored. (While frames are being written, Cabby answers
+  pings after that batch.)
+- A WebSocket client that is behind with reading is still read, one message per batch of frames
+  written to it (D-072). Before, its commands waited until it had caught up, and with
+  `--pong_timeout` it was disconnected once it was behind for longer than that, since its pongs
+  waited too. As in AnyCable, a close frame or the end of the stream from such a client now ends
+  the connection at once, without sending the frames still queued.
 - **Breaking (Rust embedding API):** `cabby_server::node::Connection::try_write_frame` takes the
   write timeout (a `Duration`, from the start of the write) instead of a deadline.
 
