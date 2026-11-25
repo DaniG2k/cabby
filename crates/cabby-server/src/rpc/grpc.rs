@@ -116,6 +116,10 @@ fn system_resolver() -> Resolver {
     })
 }
 
+/// grpc-go's `minConnectTimeout`: how long a background connection attempt may
+/// take (or its backoff, if longer).
+const MIN_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// grpc-go `backoff.DefaultExponential.Backoff(retries)`: 1 s base, factor
 /// 1.6, jitter 0.2, at most 120 s.
 fn exponential_backoff(retries: u32) -> Duration {
@@ -155,6 +159,10 @@ struct Subchannel {
     channel: ArcSwapOption<Channel>,
     /// The last connection attempt failed (gRPC `TRANSIENT_FAILURE`).
     failing: AtomicBool,
+    /// A connection attempt failed (a one-slot queue): reconnect in the background.
+    failed: Notify,
+    /// The address is no longer listed, or the client is closed.
+    removed: CancellationToken,
 }
 
 /// A connection counted in [`State::active`] while open.
@@ -336,7 +344,7 @@ impl Inner {
         (self.resolver)(bare_host(t), t.port).await.ok().filter(|a| !a.is_empty())
     }
 
-    fn subchannel(t: &Target, addr: Option<SocketAddr>) -> Arc<Subchannel> {
+    fn subchannel(&self, t: &Target, addr: Option<SocketAddr>) -> Arc<Subchannel> {
         Arc::new(Subchannel {
             authority: format!("{}:{}", t.host, t.port),
             host: bare_host(t),
@@ -344,19 +352,46 @@ impl Inner {
             addr,
             channel: ArcSwapOption::empty(),
             failing: AtomicBool::new(false),
+            failed: Notify::new(),
+            removed: self.stop.child_token(),
         })
     }
 
     /// Starts connecting `s` in the background (grpc-go connects every
-    /// subchannel when the channel leaves idle or the address list changes).
+    /// subchannel when the channel leaves idle or the address list changes) and
+    /// keeps reconnecting it with backoff when connection attempts fail.
     fn connect_in_background(&self, s: &Arc<Subchannel>) {
         let endpoint = self.endpoint(s);
-        let connector = self.connector(s);
-        let s = Arc::clone(s);
+        let (s, state, tls) = (Arc::clone(s), Arc::clone(&self.state), self.tls.clone());
         tokio::spawn(async move {
-            if let Ok(channel) = endpoint.connect_with_connector(connector).await {
-                let channel = Arc::new(channel);
-                s.channel.rcu(|cur| cur.clone().or_else(|| Some(Arc::clone(&channel))));
+            let removed = s.removed.clone();
+            let connect = || endpoint.connect_with_connector(Self::connector(&s, &state, &tls));
+            let connections = async {
+                if let Ok(channel) = connect().await {
+                    let channel = Arc::new(channel);
+                    s.channel.rcu(|cur| cur.clone().or_else(|| Some(Arc::clone(&channel))));
+                }
+                loop {
+                    s.failed.notified().await;
+                    let mut retries = 0;
+                    while s.failing.load(Ordering::Relaxed) {
+                        let backoff = exponential_backoff(retries);
+                        retries += 1;
+                        tokio::time::sleep(backoff).await;
+                        // A call may have reconnected it meanwhile.
+                        if !s.failing.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let limit = MIN_CONNECT_TIMEOUT.max(backoff);
+                        if let Ok(Ok(channel)) = tokio::time::timeout(limit, connect()).await {
+                            s.channel.store(Some(Arc::new(channel)));
+                        }
+                    }
+                }
+            };
+            tokio::select! {
+                () = removed.cancelled() => {}
+                () = connections => {}
             }
         });
     }
@@ -369,11 +404,11 @@ impl Inner {
         for t in &self.targets {
             let addrs = if t.resolve { self.lookup(t).await } else { None };
             match addrs {
-                Some(addrs) => subs.extend(addrs.into_iter().map(|a| Self::subchannel(t, Some(a)))),
+                Some(addrs) => subs.extend(addrs.into_iter().map(|a| self.subchannel(t, Some(a)))),
                 None => {
                     resolved &= !t.resolve;
                     // Dialed by name (resolution happens per connection attempt).
-                    subs.push(Self::subchannel(t, None));
+                    subs.push(self.subchannel(t, None));
                 }
             }
         }
@@ -402,7 +437,7 @@ impl Inner {
             match old.iter().find(|s| s.addr == Some(a)) {
                 Some(s) => fresh.push(Arc::clone(s)),
                 None => {
-                    let s = Self::subchannel(t, Some(a));
+                    let s = self.subchannel(t, Some(a));
                     self.connect_in_background(&s);
                     fresh.push(s);
                 }
@@ -411,6 +446,7 @@ impl Inner {
         current.store(Arc::new(fresh.clone()));
         for s in old.iter() {
             if !fresh.iter().any(|f| Arc::ptr_eq(f, s)) {
+                s.removed.cancel();
                 s.channel.store(None);
             }
         }
@@ -424,9 +460,11 @@ impl Inner {
             .tcp_nodelay(true)
     }
 
+    /// Opens connections to `s`, and keeps track of their state.
     fn connector(
-        &self,
         s: &Arc<Subchannel>,
+        state: &Arc<State>,
+        tls: &Option<Arc<ClientConfig>>,
     ) -> impl tower::Service<
         http::Uri,
         Response = TokioIo<Counted>,
@@ -434,7 +472,7 @@ impl Inner {
         Future = impl Future<Output = io::Result<TokioIo<Counted>>> + Send,
     > + Send
     + 'static {
-        let (s, state, tls) = (Arc::clone(s), Arc::clone(&self.state), self.tls.clone());
+        let (s, state, tls) = (Arc::clone(s), Arc::clone(state), tls.clone());
         tower::service_fn(move |_uri: http::Uri| {
             let (s, state, tls) = (Arc::clone(&s), Arc::clone(&state), tls.clone());
             async move {
@@ -474,6 +512,7 @@ impl Inner {
                     }
                     Err(e) => {
                         s.failing.store(true, Ordering::Relaxed);
+                        s.failed.notify_one();
                         state.resolve_now.notify_one();
                         Err(e)
                     }
@@ -494,7 +533,11 @@ impl Inner {
         if let Some(channel) = chosen.channel.load_full() {
             return Channel::clone(&channel);
         }
-        let lazy = Arc::new(self.endpoint(chosen).connect_with_connector_lazy(self.connector(chosen)));
+        let lazy = Arc::new(self.endpoint(chosen).connect_with_connector_lazy(Self::connector(
+            chosen,
+            &self.state,
+            &self.tls,
+        )));
         let previous = chosen.channel.rcu(|cur| cur.clone().or_else(|| Some(Arc::clone(&lazy))));
         Channel::clone(previous.as_deref().unwrap_or(&lazy))
     }
@@ -603,7 +646,8 @@ impl RpcClient for GrpcClient {
 
 impl ClientHelper for GrpcClient {
     /// Ready unless closed; after a transient failure (every backend's last
-    /// connection attempt failed) one immediate attempt is allowed.
+    /// connection attempt failed) one immediate attempt is allowed. Further
+    /// attempts are made in the background, until one succeeds.
     fn ready(&self) -> Result<(), RpcError> {
         if self.inner.state.closed.load(Ordering::Relaxed) {
             return Err(RpcError::Other("grpc connection is closed".into()));
@@ -741,6 +785,52 @@ mod tests {
         assert_eq!(1, lookups.load(Ordering::SeqCst));
         client.close();
         b.task.abort();
+    }
+
+    /// After every connection attempt failed, the client reconnects in the
+    /// background (grpc-go's backoff, from 1 s) and is ready again once the
+    /// backend is back on its address.
+    #[tokio::test]
+    async fn reconnects_when_the_backend_returns_on_the_same_address() {
+        let b = backend().await;
+        let config = Config { host: b.addr.to_string(), ..Config::default() };
+        let client = GrpcClient::new(&config).expect("client");
+        let _ = client.connect(&call_context(), protos::ConnectionRequest::default()).await;
+        assert_eq!(Ok(()), client.ready());
+
+        b.task.abort();
+        let _ = b.task.await;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while client.ready().is_ok() {
+            assert!(tokio::time::Instant::now() < deadline, "the client notices that the backend is gone");
+            let _ = client.connect(&call_context(), protos::ConnectionRequest::default()).await;
+        }
+        let not_ready = RpcError::Other("grpc connection is not ready".into());
+        assert_eq!(Err(not_ready), client.ready(), "one immediate attempt is allowed");
+
+        let listener = TcpListener::bind(b.addr).await.expect("bind the same address");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while client.ready().is_err() {
+            assert!(tokio::time::Instant::now() < deadline, "the client reconnects");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let _ = listener.accept().await.expect("a connection");
+        client.close();
+    }
+
+    /// Reconnecting ends when the client is closed.
+    #[tokio::test]
+    async fn does_not_reconnect_once_closed() {
+        let b = backend().await;
+        b.task.abort();
+        let _ = b.task.await;
+        let config = Config { host: b.addr.to_string(), ..Config::default() };
+        let client = GrpcClient::new(&config).expect("client");
+        let _ = client.connect(&call_context(), protos::ConnectionRequest::default()).await;
+        client.close();
+
+        let listener = TcpListener::bind(b.addr).await.expect("bind the same address");
+        assert!(tokio::time::timeout(Duration::from_secs(2), listener.accept()).await.is_err());
     }
 
     #[test]

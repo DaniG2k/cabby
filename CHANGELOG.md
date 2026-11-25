@@ -58,6 +58,10 @@ embedding API are breaking (see "Changed").
   (D-074).
 - HTTP RPC requests cancelled because their session closed no longer count as failures for the
   circuit breaker (D-075).
+- gRPC: after every connection attempt to the RPC backends failed, Cabby reconnects in the
+  background with backoff (1 s at first, up to 2 minutes), as AnyCable does. Before, RPC calls
+  kept failing with `grpc connection is not ready` after the backend was back on the same
+  address, until Cabby was restarted.
 
 ## [0.3.0] - 2026-11-24
 
