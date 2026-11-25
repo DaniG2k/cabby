@@ -41,14 +41,18 @@
 //!   encrypted). The `&[u8]` methods of the node interface must copy once into a
 //!   `Bytes`.
 //! * **Deadlines.** Each frame carries how long its write may take, and a batch
-//!   has one deadline, the last frame's, across its write and flush: the connection
-//!   fails when they take longer, whether or not the client takes some bytes.
-//!   Frames queued by [`Connection::try_write_frame`] carry a timeout that starts
-//!   when the io loop starts writing their batch, as Go sets the deadline when it
-//!   writes: producers do not read the clock, and a batch reads it once. A frame
+//!   has one deadline, the earliest of its frames', across its write and flush: the
+//!   connection fails when they take longer, whether or not the client takes some
+//!   bytes. Frames queued by [`Connection::try_write_frame`] carry a timeout that
+//!   starts when the io loop starts writing their batch, as Go sets the deadline when
+//!   it writes: producers do not read the clock, and a batch reads it once. A frame
 //!   that waits in the queue does so behind the batch being written (or a pong),
 //!   whose own deadline bounds that wait. Blocking writers, which wait for space in
-//!   the queue, bring a deadline that covers that wait as well.
+//!   the queue, and pings bring a deadline that covers the wait as well. So a ping
+//!   never gives the data around it more than its write timeout, and the connection
+//!   fails when a ping is not written by its deadline, as in Go (`WriteControl` waits
+//!   for the writer until then). A ping that is overdue when its batch starts costs
+//!   the connection only if the socket does not take the batch at once.
 //! * **Close.** [`WsConnection::close`] queues the close frame behind the frames
 //!   already queued, then waits (at most 1s, upstream `CloseWithReason`) until it
 //!   is written and the socket is closed, so a shutdown flushes close frames before
@@ -249,20 +253,24 @@ impl FrameHeader {
 /// How long writing a frame may take.
 #[derive(Clone, Copy)]
 enum WriteLimit {
-    /// Until then (a blocking writer's deadline, which started with its wait for space).
+    /// Until then (the deadline of a blocking writer, which started with its wait for
+    /// space, or of a ping).
     Until(Instant),
     /// This long, from the start of its batch's write.
     Within(Duration),
 }
 
-impl WriteLimit {
-    /// The deadline of a write that starts now.
-    fn deadline(self) -> Instant {
-        match self {
-            WriteLimit::Until(deadline) => deadline,
-            WriteLimit::Within(timeout) => deadline_after(timeout),
+/// The deadline of a batch whose write starts now: the earliest of its frames'
+/// limits. Reads the clock at most once.
+fn batch_deadline(batch: &VecDeque<Outbound>) -> Option<Instant> {
+    let (mut until, mut within) = (None, None);
+    for frame in batch {
+        match frame.limit {
+            WriteLimit::Until(at) => until = Some(until.map_or(at, |u: Instant| u.min(at))),
+            WriteLimit::Within(timeout) => within = Some(within.map_or(timeout, |w: Duration| w.min(timeout))),
         }
     }
+    [until, within.map(deadline_after)].into_iter().flatten().min()
 }
 
 /// A queued frame: its header and the shared payload, ready to be written.
@@ -722,18 +730,18 @@ where
     // Dropping the stream closes the socket.
 }
 
-/// Writes the batch to the socket, then flushes it (TLS needs that); the batch uses
-/// the last frame's limit across both, so a fan-out burst reads the clock once and
-/// registers one Tokio timer instead of one per frame. Empties the batch.
+/// Writes the batch to the socket, then flushes it (TLS needs that). One deadline
+/// covers both, the earliest of the frames' limits, so a fan-out burst reads the
+/// clock once and registers one Tokio timer instead of one per frame. Empties the
+/// batch.
 async fn write_batch<W>(io: &mut W, batch: &mut VecDeque<Outbound>) -> Result<(), String>
 where
     W: AsyncWrite + Unpin,
 {
-    let Some(limit) = batch.back().map(|frame| frame.limit) else {
+    let Some(deadline) = batch_deadline(batch) else {
         return Ok(());
     };
-    let deadline = tokio::time::Instant::from_std(limit.deadline());
-    match tokio::time::timeout_at(deadline, async {
+    match tokio::time::timeout_at(deadline.into(), async {
         write_frames(io, batch).await?;
         io.flush().await
     })
@@ -1623,9 +1631,64 @@ mod tests {
         }
     }
 
+    /// How long a batch may take on a socket that takes nothing.
+    async fn stalled_batch(name: &str, batch: impl IntoIterator<Item = Outbound>) -> Duration {
+        let started = Instant::now();
+        let mut batch = batch.into_iter().collect();
+        let res = tokio::time::timeout(Duration::from_secs(10), write_batch(&mut Gate::default(), &mut batch)).await;
+        assert_eq!(Ok(Err("i/o timeout".to_owned())), res, "{name}: the batch fails by itself");
+        started.elapsed()
+    }
+
+    /// The earliest limit of a batch bounds it, wherever its frame is.
+    #[tokio::test]
+    async fn the_earliest_limit_bounds_a_batch() {
+        const SHORT: Duration = Duration::from_millis(200);
+        const LONG: Duration = Duration::from_secs(3600);
+        // Built when its batch starts, as a ping's deadline is absolute.
+        let data: fn(Duration) -> Outbound = |t| Outbound::data(true, payload(5), WriteLimit::Within(t));
+        let ping: fn(Duration) -> Outbound = |t| Outbound::ping(WriteLimit::Until(Instant::now() + t));
+        for (name, batch) in [
+            ("ping last and shorter", [(data, LONG), (data, LONG), (ping, SHORT)]),
+            ("ping first and shorter", [(ping, SHORT), (data, LONG), (data, LONG)]),
+            ("ping last and longer", [(data, SHORT), (data, SHORT), (ping, LONG)]),
+            ("ping first and longer", [(ping, LONG), (data, SHORT), (data, SHORT)]),
+            ("shorter ping first", [(ping, SHORT), (data, LONG), (ping, LONG)]),
+            ("shorter ping last", [(ping, LONG), (data, LONG), (ping, SHORT)]),
+            ("shorter data first", [(data, SHORT), (data, LONG), (data, LONG)]),
+            ("shorter data in the middle", [(data, LONG), (data, SHORT), (data, LONG)]),
+            ("shorter data last", [(data, LONG), (data, LONG), (data, SHORT)]),
+        ] {
+            let after = stalled_batch(name, batch.map(|(frame, limit)| frame(limit))).await;
+            assert!(after >= SHORT, "{name}: {after:?}");
+        }
+        assert!(stalled_batch("ping alone", [ping(SHORT)]).await >= SHORT);
+    }
+
+    /// A ping that waited past its deadline fails the connection, with the data in
+    /// its batch, unless the socket takes the batch at once.
+    #[tokio::test]
+    async fn an_overdue_ping_fails_a_batch_that_cannot_be_written_at_once() {
+        let batch = |overdue: Instant| {
+            let data = || Outbound::data(true, payload(4), LIMIT);
+            [data(), Outbound::ping(WriteLimit::Until(overdue)), data()]
+        };
+        let overdue = Instant::now();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        let after = stalled_batch("overdue ping", batch(overdue)).await;
+        assert!(after < Duration::from_secs(5), "at once, not after the data's limit: {after:?}");
+
+        let mut gate = Gate::default();
+        gate.allow(usize::MAX);
+        write_batch(&mut gate, &mut batch(overdue).into()).await.unwrap();
+        assert_eq!(b"\x81\x04abcd\x89\x00\x81\x04abcd".to_vec(), gate.out());
+    }
+
     #[test]
     fn endless_write_timeouts_do_not_overflow() {
-        assert!(WriteLimit::Within(Duration::MAX).deadline() > Instant::now() + Duration::from_secs(3600));
+        let batch = [Outbound::data(true, Bytes::new(), WriteLimit::Within(Duration::MAX))].into();
+        assert!(batch_deadline(&batch).unwrap() > Instant::now() + Duration::from_secs(3600));
+        assert_eq!(None, batch_deadline(&VecDeque::new()));
     }
 
     /// A pong that is not written within a second (gorilla's `writeWait`) ends the

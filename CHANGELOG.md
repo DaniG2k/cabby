@@ -27,7 +27,9 @@ Differences from the AnyCable Go server are listed by ID in
 - The write timeout (`--ws_write_timeout`) of a WebSocket batch starts when the batch is
   written, as in AnyCable, instead of when its last frame is queued: frames that wait behind
   another batch, or for a busy CPU, keep their whole timeout. A client that does not take a
-  batch within the timeout is still disconnected.
+  batch within the timeout is still disconnected. The earliest limit of a batch's frames bounds
+  it: a native ping (`--enable_native_pings`) keeps its own deadline, half the ping interval
+  from when it is sent, and never gives the data written with it more than the write timeout.
 - A WebSocket connection ends when a pong cannot be written within a second, as in AnyCable.
   Before, the failure was ignored.
 - **Breaking (Rust embedding API):** `cabby_server::node::Connection::try_write_frame` takes the
