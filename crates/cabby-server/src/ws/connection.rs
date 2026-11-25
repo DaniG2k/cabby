@@ -256,8 +256,16 @@ enum WriteLimit {
     /// Until then (the deadline of a blocking writer, which started with its wait for
     /// space, or of a ping).
     Until(Instant),
-    /// This long, from the start of its batch's write.
-    Within(Duration),
+    /// This many nanoseconds (up to about 584 years) from the start of its batch's
+    /// write. A bare `u64` fits beside `Instant`'s niche, unlike a `Duration`: a
+    /// queued frame stays at 64 bytes.
+    Within(u64),
+}
+
+impl WriteLimit {
+    fn within(timeout: Duration) -> Self {
+        WriteLimit::Within(u64::try_from(timeout.as_nanos()).unwrap_or(u64::MAX))
+    }
 }
 
 /// The deadline of a batch whose write starts now: the earliest of its frames'
@@ -267,10 +275,10 @@ fn batch_deadline(batch: &VecDeque<Outbound>) -> Option<Instant> {
     for frame in batch {
         match frame.limit {
             WriteLimit::Until(at) => until = Some(until.map_or(at, |u: Instant| u.min(at))),
-            WriteLimit::Within(timeout) => within = Some(within.map_or(timeout, |w: Duration| w.min(timeout))),
+            WriteLimit::Within(nanos) => within = Some(within.map_or(nanos, |w: u64| w.min(nanos))),
         }
     }
-    [until, within.map(deadline_after)].into_iter().flatten().min()
+    [until, within.map(|nanos| deadline_after(Duration::from_nanos(nanos)))].into_iter().flatten().min()
 }
 
 /// A queued frame: its header and the shared payload, ready to be written.
@@ -577,7 +585,7 @@ impl Connection for WsConnection {
         }
         let was_empty = state.out.is_empty();
         let text = frame.frame_type == FrameType::Text;
-        state.out.push_back(Outbound::data(text, frame.payload.clone(), WriteLimit::Within(timeout)));
+        state.out.push_back(Outbound::data(text, frame.payload.clone(), WriteLimit::within(timeout)));
         drop(state);
         if was_empty {
             shared.wake.notify_one();
@@ -1325,7 +1333,7 @@ mod tests {
     }
 
     /// Long enough.
-    const LIMIT: WriteLimit = WriteLimit::Within(Duration::from_secs(10));
+    const LIMIT: WriteLimit = WriteLimit::Within(Duration::from_secs(10).as_nanos() as u64);
 
     /// The frames tungstenite writes for `messages`.
     fn tungstenite_bytes(messages: impl IntoIterator<Item = Message>) -> Vec<u8> {
@@ -1646,7 +1654,7 @@ mod tests {
         const SHORT: Duration = Duration::from_millis(200);
         const LONG: Duration = Duration::from_secs(3600);
         // Built when its batch starts, as a ping's deadline is absolute.
-        let data: fn(Duration) -> Outbound = |t| Outbound::data(true, payload(5), WriteLimit::Within(t));
+        let data: fn(Duration) -> Outbound = |t| Outbound::data(true, payload(5), WriteLimit::within(t));
         let ping: fn(Duration) -> Outbound = |t| Outbound::ping(WriteLimit::Until(Instant::now() + t));
         for (name, batch) in [
             ("ping last and shorter", [(data, LONG), (data, LONG), (ping, SHORT)]),
@@ -1684,11 +1692,19 @@ mod tests {
         assert_eq!(b"\x81\x04abcd\x89\x00\x81\x04abcd".to_vec(), gate.out());
     }
 
+    /// A connection that had frames queued keeps room for several.
     #[test]
-    fn endless_write_timeouts_do_not_overflow() {
-        let batch = [Outbound::data(true, Bytes::new(), WriteLimit::Within(Duration::MAX))].into();
+    fn queued_frames_stay_small() {
+        assert!(size_of::<Outbound>() <= 64, "{}", size_of::<Outbound>());
+    }
+
+    #[tokio::test]
+    async fn endless_write_timeouts_do_not_overflow() {
+        let mut batch = [Outbound::data(true, Bytes::new(), WriteLimit::within(Duration::MAX))].into();
         assert!(batch_deadline(&batch).unwrap() > Instant::now() + Duration::from_secs(3600));
-        assert_eq!(None, batch_deadline(&VecDeque::new()));
+        // Not ready at first, so that the timer is armed.
+        write_batch(&mut Choppy::new(usize::MAX, true), &mut batch).await.unwrap();
+        assert_eq!(None, batch_deadline(&batch));
     }
 
     /// A pong that is not written within a second (gorilla's `writeWait`) ends the
