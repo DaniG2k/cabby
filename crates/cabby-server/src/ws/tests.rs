@@ -875,3 +875,102 @@ fn a_slow_reader_is_not_dropped() {
     assert!(!writer.join().unwrap().is_closed());
     server.shutdown();
 }
+
+/// The node's commands, recording those with an identifier and how many frames the
+/// client had read by then.
+struct Recorder {
+    node: Arc<crate::node::Node>,
+    frames_read: Arc<AtomicUsize>,
+    commands: Mutex<Vec<(String, usize)>>,
+}
+
+impl crate::node::Executor for Recorder {
+    fn handle_command(
+        &self,
+        session: &Arc<crate::node::Session>,
+        msg: &cabby_core::common::Message,
+    ) -> Result<(), crate::node::NodeError> {
+        if msg.identifier.is_empty() {
+            return self.node.handle_command(session, msg);
+        }
+        let read = self.frames_read.load(Ordering::SeqCst);
+        self.commands.lock().unwrap().push((msg.identifier.clone(), read));
+        Ok(())
+    }
+
+    fn disconnect(&self, _session: &Arc<crate::node::Session>) -> Result<(), crate::node::NodeError> {
+        Ok(())
+    }
+}
+
+/// A client that reads steadily but is behind for several seconds (much longer than the
+/// pong timeout): its commands run meanwhile, in order, and its pongs are seen.
+#[test]
+fn a_slow_reader_with_a_backlog_is_still_read() {
+    use crate::node::{Node, Session, SessionOption};
+
+    const FRAMES: usize = 400;
+    const FRAME: usize = 64 * 1024;
+    let (server, addr, rx) = ws_server(&Config::new());
+    // A small receive buffer: the backlog stays on the server.
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_io().build().unwrap();
+    let mut stream = runtime.block_on(async {
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.set_recv_buffer_size(16 * 1024).unwrap();
+        socket.connect(addr).await.unwrap().into_std().unwrap()
+    });
+    stream.set_nonblocking(false).unwrap();
+    stream.set_read_timeout(Some(IO_DEADLINE)).unwrap();
+    upgrade(&mut stream, "/cable");
+    let (conn, _) = session(&rx);
+
+    let node = Node::new(crate::node::Config::new(), Vec::new());
+    let ping = Duration::from_millis(200);
+    let opts = vec![SessionOption::PingInterval(ping), SessionOption::PongTimeout(5 * ping)];
+    let session = Session::new(&node, Arc::new(conn.clone()), "/cable", None, "slow", opts);
+    let frames_read = Arc::new(AtomicUsize::new(0));
+    let recorder =
+        Arc::new(Recorder { node: node.clone(), frames_read: frames_read.clone(), commands: Mutex::default() });
+    session.set_executor(recorder.clone());
+    session.set_connected(true);
+    conn.set_inbound_handler(Arc::new(session.reader(Box::new(|| {}))));
+
+    let message = format!("\"{}\"", "x".repeat(FRAME));
+    for _ in 0..FRAMES {
+        session.send_json_transmission(&message);
+    }
+    let mut sender = stream.try_clone().unwrap();
+    let done = frames_read.clone();
+    let pongs = std::thread::spawn(move || {
+        for i in 0..3 {
+            let command = format!("{{\"command\":\"message\",\"identifier\":\"{i}\"}}");
+            sender.write_all(&raw_frame(0x81, command.as_bytes(), false)).unwrap();
+        }
+        while done.load(Ordering::SeqCst) < FRAMES {
+            sender.write_all(&raw_frame(0x81, b"{\"command\":\"pong\"}", false)).unwrap();
+            std::thread::sleep(ping / 2);
+        }
+    });
+    let started = Instant::now();
+    while frames_read.load(Ordering::SeqCst) < FRAMES {
+        let (opcode, payload) = read_server_frame(&mut stream).expect("a frame");
+        assert_eq!(1, opcode);
+        if payload.len() > FRAME {
+            frames_read.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(8));
+        } else {
+            assert!(payload.starts_with(b"{\"type\":\"ping\""), "{}", String::from_utf8_lossy(&payload));
+        }
+    }
+    assert!(started.elapsed() > 10 * ping, "behind for longer than the pong timeout");
+    assert!(!session.is_closed(), "its pongs were read");
+    pongs.join().unwrap();
+
+    let commands = recorder.commands.lock().unwrap().clone();
+    assert_eq!(vec!["0", "1", "2"], commands.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>());
+    assert!(
+        commands.iter().all(|(_, read)| *read < FRAMES / 2),
+        "executed only once the client caught up: {commands:?}"
+    );
+    server.shutdown();
+}

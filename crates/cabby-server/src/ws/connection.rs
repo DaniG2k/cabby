@@ -29,6 +29,17 @@
 //!   when the queue is full (one per ping interval), so they never wait. The io loop stops
 //!   reading from the socket while the inbound slot is full, so a slow reader
 //!   pushes back on the client through TCP, as with Go's `ReadMessage`.
+//! * **Reading between batches.** The io loop does not read while it writes a batch.
+//!   With nothing to write it waits for a message. When frames are queued again
+//!   whenever a batch is written, it looks at its reader once before each next batch:
+//!   at most one message (text, binary, ping, pong or close) is handled per batch
+//!   written. So a client that is behind with reading is still heard, and one that
+//!   sends without pause cannot hold its own frames back. A look that finds nothing
+//!   makes no system call (tokio knows that the socket is not readable), and there is
+//!   none when the loop waited for a message since the last batch. Nothing is read
+//!   once a close frame is requested; a close frame or the end of the stream read
+//!   between batches ends the connection without writing the frames still queued, as
+//!   in Go.
 //! * **Batching.** The io loop takes every queued frame at once and writes them with
 //!   one vectored write and one flush: a fan-out burst becomes one system call (with
 //!   TLS, one write of records).
@@ -71,14 +82,14 @@
 //!   reply is queued or was not flushed. The io loop never uses `write` for frames,
 //!   and `close` is the last thing it does with a connection.
 //! * Only `read` queues a reply (`additional_send`), on receiving a ping or a close
-//!   frame, and the same call returns that message. So a `ws.next()` that is pending,
-//!   or that `select!` drops while it is, has queued nothing and (as nothing was
-//!   queued before) has written nothing.
-//! * The io loop flushes a pong before it does anything else, outside of `select!`'s
-//!   reach. A flush that completes has buffered the pong (it always fits: the
-//!   output buffer's size is not limited), written the buffer and flushed the socket.
-//!   One that fails or times out, perhaps in the middle of the pong, ends the
-//!   connection ([`handle_inbound`]).
+//!   frame, and the same call returns that message. So a poll of the reader that is
+//!   pending (`select!` drops it, or it was the look between two batches) has queued
+//!   nothing and (as nothing was queued before) has written nothing.
+//! * The io loop flushes a pong before it does anything else, so before the next
+//!   batch, outside of `select!`'s reach. A flush that completes has buffered the
+//!   pong (it always fits: the output buffer's size is not limited), written the
+//!   buffer and flushed the socket. One that fails or times out, perhaps in the
+//!   middle of the pong, ends the connection ([`handle_inbound`]).
 //! * Everything else tungstenite could answer ends the connection: the io loop
 //!   answers a close frame itself ([`write_raw_close`], the queued reply is dropped
 //!   with the stream) and closes after read errors.
@@ -693,6 +704,8 @@ where
         let _ = shared.io_task.set(id);
     }
     let mut batch: VecDeque<Outbound> = VecDeque::new();
+    // A batch was written since the reader was last polled.
+    let mut behind = false;
     let reason = loop {
         let work = {
             let mut state = shared.lock();
@@ -713,9 +726,20 @@ where
                 shared.cond.notify_all();
             }
             shared.signal_writable();
+            // Frames were queued again before the loop got to wait for a message: one
+            // look at the reader between the batches (see the module docs).
+            if behind
+                && work.can_read
+                && work.close.is_none()
+                && let Poll::Ready(msg) = std::future::poll_fn(|cx| Poll::Ready(ws.poll_next_unpin(cx))).await
+                && let Some(err) = handle_inbound(&shared, &mut ws, msg).await
+            {
+                break err;
+            }
             if let Err(err) = write_batch(&mut ws.get_mut().io, &mut batch).await {
                 break err;
             }
+            behind = true;
         }
         if let Some((code, reason)) = work.close {
             let _ = tokio::time::timeout(CLOSE_DEADLINE, ws.close(close_frame(code, &reason))).await;
@@ -727,7 +751,10 @@ where
         tokio::select! {
             biased;
             () = shared.wake.notified() => {}
-            msg = ws.next(), if work.can_read => {
+            msg = std::future::poll_fn(|cx| {
+                behind = false;
+                ws.poll_next_unpin(cx)
+            }), if work.can_read => {
                 if let Some(err) = handle_inbound(&shared, &mut ws, msg).await {
                     break err;
                 }
@@ -1227,6 +1254,8 @@ mod tests {
         waker: Option<Waker>,
         /// Writes attempted.
         writes: usize,
+        /// Reads attempted.
+        reads: usize,
     }
 
     impl Gate {
@@ -1276,6 +1305,7 @@ mod tests {
     impl AsyncRead for Gate {
         fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
             let mut wire = self.wire();
+            wire.reads += 1;
             if wire.input.is_empty() {
                 wire.waker = Some(cx.waker().clone());
                 return Poll::Pending;
@@ -1786,11 +1816,19 @@ mod tests {
     struct Inbox {
         gate: Gate,
         messages: Mutex<Vec<(Bytes, Vec<u8>)>>,
+        /// Keeps the permits (the messages are being executed).
+        busy: std::sync::atomic::AtomicBool,
+        permits: Mutex<Vec<ReadPermit>>,
     }
 
     impl Inbox {
         fn of(gate: &Gate, conn: &WsConnection) -> Arc<Inbox> {
-            let inbox = Arc::new(Inbox { gate: gate.clone(), messages: Mutex::default() });
+            let inbox = Arc::new(Inbox {
+                gate: gate.clone(),
+                messages: Mutex::default(),
+                busy: false.into(),
+                permits: Mutex::default(),
+            });
             conn.set_inbound_handler(inbox.clone());
             inbox
         }
@@ -1801,39 +1839,304 @@ mod tests {
     }
 
     impl InboundHandler for Inbox {
-        fn on_message(&self, msg: Bytes, _permit: ReadPermit) {
+        fn on_message(&self, msg: Bytes, permit: ReadPermit) {
             let sent = self.gate.out();
             self.messages.lock().unwrap().push((msg, sent));
+            if self.busy.load(std::sync::atomic::Ordering::SeqCst) {
+                self.permits.lock().unwrap().push(permit);
+            }
         }
 
         fn on_end(&self, _err: ConnectionError) {}
     }
 
-    /// Deviation D-072: while frames for a client are queued or being written, its
-    /// messages stay unread; they are delivered after those frames.
-    #[tokio::test]
-    async fn deviation_d072_messages_wait_until_queued_frames_are_written() {
-        let gate = Gate::default();
+    /// The bytes of text frames.
+    fn texts<'a>(payloads: impl IntoIterator<Item = &'a str>) -> Vec<u8> {
+        payloads.into_iter().flat_map(|p| [&[0x81, p.len() as u8], p.as_bytes()].concat()).collect()
+    }
+
+    /// A connection that is writing "one" (the socket takes nothing) with "two" queued.
+    async fn behind(gate: &Gate) -> (WsConnection, Arc<Inbox>) {
         let conn = gate.connection().await;
-        let inbox = Inbox::of(&gate, &conn);
+        let inbox = Inbox::of(gate, &conn);
         queue(&conn, "one");
         until("a write", || gate.wire().writes > 0).await;
         queue(&conn, "two");
+        (conn, inbox)
+    }
+
+    /// Queues `frames` frames, refilling the queue whenever the io loop has taken it, as
+    /// a session with a backlog does. Returns how many are left.
+    fn refill_queue(conn: &WsConnection, frames: usize) -> Arc<Mutex<usize>> {
+        let left = Arc::new(Mutex::new(frames));
+        let refill = {
+            let (owner, left) = (Arc::downgrade(&conn.owner), Arc::clone(&left));
+            move || {
+                let Some(owner) = owner.upgrade() else { return };
+                let conn = WsConnection { owner };
+                let mut left = left.lock().unwrap();
+                while *left > 0 && conn.try_write_frame(&text("frame"), Duration::from_secs(10)) == Ok(true) {
+                    *left -= 1;
+                }
+            }
+        };
+        conn.set_writable_handler(Box::new(refill.clone()));
+        refill();
+        left
+    }
+
+    /// Deviation D-072: while a batch of frames for a client is being written, its
+    /// messages stay unread. They are delivered before the next batch.
+    #[tokio::test]
+    async fn deviation_d072_messages_wait_for_the_batch_being_written() {
+        let gate = Gate::default();
+        let (_conn, inbox) = behind(&gate).await;
         gate.client_sends(1, b"hello");
         let unread = gate.wire().input.len();
-
-        // "one" is being written, then "two" is.
-        for sent in [b"".as_slice(), b"\x81\x03one"] {
-            gate.allow(sent.len());
-            until("the frames before", || gate.out() == sent).await;
+        for part in [0, 1] {
+            gate.allow(part);
             tokio::time::sleep(Duration::from_millis(30)).await;
-            assert_eq!((vec![], unread), (inbox.messages(), gate.wire().input.len()), "after {sent:?}");
+            assert_eq!(part, gate.out().len());
+            assert_eq!((vec![], unread), (inbox.messages(), gate.wire().input.len()));
         }
 
-        gate.allow(usize::MAX);
+        gate.allow(texts(["one"]).len() - 1);
         until("the message", || !inbox.messages().is_empty()).await;
-        let sent = b"\x81\x03one\x81\x03two".to_vec();
-        assert_eq!(vec![(Bytes::from_static(b"hello"), sent)], inbox.messages());
+        assert_eq!(vec![(Bytes::from_static(b"hello"), texts(["one"]))], inbox.messages());
+        assert_eq!(texts(["one"]), gate.out());
+        gate.allow(usize::MAX);
+        until("the other frame", || gate.out() == texts(["one", "two"])).await;
+    }
+
+    /// A client whose queue is never empty has one message handled per batch written,
+    /// in the order it sent them.
+    #[tokio::test]
+    async fn a_client_with_a_backlog_is_read_one_message_per_batch() {
+        let gate = Gate::default();
+        let (conn, inbox) = behind(&gate).await;
+        for message in [b"m0", b"m1", b"m2", b"m3"] {
+            gate.client_sends(1, message);
+        }
+        let mut written = vec!["one"];
+        for (i, message) in [b"m0", b"m1", b"m2", b"m3"].iter().enumerate() {
+            let frame = texts(["one"]).len();
+            assert_eq!(i, inbox.messages().len(), "one message per batch");
+            gate.allow(frame);
+            until("the message", || inbox.messages().len() > i).await;
+            // The next batch is being written; queue one behind it.
+            assert_eq!((Bytes::from_static(*message), texts(written.iter().copied())), inbox.messages()[i]);
+            queue(&conn, "two");
+            written.push("two");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(4, inbox.messages().len());
+    }
+
+    /// A message that is still being executed holds the next one back, also between
+    /// batches; the frames go on.
+    #[tokio::test]
+    async fn a_message_in_progress_holds_the_next_one_back_between_batches() {
+        let gate = Gate::default();
+        let (conn, inbox) = behind(&gate).await;
+        inbox.busy.store(true, std::sync::atomic::Ordering::SeqCst);
+        gate.client_sends(1, b"m0");
+        gate.client_sends(1, b"m1");
+        let frame = texts(["one"]).len();
+        for batch in 1..=5 {
+            gate.allow(frame);
+            until("the batch", || gate.out().len() == batch * frame).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            assert_eq!(1, inbox.messages().len());
+            queue(&conn, "two");
+        }
+        inbox.permits.lock().unwrap().clear();
+        gate.allow(frame);
+        until("the other message", || inbox.messages().len() == 2).await;
+    }
+
+    /// A client that sends without pause does not hold its frames back: between two of
+    /// its messages a whole batch is written.
+    #[tokio::test]
+    async fn a_flood_of_messages_does_not_stop_frames() {
+        const FRAMES: usize = 400;
+        let gate = Gate::default();
+        gate.allow(usize::MAX);
+        for _ in 0..2 * FRAMES {
+            gate.client_sends(1, b"flood");
+        }
+        let (conn, io_loop) = gate.connect().await;
+        let inbox = Inbox::of(&gate, &conn);
+        refill_queue(&conn, FRAMES);
+        tokio::spawn(io_loop);
+        let all = texts(std::iter::repeat_n("frame", FRAMES));
+        until("every frame", || gate.out() == all).await;
+
+        // A batch is a full queue; all but the first follow a message.
+        let sent: Vec<usize> = inbox.messages().iter().map(|(_, sent)| sent.len()).filter(|n| *n < all.len()).collect();
+        assert!(sent.is_sorted_by(|a, b| a < b), "no two messages without frames in between: {sent:?}");
+        let batches = FRAMES / MAX_QUEUED;
+        assert_eq!(batches - 1, sent.len(), "the client is read all along");
+    }
+
+    /// A ping between two batches is answered between them, and pongs are handled.
+    #[tokio::test]
+    async fn pings_and_pongs_are_handled_between_batches() {
+        let gate = Gate::default();
+        let (conn, inbox) = behind(&gate).await;
+        let pongs = Arc::new(Mutex::new(Vec::new()));
+        let (seen, socket) = (Arc::clone(&pongs), gate.clone());
+        conn.set_pong_handler(move || seen.lock().unwrap().push(socket.out().len()));
+        gate.client_sends(9, b"hi");
+        gate.client_sends(10, b"");
+        gate.allow(texts(["one"]).len() + b"\x8a\x02hi".len());
+        let one = [&texts(["one"])[..], b"\x8a\x02hi"].concat();
+        until("the pong", || gate.out() == one).await;
+        // "two" is being written.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        queue(&conn, "three");
+        gate.allow(texts(["two"]).len());
+        let two = [&one[..], &texts(["two"])].concat();
+        until("the pong handler", || !pongs.lock().unwrap().is_empty()).await;
+        assert_eq!((vec![two.len()], two), (pongs.lock().unwrap().clone(), gate.out()));
+        assert!(inbox.messages().is_empty() && !conn.is_closed());
+    }
+
+    /// A pong that cannot be written ends the connection between two batches as well:
+    /// the next batch does not land inside it.
+    #[tokio::test]
+    async fn a_pong_stuck_between_batches_ends_the_connection() {
+        let gate = Gate::default();
+        let (conn, _inbox) = behind(&gate).await;
+        gate.client_sends(9, b"hi");
+        gate.allow(texts(["one"]).len() + 1);
+        assert_eq!("i/o timeout", ended(&conn).await);
+        gate.allow(usize::MAX);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!([&texts(["one"])[..], &[0x8a]].concat(), gate.out());
+    }
+
+    /// A close frame between two batches is answered at once, without the frames that
+    /// are still queued.
+    #[tokio::test]
+    async fn a_close_frame_between_batches_ends_the_connection() {
+        let gate = Gate::default();
+        let (conn, _inbox) = behind(&gate).await;
+        gate.client_sends(8, b"\x03\xe8");
+        gate.allow(usize::MAX);
+        assert_eq!("websocket: close 1000 (normal)", ended(&conn).await);
+        assert_eq!([&texts(["one"])[..], b"\x88\x02\x03\xe8"].concat(), gate.out());
+    }
+
+    /// Once a close frame is requested, the queued frames and it are written and
+    /// nothing more is read.
+    #[tokio::test]
+    async fn nothing_is_read_once_a_close_is_requested() {
+        let gate = Gate::default();
+        let (conn, inbox) = behind(&gate).await;
+        gate.client_sends(1, b"late");
+        assert!(conn.request_close(CLOSE_NORMAL_CLOSURE, ""));
+        gate.allow(usize::MAX);
+        assert_eq!("websocket: close sent", ended(&conn).await);
+        assert_eq!([&texts(["one", "two"])[..], b"\x88\x02\x03\xe8"].concat(), gate.out());
+        assert!(inbox.messages().is_empty());
+    }
+
+    /// Looking at the reader between batches costs a connection that keeps up
+    /// nothing: the reader is polled once per batch, when the loop waits for a message,
+    /// and once per batch at most otherwise.
+    #[tokio::test]
+    async fn the_reader_is_polled_once_per_batch() {
+        let gate = Gate::default();
+        gate.allow(usize::MAX);
+        let conn = gate.connection().await;
+        until("the loop to wait", || gate.wire().reads > 0).await;
+        for i in 1..=20 {
+            let reads = gate.wire().reads;
+            let out = gate.out().len();
+            queue(&conn, "frame");
+            until("the frame", || gate.out().len() > out).await;
+            tokio::time::sleep(Duration::from_millis(2)).await;
+            assert_eq!(reads + 1, gate.wire().reads, "frame {i}");
+        }
+
+        let gate = Gate::default();
+        let (conn, _inbox) = behind(&gate).await;
+        assert_eq!(0, gate.wire().reads, "the first batch comes first");
+        for batch in 1..=20 {
+            gate.allow(texts(["one"]).len());
+            until("the next batch", || gate.out().len() == batch * texts(["one"]).len()).await;
+            tokio::time::sleep(Duration::from_millis(2)).await;
+            assert_eq!(batch, gate.wire().reads);
+            queue(&conn, "two");
+        }
+    }
+
+    /// tokio's readiness flag makes a look at a socket without data free of system
+    /// calls: this stream reads as `TcpStream` does, counting the calls.
+    #[tokio::test]
+    async fn looking_at_a_socket_without_data_makes_no_system_call() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::AsyncReadExt;
+        use tokio::net::{TcpListener, TcpStream};
+
+        struct Counted {
+            stream: TcpStream,
+            /// Calls of `poll_read`, and `read` system calls.
+            counts: Arc<[AtomicUsize; 2]>,
+        }
+
+        impl AsyncRead for Counted {
+            fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+                self.counts[0].fetch_add(1, Ordering::SeqCst);
+                loop {
+                    ready!(self.stream.poll_read_ready(cx))?;
+                    self.counts[1].fetch_add(1, Ordering::SeqCst);
+                    match self.stream.try_read(buf.initialize_unfilled()) {
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                        res => {
+                            buf.advance(res?);
+                            return Poll::Ready(Ok(()));
+                        }
+                    }
+                }
+            }
+        }
+
+        impl AsyncWrite for Counted {
+            fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+                Pin::new(&mut self.stream).poll_write(cx, buf)
+            }
+
+            fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+                Pin::new(&mut self.stream).poll_flush(cx)
+            }
+
+            fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+                Pin::new(&mut self.stream).poll_shutdown(cx)
+            }
+        }
+
+        const FRAMES: usize = 400;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap());
+        let (client, server) = tokio::join!(client, listener.accept());
+        let mut client = client.unwrap();
+        let counts = Arc::new([const { AtomicUsize::new(0) }; 2]);
+        let io = Counted { stream: server.unwrap().0, counts: Arc::clone(&counts) };
+        let ws = WebSocketStream::from_raw_socket(GorillaFrames::new(io), Role::Server, None).await;
+        let (conn, io_loop) = connect(ws, String::new());
+        let left = refill_queue(&conn, FRAMES);
+        tokio::spawn(io_loop);
+        let expected = texts(std::iter::repeat_n("frame", FRAMES));
+        let mut got = vec![0; expected.len()];
+        tokio::time::timeout(Duration::from_secs(10), client.read_exact(&mut got)).await.unwrap().unwrap();
+        assert_eq!(expected, got);
+        assert_eq!(0, *left.lock().unwrap());
+
+        let [polls, reads] = [0, 1].map(|i| counts[i].load(Ordering::SeqCst));
+        // One look between every two batches, and one before waiting.
+        assert!(polls >= FRAMES / MAX_QUEUED - 1, "{polls} looks");
+        assert!(reads <= 1, "{reads} system calls for {polls} looks");
     }
 
     /// Deviation D-072: messages received while a write is blocked are not delivered
