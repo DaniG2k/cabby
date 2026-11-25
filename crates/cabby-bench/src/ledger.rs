@@ -153,6 +153,8 @@ fn parse_payload(data: &str) -> Option<Payload<'_>> {
         Some((b, s)) => (b, Some(s)),
         None => (data, None),
     };
+    // Padding (see `DeliveryLedger::padded_payload`) ends at the last `~`; stream names hold none.
+    let base = base.rsplit_once('~').map_or(base, |(_, b)| b);
     let (stream, seq) = base.rsplit_once(':')?;
     let seq = seq.parse().ok()?;
     let (worker, sent_ns) = match stamp {
@@ -185,6 +187,16 @@ impl DeliveryLedger {
     /// Payload for the `seq`-th broadcast on `stream`.
     pub fn payload(stream: &str, seq: u64) -> String {
         format!("{stream}:{seq}")
+    }
+
+    /// [`DeliveryLedger::payload`] padded in front to `bytes` bytes (`xxx~<stream>:<seq>`), to
+    /// measure realistic message sizes. A payload already that long is returned as it is.
+    pub fn padded_payload(stream: &str, seq: u64, bytes: usize) -> String {
+        let payload = Self::payload(stream, seq);
+        match bytes.checked_sub(payload.len() + 1) {
+            Some(pad) if pad > 0 => format!("{}~{payload}", "x".repeat(pad)),
+            _ => payload,
+        }
     }
 
     /// The records of `client_id` (created on first use).
@@ -273,6 +285,24 @@ mod tests {
         assert_eq!(Some(Payload { stream: "7", seq: 3, worker: 0, sent_ns: None }), parse_payload("7:3"));
         assert_eq!(Some(Payload { stream: "a:b", seq: 9, worker: 4, sent_ns: Some(55) }), parse_payload("a:b:9|4|55"));
         assert_eq!(None, parse_payload("x"));
+    }
+
+    #[test]
+    fn padded_payloads_have_the_asked_size_and_parse_like_plain_ones() {
+        for bytes in [0, 1, 3, 4, 5, 16, 1024, 32768] {
+            let padded = DeliveryLedger::padded_payload("7", 3, bytes);
+            // 5 bytes is the smallest padded size: a pad byte, `~` and `7:3`.
+            assert_eq!(if bytes < 5 { "7:3".len() } else { bytes }, padded.len(), "{bytes}");
+            assert_eq!(parse_payload("7:3"), parse_payload(&padded), "{bytes}");
+            assert_eq!(
+                Some(Payload { stream: "7", seq: 3, worker: 2, sent_ns: Some(9) }),
+                parse_payload(&format!("{padded}|2|9")),
+                "{bytes}"
+            );
+        }
+        // Too small to pad: the plain payload (4 would leave an empty pad).
+        assert_eq!("7:3", DeliveryLedger::padded_payload("7", 3, 4));
+        assert_eq!("x~7:3", DeliveryLedger::padded_payload("7", 3, 5));
     }
 
     #[test]

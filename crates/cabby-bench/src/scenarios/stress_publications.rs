@@ -72,6 +72,8 @@ pub struct RunConfig {
     pub publish_workers: usize,
     /// `--publish-batch`, default 64.
     pub publish_batch: usize,
+    /// `--payload-bytes`, default 0: the short ledger payload.
+    pub payload_bytes: usize,
     /// `--setup-failure-tolerance`, default 0.
     pub tolerance: usize,
     /// `--seed`, default 1 (an int64 reinterpreted as u64).
@@ -196,6 +198,12 @@ const DEFS: &[FlagDef] = &[
         usage: "max broadcasts coalesced into a single POST under backpressure (1 disables batching); Pusher mode: default 1, at most 10 (batch_events, which AnyCable's Pusher API lacks)",
     },
     FlagDef {
+        name: "payload-bytes",
+        kind: Kind::Int,
+        default: "0",
+        usage: "pad each broadcast's payload to this many bytes (0 leaves the short default payload)",
+    },
+    FlagDef {
         name: "setup-failure-tolerance",
         kind: Kind::Int,
         default: "",
@@ -264,6 +272,7 @@ pub fn parse_flags(args: &[String], stderr: &mut dyn Write) -> Result<RunConfig,
         // AnyCable's Pusher API has no batch_events endpoint (a batch is accepted and
         // dropped), so Pusher mode batches only when asked to.
         publish_batch: positive(p.int("publish-batch", if protocol == Protocol::ActionCable { 64 } else { 1 })),
+        payload_bytes: positive(p.int("payload-bytes", 0)),
         tolerance: positive(p.int("setup-failure-tolerance", 0)),
         seed: p.int("seed", 1) as u64,
         non_interactive: p.boolean("non-interactive"),
@@ -502,7 +511,8 @@ pub fn publish_interval(cfg: &RunConfig) -> Duration {
 /// each tick or firing late (catch-up). Returns the number of late publishes. The
 /// issued count is deterministic for a given `(r, d)`.
 ///
-/// Each tick publishes a ledger payload (`<stream>:<seq>`); sequence numbers are
+/// Each tick publishes a ledger payload (`<stream>:<seq>`, padded to `--payload-bytes`);
+/// sequence numbers are
 /// per stream and advance only for enqueued publications, so the issued
 /// publications of a stream are exactly `1..=target_counts()[stream]`.
 pub fn publish_window(cfg: &RunConfig, publisher: &Publisher) -> u64 {
@@ -525,7 +535,7 @@ pub fn publish_window(cfg: &RunConfig, publisher: &Publisher) -> u64 {
         }
         let stream = (rng.below(cfg.big_s.max(1) as u64) + 1).to_string();
         let seq = seqs.get(&stream).copied().unwrap_or(0) + 1;
-        if publisher.try_publish(&stream, &DeliveryLedger::payload(&stream, seq)) {
+        if publisher.try_publish(&stream, &DeliveryLedger::padded_payload(&stream, seq, cfg.payload_bytes)) {
             seqs.insert(stream, seq);
         }
     }
