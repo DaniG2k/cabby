@@ -125,7 +125,7 @@ pub trait Connection: Send + Sync {
     /// once it can (or once it has failed). `timeout` bounds the write, from when the
     /// transport starts it (producers do not read the clock).
     fn try_write_frame(&self, frame: &Arc<SentFrame>, timeout: Duration) -> Result<bool, ConnectionError> {
-        self.write_frame(frame, Instant::now() + timeout).map(|()| true)
+        self.write_frame(frame, deadline_after(timeout)).map(|()| true)
     }
 
     /// Sets the handler [`Connection::try_write_frame`] promises to call after
@@ -216,6 +216,13 @@ const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 /// limited much lower (`cli::MAX_CLIENT_PING_INTERVAL_SECS`); this bounds
 /// operator settings and library callers.
 pub const MAX_TIMER_INTERVAL: Duration = Duration::from_secs(10 * 365 * 24 * 60 * 60);
+
+/// The instant `timeout` from now. A timeout beyond what the clock can represent is
+/// none in practice (about 136 years).
+pub(crate) fn deadline_after(timeout: Duration) -> Instant {
+    let now = Instant::now();
+    now.checked_add(timeout).unwrap_or_else(|| now + Duration::from_secs(u64::from(u32::MAX)))
+}
 
 fn bounded(d: Duration) -> Duration {
     d.min(MAX_TIMER_INTERVAL)
@@ -2276,6 +2283,44 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(Some(&format!("close:{CLOSE_NORMAL_CLOSURE}")), valve.frames().last());
+    }
+
+    /// Records the deadline of each write.
+    #[derive(Default)]
+    struct Deadlines(Mutex<Vec<Instant>>);
+
+    impl Connection for Deadlines {
+        fn write(&self, _msg: &[u8], deadline: Instant) -> Result<(), ConnectionError> {
+            lock(&self.0).push(deadline);
+            Ok(())
+        }
+        fn write_binary(&self, msg: &[u8], deadline: Instant) -> Result<(), ConnectionError> {
+            self.write(msg, deadline)
+        }
+        fn write_ping(&self, _deadline: Instant) -> Result<(), ConnectionError> {
+            Ok(())
+        }
+        fn read(&self) -> Result<Vec<u8>, ConnectionError> {
+            Err(ConnectionError("websocket: close 1000 (normal)".into()))
+        }
+        fn close(&self, _code: i32, _reason: &str) {}
+    }
+
+    /// `Connection::try_write_frame`, as transports that do not override it have it.
+    #[test]
+    fn the_default_nonblocking_write_honours_the_timeout() {
+        let conn = Deadlines::default();
+        let frame = Arc::new(SentFrame::text(b"x".to_vec()));
+        for timeout in [Duration::ZERO, Duration::from_secs(7), MAX_TIMER_INTERVAL] {
+            let before = Instant::now();
+            assert_eq!(Ok(true), conn.try_write_frame(&frame, timeout));
+            let after = Instant::now();
+            let deadline = lock(&conn.0).pop().unwrap();
+            assert!(before + timeout <= deadline && deadline <= after + timeout, "{timeout:?}");
+        }
+        // Too long for the clock: no overflow, and no early deadline either.
+        assert_eq!(Ok(true), conn.try_write_frame(&frame, Duration::MAX));
+        assert!(lock(&conn.0).pop().unwrap() > Instant::now() + MAX_TIMER_INTERVAL);
     }
 
     #[test]

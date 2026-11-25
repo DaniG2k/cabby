@@ -42,6 +42,7 @@ pub use config::{
 };
 pub use deps::{Hub, LegacySubscriber};
 pub use disconnect_queue::{DisconnectQueue, Disconnector, InlineDisconnector, NoopDisconnectQueue};
+pub(crate) use session::deadline_after;
 pub use session::{Connection, ConnectionError, Executor, ReadPermit, Session, SessionOption, SessionReader};
 pub use subscription_state::SubscriptionState;
 pub use tasks::{

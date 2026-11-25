@@ -105,7 +105,7 @@ use tungstenite::protocol::frame::coding::CloseCode;
 use tungstenite::{Message, Utf8Bytes};
 
 use super::{FrameType, SentFrame};
-use crate::node::{Connection, ConnectionError, SessionReader};
+use crate::node::{Connection, ConnectionError, SessionReader, deadline_after};
 
 /// Upstream `CloseNormalClosure`.
 pub const CLOSE_NORMAL_CLOSURE: i32 = 1000;
@@ -260,11 +260,7 @@ impl WriteLimit {
     fn deadline(self) -> Instant {
         match self {
             WriteLimit::Until(deadline) => deadline,
-            WriteLimit::Within(timeout) => {
-                let now = Instant::now();
-                // A timeout beyond what the clock can represent is none in practice.
-                now.checked_add(timeout).unwrap_or_else(|| now + Duration::from_secs(u64::from(u32::MAX)))
-            }
+            WriteLimit::Within(timeout) => deadline_after(timeout),
         }
     }
 }
