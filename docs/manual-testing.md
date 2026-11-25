@@ -146,4 +146,4 @@ and the server exits with status 0.
   `ANYCABLE_*` variables; drop `--public`). `anycable-rails` and your channels need no changes.
 - **The full compatibility suite:** `cargo xtask test --backend rust` (needs
   `eval "$(compat/scripts/services.sh start)"` for Redis and NATS).
-- **Benchmarks:** see the README and `compat/scripts/bench-compare.sh`.
+- **Benchmarks:** see [`benchmarks.md`](benchmarks.md) and `compat/scripts/bench-compare.sh`.
