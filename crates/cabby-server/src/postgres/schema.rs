@@ -15,9 +15,18 @@
 //! With `unlogged`, every table but the outbox is `UNLOGGED`: PostgreSQL
 //! empties such tables after a crash, the epoch goes with them, and the next
 //! epoch is a new one, so clients resynchronize.
+//!
+//! Preparing the schema is bounded ([`Limits`]): a lock another session holds
+//! fails the start with an error instead of hanging it. Existing tables are
+//! not locked: an index that exists is left alone (`CREATE INDEX IF NOT
+//! EXISTS` would take a `SHARE` lock on its table first, waiting for its
+//! writers and making new ones wait behind it).
+
+use std::time::Duration;
 
 use cabby_core::log_warn;
 use cabby_core::logger::Logger;
+use tokio_postgres::error::SqlState;
 
 use super::connect::ConnectSpec;
 use super::{BROADCASTS, HISTORY, META, Names, OVERFLOW, PgError, SESSIONS, STREAMS, error_text, quote};
@@ -110,8 +119,56 @@ fn lock_key(n: &Names) -> i64 {
     i64::from_ne_bytes(hash.to_ne_bytes())
 }
 
+/// How long preparing the schema may take. The lock limits are well below
+/// the adapters' query timeout ([`super::connect::QUERY_TIMEOUT`]): writes of
+/// running nodes that queue behind a lock this start waits for are delayed,
+/// not failed.
+#[derive(Debug, Clone, Copy)]
+struct Limits {
+    /// Waiting for another node's migration (each takes the table locks it
+    /// needs in turn).
+    migration: Duration,
+    /// Waiting for any other lock.
+    lock: Duration,
+    /// One statement, lock waits included.
+    statement: Duration,
+    /// Everything, connecting included (a server that stops answering).
+    total: Duration,
+}
+
+const LIMITS: Limits = Limits {
+    migration: Duration::from_secs(15),
+    lock: Duration::from_secs(5),
+    statement: Duration::from_secs(30),
+    total: Duration::from_secs(60),
+};
+
 fn db(e: tokio_postgres::Error) -> PgError {
     PgError(error_text(&e))
+}
+
+/// An error of the step `what`, naming it when a limit ended it.
+fn step<'a>(what: &'a str, lock: Duration) -> impl FnOnce(tokio_postgres::Error) -> PgError + 'a {
+    move |e| match e.code() {
+        Some(c) if *c == SqlState::LOCK_NOT_AVAILABLE => PgError(format!(
+            "timed out after {}s waiting for a lock to {what}: another session holds a conflicting lock (see pg_locks and pg_stat_activity)",
+            lock.as_secs()
+        )),
+        Some(c) if *c == SqlState::QUERY_CANCELED => PgError(format!("failed to {what}, cause: {}", error_text(&e))),
+        _ => db(e),
+    }
+}
+
+/// What a DDL statement does, for errors: its first line, up to the column list.
+fn summary(statement: &str) -> &str {
+    let line = statement.lines().next().unwrap_or_default();
+    line.split_once(" (").map_or(line, |(head, _)| head)
+}
+
+/// The index a statement of [`ddl`] creates (names are validated identifiers:
+/// no quotes in them).
+fn created_index(statement: &str) -> Option<&str> {
+    statement.strip_prefix("CREATE INDEX IF NOT EXISTS \"")?.split('"').next()
 }
 
 /// Creates the tables (`auto_migrate`) or checks that `needed` exist.
@@ -122,13 +179,61 @@ pub(crate) async fn prepare(
     needed: &[&str],
     log: &Logger,
 ) -> Result<(), PgError> {
-    let mut client = spec.connect("cabby migrate").await?;
-    if auto_migrate { migrate(&mut client, names).await } else { check(&client, names, needed, log).await }
+    prepare_within(spec, names, auto_migrate, needed, log, &LIMITS).await
 }
 
-async fn stored_version(client: &impl tokio_postgres::GenericClient, n: &Names) -> Result<Option<i64>, PgError> {
+async fn prepare_within(
+    spec: &ConnectSpec,
+    names: &Names,
+    auto_migrate: bool,
+    needed: &[&str],
+    log: &Logger,
+    limits: &Limits,
+) -> Result<(), PgError> {
+    let work = async {
+        let mut client = spec.connect("cabby migrate").await?;
+        if auto_migrate {
+            migrate(&mut client, names, limits).await
+        } else {
+            check(&mut client, names, needed, log, limits).await
+        }
+    };
+    match tokio::time::timeout(limits.total, work).await {
+        Ok(result) => result,
+        Err(_) => {
+            Err(PgError(format!("timed out after {}s: no answer from {}", limits.total.as_secs(), spec.description)))
+        }
+    }
+}
+
+/// Begins a transaction in which `lock` bounds lock waits.
+async fn begin<'a>(
+    client: &'a mut tokio_postgres::Client,
+    limits: &Limits,
+    lock: Duration,
+) -> Result<tokio_postgres::Transaction<'a>, PgError> {
+    let tx = client.transaction().await.map_err(db)?;
+    tx.batch_execute(&format!(
+        "SET LOCAL statement_timeout = {}; {}",
+        limits.statement.as_millis(),
+        set_lock_timeout(lock)
+    ))
+    .await
+    .map_err(db)?;
+    Ok(tx)
+}
+
+fn set_lock_timeout(lock: Duration) -> String {
+    format!("SET LOCAL lock_timeout = {}", lock.as_millis())
+}
+
+async fn stored_version(
+    client: &impl tokio_postgres::GenericClient,
+    n: &Names,
+    limits: &Limits,
+) -> Result<Option<i64>, PgError> {
     let sql = format!("SELECT value FROM {} WHERE key = 'schema_version'", n.table(META));
-    let row = client.query_opt(&sql, &[]).await.map_err(db)?;
+    let row = client.query_opt(&sql, &[]).await.map_err(step("read the schema version", limits.lock))?;
     Ok(row.and_then(|r| r.get::<_, String>(0).parse().ok()))
 }
 
@@ -139,27 +244,43 @@ fn newer(n: &Names, version: i64) -> PgError {
     ))
 }
 
-async fn migrate(client: &mut tokio_postgres::Client, n: &Names) -> Result<(), PgError> {
-    let tx = client.transaction().await.map_err(db)?;
-    tx.execute("SELECT pg_advisory_xact_lock($1)", &[&lock_key(n)]).await.map_err(db)?;
+async fn migrate(client: &mut tokio_postgres::Client, n: &Names, limits: &Limits) -> Result<(), PgError> {
+    let tx = begin(client, limits, limits.migration).await?;
+    tx.execute("SELECT pg_advisory_xact_lock($1)", &[&lock_key(n)])
+        .await
+        .map_err(step("run the migration (one node at a time)", limits.migration))?;
+    tx.batch_execute(&set_lock_timeout(limits.lock)).await.map_err(db)?;
     let has_schema =
         tx.query_opt("SELECT 1 FROM pg_namespace WHERE nspname = $1", &[&n.schema]).await.map_err(db)?.is_some();
     if !has_schema {
-        tx.batch_execute(&format!("CREATE SCHEMA IF NOT EXISTS {}", quote(&n.schema))).await.map_err(db)?;
+        let sql = format!("CREATE SCHEMA IF NOT EXISTS {}", quote(&n.schema));
+        tx.batch_execute(&sql).await.map_err(step(&format!("run {sql}"), limits.lock))?;
     }
     for statement in ddl(n) {
-        tx.batch_execute(&statement).await.map_err(db)?;
+        if let Some(index) = created_index(&statement)
+            && relation_exists(&tx, &format!("{}.{}", quote(&n.schema), quote(index))).await?
+        {
+            continue;
+        }
+        tx.batch_execute(&statement).await.map_err(step(&format!("run {}", summary(&statement)), limits.lock))?;
     }
-    if let Some(version) = stored_version(&tx, n).await?
+    if let Some(version) = stored_version(&tx, n, limits).await?
         && version > SCHEMA_VERSION
     {
         return Err(newer(n, version));
     }
     if !trigger_exists(&tx, n).await? {
-        tx.batch_execute(&trigger_ddl(n)).await.map_err(db)?;
+        let sql = trigger_ddl(n);
+        tx.batch_execute(&sql).await.map_err(step(&format!("run {}", summary(&sql)), limits.lock))?;
     }
-    tx.batch_execute(&version_sql(n)).await.map_err(db)?;
+    tx.batch_execute(&version_sql(n)).await.map_err(step("store the schema version", limits.lock))?;
     tx.commit().await.map_err(db)
+}
+
+/// Whether a relation (a table or an index) of this quoted name exists; takes
+/// no lock on it.
+async fn relation_exists(client: &impl tokio_postgres::GenericClient, name: &str) -> Result<bool, PgError> {
+    Ok(client.query_one("SELECT to_regclass($1) IS NOT NULL", &[&name]).await.map_err(db)?.get(0))
 }
 
 async fn trigger_exists(client: &impl tokio_postgres::GenericClient, n: &Names) -> Result<bool, PgError> {
@@ -173,26 +294,29 @@ async fn trigger_exists(client: &impl tokio_postgres::GenericClient, n: &Names) 
     Ok(row.is_some())
 }
 
-async fn check(client: &tokio_postgres::Client, n: &Names, needed: &[&str], log: &Logger) -> Result<(), PgError> {
+async fn check(
+    client: &mut tokio_postgres::Client,
+    n: &Names,
+    needed: &[&str],
+    log: &Logger,
+    limits: &Limits,
+) -> Result<(), PgError> {
+    let tx = begin(client, limits, limits.lock).await?;
     for table in needed {
-        let exists: bool =
-            client.query_one("SELECT to_regclass($1) IS NOT NULL", &[&n.table(table)]).await.map_err(db)?.get(0);
-        if !exists {
+        if !relation_exists(&tx, &n.table(table)).await? {
             return Err(PgError(format!(
                 "table {} is missing: create it with the DDL in docs/postgres.md or set --postgres_auto_migrate=true",
                 n.table_display(table)
             )));
         }
     }
-    let has_meta: bool =
-        client.query_one("SELECT to_regclass($1) IS NOT NULL", &[&n.table(META)]).await.map_err(db)?.get(0);
-    if has_meta
-        && let Some(version) = stored_version(client, n).await?
+    if relation_exists(&tx, &n.table(META)).await?
+        && let Some(version) = stored_version(&tx, n, limits).await?
         && version > SCHEMA_VERSION
     {
         return Err(newer(n, version));
     }
-    if needed.contains(&BROADCASTS) && !trigger_exists(client, n).await? {
+    if needed.contains(&BROADCASTS) && !trigger_exists(&tx, n).await? {
         log_warn!(
             log,
             &format!(
@@ -202,7 +326,7 @@ async fn check(client: &tokio_postgres::Client, n: &Names, needed: &[&str], log:
             )
         );
     }
-    Ok(())
+    tx.commit().await.map_err(db)
 }
 
 #[cfg(test)]
@@ -224,6 +348,70 @@ mod tests {
         let end = doc.find("<!-- ddl:end -->").expect("ddl:end marker");
         let block = doc[start..end].trim().trim_start_matches("```sql").trim_end_matches("```").trim();
         assert_eq!(expected, block, "update the DDL in docs/postgres.md");
+    }
+
+    #[test]
+    fn index_statements_are_recognized() {
+        let names = Names::from_config(&PostgresConfig::new()).unwrap();
+        let all = ddl(&names);
+        let found: Vec<&str> = all.iter().filter_map(|s| created_index(s)).collect();
+        assert_eq!(
+            vec!["cabby_pubsub_overflow_expires_at", "cabby_history_ts_sec", "cabby_sessions_expires_at_ms"],
+            found
+        );
+        assert_eq!(all.iter().filter(|s| s.contains("INDEX")).count(), found.len());
+        assert_eq!("CREATE UNLOGGED TABLE IF NOT EXISTS \"public\".\"cabby_meta\"", summary(&all[0]));
+        assert_eq!(
+            "CREATE INDEX IF NOT EXISTS \"cabby_pubsub_overflow_expires_at\" ON \"public\".\"cabby_pubsub_overflow\"",
+            summary(&all[2])
+        );
+    }
+
+    /// A server that accepts the connection and then answers nothing more.
+    fn silent_server() -> std::net::SocketAddr {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for mut conn in listener.incoming().flatten() {
+                std::thread::spawn(move || {
+                    let mut len = [0; 4];
+                    conn.read_exact(&mut len)?;
+                    let mut startup = vec![0; u32::from_be_bytes(len) as usize - 4];
+                    conn.read_exact(&mut startup)?;
+                    // AuthenticationOk, ReadyForQuery.
+                    conn.write_all(b"R\0\0\0\x08\0\0\0\0Z\0\0\0\x05I")?;
+                    std::io::copy(&mut conn, &mut std::io::sink())
+                });
+            }
+        });
+        addr
+    }
+
+    #[test]
+    fn a_server_that_stops_answering_ends_the_start() {
+        let addr = silent_server();
+        let mut c = PostgresConfig::new();
+        c.url = format!("postgres://cabby@{addr}/db?sslmode=disable");
+        let limits = Limits { total: Duration::from_secs(1), ..LIMITS };
+        for auto_migrate in [true, false] {
+            let names = Names::from_config(&c).unwrap();
+            let spec = ConnectSpec::from_config(&c, "test").unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            super::super::connect::runtime().spawn(async move {
+                let log = Logger::default();
+                let _ = tx.send(prepare_within(&spec, &names, auto_migrate, BROKER_TABLES, &log, &limits).await);
+            });
+            let result = rx.recv_timeout(Duration::from_secs(20)).expect("the start hangs");
+            assert_eq!(Err(format!("timed out after 1s: no answer from {addr}/db")), result.map_err(|e| e.0));
+        }
+    }
+
+    #[test]
+    fn lock_waits_are_shorter_than_the_query_timeout() {
+        assert!(LIMITS.lock * 2 <= super::super::connect::QUERY_TIMEOUT);
+        assert!(LIMITS.migration + LIMITS.lock < LIMITS.statement);
+        assert!(super::super::connect::CONNECT_TIMEOUT + LIMITS.migration + LIMITS.statement < LIMITS.total);
     }
 
     #[test]

@@ -74,6 +74,16 @@ pub struct PgScope {
     roles: std::sync::Mutex<Vec<String>>,
 }
 
+/// `url` with `sslmode=disable`, for tests that start many adapters at once:
+/// `sslmode=prefer` (the default) reads the system's CA certificates for each,
+/// which macOS fails to list now and then under load.
+pub fn without_tls(mut url: String) -> String {
+    if !url.contains("sslmode=") {
+        url.push_str(if url.contains('?') { "&sslmode=disable" } else { "?sslmode=disable" });
+    }
+    url
+}
+
 /// A plain connection to the test server.
 pub fn connect() -> std::sync::Arc<Client> {
     let url = url();
@@ -108,6 +118,13 @@ impl PgScope {
             keepalive_interval: 1,
             ..PostgresConfig::new()
         }
+    }
+
+    /// [`PgScope::config`] without TLS (see [`without_tls`]).
+    pub fn plain_config(&self) -> PostgresConfig {
+        let mut config = self.config();
+        config.url = without_tls(config.url);
+        config
     }
 
     /// Creates the tables (what `auto_migrate` does when an adapter starts).

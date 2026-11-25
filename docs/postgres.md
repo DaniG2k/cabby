@@ -61,6 +61,23 @@ INF Starting Postgres broadcaster: db.internal:5432/app (table: public.cabby_bro
 With `--postgres_auto_migrate` (the default) Cabby creates its tables on the first start. Every
 node runs the same migration inside an advisory lock, so nodes starting together don't race.
 
+Once the tables and indexes exist, a start locks none of them exclusively: it neither waits for
+sessions writing to them nor holds the writes of running nodes back. A start that does need a
+lock another session holds (to create an index that was dropped, for example) waits for it at
+most 5 seconds, and at most 15 seconds for another node's migration. It then stops with an error
+naming the statement:
+
+```text
+failed to start Postgres broker, cause: timed out after 5s waiting for a lock to run CREATE INDEX IF NOT EXISTS "cabby_history_ts_sec" ON "public"."cabby_history": another session holds a conflicting lock (see pg_locks and pg_stat_activity)
+```
+
+While a node starts, `SELECT pid, pg_blocking_pids(pid), query FROM pg_stat_activity WHERE
+application_name = 'cabby migrate'` shows which session it waits for. A statement may take 30
+seconds (create a missing index of a very large table yourself, with `CREATE INDEX
+CONCURRENTLY`), and preparing the tables 60 seconds in all: a server that stops answering ends
+the start with `timed out after 60s: no answer from db.internal:5432/app`. With
+`--postgres_auto_migrate=false` the same limits apply to the checks.
+
 ## Settings
 
 Cabby-only settings: they have no `ANYCABLE_*` names.
@@ -174,8 +191,9 @@ inserted while a node was reconnecting is not left behind.
   publication format"` and deleted too; nothing is retried for it.
 - **Duplicates** can happen: rows already handed to the broker are handed again after a node
   crashes mid-batch, after its claim connection is lost or its commit fails (the transaction
-  rolls back), and when a row holding an array of messages fails partway (the messages before
-  the failed one are broadcast again on the retry).
+  rolls back), when the broker's query timed out but Postgres ran it afterwards (see
+  [Broker](#broker---brokerpostgres)), and when a row holding an array of messages fails partway
+  (the messages before the failed one are broadcast again on the retry).
 - **In order.** One node drains the table at a time (a transaction advisory lock; the server
   ends a claim transaction left idle for 60 s), so committed rows are broadcast in order of
   their `id`, and offsets follow that order. A batch hands rows to the broker for at most
@@ -247,6 +265,11 @@ node resumes its session and catches up on what it missed.
   delivered without an offset) and session recovery falls back to a new session, as with the NATS
   broker. An HTTP broadcast then answers `501`, the status the HTTP broadcaster gives for any
   broker failure.
+- **Timeouts.** A query has 10 seconds. A broadcast that timed out has failed for Cabby, but
+  Postgres may still run its statement afterwards (when the lock it waited for is released, for
+  example): the message then has an offset and is in history, but isn't delivered live; clients
+  get it when they catch up. If that broadcast is retried (an outbox row, a `redisx` entry, an
+  HTTP request the app sends again), it is stored twice, with two offsets.
 - **Presence** is not supported with `--broker=postgres` (as with `--broker=nats`).
 
 ### `UNLOGGED` tables

@@ -74,6 +74,11 @@ embedding API are breaking (see "Changed").
   upper case, and a new one says when a URL asks for TLS but connections do not use it, such as
   a `rediss://` master with Sentinel addresses without TLS (D-081).
 - Durable Streams read the result of authentication as the SSE endpoint does.
+- Postgres adapters: a node starting while another session wrote to Cabby's tables, or ran
+  `VACUUM` on them, waited without a limit, and the broadcasts of running nodes failed behind it.
+  A start no longer locks tables and indexes that exist, and one that needs a lock another session
+  holds stops after a few seconds with an error naming the statement (see
+  [`docs/postgres.md`](docs/postgres.md)).
 
 ## [0.3.0] - 2026-11-24
 

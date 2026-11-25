@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use cabby_core::broker::{Broadcaster, Broker, Config};
 use cabby_core::common::{RemoteCommandMessage, StreamMessage, StreamMessageMetadata};
-use cabby_server::postgres::{Metrics, PostgresBroker};
+use cabby_server::postgres::{Metrics, PostgresBroadcaster, PostgresBroker, PostgresConfig, PostgresSubscriber};
 use cabby_testkit::jwt::unix_from_now;
 use cabby_testkit::postgres::{PgScope, rust_only};
 use cabby_testkit::reference::broker::{TestCacheable, new_config};
@@ -596,4 +596,175 @@ fn deviation_d071_postgres_pruning_keeps_a_stream_written_meanwhile() {
         scope.scalar(&format!("SELECT max_seq FROM {streams} WHERE stream = 'live'")),
         "the stream written meanwhile is kept"
     );
+}
+
+/// An adapter starting on its own thread.
+struct Starting(std::sync::mpsc::Receiver<(Result<(), String>, Duration)>);
+
+impl Starting {
+    fn new(start: impl FnOnce() -> Result<(), String> + Send + 'static) -> Self {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let started = std::time::Instant::now();
+        thread::spawn(move || {
+            let result = start();
+            let _ = tx.send((result, started.elapsed()));
+        });
+        Self(rx)
+    }
+
+    fn broker(config: PostgresConfig) -> Self {
+        Self::new(move || {
+            PostgresBroker::new(None, &new_config(), &config, Metrics::none())
+                .and_then(|b| b.start())
+                .map_err(|e| e.message)
+        })
+    }
+
+    /// The outcome and the time it took.
+    fn wait(self, within: Duration) -> (Result<(), String>, Duration) {
+        self.0.recv_timeout(within).expect("the start hangs")
+    }
+}
+
+/// Waits until a migration in this scope's schema waits for a lock.
+fn wait_migration_blocked(scope: &PgScope) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while scope.scalar(&format!(
+        "SELECT count(*) FROM pg_stat_activity WHERE application_name = 'cabby migrate' AND wait_event_type = 'Lock' AND query LIKE '%{}%'",
+        scope.schema
+    )) == Some("0".to_owned())
+    {
+        assert!(std::time::Instant::now() < deadline, "the migration did not wait for the lock");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn plain_broker(scope: &PgScope) -> PostgresBroker {
+    let broker = PostgresBroker::new(None, &new_config(), &scope.plain_config(), Metrics::none()).expect("new");
+    broker.start().expect("start");
+    broker
+}
+
+struct NoNode;
+
+impl cabby_core::pubsub::Handler for NoNode {
+    fn broadcast(&self, _msg: &StreamMessage) {}
+    fn execute_remote_command(&self, _cmd: &RemoteCommandMessage) {}
+}
+
+impl cabby_core::broadcast::Handler for NoNode {
+    fn handle_broadcast(&self, _json: &[u8]) -> Result<(), cabby_core::broadcast::BroadcastError> {
+        Ok(())
+    }
+    fn handle_pubsub(&self, _json: &[u8]) {}
+}
+
+/// regression-for: broker/nats_test.go#TestNATSBroker_Epoch
+/// note: Deviations D-070 and D-071: nodes starting with existing tables (three nodes with all three adapters at once, migrating or only checking) don't wait for sessions writing to them, nor for a VACUUM, and the broadcasts of running nodes go through meanwhile.
+#[test]
+fn deviation_d071_postgres_starts_do_not_wait_for_locks_on_existing_tables() {
+    use cabby_core::broadcast::Broadcaster as _;
+    use cabby_core::pubsub::Subscriber as _;
+
+    let scope = scope();
+    let running = plain_broker(&scope);
+    running.handle_broadcast(&msg("s", "before")).unwrap();
+    let holder = scope.other_session();
+    holder.execute("BEGIN");
+    for table in ["history", "sessions", "pubsub_overflow", "streams", "meta"] {
+        let table = scope.table(table);
+        // A writer's lock and VACUUM's.
+        holder.execute(&format!(
+            "LOCK TABLE {table} IN ROW EXCLUSIVE MODE; LOCK TABLE {table} IN SHARE UPDATE EXCLUSIVE MODE;"
+        ));
+    }
+
+    for auto_migrate in [true, false] {
+        let mut config = scope.plain_config();
+        config.auto_migrate = auto_migrate;
+        let mut starting = Vec::new();
+        for _ in 0..3 {
+            let (c1, c2) = (config.clone(), config.clone());
+            starting.push(Starting::broker(config.clone()));
+            starting.push(Starting::new(move || {
+                let s = PostgresSubscriber::new(Arc::new(NoNode), &c1, Metrics::none()).map_err(|e| e.0)?;
+                s.start(std::sync::mpsc::channel().0).map_err(|e| e.0)
+            }));
+            starting.push(Starting::new(move || {
+                let b = PostgresBroadcaster::new(Arc::new(NoNode), &c2, Metrics::none()).map_err(|e| e.0)?;
+                b.start(std::sync::mpsc::channel().0).map_err(|e| e.0)
+            }));
+        }
+        running.handle_broadcast(&msg("s", "while starting")).expect("a running node broadcasts");
+        for start in starting {
+            let (result, _) = start.wait(Duration::from_secs(20));
+            assert_eq!(Ok(()), result, "auto_migrate={auto_migrate}");
+        }
+        running.handle_broadcast(&msg("s", "after")).expect("a running node broadcasts");
+    }
+}
+
+/// regression-for: broker/nats_test.go#TestNATSBroker_Epoch
+/// note: Deviation D-071: a start that needs a lock another session holds (here: a missing index) fails after 5 s, naming the statement; the broadcasts of running nodes that queue behind it are delayed, not failed. Once the lock is gone the next start creates the index.
+#[test]
+fn deviation_d071_postgres_start_fails_when_a_lock_it_needs_is_held() {
+    let scope = scope();
+    let running = plain_broker(&scope);
+    running.handle_broadcast(&msg("s", "before")).unwrap();
+    scope.execute(&format!("DROP INDEX \"{}\".cabby_history_ts_sec", scope.schema));
+    let holder = scope.other_session();
+    holder.execute(&format!("BEGIN; LOCK TABLE {} IN ROW EXCLUSIVE MODE;", scope.table("history")));
+
+    let starting = Starting::broker(scope.plain_config());
+    wait_migration_blocked(&scope);
+    running.handle_broadcast(&msg("s", "delayed")).expect("a running node's broadcast is only delayed");
+    let (result, took) = starting.wait(Duration::from_secs(30));
+    let error = result.expect_err("the start needs the lock");
+    assert_eq!(
+        format!(
+            "failed to start Postgres broker, cause: timed out after 5s waiting for a lock to run CREATE INDEX IF NOT \
+             EXISTS \"cabby_history_ts_sec\" ON \"{}\".\"cabby_history\": another session holds a conflicting lock \
+             (see pg_locks and pg_stat_activity)",
+            scope.schema
+        ),
+        error
+    );
+    assert!(took >= Duration::from_secs(5), "{took:?}");
+
+    holder.execute("ROLLBACK");
+    plain_broker(&scope);
+    let index = format!("SELECT to_regclass('\"{}\".cabby_history_ts_sec') IS NOT NULL", scope.schema);
+    assert_eq!(Some("t".to_owned()), scope.scalar(&index), "the next start creates the index");
+}
+
+/// regression-for: broker/nats_test.go#TestNATSBroker_Epoch
+/// note: Deviation D-071: a start waits at most 15 s for another node's migration, and one that only checks the tables (--postgres_auto_migrate=false) at most 5 s for a table another session has locked exclusively; both then fail with an error.
+#[test]
+fn deviation_d071_postgres_start_does_not_wait_forever_for_a_migration_or_a_table() {
+    let scope = scope();
+    plain_broker(&scope);
+    let key = format!("cabby:{}.cabby_", scope.schema)
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, b| (hash ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3));
+    let holder = scope.other_session();
+    holder.execute(&format!("BEGIN; SELECT pg_advisory_xact_lock({});", key.cast_signed()));
+    let expected = |cause: &str| {
+        format!(
+            "failed to start Postgres broker, cause: {cause}: another session holds a conflicting lock (see pg_locks and \
+             pg_stat_activity)"
+        )
+    };
+    let (result, took) = Starting::broker(scope.plain_config()).wait(Duration::from_secs(40));
+    assert_eq!(
+        Err(expected("timed out after 15s waiting for a lock to run the migration (one node at a time)")),
+        result
+    );
+    assert!(took >= Duration::from_secs(15), "{took:?}");
+    holder.execute("ROLLBACK");
+
+    holder.execute(&format!("BEGIN; LOCK TABLE {} IN ACCESS EXCLUSIVE MODE;", scope.table("meta")));
+    let mut config = scope.plain_config();
+    config.auto_migrate = false;
+    let (result, _) = Starting::broker(config).wait(Duration::from_secs(40));
+    assert_eq!(Err(expected("timed out after 5s waiting for a lock to read the schema version")), result);
 }
