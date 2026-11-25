@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 410" width="960" height="410" role="img" aria-labelledby="t d">
+<title id="t">How Cabby fits between your clients and your app</title>
+<desc id="d">Clients keep a WebSocket, SSE or Pusher connection open to Cabby. 1: a client subscribes or sends. 2: Cabby asks your app over HTTP or gRPC, and the app allows or rejects. 3: your app broadcasts over HTTP, Redis, NATS or PostgreSQL. 4: Cabby delivers the message to every subscriber. Optionally, Redis, PostgreSQL or NATS connect several Cabby nodes.</desc>
+<style>
+  .surface { fill: #ffffff; } .box { fill: #f8fafc; stroke: #94a3b8; } .cabby { fill: #fff1f2; stroke: #f43f5e; }
+  .pipe { fill: #e2e8f0; } .opt { fill: none; stroke: #94a3b8; stroke-dasharray: 5 4; }
+  .t1 { fill: #0f172a; } .t2 { fill: #475569; }
+  .ask { stroke: #0284c7; } .ask-f { fill: #0284c7; } .cast { stroke: #e11d48; } .cast-f { fill: #e11d48; } .num { fill: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #0f172a; } .box { fill: #1e293b; stroke: #64748b; } .cabby { fill: #4c0519; stroke: #f43f5e; }
+    .pipe { fill: #334155; } .opt { stroke: #64748b; }
+    .t1 { fill: #f1f5f9; } .t2 { fill: #cbd5e1; }
+    .ask { stroke: #38bdf8; } .ask-f { fill: #38bdf8; } .cast { stroke: #fb7185; } .cast-f { fill: #fb7185; } .num { fill: #0f172a; }
+  }
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 14px; }
+  .h { font-size: 19px; font-weight: 700; } .b { font-weight: 600; } .s { font-size: 13px; } .n { font-size: 13px; font-weight: 700; text-anchor: middle; } .m { text-anchor: middle; }
+  .l { fill: none; stroke-width: 2.5; }
+</style>
+<defs>
+  <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path class="ask-f" d="M0 0 9 4.5 0 9z"/></marker>
+  <marker id="c" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path class="cast-f" d="M0 0 9 4.5 0 9z"/></marker>
+</defs>
+<rect class="surface" width="960" height="410" rx="8"/>
+
+<!-- open connections -->
+<text class="t2 s m" x="258" y="38">connections stay open</text>
+<text class="t2 s m" x="258" y="56">(WebSocket, SSE or Pusher)</text>
+<rect class="pipe" x="158" y="84" width="200" height="34"/>
+<rect class="pipe" x="158" y="168" width="200" height="34"/>
+<rect class="pipe" x="158" y="252" width="200" height="34"/>
+
+<!-- clients -->
+<rect class="box" x="24" y="72" width="136" height="58" rx="10" stroke-width="1.5"/><text class="t1 b m" x="92" y="106">Browser tab</text>
+<rect class="box" x="24" y="156" width="136" height="58" rx="10" stroke-width="1.5"/><text class="t1 b m" x="92" y="190">Another tab</text>
+<rect class="box" x="24" y="240" width="136" height="58" rx="10" stroke-width="1.5"/><text class="t1 b m" x="92" y="274">Phone</text>
+
+<!-- Cabby -->
+<rect class="cabby" x="356" y="72" width="196" height="226" rx="14" stroke-width="2.5"/>
+<text class="t1 h m" x="454" y="122">Cabby</text>
+<text class="t2 m" x="454" y="158">holds every connection</text>
+<text class="t2 m" x="454" y="184">tracks subscriptions</text>
+<text class="t2 m" x="454" y="210">optional stream history</text>
+<text class="t2 m" x="454" y="236">sends pings</text>
+
+<!-- your app -->
+<rect class="box" x="760" y="72" width="180" height="226" rx="14" stroke-width="1.5"/>
+<text class="t1 h m" x="850" y="122">Your app</text>
+<text class="t2 m" x="850" y="158">Rails, or any backend</text>
+<text class="t2 m" x="850" y="196">decides who may</text>
+<text class="t2 m" x="850" y="216">connect and subscribe</text>
+<text class="t1 b m" x="850" y="256">holds no connections</text>
+
+<!-- 1: client to Cabby -->
+<line class="l ask" x1="168" y1="94" x2="350" y2="94" marker-end="url(#a)"/>
+<circle class="ask-f" cx="181" cy="141" r="10"/><text class="num n" x="181" y="145.5">1</text>
+<text class="t1" x="198" y="146">subscribes or sends</text>
+
+<!-- 2: RPC -->
+<circle class="ask-f" cx="576" cy="88" r="10"/><text class="num n" x="576" y="92.5">2</text>
+<text class="t1" x="593" y="93">asks your app</text>
+<text class="t2 s" x="593" y="111">RPC over HTTP or gRPC</text>
+<line class="l ask" x1="562" y1="126" x2="752" y2="126" marker-end="url(#a)"/>
+<line class="l ask" x1="752" y1="150" x2="562" y2="150" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<text class="t2 s" x="593" y="170">allowed or rejected</text>
+
+<!-- 3: broadcast -->
+<circle class="cast-f" cx="576" cy="222" r="10"/><text class="num n" x="576" y="226.5">3</text>
+<text class="t1" x="593" y="227">broadcasts a message</text>
+<line class="l cast" x1="752" y1="246" x2="562" y2="246" marker-end="url(#c)"/>
+<text class="t2 s" x="593" y="268">HTTP, Redis, NATS</text>
+<text class="t2 s" x="593" y="285">or PostgreSQL</text>
+
+<!-- 4: fan-out -->
+<line class="l cast" x1="350" y1="108" x2="168" y2="108" marker-end="url(#c)"/>
+<line class="l cast" x1="350" y1="185" x2="168" y2="185" marker-end="url(#c)"/>
+<line class="l cast" x1="350" y1="269" x2="168" y2="269" marker-end="url(#c)"/>
+<circle class="cast-f" cx="181" cy="309" r="10"/><text class="num n" x="181" y="313.5">4</text>
+<text class="t1" x="198" y="314">reaches every</text>
+<text class="t1" x="198" y="333">subscriber</text>
+
+<!-- optional backend -->
+<line class="opt" x1="454" y1="299" x2="454" y2="340" stroke-width="1.5"/>
+<rect class="opt" x="314" y="340" width="280" height="54" rx="10" stroke-width="1.5"/>
+<text class="t1 s m" x="454" y="363">Optional: Redis, PostgreSQL or NATS</text>
+<text class="t2 s m" x="454" y="382">connects several Cabby nodes</text>
+</svg>

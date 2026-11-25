@@ -42,17 +42,12 @@ method, and the scripts to rerun it all.
 
 ## How it fits
 
-```mermaid
-flowchart LR
-    B[Browsers] -- "WebSocket / SSE / Pusher" --> C["Cabby<br/>connections, streams, pings"]
-    C -- "RPC over HTTP or gRPC<br/>connect, subscribe, perform" --> R["Rails app<br/>channel code"]
-    R -- "broadcasts over HTTP, Redis or NATS" --> C
-```
+<p align="center">
+  <img src="docs/assets/how-it-fits.svg" width="860" alt="Clients keep a WebSocket, SSE or Pusher connection open to Cabby. 1: a client subscribes or sends. 2: Cabby asks your app over HTTP or gRPC, and the app allows or rejects. 3: your app broadcasts over HTTP, Redis, NATS or PostgreSQL. 4: Cabby delivers the message to every subscriber. Optionally, Redis, PostgreSQL or NATS connect several Cabby nodes." />
+</p>
 
-Cabby holds the connections and subscriptions, keeps stream history and sends pings. When a
-client connects, subscribes or performs an action, Cabby calls your app over RPC and your channel
-code decides. When your app broadcasts, it sends the message to Cabby, which delivers it to every
-subscriber. Several Cabby nodes can share broadcasts through Redis, NATS or PostgreSQL.
+Your app runs only when something happens, so idle connections cost it nothing. With JWT and signed
+streams, Cabby can skip step 2.
 
 ## Quick start
 
