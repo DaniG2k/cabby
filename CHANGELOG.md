@@ -56,6 +56,8 @@ embedding API are breaking (see "Changed").
 - A session whose client sent a message that cannot be decoded ends when its connection does.
   Before, the connection was no longer read, and its end was only noticed by a later write
   (D-074).
+- HTTP RPC requests cancelled because their session closed no longer count as failures for the
+  circuit breaker (D-075).
 
 ## [0.3.0] - 2026-11-24
 

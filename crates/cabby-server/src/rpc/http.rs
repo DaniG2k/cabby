@@ -9,7 +9,8 @@
 //! other non-200 Unknown; transport errors are DeadlineExceeded when the context
 //! is done, Unauthenticated for TLS failures, Unavailable otherwise. A response
 //! body over `rpc.max_recv_size` (16 MiB by default) is Unknown, not retried,
-//! and counts as a success for the circuit breaker (D-068).
+//! and counts as a success for the circuit breaker (D-068). A request cancelled
+//! because its session closed does not count for the circuit breaker (D-075).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -20,6 +21,7 @@ use cabby_core::{gojson, protos};
 use http::header::{AUTHORIZATION, CONTENT_TYPE, HeaderName, HeaderValue};
 use serde::de::DeserializeOwned;
 use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 use super::{
     BoxFuture, ClientError, ClientHelper, Code, Config, Context, Dialer, RpcError, RpcService,
@@ -116,6 +118,15 @@ impl Breaker {
         Ok(self.generation)
     }
 
+    /// A request that says nothing about the application: it is not counted, and
+    /// its half-open slot is free again (D-075).
+    fn discard(&mut self, generation: u64) {
+        self.current(Instant::now());
+        if generation == self.generation {
+            self.counts.requests -= 1;
+        }
+    }
+
     /// gobreaker `afterRequest`.
     fn done(&mut self, generation: u64, success: bool) {
         let now = Instant::now();
@@ -157,15 +168,22 @@ fn cb_logger() -> cabby_core::logger::Logger {
 
 /// Reports a request's outcome to the breaker on drop (failure unless marked
 /// successful, as upstream's deferred callback; also when the call is dropped).
+/// A request cancelled because its session closed has no outcome (D-075).
 struct CbGuard<'a> {
     breaker: &'a Mutex<Breaker>,
+    cancel: &'a CancellationToken,
     generation: u64,
     success: bool,
 }
 
 impl Drop for CbGuard<'_> {
     fn drop(&mut self) {
-        lock(self.breaker).done(self.generation, self.success);
+        let mut breaker = lock(self.breaker);
+        if !self.success && self.cancel.is_cancelled() {
+            breaker.discard(self.generation);
+        } else {
+            breaker.done(self.generation, self.success);
+        }
     }
 }
 
@@ -244,7 +262,7 @@ impl HttpService {
         payload: Vec<u8>,
     ) -> Result<T, ClientError> {
         let generation = lock(&self.breaker).allow().map_err(|e| ClientError::Other(e.to_owned()))?;
-        let mut cb = CbGuard { breaker: &self.breaker, generation, success: false };
+        let mut cb = CbGuard { breaker: &self.breaker, cancel: &ctx.cancel, generation, success: false };
 
         let mut headers: Vec<(HeaderName, HeaderValue)> = Vec::with_capacity(ctx.metadata.len() + 2);
         headers.push((CONTENT_TYPE, HeaderValue::from_static("application/json")));
@@ -487,5 +505,67 @@ mod tests {
             }
         }
         assert!(!service.breaker_open(), "20 oversized responses leave the breaker closed");
+    }
+
+    /// A server that accepts connections and never answers.
+    async fn silent() -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            let mut conns = Vec::new();
+            while let Ok((conn, _)) = listener.accept().await {
+                conns.push(conn);
+            }
+        });
+        addr
+    }
+
+    /// Pins D-075: requests cancelled because their session closed do not count
+    /// for the circuit breaker; requests that time out do.
+    #[tokio::test]
+    async fn deviation_d075_cancelled_requests_do_not_count_for_the_breaker() {
+        async fn call(service: &HttpService, ctx: &Context) {
+            let res = ctx.bound(service.perform::<protos::CommandResponse>(ctx, "command", b"{}".to_vec())).await;
+            assert!(res.is_err());
+        }
+
+        let service = service(silent().await, 0);
+        for _ in 0..20 {
+            let ctx = Context::default();
+            let cancel = ctx.cancel.clone();
+            tokio::join!(call(&service, &ctx), async {
+                tokio::task::yield_now().await;
+                cancel.cancel();
+            });
+        }
+        assert_eq!(0, lock(&service.breaker).counts.requests);
+        assert!(!service.breaker_open(), "20 cancelled requests leave the breaker closed");
+
+        for _ in 0..10 {
+            call(&service, &Context::default().with_timeout(Duration::from_millis(10))).await;
+        }
+        assert!(service.breaker_open(), "10 requests that timed out open it");
+    }
+
+    /// Pins D-075: a cancelled request gives its half-open slot back.
+    #[tokio::test(start_paused = true)]
+    async fn deviation_d075_a_cancelled_request_frees_its_half_open_slot() {
+        let mut b = Breaker::new();
+        for _ in 0..10 {
+            let g = b.allow().expect("closed");
+            b.done(g, false);
+        }
+        assert_eq!(CbState::Open, b.current(Instant::now()));
+        tokio::time::advance(CB_TIMEOUT).await;
+
+        for _ in 0..2 * CB_MAX_REQUESTS {
+            let g = b.allow().expect("half-open");
+            b.discard(g);
+        }
+        for _ in 0..CB_MAX_REQUESTS {
+            let g = b.allow().expect("half-open");
+            b.done(g, true);
+        }
+        assert_eq!(CbState::Closed, b.current(Instant::now()));
     }
 }
