@@ -22,8 +22,14 @@ use crate::toml_config::{self, DeValue, DecodeError, Decoder, FromToml};
 const DISCONNECT_UNAUTHORIZED: &str = "{\"type\":\"disconnect\",\"reason\":\"unauthorized\",\"reconnect\":false}";
 const DISCONNECT_TOKEN_EXPIRED: &str = "{\"type\":\"disconnect\",\"reason\":\"token_expired\",\"reconnect\":false}";
 
+/// `sid` as a JSON string; `<`, `>` and `&` are written as they are, as upstream
+/// does (D-076).
+fn json_sid(sid: &str) -> String {
+    Value::from(sid).to_string()
+}
+
 fn welcome_message(sid: &str) -> String {
-    format!("{{\"type\":\"welcome\",\"sid\":\"{sid}\"}}")
+    format!("{{\"type\":\"welcome\",\"sid\":{}}}", json_sid(sid))
 }
 
 /// Identifies a connection (upstream `identity.Identifier`). Returning neither a
@@ -70,7 +76,7 @@ impl Identifier for PublicIdentifier {
     fn identify(&self, sid: &str, _env: &SessionEnv) -> Outcome<ConnectResult> {
         Outcome {
             result: Some(ConnectResult {
-                identifier: format!("{{\"sid\":\"{sid}\"}}"),
+                identifier: format!("{{\"sid\":{}}}", json_sid(sid)),
                 transmissions: vec![welcome_message(sid)],
                 status: Status::Success,
                 ..Default::default()
@@ -612,6 +618,27 @@ mod tests {
         assert_eq!(parse_query("a=1;b=2"), Err("invalid semicolon separator in query".into()));
         assert_eq!(url_raw_query("ws://x/cable?jid=1#frag").unwrap(), "jid=1");
         assert!(url_raw_query("ws://x/\ncable").is_err());
+    }
+
+    /// Deviation D-076: the session id is a JSON string in the welcome message
+    /// and the public identifiers.
+    #[test]
+    fn deviation_d076_session_ids_are_json_strings() {
+        let identify = |sid: &str| {
+            let result = PublicIdentifier::new().identify(sid, &SessionEnv::default()).result.unwrap();
+            (result.identifier, result.transmissions)
+        };
+        for sid in ["a1", r#"a"b"#, r"a\b"] {
+            let (identifier, transmissions) = identify(sid);
+            assert_eq!(serde_json::json!({"sid": sid}), serde_json::from_str::<Value>(&identifier).unwrap());
+            let welcome: Value = serde_json::from_str(&transmissions[0]).unwrap();
+            assert_eq!(serde_json::json!({"type": "welcome", "sid": sid}), welcome);
+        }
+        // The bytes of any other id are Go's.
+        for sid in ["a1", "a<b>&c'/{}~"] {
+            let welcome = format!(r#"{{"type":"welcome","sid":"{sid}"}}"#);
+            assert_eq!((format!(r#"{{"sid":"{sid}"}}"#), vec![welcome]), identify(sid));
+        }
     }
 
     /// Malformed JWT segments are rejected with golang-jwt's prefix and Go's

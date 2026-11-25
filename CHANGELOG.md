@@ -62,6 +62,8 @@ embedding API are breaking (see "Changed").
   background with backoff (1 s at first, up to 2 minutes), as AnyCable does. Before, RPC calls
   kept failing with `grpc connection is not ready` after the backend was back on the same
   address, until Cabby was restarted.
+- The session id is a JSON string in the welcome message and in the identifiers of public and
+  no-auth connections, whatever characters it contains (D-076).
 
 ## [0.3.0] - 2026-11-24
 
