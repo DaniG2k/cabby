@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 175
+      "cases": 182
     },
     "translation": {
       "reviewed": 923
@@ -26236,6 +26236,15 @@
   ],
   "rust_only": [
     {
+      "rust_case": "broadcast::legacy_redis_test::deviation_d082_implicit_sentinel_url",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broadcast/legacy_redis_test.go#TestLegacyRedisBroadcaster/Handles_pubsub_broadcasts"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
       "rust_case": "broadcast::postgres_test::deviation_d070_postgres_a_held_claim_lock_does_not_stall_the_claimer",
       "relation": "regression",
       "links": [
@@ -26243,6 +26252,15 @@
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "broadcast::postgres_test::deviation_d070_postgres_a_silent_commit_of_an_empty_batch_is_given_up",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "broadcast::postgres_test::deviation_d070_postgres_broker_errors_never_drop_rows",
@@ -26480,6 +26498,33 @@
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "broker::postgres_test::deviation_d071_postgres_start_does_not_wait_forever_for_a_migration_or_a_table",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Epoch"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "broker::postgres_test::deviation_d071_postgres_start_fails_when_a_lock_it_needs_is_held",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Epoch"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "broker::postgres_test::deviation_d071_postgres_starts_do_not_wait_for_locks_on_existing_tables",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Epoch"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "broker::postgres_test::deviation_d071_postgres_transient_messages_and_presence",
@@ -27802,6 +27847,15 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "pubsub::redis_test::deviation_d082_implicit_sentinel_url",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
       "rust_case": "pusher::http_test::test_http_handler::handles_broadcasts_exactly_once",
       "relation": "regression",
       "links": [
@@ -27809,6 +27863,15 @@
       ],
       "reference_status": "pass",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "redis::config_test::deviation_d082_implicit_sentinel_resolves_the_same_every_time",
+      "relation": "regression",
+      "links": [
+        "26a1a703:redis/config_test.go#TestSentinelImplicitFormat"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "rpc::grpc_test::test_grpc_integration::timeout_is_deadline_exceeded",
