@@ -8,7 +8,11 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-26
+
+Cabby 0.4.0 delivers broadcasts with less CPU and lower latency, and uses far less memory when
+messages are large. It stays compatible with AnyCable server 1.6.21. Two changes to the Rust
+embedding API are breaking (see "Changed").
 
 ### Changed
 

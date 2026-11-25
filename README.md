@@ -57,7 +57,7 @@ subscriber. Several Cabby nodes can share broadcasts through Redis, NATS or Post
 ## Install
 
 ```sh
-docker run --rm -p 8080:8080 -p 8090:8090 ghcr.io/danig2k/cabby:0.3.0 --norpc --public
+docker run --rm -p 8080:8080 -p 8090:8090 ghcr.io/danig2k/cabby:0.4.0 --norpc --public
 ```
 
 The image (linux/amd64 and arm64) runs without Redis and takes broadcasts over HTTP only; to use
