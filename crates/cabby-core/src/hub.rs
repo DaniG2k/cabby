@@ -438,6 +438,8 @@ struct SessionStreams {
 /// A registered session (upstream `HubSessionInfo`).
 struct SessionInfo<S: ?Sized> {
     session: Arc<S>,
+    /// The connection identifiers it is registered with.
+    identifiers: Arc<str>,
     streams: Mutex<SessionStreams>,
 }
 
@@ -445,7 +447,29 @@ struct HubState<S: ?Sized> {
     /// Keyed as in gates: several sessions may have the same id (D-077).
     sessions: BySession<Arc<SessionInfo<S>>>,
     /// Connection identifiers -> session keys.
-    identifiers: HashMap<String, HashSet<usize, BuildHasherDefault<AddrHasher>>>,
+    identifiers: HashMap<Arc<str>, HashSet<usize, BuildHasherDefault<AddrHasher>>>,
+}
+
+impl<S: ?Sized> HubState<S> {
+    /// Registers the session's entry, returning the one it replaces.
+    fn insert(&mut self, key: usize, info: Arc<SessionInfo<S>>) -> Option<Arc<SessionInfo<S>>> {
+        let replaced = self.remove(key);
+        self.identifiers.entry(Arc::clone(&info.identifiers)).or_default().insert(key);
+        self.sessions.insert(key, info);
+        replaced
+    }
+
+    /// Unregisters the session's entry.
+    fn remove(&mut self, key: usize) -> Option<Arc<SessionInfo<S>>> {
+        let info = self.sessions.remove(&key)?;
+        if let Some(keys) = self.identifiers.get_mut(&info.identifiers) {
+            keys.remove(&key);
+            if keys.is_empty() {
+                self.identifiers.remove(&info.identifiers);
+            }
+        }
+        Some(info)
+    }
 }
 
 #[derive(Default)]
@@ -535,7 +559,7 @@ impl<S: ?Sized + HubSession + 'static> Hub<S> {
     /// `msg.identifier` receives a `remote` disconnect message, on the
     /// remote-commands pool.
     pub fn remote_disconnect(&self, msg: RemoteDisconnectMessage) {
-        if !read(&self.inner.state).identifiers.contains_key(&msg.identifier) {
+        if !read(&self.inner.state).identifiers.contains_key(msg.identifier.as_str()) {
             log_debug!(self.inner.log, "cannot disconnect session",
                 "identifier" => &msg.identifier, "reason" => "not found");
             return;
@@ -604,41 +628,28 @@ impl<S: ?Sized + HubSession> Hub<S> {
     /// Registers a session.
     pub fn add_session(&self, session: Arc<S>) {
         let uid = session.get_id();
-        let identifiers = session.get_identifiers();
+        let identifiers: Arc<str> = session.get_identifiers().into();
         let key = session_key(&session);
-        let info = Arc::new(SessionInfo { session, streams: Mutex::new(SessionStreams::default()) });
+        let info = Arc::new(SessionInfo {
+            session,
+            identifiers: Arc::clone(&identifiers),
+            streams: Mutex::new(SessionStreams::default()),
+        });
 
-        let replaced = {
-            let mut state = write(&self.inner.state);
-            let replaced = state.sessions.insert(key, info);
-            state.identifiers.entry(identifiers.clone()).or_default().insert(key);
-            replaced
-        };
+        // Dropped outside the lock.
+        let replaced = write(&self.inner.state).insert(key, info);
         drop(replaced);
 
-        log_debug!(self.inner.log, "registered", "sid" => uid, "ids" => identifiers);
+        log_debug!(self.inner.log, "registered", "sid" => uid, "ids" => &*identifiers);
     }
 
     /// Unsubscribes the session from all its streams and unregisters it.
     pub fn remove_session(&self, session: &Arc<S>) {
         let uid = session.get_id();
-        let identifiers = session.get_identifiers();
-        let key = session_key(session);
-
-        let info = {
-            let mut state = write(&self.inner.state);
-            let Some(info) = state.sessions.remove(&key) else {
-                drop(state);
-                log_warn!(self.inner.log, "session hasn't been registered", "sid" => uid);
-                return;
-            };
-            if let Some(keys) = state.identifiers.get_mut(&identifiers) {
-                keys.remove(&key);
-                if keys.is_empty() {
-                    state.identifiers.remove(&identifiers);
-                }
-            }
-            info
+        let removed = write(&self.inner.state).remove(session_key(session));
+        let Some(info) = removed else {
+            log_warn!(self.inner.log, "session hasn't been registered", "sid" => uid);
+            return;
         };
 
         let streams = {
@@ -825,6 +836,46 @@ mod tests {
 
         hub.remove_session(&b);
         assert_eq!((0, 0, 0), (hub.size(), hub.uniq_size(), hub.streams_size()));
+        hub.shutdown();
+    }
+
+    /// A session whose identifiers change between registration and removal.
+    struct Renamed(Mutex<&'static str>);
+
+    impl HubSession for Renamed {
+        fn get_id(&self) -> String {
+            "1".into()
+        }
+
+        fn get_identifiers(&self) -> String {
+            lock(&self.0).to_string()
+        }
+
+        fn send(&self, _msg: &EncodedMessage) {}
+
+        fn disconnect_with_message(&self, _msg: &EncodedMessage, _code: &str) {}
+    }
+
+    /// A session is unregistered from the identifiers it was registered with.
+    #[test]
+    fn registration_remembers_the_identifiers() {
+        let hub: Hub = Hub::new(1);
+        let renamed = Arc::new(Renamed(Mutex::new("a")));
+        let session: SessionRef = renamed.clone();
+        hub.add_session(Arc::clone(&session));
+        *lock(&renamed.0) = "b";
+        hub.remove_session(&session);
+        assert_eq!((0, 0), (hub.size(), hub.uniq_size()));
+
+        // Registered again with other identifiers: only those are kept.
+        hub.add_session(Arc::clone(&session));
+        *lock(&renamed.0) = "c";
+        hub.add_session(Arc::clone(&session));
+        assert_eq!((1, 1), (hub.size(), hub.uniq_size()));
+        assert!(hub.find_by_identifier("b").is_none());
+        assert!(hub.find_by_identifier("c").is_some());
+        hub.remove_session(&session);
+        assert_eq!((0, 0), (hub.size(), hub.uniq_size()));
         hub.shutdown();
     }
 
