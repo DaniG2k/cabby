@@ -442,10 +442,10 @@ struct SessionInfo<S: ?Sized> {
 }
 
 struct HubState<S: ?Sized> {
-    /// sid -> session.
-    sessions: HashMap<String, Arc<SessionInfo<S>>>,
-    /// Connection identifiers -> sids.
-    identifiers: HashMap<String, HashSet<String>>,
+    /// Keyed as in gates: several sessions may have the same id (D-077).
+    sessions: BySession<Arc<SessionInfo<S>>>,
+    /// Connection identifiers -> session keys.
+    identifiers: HashMap<String, HashSet<usize, BuildHasherDefault<AddrHasher>>>,
 }
 
 #[derive(Default)]
@@ -470,8 +470,8 @@ impl<S: ?Sized + HubSession> HubInner<S> {
         &self.gates[gate_index(stream, self.gates.len())]
     }
 
-    fn info(&self, sid: &str) -> Option<Arc<SessionInfo<S>>> {
-        read(&self.state).sessions.get(sid).cloned()
+    fn info(&self, session: &Arc<S>) -> Option<Arc<SessionInfo<S>>> {
+        read(&self.state).sessions.get(&session_key(session)).cloned()
     }
 
     /// Upstream `disconnectSessions`' scheduled task: disconnects the first
@@ -482,7 +482,7 @@ impl<S: ?Sized + HubSession> HubInner<S> {
             state
                 .identifiers
                 .get(identifier)
-                .and_then(|sids| sids.iter().find_map(|sid| state.sessions.get(sid)))
+                .and_then(|keys| keys.iter().find_map(|key| state.sessions.get(key)))
                 .map(|info| Arc::clone(&info.session))
         };
         if let Some(session) = session {
@@ -521,7 +521,7 @@ impl<S: ?Sized + HubSession + 'static> Hub<S> {
                 gates,
                 log,
                 ctx,
-                state: RwLock::new(HubState { sessions: HashMap::new(), identifiers: HashMap::new() }),
+                state: RwLock::new(HubState { sessions: BySession::default(), identifiers: HashMap::new() }),
                 // Created eagerly, as upstream: it is listed by `utils::all_pools()`
                 // (the runner's "Go pools initialized" log line).
                 pool: GoPool::new("remote commands", REMOTE_COMMANDS_POOL_SIZE),
@@ -601,16 +601,17 @@ impl<S: ?Sized + HubSession> Hub<S> {
         self.inner.gates.iter().map(Gate::size).sum()
     }
 
-    /// Registers a session (replacing a session registered with the same id).
+    /// Registers a session.
     pub fn add_session(&self, session: Arc<S>) {
         let uid = session.get_id();
         let identifiers = session.get_identifiers();
+        let key = session_key(&session);
         let info = Arc::new(SessionInfo { session, streams: Mutex::new(SessionStreams::default()) });
 
         let replaced = {
             let mut state = write(&self.inner.state);
-            let replaced = state.sessions.insert(uid.clone(), info);
-            state.identifiers.entry(identifiers.clone()).or_default().insert(uid.clone());
+            let replaced = state.sessions.insert(key, info);
+            state.identifiers.entry(identifiers.clone()).or_default().insert(key);
             replaced
         };
         drop(replaced);
@@ -622,17 +623,18 @@ impl<S: ?Sized + HubSession> Hub<S> {
     pub fn remove_session(&self, session: &Arc<S>) {
         let uid = session.get_id();
         let identifiers = session.get_identifiers();
+        let key = session_key(session);
 
         let info = {
             let mut state = write(&self.inner.state);
-            let Some(info) = state.sessions.remove(&uid) else {
+            let Some(info) = state.sessions.remove(&key) else {
                 drop(state);
                 log_warn!(self.inner.log, "session hasn't been registered", "sid" => uid);
                 return;
             };
-            if let Some(sids) = state.identifiers.get_mut(&identifiers) {
-                sids.remove(&uid);
-                if sids.is_empty() {
+            if let Some(keys) = state.identifiers.get_mut(&identifiers) {
+                keys.remove(&key);
+                if keys.is_empty() {
                     state.identifiers.remove(&identifiers);
                 }
             }
@@ -654,7 +656,7 @@ impl<S: ?Sized + HubSession> Hub<S> {
     /// Upstream unexported `unsubscribeSessionFromAllChannels`: removes the gate
     /// subscriptions but keeps the session's bookkeeping, as upstream.
     pub fn unsubscribe_session_from_all_channels(&self, session: &Arc<S>) {
-        let Some(info) = self.inner.info(&session.get_id()) else { return };
+        let Some(info) = self.inner.info(session) else { return };
         let streams = lock(&info.streams);
         for (stream, identifier) in &streams.list {
             self.inner.gate(stream).unsubscribe(session, stream, identifier);
@@ -664,7 +666,7 @@ impl<S: ?Sized + HubSession> Hub<S> {
     /// Removes every stream subscribed under the channel `identifier`.
     pub fn unsubscribe_session_from_channel(&self, session: &Arc<S>, identifier: &str) {
         let sid = session.get_id();
-        if let Some(info) = self.inner.info(&sid) {
+        if let Some(info) = self.inner.info(session) {
             let mut streams = lock(&info.streams);
             streams.list.retain(|(stream, id)| {
                 if id != identifier {
@@ -682,7 +684,7 @@ impl<S: ?Sized + HubSession> Hub<S> {
     /// Unregistered sessions are ignored (upstream logs an error).
     pub fn subscribe_session(&self, session: &Arc<S>, stream: &str, identifier: &str) {
         let sid = session.get_id();
-        let registered = self.inner.info(&sid).is_some_and(|info| {
+        let registered = self.inner.info(session).is_some_and(|info| {
             let mut streams = lock(&info.streams);
             if streams.removed {
                 return false;
@@ -705,7 +707,7 @@ impl<S: ?Sized + HubSession> Hub<S> {
         self.inner.gate(stream).unsubscribe(session, stream, identifier);
 
         let sid = session.get_id();
-        if let Some(info) = self.inner.info(&sid) {
+        if let Some(info) = self.inner.info(session) {
             let mut streams = lock(&info.streams);
             if let Some(pos) = streams.list.iter().position(|(s, id)| s == stream && id == identifier) {
                 streams.list.remove(pos);
@@ -719,8 +721,8 @@ impl<S: ?Sized + HubSession> Hub<S> {
     /// A session registered with the connection `identifier`, if any.
     pub fn find_by_identifier(&self, identifier: &str) -> Option<Arc<S>> {
         let state = read(&self.inner.state);
-        let sids = state.identifiers.get(identifier)?;
-        sids.iter().find_map(|sid| state.sessions.get(sid)).map(|info| Arc::clone(&info.session))
+        let keys = state.identifiers.get(identifier)?;
+        keys.iter().find_map(|key| state.sessions.get(key)).map(|info| Arc::clone(&info.session))
     }
 
     /// All registered sessions.
@@ -787,6 +789,42 @@ mod tests {
 
         let frame = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("delivered after the panic");
         assert_eq!(b"{\"identifier\":\"c\",\"message\":\"ok\"}".to_vec(), frame);
+        hub.shutdown();
+    }
+
+    /// Deviation D-077: sessions with the same id are registered, subscribed and
+    /// unregistered independently.
+    #[test]
+    fn deviation_d077_sessions_with_the_same_id_are_independent() {
+        let hub: Hub = Hub::new(1);
+        let connect = || {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let session: SessionRef = Arc::new(Recorder { sid: "1".into(), frames: tx });
+            hub.add_session(Arc::clone(&session));
+            (session, rx)
+        };
+        let next = |rx: &std::sync::mpsc::Receiver<Vec<u8>>| {
+            String::from_utf8(rx.recv_timeout(std::time::Duration::from_secs(5)).expect("a frame")).unwrap()
+        };
+
+        let (a, a_frames) = connect();
+        hub.subscribe_session(&a, "a", "c");
+        let (b, b_frames) = connect();
+        hub.subscribe_session(&a, "late", "c");
+        hub.subscribe_session(&b, "b", "c");
+        assert_eq!((2, 1, 3), (hub.size(), hub.uniq_size(), hub.streams_size()));
+
+        hub.remove_session(&a);
+        assert_eq!((1, 1, 1), (hub.size(), hub.uniq_size(), hub.streams_size()));
+        assert!(hub.find_by_identifier("1").is_some_and(|s| Arc::ptr_eq(&s, &b)));
+        hub.subscribe_session(&b, "later", "c");
+        hub.broadcast("a", "1");
+        hub.broadcast("later", "2");
+        assert_eq!(r#"{"identifier":"c","message":2}"#, next(&b_frames));
+        assert!(a_frames.try_recv().is_err());
+
+        hub.remove_session(&b);
+        assert_eq!((0, 0, 0), (hub.size(), hub.uniq_size(), hub.streams_size()));
         hub.shutdown();
     }
 

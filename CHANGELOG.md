@@ -64,6 +64,8 @@ embedding API are breaking (see "Changed").
   address, until Cabby was restarted.
 - The session id is a JSON string in the welcome message and in the identifiers of public and
   no-auth connections, whatever characters it contains (D-076).
+- Sessions with the same id (a proxy may repeat an `X-Request-ID`) are registered, subscribed and
+  unregistered independently (D-077).
 
 ## [0.3.0] - 2026-11-24
 
