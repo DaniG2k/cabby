@@ -109,8 +109,9 @@ run() { # run <workload-name> <scenario> <args...>
 
 if [[ "${WORKLOADS:-standard}" == ceiling ]]; then
   export CABBY_BENCH_THREADS=8
-  for r in 1000 1500 2000 2500 3000 3500 4000; do
-    run "core1-$((r * 50 / 1000))k" stress_publications -c 1000 -S 100 -s 5 -r "${r}" -d 20s
+  # 20 streams: a publication reaches 250 subscribers, so the generator publishes less for the same load.
+  for r in 200 400 600 800 1000 1200 1400 1600; do
+    run "core1-$((r * 250 / 1000))k" stress_publications -c 1000 -S 20 -s 5 -r "${r}" -d 20s
   done
   echo "results in ${OUT}" >&2
   exit

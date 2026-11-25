@@ -179,6 +179,34 @@ for w in workloads:
         row(w if first else "", label, f)
         first = False
 
+# The throughput ceiling (WORKLOADS=ceiling): the highest rate of the core1-* ladder a server holds, with
+# every rate below it. Holding a rate takes at least MIN_USABLE runs the generator kept up in, all of
+# them sustained (see `sustained`), with a median p99 latency of at most MAX_P99_MS. Fixed before the
+# published runs.
+MIN_USABLE = 3
+MAX_P99_MS = 50
+ladder = sorted((w for w in workloads if w.startswith("core1-")), key=lambda w: int(w[len("core1-"):-1]))
+if ladder:
+    def holds(w, s):
+        rs = runs.get((w, s), [])
+        if len(rs) < MIN_USABLE:
+            return None  # not measured: the generator was the limit, or runs failed
+        return all(sustained(r) for r in rs) and med(w, s, "latency_p99_ms") <= MAX_P99_MS
+
+    def ceiling(s):
+        best, stopped = None, False
+        for w in ladder:
+            h = holds(w, s)
+            if h is None:
+                stopped = True
+                break
+            if not h:
+                return f"{best or 'below ' + ladder[0][6:]} msg/s"
+            best = w[len("core1-"):]
+        return f"at least {best} msg/s" if best else ("not measured" if stopped else "–")
+
+    row("Throughput ceiling, 1 core", f"highest rate held (p99 at most {MAX_P99_MS} ms, nothing lost)", ceiling)
+
 notes = []
 if any_marked:
     notes.append(f"{MARK} The server did not sustain this load (see “Sustained the load”): "
