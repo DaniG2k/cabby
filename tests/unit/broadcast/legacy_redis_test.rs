@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use cabby_server::broadcast::LegacyRedisConfig;
+use cabby_testkit::fake_sentinel::{self, FakeSentinel};
 use cabby_testkit::reference::broadcast::{
     Broadcaster, HandlerCall, MockHandler, legacy_redis_config_decode_toml, legacy_redis_config_to_toml,
     new_legacy_redis_config,
@@ -152,4 +153,26 @@ fn test_legacy_redis_broadcaster_reconnect() {
     let messages = decode(handler.drain(DRAIN_IDLE));
     assert_eq!(1, messages.len(), "Expected 1 message after reconnect, got {}", messages.len());
     assert_eq!(Some("after_reconnect"), messages[0].get("data").map(String::as_str));
+}
+
+/// regression-for: broadcast/legacy_redis_test.go#TestLegacyRedisBroadcaster/Handles_pubsub_broadcasts
+/// note: Deviation D-082: the broadcaster works with an implicit sentinel URL (`?master_set=`), which it resolves twice.
+#[test]
+fn deviation_d082_implicit_sentinel_url() {
+    fake_sentinel::rust_only();
+    let scope = services::redis().scope("legacy_redis");
+    let sentinel = FakeSentinel::start(services::redis().addr());
+    let mut config = config(&scope, "__anycable__");
+    config.redis.as_mut().expect("Redis settings").url = sentinel.implicit_url(&scope);
+    let handler = MockHandler::new();
+
+    let broadcaster = Broadcaster::legacy_redis(&handler, &config);
+    broadcaster.start().expect("Start");
+    let _guard = ShutdownGuard(&broadcaster);
+    wait_subscription(&scope, &config.channel);
+
+    scope.publish(&config.channel, &payload("legacy_test", "789_test")).expect("PUBLISH");
+    let messages = decode(handler.drain(DRAIN_IDLE));
+    assert_eq!(1, messages.len(), "{messages:?}");
+    assert_eq!(Some("789_test"), messages[0].get("data").map(String::as_str));
 }

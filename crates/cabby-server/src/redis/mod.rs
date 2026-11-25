@@ -173,8 +173,10 @@ impl RedisConfig {
     }
 
     fn resolve(&mut self) -> Result<(ClientOptions, connect::ConnectSpec), RedisError> {
+        // Not `is_sentinel()`: an implicit sentinel URL (`?master_set=`) sets
+        // `sentinel_master`, and must parse the same way every time (D-082).
         let (mut options, parsed) =
-            if self.is_sentinel() { self.parse_sentinels()? } else { parse_redis_url(&self.url)? };
+            if self.sentinels.is_empty() { parse_redis_url(&self.url)? } else { self.parse_sentinels()? };
 
         self.hosts = options.init_address.clone();
         self.sentinel_master = options.sentinel.master_set.clone();

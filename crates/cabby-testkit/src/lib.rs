@@ -26,6 +26,7 @@ pub mod cable_client;
 pub mod fake_http;
 pub mod fake_redis_cluster;
 pub mod fake_rpc;
+pub mod fake_sentinel;
 pub mod fault_proxy;
 pub mod http_stub;
 pub mod mruby_bridge;

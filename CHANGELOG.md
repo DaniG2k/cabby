@@ -82,6 +82,8 @@ embedding API are breaking (see "Changed").
 - Postgres broadcaster: a connection that went silent while the claim of an empty outbox was being
   committed could stop the node from claiming broadcasts; the commit now has the same timeout as
   the other claim statements.
+- Redis pub/sub and the legacy `redis` broadcast adapter couldn't connect with an implicit Sentinel
+  URL (`redis://sentinel:26379?master_set=mymaster`) (D-082).
 
 ## [0.3.0] - 2026-11-24
 

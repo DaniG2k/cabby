@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use cabby_core::common::StreamMessage;
 use cabby_server::pubsub::RedisConfig;
+use cabby_testkit::fake_sentinel::{self, FakeSentinel};
 use cabby_testkit::reference::pubsub::{
     Subscriber, TestHandler, new_redis_config, redis_config_decode_toml, redis_config_to_toml,
 };
@@ -151,4 +152,35 @@ fn test_redis_reconnect() {
 
     let received = handler.receive().expect("message");
     assert_eq!("2023", received.data);
+}
+
+/// regression-for: pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast
+/// note: Deviation D-082: the subscriber works with an implicit sentinel URL (`?master_set=`), which it resolves twice, alone and with a configuration another adapter has already resolved.
+#[test]
+fn deviation_d082_implicit_sentinel_url() {
+    fake_sentinel::rust_only();
+    let mut redis = Redis::new();
+    let sentinel = FakeSentinel::start(services::redis().addr());
+    let mut rconfig = RedisClientConfig::new();
+    rconfig.url = sentinel.implicit_url(&redis.scope);
+    let fresh = rconfig.config();
+    let mut resolved = fresh.clone();
+    resolved.to_client_options().expect("options");
+
+    for (name, rconfig) in [("fresh", fresh), ("resolved", resolved)] {
+        redis.config.redis = Some(rconfig);
+        let handler = TestHandler::new();
+        let subscriber = ShutdownGuard(redis.subscriber(&handler));
+        subscriber.0.start().expect("Start");
+        redis.wait_subscriptions(&redis.config.channel, 1).unwrap_or_else(|e| panic!("{name}: {e}"));
+
+        let stream = redis.stream(name);
+        subscriber.0.subscribe(&stream);
+        redis.wait_subscriptions(&stream, 1).expect("stream subscribed");
+        subscriber.0.broadcast(&StreamMessage { stream, data: name.into(), ..Default::default() });
+        assert_eq!(name, handler.receive().expect("message").data);
+
+        drop(subscriber);
+        redis.wait_subscriptions(&redis.config.channel, 0).expect("released");
+    }
 }

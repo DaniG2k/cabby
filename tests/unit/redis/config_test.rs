@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use cabby_testkit::reference::redis::{Config, decode_toml};
 use cabby_testkit::services::unique;
+use cabby_testkit::{Backend, backend};
 
 fn fixture(name: &str) -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("unit/redis/fixtures").join(name).to_string_lossy().into_owned()
@@ -355,6 +356,40 @@ fn test_sentinel_implicit_format() {
     assert_eq!(strings(&["localhost:1234"]), options.init_address);
     assert_eq!("user", options.username);
     assert_eq!("pass", options.password);
+}
+
+/// regression-for: redis/config_test.go#TestSentinelImplicitFormat
+/// note: Deviation D-082: resolving an implicit sentinel configuration again gives the same options (AnyCable's second `ToRueidisOptions` takes the Sentinel's address for the master name and localhost:6379 for the Sentinel). With `sentinels` set, the master is still the URL's host.
+#[test]
+fn deviation_d082_implicit_sentinel_resolves_the_same_every_time() {
+    if backend() == Backend::Go {
+        unimplemented!("not_observable: AnyCable's second resolution is the defect D-082 describes");
+    }
+    let mut config = Config::new();
+    config.url = "redis://user:pass@localhost:1234/5?master_set=master-name".into();
+    for _ in 0..3 {
+        let options = config.to_rueidis_options().expect("options");
+
+        assert!(config.is_sentinel());
+        assert_eq!("master-name", config.hostname());
+        assert_eq!("master-name", options.sentinel.master_set);
+        assert_eq!(strings(&["localhost:1234"]), options.init_address);
+        assert_eq!(("user", "pass"), (options.username.as_str(), options.password.as_str()));
+        assert_eq!(5, options.select_db);
+    }
+
+    // With `sentinels` set the URL's host names the master (its `master_set`
+    // is not read), at every resolution, as in AnyCable.
+    config.url = "redis://mymaster?master_set=other".into();
+    config.sentinels = "localhost:1234,localhost:1235".into();
+    for _ in 0..3 {
+        let options = config.to_rueidis_options().expect("options");
+
+        assert!(config.is_sentinel());
+        assert_eq!("mymaster", config.hostname());
+        assert_eq!("mymaster", options.sentinel.master_set);
+        assert_eq!(strings(&["localhost:1234", "localhost:1235"]), options.init_address);
+    }
 }
 
 /// upstream: redis/config_test.go#TestDefaultScheme
