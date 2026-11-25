@@ -963,7 +963,7 @@ impl Handler {
         } else {
             match self.node.authenticate(&session, &[]) {
                 Err(e) => return (poll, Err(DsError(e.0))),
-                Ok(Some(res)) if res.status != Status::Failure => {}
+                Ok(Some(res)) if res.status == Status::Success => {}
                 // Rejected, or closed while authenticating (Go would get a nil result).
                 Ok(_) => return (poll, Err(DsError("authentication rejected".to_owned()))),
             }
@@ -1314,6 +1314,7 @@ impl server::Handler for Endpoint {
 mod tests {
     use super::*;
     use crate::node;
+    use cabby_core::common::{CommandResult, Outcome};
 
     #[test]
     fn decode_offset_errors_like_go() {
@@ -1356,51 +1357,140 @@ data:{"streamCursor":"c","streamNextOffset":"1::e","upToDate":true}"#,
         assert!(stream_params_from_req(&req("/ds/"), &c).is_err());
     }
 
+    fn message(data: &str) -> StreamMessage {
+        StreamMessage { stream: "s".into(), data: data.into(), ..Default::default() }
+    }
+
+    fn request(addr: std::net::SocketAddr, method: &str, target: &str) -> String {
+        use std::io::{Read, Write};
+
+        let mut s = std::net::TcpStream::connect(addr).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        write!(s, "{method} {target} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        out.to_lowercase()
+    }
+
+    /// The endpoint on an HTTP server, with public streams and one message in `s`.
+    struct Served {
+        node: Arc<Node>,
+        memory: Arc<cabby_core::broker::Memory>,
+        addr: std::net::SocketAddr,
+        _server: Arc<server::HttpServer>,
+    }
+
+    impl Served {
+        /// Connections are authenticated by `controller`, or not at all.
+        fn new(controller: Option<Arc<dyn cabby_core::common::Controller>>) -> Self {
+            let mut nconf = node::Config::new();
+            nconf.disconnect_mode = node::DISCONNECT_MODE_NEVER.into();
+            let mut sconf = cabby_core::streams::Config::new();
+            sconf.public = true;
+            let streams = Arc::new(StreamsController::for_config(&sconf));
+            let mut conf = Config::new();
+            conf.skip_auth = controller.is_none();
+            conf.poll_interval = 5;
+            let controller = controller.unwrap_or_else(|| streams.clone());
+            let node = Node::new(nconf, vec![node::NodeOption::Controller(controller)]);
+            let subscriber = Arc::new(node::LegacySubscriber::new(node.clone()));
+            let memory = Arc::new(cabby_core::broker::Memory::new(
+                Some(subscriber as Arc<dyn cabby_core::broker::Broadcaster>),
+                None,
+                &cabby_core::broker::Config::new(),
+                Arc::new(cabby_core::broker::SystemClock),
+            ));
+            memory.set_epoch("ep");
+            node.set_broker(memory.clone());
+            memory.start().unwrap();
+            node.start().unwrap();
+            memory.handle_broadcast(&message(r#"{"n":1}"#)).unwrap();
+
+            let srv = server::HttpServer::new("127.0.0.1", "0", None, 0).unwrap();
+            let ep = handler(node.clone(), memory.clone(), Some(streams), None, srv.shutdown_token(), None, &conf);
+            srv.setup_handler("/ds/*", ep.unwrap());
+            srv.start().unwrap();
+            let addr = srv.local_addr().unwrap();
+            Self { node, memory, addr, _server: srv }
+        }
+    }
+
+    /// Answers every connection with a status, and no error.
+    struct Answering(Status);
+
+    impl cabby_core::common::Controller for Answering {
+        fn start(&self) -> Result<(), cabby_core::common::ControllerError> {
+            Ok(())
+        }
+        fn shutdown(&self) -> Result<(), cabby_core::common::ControllerError> {
+            Ok(())
+        }
+        fn authenticate(
+            &self,
+            _sid: &str,
+            _env: Option<&cabby_core::common::SessionEnv>,
+        ) -> Outcome<cabby_core::common::ConnectResult> {
+            let result =
+                cabby_core::common::ConnectResult { status: self.0, identifier: "ids".into(), ..Default::default() };
+            Outcome { result: Some(result), error: None }
+        }
+        fn subscribe(
+            &self,
+            _sid: &str,
+            _env: Option<&cabby_core::common::SessionEnv>,
+            _ids: &str,
+            _channel: &str,
+        ) -> Outcome<CommandResult> {
+            Outcome { result: None, error: None }
+        }
+        fn unsubscribe(
+            &self,
+            _sid: &str,
+            _env: Option<&cabby_core::common::SessionEnv>,
+            _ids: &str,
+            _channel: &str,
+        ) -> Outcome<CommandResult> {
+            Outcome { result: None, error: None }
+        }
+        fn perform(
+            &self,
+            _sid: &str,
+            _env: Option<&cabby_core::common::SessionEnv>,
+            _ids: &str,
+            _channel: &str,
+            _data: &str,
+        ) -> Outcome<CommandResult> {
+            Outcome { result: None, error: None }
+        }
+        fn disconnect(
+            &self,
+            _sid: &str,
+            _env: Option<&cabby_core::common::SessionEnv>,
+            _ids: &str,
+            _subscriptions: &[String],
+        ) -> Result<(), cabby_core::common::ControllerError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn only_successful_authentication_is_served() {
+        for (status, want) in [(Status::Success, "200"), (Status::Failure, "401"), (Status::Error, "401")] {
+            let endpoint = Served::new(Some(Arc::new(Answering(status))));
+            let get = request(endpoint.addr, "GET", "/ds/s?offset=-1");
+            assert!(get.starts_with(&format!("http/1.1 {want}")), "{status:?}: {get}");
+            assert_eq!(want == "200", get.contains(r#"[{"n":1}]"#), "{status:?}: {get}");
+        }
+    }
+
     /// The mounted endpoint over a real socket: HEAD, catch-up, a long-poll
     /// answered by a broadcast.
     #[test]
     fn serves_on_the_http_server() {
-        use std::io::{Read, Write};
-
-        let mut nconf = node::Config::new();
-        nconf.disconnect_mode = node::DISCONNECT_MODE_NEVER.into();
-        let mut sconf = cabby_core::streams::Config::new();
-        sconf.public = true;
-        let streams_ctrl = Arc::new(StreamsController::for_config(&sconf));
-        let streams = Some(streams_ctrl.clone());
-        let node = Node::new(nconf, vec![node::NodeOption::Controller(streams_ctrl)]);
-        let subscriber = Arc::new(node::LegacySubscriber::new(node.clone()));
-        let memory = Arc::new(cabby_core::broker::Memory::new(
-            Some(subscriber as Arc<dyn cabby_core::broker::Broadcaster>),
-            None,
-            &cabby_core::broker::Config::new(),
-            Arc::new(cabby_core::broker::SystemClock),
-        ));
-        memory.set_epoch("ep");
-        node.set_broker(memory.clone());
-        memory.start().unwrap();
-        node.start().unwrap();
-        let msg = |data: &str| StreamMessage { stream: "s".into(), data: data.into(), ..Default::default() };
-        memory.handle_broadcast(&msg(r#"{"n":1}"#)).unwrap();
-
-        let mut conf = Config::new();
-        conf.skip_auth = true;
-        conf.poll_interval = 5;
-
-        let srv = server::HttpServer::new("127.0.0.1", "0", None, 0).unwrap();
-        let ep = handler(node.clone(), memory.clone(), streams, None, srv.shutdown_token(), None, &conf).unwrap();
-        srv.setup_handler("/ds/*", ep);
-        srv.start().unwrap();
-        let addr = srv.local_addr().unwrap();
-
-        let request = move |method: &str, target: &str| {
-            let mut s = std::net::TcpStream::connect(addr).unwrap();
-            s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-            write!(s, "{method} {target} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").unwrap();
-            let mut out = String::new();
-            let _ = s.read_to_string(&mut out);
-            out.to_lowercase()
-        };
+        let endpoint = Served::new(None);
+        let (node, memory) = (&endpoint.node, &endpoint.memory);
+        let addr = endpoint.addr;
+        let request = move |method: &str, target: &str| request(addr, method, target);
 
         let head = request("HEAD", "/ds/s");
         assert!(head.starts_with("http/1.1 200"), "{head}");
@@ -1421,7 +1511,7 @@ data:{"streamCursor":"c","streamNextOffset":"1::e","upToDate":true}"#,
             assert!(Instant::now() < deadline, "long-poll session not subscribed");
             std::thread::sleep(Duration::from_millis(10));
         }
-        memory.handle_broadcast(&msg(r#"{"n":2}"#)).unwrap();
+        memory.handle_broadcast(&message(r#"{"n":2}"#)).unwrap();
         let resp = pending.join().unwrap();
         assert!(resp.starts_with("http/1.1 200"), "{resp}");
         assert!(resp.contains("stream-next-offset: 2::ep"), "{resp}");

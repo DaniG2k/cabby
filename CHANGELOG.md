@@ -73,6 +73,7 @@ embedding API are breaking (see "Changed").
 - The warning about unverified Redis TLS certificates also covers `valkeys://` and schemes in
   upper case, and a new one says when a URL asks for TLS but connections do not use it, such as
   a `rediss://` master with Sentinel addresses without TLS (D-081).
+- Durable Streams read the result of authentication as the SSE endpoint does.
 
 ## [0.3.0] - 2026-11-24
 
