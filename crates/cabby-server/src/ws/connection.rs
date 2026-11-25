@@ -29,12 +29,17 @@
 //!   when the queue is full (one per ping interval), so they never wait. The io loop stops
 //!   reading from the socket while the inbound slot is full, so a slow reader
 //!   pushes back on the client through TCP, as with Go's `ReadMessage`.
-//! * **Batching.** The io loop takes every queued frame at once, feeds them to the
-//!   WebSocket and flushes once: a fan-out burst becomes one socket write.
-//! * **Zero-copy frames.** [`Connection::write_frame`] and `try_write_frame` clone
-//!   the hub's shared `Bytes` payload (`SentFrame::payload`) without copying it
-//!   until it is written into the socket buffer. The `&[u8]` methods of the
-//!   node interface must copy once into a `Bytes`.
+//! * **Batching.** The io loop takes every queued frame at once and writes them with
+//!   one vectored write and one flush: a fan-out burst becomes one system call (with
+//!   TLS, one write of records).
+//! * **Pre-framed, zero-copy writes.** Server frames are not masked and
+//!   permessage-deflate is never negotiated, so a frame is a header of 2 to 10 bytes
+//!   and the payload as it is. A queued frame carries its header, and [`write_batch`]
+//!   writes headers and payloads straight to the socket, past tungstenite (see
+//!   below). [`Connection::write_frame`] and `try_write_frame` share the hub's
+//!   `Bytes` payload (`SentFrame::payload`), which is copied only by the kernel (or
+//!   encrypted). The `&[u8]` methods of the node interface must copy once into a
+//!   `Bytes`.
 //! * **Deadlines.** Each frame carries its deadline; [`write_batch`] enforces
 //!   the last frame's deadline across the batch and its flush, failing the
 //!   connection when writing takes longer.
@@ -43,23 +48,54 @@
 //!   is written and the socket is closed, so a shutdown flushes close frames before
 //!   the process exits.
 //!
+//! # Writing past tungstenite
+//!
+//! tungstenite reads, answers pings and writes most close frames; the io loop writes
+//! everything else to the socket itself. Such a write must not land inside a frame
+//! tungstenite has partly written, so whenever the io loop writes, **tungstenite
+//! has nothing to write**: its output buffer is empty, no reply is queued in it, and
+//! what it wrote is flushed. This holds because (tungstenite 0.30
+//! `protocol/mod.rs`, `protocol/frame/mod.rs`):
+//!
+//! * It buffers output only in `write`, `flush` and `close`, and in `read` when a
+//!   reply is queued or was not flushed. The io loop never uses `write` for frames,
+//!   and `close` is the last thing it does with a connection.
+//! * Only `read` queues a reply (`additional_send`), on receiving a ping or a close
+//!   frame, and the same call returns that message. So a `ws.next()` that is pending,
+//!   or that `select!` drops while it is, has queued nothing and (as nothing was
+//!   queued before) has written nothing.
+//! * The io loop flushes a pong before it does anything else, outside of `select!`'s
+//!   reach. A flush that completes has buffered the pong (it always fits: the
+//!   output buffer's size is not limited), written the buffer and flushed the socket.
+//!   One that fails or times out, perhaps in the middle of the pong, ends the
+//!   connection ([`handle_inbound`]).
+//! * Everything else tungstenite could answer ends the connection: the io loop
+//!   answers a close frame itself ([`write_raw_close`], the queued reply is dropped
+//!   with the stream) and closes after read errors.
+//!
+//! In the other direction, [`write_batch`] returns successfully only after the last
+//! byte is written and flushed, and its failure ends the connection, so tungstenite
+//! never writes inside one of the io loop's frames.
+//!
 //! Error texts follow gorilla/websocket (e.g. `websocket: close 1000 (normal)`),
 //! so [`is_close_error`] can tell expected closures apart, like upstream
 //! `ws.IsCloseError`.
 
 use std::collections::VecDeque;
+use std::io::{self, IoSlice};
+use std::pin::Pin;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
+use std::task::{Context, Poll, ready};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::Notify;
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::error::{CapacityError, Error as WsError, ProtocolError};
 use tungstenite::protocol::CloseFrame;
-use tungstenite::protocol::frame::Frame;
-use tungstenite::protocol::frame::coding::{CloseCode, Data, OpCode};
+use tungstenite::protocol::frame::coding::CloseCode;
 use tungstenite::{Message, Utf8Bytes};
 
 use super::{FrameType, SentFrame};
@@ -166,28 +202,69 @@ impl Drop for ReadPermit {
     }
 }
 
-enum Outbound {
-    Data { text: bool, payload: Bytes, deadline: Instant },
-    Ping { deadline: Instant },
+/// The header of a server frame (RFC 6455 section 5.2): FIN set, no extension
+/// bits (permessage-deflate is never negotiated) and no mask, so 2, 4 or 10 bytes.
+struct FrameHeader([u8; 10]);
+
+impl FrameHeader {
+    const TEXT: u8 = 0x81;
+    const BINARY: u8 = 0x82;
+    /// A ping without a payload.
+    const PING: FrameHeader = FrameHeader([0x89, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+    /// The header of a frame with `len` payload bytes; `b0` is FIN and the opcode.
+    fn new(b0: u8, len: usize) -> Self {
+        let mut header = [0; 10];
+        header[0] = b0;
+        match len {
+            0..=125 => header[1] = len as u8,
+            126..=0xffff => {
+                header[1] = 126;
+                header[2..4].copy_from_slice(&(len as u16).to_be_bytes());
+            }
+            _ => {
+                header[1] = 127;
+                header[2..].copy_from_slice(&(len as u64).to_be_bytes());
+            }
+        }
+        Self(header)
+    }
+
+    fn bytes(&self) -> &[u8] {
+        let len = match self.0[1] {
+            126 => 4,
+            127 => 10,
+            _ => 2,
+        };
+        &self.0[..len]
+    }
+}
+
+/// A queued frame: its header and the shared payload, ready to be written.
+struct Outbound {
+    header: FrameHeader,
+    payload: Bytes,
+    deadline: Instant,
 }
 
 impl Outbound {
-    fn deadline(&self) -> Instant {
-        match self {
-            Outbound::Data { deadline, .. } | Outbound::Ping { deadline } => *deadline,
-        }
+    fn data(text: bool, payload: Bytes, deadline: Instant) -> Self {
+        let b0 = if text { FrameHeader::TEXT } else { FrameHeader::BINARY };
+        Self { header: FrameHeader::new(b0, payload.len()), payload, deadline }
     }
 
-    fn into_message(self) -> Message {
-        match self {
-            Outbound::Data { text, payload, .. } => {
-                // Text payloads are produced by our encoders (valid UTF-8); sending
-                // a raw frame skips re-validating them.
-                let opcode = OpCode::Data(if text { Data::Text } else { Data::Binary });
-                Message::Frame(Frame::message(payload, opcode, true))
-            }
-            Outbound::Ping { .. } => Message::Ping(Bytes::new()),
-        }
+    /// A shared text or binary frame, without copying its payload.
+    fn frame(frame: &SentFrame, deadline: Instant) -> Self {
+        Self::data(frame.frame_type == FrameType::Text, frame.payload.clone(), deadline)
+    }
+
+    fn ping(deadline: Instant) -> Self {
+        Self { header: FrameHeader::PING, payload: Bytes::new(), deadline }
+    }
+
+    /// The bytes on the wire.
+    fn parts(&self) -> impl Iterator<Item = &[u8]> {
+        [self.header.bytes(), &self.payload].into_iter().filter(|part| !part.is_empty())
     }
 }
 
@@ -370,7 +447,7 @@ impl WsConnection {
     /// Queues `item`, waiting until `deadline` for space.
     fn push(&self, item: Outbound) -> Result<(), ConnectionError> {
         let shared = self.shared();
-        let deadline = item.deadline();
+        let deadline = item.deadline;
         let mut state = shared.lock();
         let was_empty;
         loop {
@@ -418,12 +495,12 @@ impl WsConnection {
 impl Connection for WsConnection {
     /// Queues a text frame (upstream `Write`).
     fn write(&self, msg: &[u8], deadline: Instant) -> Result<(), ConnectionError> {
-        self.push(Outbound::Data { text: true, payload: Bytes::copy_from_slice(msg), deadline })
+        self.push(Outbound::data(true, Bytes::copy_from_slice(msg), deadline))
     }
 
     /// Queues a binary frame (upstream `WriteBinary`).
     fn write_binary(&self, msg: &[u8], deadline: Instant) -> Result<(), ConnectionError> {
-        self.push(Outbound::Data { text: false, payload: Bytes::copy_from_slice(msg), deadline })
+        self.push(Outbound::data(false, Bytes::copy_from_slice(msg), deadline))
     }
 
     /// Queues a ping control frame (upstream `WritePing`), even when the queue is
@@ -438,7 +515,7 @@ impl Connection for WsConnection {
             return Err(ConnectionError(ERR_CLOSE_SENT.to_owned()));
         }
         let was_empty = state.out.is_empty();
-        state.out.push_back(Outbound::Ping { deadline });
+        state.out.push_back(Outbound::ping(deadline));
         drop(state);
         if was_empty {
             shared.wake.notify_one();
@@ -470,11 +547,7 @@ impl Connection for WsConnection {
             return Ok(false);
         }
         let was_empty = state.out.is_empty();
-        state.out.push_back(Outbound::Data {
-            text: frame.frame_type == FrameType::Text,
-            payload: frame.payload.clone(),
-            deadline,
-        });
+        state.out.push_back(Outbound::frame(frame, deadline));
         drop(state);
         if was_empty {
             shared.wake.notify_one();
@@ -517,11 +590,7 @@ impl Connection for WsConnection {
                 self.close(frame.close_code, &frame.close_reason);
                 Ok(())
             }
-            FrameType::Text | FrameType::Binary => self.push(Outbound::Data {
-                text: frame.frame_type == FrameType::Text,
-                payload: frame.payload.clone(),
-                deadline,
-            }),
+            FrameType::Text | FrameType::Binary => self.push(Outbound::frame(frame, deadline)),
         }
     }
 
@@ -604,7 +673,7 @@ where
                 shared.cond.notify_all();
             }
             shared.signal_writable();
-            if let Err(err) = write_batch(&mut ws, &mut batch).await {
+            if let Err(err) = write_batch(&mut ws.get_mut().io, &mut batch).await {
                 break err;
             }
         }
@@ -629,29 +698,88 @@ where
     // Dropping the stream closes the socket.
 }
 
-/// Writes the batch, then flushes; the batch uses the last frame's deadline
-/// (matching the flush deadline) so a fan-out burst registers one Tokio timer
-/// instead of one per frame.
-async fn write_batch<S>(ws: &mut WebSocketStream<S>, batch: &mut VecDeque<Outbound>) -> Result<(), String>
+/// Writes the batch to the socket, then flushes it (TLS needs that); the batch uses
+/// the last frame's deadline across both, so a fan-out burst registers one Tokio
+/// timer instead of one per frame. Empties the batch.
+async fn write_batch<W>(io: &mut W, batch: &mut VecDeque<Outbound>) -> Result<(), String>
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    W: AsyncWrite + Unpin,
 {
-    let Some(deadline) = batch.back().map(Outbound::deadline) else {
+    let Some(deadline) = batch.back().map(|frame| frame.deadline) else {
         return Ok(());
     };
     let deadline = tokio::time::Instant::from_std(deadline);
     match tokio::time::timeout_at(deadline, async {
-        for item in batch.drain(..) {
-            ws.feed(item.into_message()).await?;
-        }
-        ws.flush().await
+        write_frames(io, batch).await?;
+        io.flush().await
     })
     .await
     {
         Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => Err(e.to_string()),
+        Ok(Err(e)) => Err(WsError::Io(e).to_string()),
         Err(_) => Err(ERR_TIMEOUT.to_owned()),
     }
+}
+
+/// Frames written by one vectored write: a full queue and a few pings.
+const MAX_WRITE_FRAMES: usize = MAX_QUEUED + 2;
+
+/// Writes the frames with vectored writes, without copying their payloads.
+async fn write_frames<W>(io: &mut W, batch: &mut VecDeque<Outbound>) -> io::Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    if !io.is_write_vectored() {
+        // Such a writer takes one slice at a time: one buffer instead of a write
+        // (or a TLS record) per slice.
+        let bytes = batch.iter().flat_map(Outbound::parts).collect::<Vec<_>>().concat();
+        let mut written = 0;
+        std::future::poll_fn(|cx| poll_write_slices(Pin::new(&mut *io), cx, &mut [IoSlice::new(&bytes)], &mut written))
+            .await?;
+        batch.clear();
+    }
+    while !batch.is_empty() {
+        let count = batch.len().min(MAX_WRITE_FRAMES);
+        let mut written = 0;
+        // The slices are gathered on every poll: kept across polls they would be
+        // part of every idle connection's task.
+        std::future::poll_fn(|cx| {
+            let mut slices = [IoSlice::new(&[]); 2 * MAX_WRITE_FRAMES];
+            let mut len = 0;
+            for part in batch.iter().take(count).flat_map(Outbound::parts) {
+                slices[len] = IoSlice::new(part);
+                len += 1;
+            }
+            poll_write_slices(Pin::new(&mut *io), cx, &mut slices[..len], &mut written)
+        })
+        .await?;
+        batch.drain(..count);
+    }
+    Ok(())
+}
+
+/// Writes what follows the first `written` bytes of `slices`, counting in `written`.
+fn poll_write_slices<W>(
+    mut io: Pin<&mut W>,
+    cx: &mut Context<'_>,
+    mut slices: &mut [IoSlice<'_>],
+    written: &mut usize,
+) -> Poll<io::Result<()>>
+where
+    W: AsyncWrite,
+{
+    IoSlice::advance_slices(&mut slices, *written);
+    while !slices.is_empty() {
+        let n = ready!(io.as_mut().poll_write_vectored(cx, slices))?;
+        if n == 0 {
+            // As tungstenite reports it.
+            let e = io::Error::new(io::ErrorKind::ConnectionReset, "Connection reset while sending");
+            return Poll::Ready(Err(e));
+        }
+        *written += n;
+        IoSlice::advance_slices(&mut slices, n);
+    }
+    Poll::Ready(Ok(()))
 }
 
 /// Handles one read result; `Some(error)` ends the connection.
@@ -687,7 +815,8 @@ where
         Some(Ok(Message::Binary(data))) => deliver(data),
         Some(Ok(Message::Ping(_))) => {
             // The pong is queued by tungstenite: send it now. One that is not
-            // written within gorilla's `writeWait` ends the connection, as in Go.
+            // written within gorilla's `writeWait` ends the connection, as in Go;
+            // nothing may be written after a part of it (see the module docs).
             return match tokio::time::timeout(PONG_DEADLINE, ws.flush()).await {
                 Ok(res) => res.err().map(|e| e.to_string()),
                 Err(_) => Some(ERR_TIMEOUT.to_owned()),
@@ -743,14 +872,12 @@ where
 
 /// Writes a close frame directly to the socket, as gorilla's `WriteControl`
 /// (`FormatCloseMessage`: an empty payload for 1005, the payload cut to 125
-/// bytes), bypassing tungstenite's reply. Writes are always flushed before the
-/// io loop reads, so nothing else is pending in tungstenite.
+/// bytes), bypassing tungstenite's reply. tungstenite has written nothing else (see
+/// the module docs).
 async fn write_raw_close<S>(ws: &mut WebSocketStream<GorillaFrames<S>>, code: i32, text: &str)
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    use tokio::io::AsyncWriteExt;
-
     let mut payload = Vec::with_capacity(2 + text.len());
     if code != CLOSE_NO_STATUS_RECEIVED {
         payload.extend_from_slice(&u16::try_from(code).unwrap_or(1011).to_be_bytes());
@@ -1013,9 +1140,7 @@ fn close_frame(code: i32, reason: &str) -> Option<CloseFrame> {
 
 #[cfg(test)]
 mod tests {
-    use std::io;
-    use std::pin::Pin;
-    use std::task::{Context, Poll, Waker};
+    use std::task::Waker;
 
     use tokio::io::ReadBuf;
     use tungstenite::protocol::Role;
@@ -1159,6 +1284,244 @@ mod tests {
     fn queue(conn: &WsConnection, payload: &'static str) {
         let deadline = Instant::now() + Duration::from_secs(10);
         assert_eq!(Ok(true), conn.try_write_frame(&text(payload), deadline));
+    }
+
+    fn soon() -> Instant {
+        Instant::now() + Duration::from_secs(10)
+    }
+
+    /// The frames tungstenite writes for `messages`.
+    fn tungstenite_bytes(messages: impl IntoIterator<Item = Message>) -> Vec<u8> {
+        let mut ws = tungstenite::WebSocket::from_raw_socket(io::Cursor::new(Vec::new()), Role::Server, None);
+        for message in messages {
+            ws.send(message).unwrap();
+        }
+        ws.into_inner().into_inner()
+    }
+
+    /// `len` payload bytes that differ from their neighbours.
+    fn payload(len: usize) -> Bytes {
+        (0..len).map(|i| b'a' + (i % 23) as u8).collect::<Vec<_>>().into()
+    }
+
+    /// The lengths around which the header's size changes.
+    const EDGES: [usize; 6] = [0, 1, 125, 126, 65535, 65536];
+
+    #[tokio::test]
+    async fn frames_are_tungstenites_byte_for_byte() {
+        for len in EDGES {
+            for text in [true, false] {
+                let message = if text {
+                    Message::Text(Utf8Bytes::try_from(payload(len)).unwrap())
+                } else {
+                    Message::Binary(payload(len))
+                };
+                let mut out = Vec::new();
+                let mut batch = VecDeque::from([Outbound::data(text, payload(len), soon())]);
+                write_batch(&mut out, &mut batch).await.unwrap();
+                assert!(batch.is_empty());
+                assert!(tungstenite_bytes([message]) == out, "text={text} len={len}");
+            }
+        }
+        let mut out = Vec::new();
+        write_batch(&mut out, &mut VecDeque::from([Outbound::ping(soon())])).await.unwrap();
+        assert_eq!(tungstenite_bytes([Message::Ping(Bytes::new())]), out);
+        assert_eq!(vec![0x89, 0x00], out);
+    }
+
+    /// A socket that takes at most `first` bytes in the first write and `chunk` in
+    /// the others, and is not ready every other time.
+    struct Choppy {
+        out: Vec<u8>,
+        first: usize,
+        chunk: usize,
+        vectored: bool,
+        ready: bool,
+        writes: usize,
+        /// Bytes written before the last flush.
+        flushed: usize,
+    }
+
+    impl Choppy {
+        fn new(chunk: usize, vectored: bool) -> Self {
+            Self { out: Vec::new(), first: chunk, chunk, vectored, ready: false, writes: 0, flushed: 0 }
+        }
+
+        fn take(&mut self, cx: &mut Context<'_>, slices: &[IoSlice<'_>]) -> Poll<io::Result<usize>> {
+            self.ready = !self.ready;
+            if !self.ready {
+                cx.waker().wake_by_ref();
+                return Poll::Pending;
+            }
+            let limit = if self.writes == 0 { self.first } else { self.chunk };
+            self.writes += 1;
+            let before = self.out.len();
+            for slice in slices {
+                let n = slice.len().min(limit - (self.out.len() - before));
+                self.out.extend_from_slice(&slice[..n]);
+            }
+            Poll::Ready(Ok(self.out.len() - before))
+        }
+    }
+
+    impl AsyncWrite for Choppy {
+        fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+            self.take(cx, &[IoSlice::new(buf)])
+        }
+
+        fn poll_write_vectored(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            bufs: &[IoSlice<'_>],
+        ) -> Poll<io::Result<usize>> {
+            // As tokio's default implementation, unless vectored.
+            let first = bufs.iter().position(|b| !b.is_empty()).unwrap_or(0);
+            let bufs = if self.vectored { bufs } else { &bufs[first..=first] };
+            self.take(cx, bufs)
+        }
+
+        fn is_write_vectored(&self) -> bool {
+            self.vectored
+        }
+
+        fn poll_flush(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            self.flushed = self.out.len();
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    /// Payload lengths of full batches with every header size in several positions.
+    const BATCHES: [[usize; MAX_QUEUED]; 3] =
+        [[0, 1, 125, 126, 300, 0, 2, 127], [70_000, 3, 126, 0, 65_536, 65_535, 1, 5], [5; MAX_QUEUED]];
+
+    fn batch_of(lens: &[usize]) -> (VecDeque<Outbound>, Vec<u8>) {
+        let batch = lens.iter().enumerate().map(|(i, len)| Outbound::data(i % 2 == 1, payload(*len), soon())).collect();
+        let messages = lens.iter().enumerate().map(|(i, len)| match i % 2 {
+            1 => Message::Text(Utf8Bytes::try_from(payload(*len)).unwrap()),
+            _ => Message::Binary(payload(*len)),
+        });
+        (batch, tungstenite_bytes(messages))
+    }
+
+    async fn check_partial(lens: &[usize], mut io: Choppy) {
+        let (first, chunk, vectored) = (io.first, io.chunk, io.vectored);
+        let (mut batch, expected) = batch_of(lens);
+        write_batch(&mut io, &mut batch).await.unwrap();
+        assert!(expected == io.out, "{lens:?} vectored={vectored} first={first} chunk={chunk}");
+        assert_eq!(expected.len(), io.flushed, "flushed after the last write");
+        assert!(batch.is_empty());
+    }
+
+    #[tokio::test]
+    async fn partial_writes_lose_and_repeat_nothing() {
+        for vectored in [true, false] {
+            for lens in BATCHES {
+                let (_, expected) = batch_of(&lens);
+                let chunks = if expected.len() < 1000 { 1..expected.len() + 1 } else { 4095..4097 };
+                for chunk in chunks {
+                    check_partial(&lens, Choppy::new(chunk, vectored)).await;
+                }
+                // One split, at every byte of every header and around it.
+                let mut start = 0;
+                for len in lens {
+                    let header = FrameHeader::new(FrameHeader::TEXT, len).bytes().len();
+                    for first in start..=start + header + 1 {
+                        let io = Choppy { first, ..Choppy::new(usize::MAX, vectored) };
+                        if (1..=expected.len()).contains(&first) {
+                            check_partial(&lens, io).await;
+                        }
+                    }
+                    start += header + len;
+                }
+                assert_eq!(expected.len(), start);
+            }
+        }
+    }
+
+    /// A batch is one write, also where only single buffers can be written, and
+    /// with pings beyond the queue's limit still few.
+    #[tokio::test]
+    async fn a_batch_is_one_write() {
+        for vectored in [true, false] {
+            for lens in BATCHES {
+                let (mut batch, expected) = batch_of(&lens);
+                let mut io = Choppy::new(usize::MAX, vectored);
+                write_batch(&mut io, &mut batch).await.unwrap();
+                assert!(expected == io.out);
+                assert_eq!(1, io.writes, "{lens:?} vectored={vectored}");
+            }
+        }
+
+        let (mut batch, mut expected) = batch_of(&BATCHES[0]);
+        for _ in 0..2 * MAX_WRITE_FRAMES {
+            batch.push_back(Outbound::ping(soon()));
+            expected.extend([0x89, 0]);
+        }
+        let mut io = Choppy::new(usize::MAX, true);
+        write_batch(&mut io, &mut batch).await.unwrap();
+        assert_eq!((expected, 3), (io.out, io.writes));
+    }
+
+    /// tokio-rustls takes the slices of a batch together, and keeps the records a
+    /// full socket did not take until it is flushed: the client must get them all.
+    #[tokio::test]
+    async fn batches_are_flushed_through_tls() {
+        use rustls::pki_types::pem::PemObject;
+        use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
+        use tokio::io::AsyncReadExt;
+
+        let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
+        let cert = CertificateDer::from_pem_file(format!("{fixtures}/server.crt")).unwrap();
+        let key = PrivateKeyDer::from_pem_file(format!("{fixtures}/server.key")).unwrap();
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let server = rustls::ServerConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert.clone()], key)
+            .unwrap();
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(cert).unwrap();
+        let client = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+
+        // Smaller than a TLS record, so that writes are often partial.
+        let (near, far) = tokio::io::duplex(1024);
+        let connector = tokio_rustls::TlsConnector::from(Arc::new(client));
+        let client = connector.connect(ServerName::try_from("localhost").unwrap(), far);
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server));
+        let (client, server) = tokio::join!(client, acceptor.accept(near));
+        let (mut client, mut server) = (client.unwrap(), server.unwrap());
+        assert!(server.is_write_vectored());
+
+        for lens in BATCHES {
+            let (mut batch, expected) = batch_of(&lens);
+            let mut got = vec![0; expected.len()];
+            let (wrote, read) = tokio::time::timeout(Duration::from_secs(10), async {
+                tokio::join!(write_batch(&mut server, &mut batch), client.read_exact(&mut got))
+            })
+            .await
+            .expect("the whole batch arrives");
+            wrote.unwrap();
+            read.unwrap();
+            assert!(expected == got, "{lens:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_write_of_nothing_is_an_error() {
+        for vectored in [true, false] {
+            let (mut batch, _) = batch_of(&[1, 2]);
+            let err = write_batch(&mut Choppy::new(0, vectored), &mut batch).await;
+            assert_eq!(Err("IO error: Connection reset while sending".to_owned()), err);
+        }
     }
 
     /// A pong that is not written within a second (gorilla's `writeWait`) ends the

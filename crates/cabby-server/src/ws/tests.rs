@@ -1,6 +1,6 @@
 //! End-to-end tests of the WebSocket endpoint and connection over real sockets.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -13,7 +13,7 @@ use tungstenite::{ClientRequestBuilder, Message, WebSocket};
 use super::*;
 use crate::node::{Connection, ConnectionError};
 use crate::server::tests::support::{IO_DEADLINE, connect, read_response, request, start};
-use crate::server::{HttpServer, RequestInfo};
+use crate::server::{HttpServer, RequestInfo, SslConfig};
 
 type Client = WebSocket<TcpStream>;
 
@@ -25,13 +25,17 @@ enum Event {
 /// A server with the WebSocket endpoint at `/cable`; each session is sent to the
 /// returned channel.
 fn ws_server(config: &Config) -> (Arc<HttpServer>, SocketAddr, mpsc::Receiver<Event>) {
+    ws_server_with(config, None)
+}
+
+fn ws_server_with(config: &Config, ssl: Option<&SslConfig>) -> (Arc<HttpServer>, SocketAddr, mpsc::Receiver<Event>) {
     let (tx, rx) = mpsc::channel();
     let tx = Mutex::new(tx);
     let handler: SessionHandler = Arc::new(move |conn, info, _callback| {
         tx.lock().unwrap().send(Event::Session(conn, info)).map_err(|e| e.to_string())
     });
     let protocols = vec!["actioncable-v1-json".to_owned(), "actioncable-v1-ext-json".to_owned()];
-    let server = HttpServer::new("127.0.0.1", "0", None, 0).unwrap();
+    let server = HttpServer::new("127.0.0.1", "0", ssl, 0).unwrap();
     server.setup_handler("/cable", websocket_handler(protocols, None, config, handler));
     let addr = start(&server);
     (server, addr, rx)
@@ -503,7 +507,6 @@ fn raw_frame(b0: u8, payload: &[u8], unmasked: bool) -> Vec<u8> {
 
 /// Reads the server's next frame: `(opcode, payload)`.
 fn read_raw_frame(stream: &mut TcpStream) -> (u8, Vec<u8>) {
-    use std::io::Read;
     let mut head = [0u8; 2];
     stream.read_exact(&mut head).unwrap();
     assert_eq!(0, head[1] & 0x80, "server frames are not masked");
@@ -567,5 +570,245 @@ fn closes_protocol_errors_with_gorilla_texts() {
     stream.write_all(&[raw_frame(0x81, b"ok", false), raw_frame(0x83, b"x", false)].concat()).unwrap();
     assert_eq!(Ok(b"ok".to_vec()), conn.read());
     assert_eq!(Err(ConnectionError("websocket: bad opcode 3".into())), conn.read());
+    server.shutdown();
+}
+
+// --- Vectored, pre-framed writes -----------------------------------------------
+
+type TlsStream = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
+
+fn ssl() -> SslConfig {
+    let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
+    SslConfig { cert_path: format!("{fixtures}/server.crt"), key_path: format!("{fixtures}/server.key") }
+}
+
+fn connect_tls(addr: SocketAddr) -> TlsStream {
+    use rustls::pki_types::pem::PemObject;
+
+    let mut roots = rustls::RootCertStore::empty();
+    for cert in rustls::pki_types::CertificateDer::pem_file_iter(ssl().cert_path).unwrap() {
+        roots.add(cert.unwrap()).unwrap();
+    }
+    let config = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let name = rustls::pki_types::ServerName::try_from("localhost").unwrap();
+    rustls::StreamOwned::new(rustls::ClientConnection::new(Arc::new(config), name).unwrap(), connect(addr))
+}
+
+/// The handshake and one request on `stream`, which must be answered with 101.
+fn upgrade(stream: &mut (impl Read + Write), path: &str) {
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    )
+    .unwrap();
+    assert_eq!(101, read_response(stream).status);
+}
+
+/// Every layer between the io loop and the socket passes vectored writes on, with
+/// and without TLS: a batch is one system call, or one TLS write.
+#[test]
+fn upgraded_sockets_take_vectored_writes() {
+    use tokio::io::AsyncWrite;
+
+    let ssl = ssl();
+    for tls in [false, true] {
+        let (tx, rx) = mpsc::channel();
+        let server = HttpServer::new("127.0.0.1", "0", tls.then_some(&ssl), 0).unwrap();
+        server.setup_handler("/probe", move |mut req: crate::server::Request| {
+            let on_upgrade = hyper::upgrade::on(&mut req);
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                // As `WebsocketHandler` wraps the socket.
+                let io = hyper_util::rt::TokioIo::new(on_upgrade.await.expect("upgraded"));
+                tx.send(connection::GorillaFrames::new(io).is_write_vectored()).unwrap();
+            });
+            let mut resp = http::Response::new(crate::server::empty());
+            *resp.status_mut() = http::StatusCode::SWITCHING_PROTOCOLS;
+            std::future::ready(resp)
+        });
+        let addr = start(&server);
+        if tls {
+            upgrade(&mut connect_tls(addr), "/probe");
+        } else {
+            upgrade(&mut connect(addr), "/probe");
+        }
+        assert!(rx.recv_timeout(IO_DEADLINE).expect("an upgraded socket"), "tls={tls}");
+        server.shutdown();
+    }
+}
+
+/// The server's next frame (`None` at the end of the stream), which must be
+/// complete, final, unmasked and have the shortest length encoding.
+fn read_server_frame(stream: &mut impl Read) -> Option<(u8, Vec<u8>)> {
+    let mut head = [0u8; 2];
+    if stream.read(&mut head[..1]).expect("a frame or the end") == 0 {
+        return None;
+    }
+    stream.read_exact(&mut head[1..]).unwrap();
+    assert_eq!(0x80, head[0] & 0xf0, "FIN and no extension bits: {head:x?}");
+    let len = match head[1] {
+        126 => {
+            let mut ext = [0; 2];
+            stream.read_exact(&mut ext).unwrap();
+            let len = u64::from(u16::from_be_bytes(ext));
+            assert!(len > 125);
+            len
+        }
+        127 => {
+            let mut ext = [0; 8];
+            stream.read_exact(&mut ext).unwrap();
+            let len = u64::from_be_bytes(ext);
+            assert!((65_536..1 << 20).contains(&len), "{len}");
+            len
+        }
+        len => {
+            assert_eq!(0, len & 0x80, "server frames are not masked");
+            u64::from(len)
+        }
+    };
+    let mut payload = vec![0; usize::try_from(len).unwrap()];
+    stream.read_exact(&mut payload).unwrap();
+    Some((head[0] & 0x0f, payload))
+}
+
+/// Data frame `i` of a load: its number, then filler of varying length.
+fn load_frame(i: usize) -> Arc<SentFrame> {
+    const FILLER: [usize; 7] = [0, 1, 115, 121, 300, 1500, 9000];
+    let len = if i % 100 == 99 { 70_000 } else { FILLER[i % FILLER.len()] };
+    let mut payload = format!("{i}:").into_bytes();
+    payload.extend((0..len).map(|k| b'a' + ((i + k) % 26) as u8));
+    let frame_type = if i.is_multiple_of(3) { FrameType::Binary } else { FrameType::Text };
+    Arc::new(SentFrame::new(frame_type, payload, 0, String::new()))
+}
+
+fn assert_load_frame(i: usize, opcode: u8, payload: &[u8]) {
+    let expected = load_frame(i);
+    let expected_opcode = if expected.frame_type == FrameType::Text { 1 } else { 2 };
+    assert!(opcode == expected_opcode && expected.payload == payload, "data frame {i} is not intact");
+}
+
+/// Data frames, server pings, answers to client pings and the close frame, all at
+/// once: every frame arrives intact and in order, and nothing follows the close.
+#[test]
+fn frames_stay_intact_and_in_order_under_load() {
+    const FRAMES: usize = 2000;
+    /// Written with the close frame right behind them.
+    const LAST: usize = 100;
+    const CLIENT_PINGS: usize = 400;
+
+    let (server, addr, rx) = ws_server(&Config::new());
+    let (mut stream, conn) = raw_session(addr, &rx);
+
+    let mut sender = stream.try_clone().unwrap();
+    let pings = std::thread::spawn(move || {
+        for i in 0..CLIENT_PINGS {
+            // In bursts, so that the server reads several at once.
+            sender.write_all(&raw_frame(0x89, format!("ping {i}").as_bytes(), false)).unwrap();
+            if i % 8 == 7 {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+    });
+    let (pongs_tx, pongs_seen) = mpsc::channel();
+    let pinger = {
+        let conn = conn.clone();
+        std::thread::spawn(move || {
+            let mut sent = 0;
+            while conn.write_ping(deadline()).is_ok() {
+                sent += 1;
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            sent
+        })
+    };
+    let writer = std::thread::spawn(move || {
+        for i in 0..FRAMES - LAST {
+            conn.write_frame(&load_frame(i), deadline()).unwrap();
+        }
+        // No client ping may be unread when the server closes the socket (the
+        // reset would discard frames).
+        pongs_seen.recv_timeout(Duration::from_secs(30)).expect("every ping is answered");
+        for i in FRAMES - LAST..FRAMES {
+            conn.write_frame(&load_frame(i), deadline()).unwrap();
+        }
+        conn.close(CLOSE_NORMAL_CLOSURE, "done");
+    });
+
+    let (mut data, mut pongs, mut server_pings) = (0, 0, 0);
+    loop {
+        let (opcode, payload) = read_server_frame(&mut stream).expect("a close frame before the end");
+        match opcode {
+            1 | 2 => {
+                assert_load_frame(data, opcode, &payload);
+                data += 1;
+            }
+            8 => {
+                assert_eq!(b"\x03\xe8done".to_vec(), payload);
+                break;
+            }
+            9 => {
+                assert!(payload.is_empty());
+                server_pings += 1;
+            }
+            10 => {
+                assert_eq!(format!("ping {pongs}").into_bytes(), payload);
+                pongs += 1;
+                if pongs == CLIENT_PINGS {
+                    pongs_tx.send(()).unwrap();
+                }
+            }
+            other => panic!("unexpected opcode {other}"),
+        }
+    }
+    assert_eq!(None, read_server_frame(&mut stream), "nothing follows the close frame");
+    assert_eq!((FRAMES, CLIENT_PINGS), (data, pongs));
+    let sent = pinger.join().unwrap();
+    // The last pings may have been queued after the close frame was requested.
+    assert!(server_pings > 0 && server_pings <= sent, "{server_pings} of {sent}");
+    pings.join().unwrap();
+    writer.join().unwrap();
+    server.shutdown();
+}
+
+/// The same write path over TLS, end to end.
+#[test]
+fn frames_stay_intact_over_tls() {
+    const FRAMES: usize = 300;
+
+    let (server, addr, rx) = ws_server_with(&Config::new(), Some(&ssl()));
+    let mut tls = connect_tls(addr);
+    upgrade(&mut tls, "/cable");
+    let (conn, _) = session(&rx);
+    tls.write_all(&raw_frame(0x89, b"hello", false)).unwrap();
+    assert_eq!(Some((10, b"hello".to_vec())), read_server_frame(&mut tls));
+
+    let writer = std::thread::spawn(move || {
+        for i in 0..FRAMES {
+            conn.write_frame(&load_frame(i), deadline()).unwrap();
+            if i % 10 == 9 {
+                conn.write_ping(deadline()).unwrap();
+            }
+        }
+        conn.close(CLOSE_NORMAL_CLOSURE, "done");
+    });
+    let mut data = 0;
+    for _ in 0..FRAMES + FRAMES / 10 {
+        let (opcode, payload) = read_server_frame(&mut tls).expect("a frame");
+        if opcode == 9 {
+            assert!(payload.is_empty());
+            assert_eq!(0, data % 10, "the ping keeps its place");
+            continue;
+        }
+        assert_load_frame(data, opcode, &payload);
+        data += 1;
+    }
+    assert_eq!(FRAMES, data);
+    assert_eq!(Some((8, b"\x03\xe8done".to_vec())), read_server_frame(&mut tls));
+    writer.join().unwrap();
     server.shutdown();
 }

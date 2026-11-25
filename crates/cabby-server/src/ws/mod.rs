@@ -11,28 +11,31 @@
 //! # WebSocket library
 //!
 //! The handshake is ours (it runs inside the hyper service, so the HTTP side
-//! stays one server); framing uses **tungstenite** (`tokio-tungstenite` for the
-//! async stream). Reasons:
+//! stays one server); reading and control frames use **tungstenite**
+//! (`tokio-tungstenite` for the async stream), and data frames, which a server
+//! neither masks nor compresses, are framed by `connection.rs` and written past it.
+//! Reasons:
 //!
 //! * **Compliance.** tungstenite passes the Autobahn test suite and is the most
 //!   widely used Rust WebSocket implementation; it handles fragmentation, control
 //!   frames interleaved with fragments, close handshakes, UTF-8 validation and
 //!   message/frame size limits. tungstenite 0.30 was already in the workspace (the
 //!   testkit's clients).
-//! * **Memory per connection.** Its buffers are configurable: `ws.read_buffer_size`
-//!   and `ws.write_buffer_size` (1 KiB by default, as upstream) bound what an idle
-//!   connection holds, and there is no per-connection task besides ours.
-//! * **No copies of shared frames.** Payloads are `Bytes`: the hub's
-//!   `Arc<SentFrame>` is wrapped (`Bytes::from_owner`) and sent as a raw frame, so
-//!   the payload is neither cloned nor re-validated per session; the only copy is
-//!   into the socket write buffer, which batches the frames of one flush into a
-//!   single write.
+//! * **Memory per connection.** Its read buffer is configurable: `ws.read_buffer_size`
+//!   (1 KiB by default, as upstream) is what an idle connection starts with. Frames
+//!   are not buffered for writing: a connection holds a write buffer only for the
+//!   pongs and the close frame tungstenite writes (control frames, up to 127 bytes
+//!   each), so `ws.write_buffer_size` is accepted but no longer sizes anything that
+//!   matters. There is no per-connection task besides ours.
+//! * **No copies of shared frames.** Payloads are `Bytes`: the hub's `SentFrame`
+//!   payload is shared by every session's queue, with the frame header next to it,
+//!   and a batch of them is written with one vectored write. It is neither cloned,
+//!   re-validated nor copied into a write buffer per session.
 //!
-//! `fastwebsockets` was the alternative: faster raw framing and vectored writes,
-//! but its reads are not cancel-safe (our io loop multiplexes reads and writes on
-//! one task with `select!`, which tungstenite's incremental parser supports), it
-//! leaves fragment reassembly and UTF-8 checks to helpers, and it is far less
-//! widely deployed. Neither crate implements permessage-deflate, so
+//! `fastwebsockets` was the alternative: faster raw framing, but its reads are not
+//! cancel-safe (our io loop multiplexes reads and writes on one task with `select!`,
+//! which tungstenite's incremental parser supports), it leaves fragment reassembly
+//! and UTF-8 checks to helpers, and it is far less widely deployed. Neither crate implements permessage-deflate, so
 //! `ws.enable_compression` is accepted but not negotiated (proposed deviation).
 
 use cabby_core::toml_config::string_list;

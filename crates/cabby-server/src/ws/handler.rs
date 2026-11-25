@@ -72,7 +72,9 @@ pub fn websocket_handler(
 }
 
 /// gorilla's buffer defaults (4096) apply to sizes of 0 or less; a message size
-/// of 0 or less means no limit.
+/// of 0 or less means no limit. The write buffer only holds control frames (data
+/// frames are written past it, see `connection.rs`), and its maximum stays unlimited:
+/// a pong must always fit.
 fn websocket_config(config: &Config) -> WebSocketConfig {
     let size = |v: i64| usize::try_from(v).ok().filter(|v| *v > 0).unwrap_or(4096);
     let max_message = usize::try_from(config.max_message_size).ok().filter(|v| *v > 0);
