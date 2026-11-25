@@ -441,15 +441,31 @@ fn verify_mac<M: Mac + KeyInit>(key: &[u8], signing_input: &[u8], signature: &[u
     mac.verify_slice(signature).is_ok()
 }
 
+/// Longest token accepted, in bytes (D-079).
+const MAX_TOKEN_BYTES: usize = 128 * 1024;
+
+/// Longest header segment accepted, as encoded, in bytes (D-079). It names the
+/// algorithm, so it is decoded before the signature can be checked.
+const MAX_HEADER_SEGMENT_BYTES: usize = 8 * 1024;
+
 /// Parses and verifies an HMAC-signed JWT as golang-jwt v5 `jwt.Parse` does with a
-/// key function accepting only HMAC methods: structure, header and claims, the
-/// signing method, the signature segment, the key function, the signature, then
-/// the time claims (`exp` and `nbf`, no leeway). Errors carry golang-jwt's text.
+/// key function accepting only HMAC methods: structure, header, the signing
+/// method, the signature segment, the key function, the signature, the claims,
+/// then the time claims (`exp` and `nbf`, no leeway). Errors carry golang-jwt's
+/// text. The claims are decoded after the signature is checked, and the sizes
+/// are bounded (D-079).
 fn verify_hmac_jwt(token: &str, secret: &[u8], now: SystemTime) -> Result<Map<String, Value>, JwtError> {
-    let parts: Vec<&str> = token.split('.').collect();
-    let [header, payload, signature] = parts[..] else {
+    if token.len() > MAX_TOKEN_BYTES {
+        return Err(jwt_error(ERR_TOKEN_MALFORMED, "token is too long", &[]));
+    }
+    let mut parts = token.split('.');
+    let (Some(header), Some(payload), Some(signature), None) = (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
         return Err(jwt_error(ERR_TOKEN_MALFORMED, "token contains an invalid number of segments", &[]));
     };
+    if header.len() > MAX_HEADER_SEGMENT_BYTES {
+        return Err(jwt_error(ERR_TOKEN_MALFORMED, "header is too long", &[]));
+    }
 
     let header_bytes =
         decode_segment(header).map_err(|e| jwt_error(ERR_TOKEN_MALFORMED, "could not base64 decode header", &[&e]))?;
@@ -457,8 +473,6 @@ fn verify_hmac_jwt(token: &str, secret: &[u8], now: SystemTime) -> Result<Map<St
         .map_err(|e| jwt_error(ERR_TOKEN_MALFORMED, "could not JSON decode header", &[&e]))?;
     let claims_bytes =
         decode_segment(payload).map_err(|e| jwt_error(ERR_TOKEN_MALFORMED, "could not base64 decode claim", &[&e]))?;
-    let claims = decode_object(&claims_bytes, "jwt.MapClaims")
-        .map_err(|e| jwt_error(ERR_TOKEN_MALFORMED, "could not JSON decode claim", &[&e]))?;
 
     let alg = match header_map.get("alg") {
         Some(Value::String(alg)) if KNOWN_METHODS.contains(&alg.as_str()) => alg.as_str(),
@@ -484,6 +498,9 @@ fn verify_hmac_jwt(token: &str, secret: &[u8], now: SystemTime) -> Result<Map<St
     if !valid {
         return Err(jwt_error(ERR_TOKEN_SIGNATURE_INVALID, "", &["signature is invalid"]));
     }
+
+    let claims = decode_object(&claims_bytes, "jwt.MapClaims")
+        .map_err(|e| jwt_error(ERR_TOKEN_MALFORMED, "could not JSON decode claim", &[&e]))?;
 
     let now_nanos = match now.duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_nanos() as i128,
@@ -662,6 +679,94 @@ mod tests {
             "token is malformed: could not JSON decode header: invalid character 'x' looking for beginning of value",
             syntax
         );
+    }
+
+    fn encode(bytes: &[u8]) -> String {
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    }
+
+    const HS256: &[u8] = br#"{"alg":"HS256"}"#;
+
+    /// A token with this header and (encoded) claims, signed with `secret`.
+    fn signed(header: &[u8], claims: &str, secret: &[u8]) -> String {
+        let input = format!("{}.{claims}", encode(header));
+        let mut mac = Hmac::<Sha256>::new_from_slice(secret).unwrap();
+        mac.update(input.as_bytes());
+        format!("{input}.{}", encode(&mac.finalize().into_bytes()))
+    }
+
+    /// Claims (encoded) of about `len` bytes, a little less.
+    fn claims_of(len: usize) -> String {
+        encode(format!(r#"{{"ext":"{}"}}"#, "x".repeat(len / 4 * 3 - 12)).as_bytes())
+    }
+
+    fn error(token: &str) -> String {
+        match verify_hmac_jwt(token, b"s", SystemTime::now()) {
+            Err(JwtError::Invalid(text)) => text,
+            other => panic!("expected an invalid token, got {other:?}"),
+        }
+    }
+
+    /// Pins D-079: the claims are decoded only when the signature is valid. A
+    /// token whose only problem is its claims reads as golang-jwt's.
+    #[test]
+    fn deviation_d079_the_signature_is_checked_before_the_claims() {
+        for claims in ["[1]", "x", "{\"a\":"] {
+            let token = signed(HS256, &encode(claims.as_bytes()), b"other");
+            assert_eq!("token signature is invalid: signature is invalid", error(&token));
+        }
+        assert_eq!(
+            "token is malformed: could not JSON decode claim: \
+             json: cannot unmarshal array into Go value of type jwt.MapClaims",
+            error(&signed(HS256, &encode(b"[1]"), b"s"))
+        );
+        assert_eq!(
+            "token is malformed: could not JSON decode claim: invalid character 'x' looking for beginning of value",
+            error(&signed(HS256, &encode(b"x"), b"s"))
+        );
+        // The encoding of the segments is still checked first.
+        assert_eq!(
+            "token is malformed: could not base64 decode claim: illegal base64 data at input byte 0",
+            error(&signed(HS256, "!", b"other"))
+        );
+    }
+
+    /// Pins D-079: tokens up to 128 KiB are accepted, with a header segment up to 8 KiB.
+    #[test]
+    fn deviation_d079_token_sizes_are_bounded() {
+        let now = SystemTime::now();
+        let around = signed(HS256, "", b"s").len();
+        let fits = signed(HS256, &claims_of(MAX_TOKEN_BYTES - around), b"s");
+        assert!((MAX_TOKEN_BYTES - 16..=MAX_TOKEN_BYTES).contains(&fits.len()), "{}", fits.len());
+        assert!(verify_hmac_jwt(&fits, b"s", now).is_ok());
+        let long = signed(HS256, &claims_of(MAX_TOKEN_BYTES + 16 - around), b"s");
+        assert!(long.len() > MAX_TOKEN_BYTES, "{}", long.len());
+        assert_eq!("token is malformed: token is too long", error(&long));
+
+        let with_header = |len: usize| {
+            let header = format!(r#"{{"alg":"HS256","kid":"{}"}}"#, "x".repeat(len / 4 * 3 - 24));
+            signed(header.as_bytes(), "e30", b"s")
+        };
+        let segment = |token: &str| token.find('.').unwrap();
+        let fits = with_header(MAX_HEADER_SEGMENT_BYTES);
+        assert!((MAX_HEADER_SEGMENT_BYTES - 16..=MAX_HEADER_SEGMENT_BYTES).contains(&segment(&fits)));
+        assert!(verify_hmac_jwt(&fits, b"s", now).is_ok());
+        let long = with_header(MAX_HEADER_SEGMENT_BYTES + 16);
+        assert!(segment(&long) > MAX_HEADER_SEGMENT_BYTES);
+        assert_eq!("token is malformed: header is too long", error(&long));
+    }
+
+    /// Pins D-079: a token over the limit gets the answer of any other invalid one.
+    #[test]
+    fn deviation_d079_a_long_token_is_unauthorized() {
+        let identifier = JwtIdentifier::new(&JwtConfig::new("s"));
+        let token = signed(HS256, &claims_of(MAX_TOKEN_BYTES), b"s");
+        let headers = std::collections::HashMap::from([("x-jid".to_owned(), token)]);
+        let outcome = identifier.identify("1", &SessionEnv { headers: Some(headers), ..Default::default() });
+        assert_eq!(None, outcome.error);
+        let result = outcome.result.unwrap();
+        assert_eq!(Status::Failure, result.status);
+        assert_eq!(vec![DISCONNECT_UNAUTHORIZED.to_owned()], result.transmissions);
     }
 
     #[test]
