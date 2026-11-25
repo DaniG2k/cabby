@@ -44,7 +44,8 @@ embedding API are breaking (see "Changed").
   written to it (D-072). Before, its commands waited until it had caught up, and with
   `--pong_timeout` it was disconnected once it was behind for longer than that, since its pongs
   waited too. As in AnyCable, a close frame or the end of the stream from such a client now ends
-  the connection at once, without sending the frames still queued.
+  the connection after at most the batch being written, without sending the frames still queued. A
+  pong to a ping read this way must also be written within a second.
 - **Breaking (Rust embedding API):** `cabby_server::node::Connection::try_write_frame` takes the
   write timeout (a `Duration`, from the start of the write) instead of a deadline.
 

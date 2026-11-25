@@ -37,9 +37,9 @@
 //!   sends without pause cannot hold its own frames back. A look that finds nothing
 //!   makes no system call (tokio knows that the socket is not readable), and there is
 //!   none when the loop waited for a message since the last batch. Nothing is read
-//!   once a close frame is requested; a close frame or the end of the stream read
-//!   between batches ends the connection without writing the frames still queued, as
-//!   in Go.
+//!   once the loop sees that a close frame is requested; a close frame or the end of the
+//!   stream read between batches ends the connection, before the next batch, without
+//!   writing the frames still queued, as in Go.
 //! * **Batching.** The io loop takes every queued frame at once and writes them with
 //!   one vectored write and one flush: a fan-out burst becomes one system call (with
 //!   TLS, one write of records).
@@ -2015,7 +2015,7 @@ mod tests {
         assert_eq!([&texts(["one"])[..], &[0x8a]].concat(), gate.out());
     }
 
-    /// A close frame between two batches is answered at once, without the frames that
+    /// A close frame between two batches is answered before the next batch, without the frames that
     /// are still queued.
     #[tokio::test]
     async fn a_close_frame_between_batches_ends_the_connection() {
@@ -2136,6 +2136,7 @@ mod tests {
         let [polls, reads] = [0, 1].map(|i| counts[i].load(Ordering::SeqCst));
         // One look between every two batches, and one before waiting.
         assert!(polls >= FRAMES / MAX_QUEUED - 1, "{polls} looks");
+        // Tokio takes an accepted socket to be readable until its first read says otherwise.
         assert!(reads <= 1, "{reads} system calls for {polls} looks");
     }
 
