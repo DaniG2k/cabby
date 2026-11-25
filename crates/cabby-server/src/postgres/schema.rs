@@ -367,44 +367,77 @@ mod tests {
         );
     }
 
-    /// A server that accepts the connection and then answers nothing more.
-    fn silent_server() -> std::net::SocketAddr {
+    /// A server that accepts the connection and then answers each message by its type.
+    fn server(answer: fn(u8) -> Vec<u8>) -> std::net::SocketAddr {
         use std::io::{Read, Write};
+        fn body(conn: &mut std::net::TcpStream) -> std::io::Result<()> {
+            let mut len = [0; 4];
+            conn.read_exact(&mut len)?;
+            conn.read_exact(&mut vec![0; u32::from_be_bytes(len) as usize - 4])
+        }
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         std::thread::spawn(move || {
             for mut conn in listener.incoming().flatten() {
-                std::thread::spawn(move || {
-                    let mut len = [0; 4];
-                    conn.read_exact(&mut len)?;
-                    let mut startup = vec![0; u32::from_be_bytes(len) as usize - 4];
-                    conn.read_exact(&mut startup)?;
+                std::thread::spawn(move || -> std::io::Result<()> {
+                    body(&mut conn)?;
                     // AuthenticationOk, ReadyForQuery.
                     conn.write_all(b"R\0\0\0\x08\0\0\0\0Z\0\0\0\x05I")?;
-                    std::io::copy(&mut conn, &mut std::io::sink())
+                    loop {
+                        let mut kind = [0];
+                        conn.read_exact(&mut kind)?;
+                        body(&mut conn)?;
+                        conn.write_all(&answer(kind[0]))?;
+                    }
                 });
             }
         });
         addr
     }
 
+    /// Prepares the schema on `server` (off its runtime, which must not hang).
+    fn prepare_on(server: std::net::SocketAddr, auto_migrate: bool, limits: Limits) -> Result<(), String> {
+        let mut c = PostgresConfig::new();
+        c.url = format!("postgres://cabby@{server}/db?sslmode=disable");
+        let names = Names::from_config(&c).unwrap();
+        let spec = ConnectSpec::from_config(&c, "test").unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        super::super::connect::runtime().spawn(async move {
+            let log = Logger::default();
+            let _ = tx.send(prepare_within(&spec, &names, auto_migrate, BROKER_TABLES, &log, &limits).await);
+        });
+        rx.recv_timeout(Duration::from_secs(20)).expect("the start hangs").map_err(|e| e.0)
+    }
+
     #[test]
     fn a_server_that_stops_answering_ends_the_start() {
-        let addr = silent_server();
-        let mut c = PostgresConfig::new();
-        c.url = format!("postgres://cabby@{addr}/db?sslmode=disable");
+        let addr = server(|_| Vec::new());
         let limits = Limits { total: Duration::from_secs(1), ..LIMITS };
         for auto_migrate in [true, false] {
-            let names = Names::from_config(&c).unwrap();
-            let spec = ConnectSpec::from_config(&c, "test").unwrap();
-            let (tx, rx) = std::sync::mpsc::channel();
-            super::super::connect::runtime().spawn(async move {
-                let log = Logger::default();
-                let _ = tx.send(prepare_within(&spec, &names, auto_migrate, BROKER_TABLES, &log, &limits).await);
-            });
-            let result = rx.recv_timeout(Duration::from_secs(20)).expect("the start hangs");
-            assert_eq!(Err(format!("timed out after 1s: no answer from {addr}/db")), result.map_err(|e| e.0));
+            let expected = format!("timed out after 1s: no answer from {addr}/db");
+            assert_eq!(Err(expected), prepare_on(addr, auto_migrate, limits));
         }
+    }
+
+    /// The error of a statement that ran into the statement timeout names the step.
+    #[test]
+    fn a_statement_timeout_names_the_step() {
+        fn message(kind: u8, body: &[u8]) -> Vec<u8> {
+            [&[kind][..], &(body.len() as u32 + 4).to_be_bytes(), body].concat()
+        }
+        let addr = server(|kind| match kind {
+            // A simple query (the transaction and its settings): CommandComplete, ReadyForQuery.
+            b'Q' => [message(b'C', b"SET\0"), message(b'Z', b"T")].concat(),
+            // Sync, the end of the first statement with parameters: ErrorResponse, ReadyForQuery.
+            b'S' => {
+                let error = b"SERROR\0VERROR\0C57014\0Mcanceling statement due to statement timeout\0\0";
+                [message(b'E', error), message(b'Z', b"E")].concat()
+            }
+            _ => Vec::new(),
+        });
+        let expected = "failed to run the migration (one node at a time), cause: \
+                        ERROR: canceling statement due to statement timeout";
+        assert_eq!(Err(expected.to_owned()), prepare_on(addr, true, LIMITS));
     }
 
     #[test]

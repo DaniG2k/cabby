@@ -1972,6 +1972,16 @@ mod tests {
             }
         }
 
+        /// Moves to the next timer's deadline and takes its callback without running it: it
+        /// has fired, and stopping it comes too late.
+        fn fire_later(&self) -> Callback {
+            let mut s = lock(&self.state);
+            let (i, _) = s.2.iter().enumerate().min_by_key(|(_, t)| (t.1, t.0)).expect("a timer");
+            let (_, due, cb) = s.2.remove(i);
+            s.0 = due;
+            cb
+        }
+
         fn pending(&self) -> usize {
             lock(&self.state).2.len()
         }
@@ -2163,6 +2173,56 @@ mod tests {
         clock.advance(Duration::from_millis(101));
         assert!(s.is_closed(), "the new deadline passed");
         assert_eq!(0, clock.pending());
+    }
+
+    /// A timer that fired just before the session's timer was re-armed or stopped does
+    /// nothing when its callback runs: what it was armed for no longer holds.
+    #[test]
+    fn a_timer_that_fired_before_it_was_rearmed_does_nothing() {
+        for answer in ["pong", "message", "close"] {
+            let clock = TestClock::new();
+            let pong_timeout = Duration::from_secs(6);
+            let (s, rx) = session(
+                &clock,
+                vec![SessionOption::PingInterval(Duration::from_secs(100)), SessionOption::PongTimeout(pong_timeout)],
+            );
+            s.set_connected(true);
+            s.start_timers();
+            let ping = lock(&s.timers).ping.unwrap();
+            clock.advance(ping - clock.now());
+            assert!(next(&rx).starts_with(r#"{"type":"ping","message":"#));
+
+            // The pong deadline passes; its callback waits for a thread meanwhile.
+            assert_eq!(Some(TimerEvent::Pong), lock(&s.timers).armed.map(|(ev, _)| ev));
+            let fired = clock.fire_later();
+            match answer {
+                // Armed for the new pong deadline.
+                "pong" => s.handle_native_pong(),
+                // Armed for the next ping.
+                "message" => s.keepalive(),
+                // Not armed.
+                _ => s.close(),
+            }
+            let armed = lock(&s.timers).armed;
+            let state = || (s.is_closed(), lock(&s.timers).armed, clock.armed(), clock.pending());
+            let before = state();
+            fired();
+            assert_eq!(before, state(), "{answer}");
+            assert_eq!(Err(std::sync::mpsc::TryRecvError::Empty), rx.try_recv(), "{answer}");
+
+            // The timer armed instead fires at its time.
+            let Some((event, at)) = armed.filter(|_| answer != "close") else { continue };
+            let expected = if answer == "pong" { TimerEvent::Pong } else { TimerEvent::Ping };
+            assert_eq!(expected, event);
+            clock.advance(at - clock.now() - Duration::from_millis(1));
+            assert_eq!(before, state(), "{answer}");
+            clock.advance(Duration::from_millis(1));
+            if answer == "pong" {
+                assert!(s.is_closed());
+            } else {
+                assert!(next(&rx).starts_with(r#"{"type":"ping","message":"#));
+            }
+        }
     }
 
     /// `pong_timeout` with clients that answer every ping (with a native pong or with a
