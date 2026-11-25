@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340" width="720" height="340" role="img" aria-labelledby="t d">
-<title id="t">Broadcast delivery latency, p99, Pusher protocol</title><desc id="d">Publish to client delivery, 1,000 clients; lower is better. 50k msg/s: Soketi (Node.js) 24.80 ms, Reverb (PHP) not sustained, AnyCable (Go) 0.90 ms, Cabby (Rust) 0.74 ms; 100k msg/s: Soketi (Node.js) not sustained, Reverb (PHP) not sustained, AnyCable (Go) 2.90 ms, Cabby (Rust) 1.78 ms; 150k msg/s: Soketi (Node.js) not sustained, Reverb (PHP) not sustained, AnyCable (Go) 15.22 ms, Cabby (Rust) 8.90 ms</desc>
+<title id="t">Broadcast delivery latency, p99, Pusher protocol</title><desc id="d">Publish to client delivery, 1,000 clients; lower is better. 50k msg/s: Soketi (Node.js) 11.36 ms, Reverb (PHP) not sustained, AnyCable (Go) 0.94 ms, Cabby (Rust) 0.70 ms; 100k msg/s: Soketi (Node.js) not sustained, Reverb (PHP) not sustained, AnyCable (Go) 2.90 ms, Cabby (Rust) 1.69 ms; 150k msg/s: Soketi (Node.js) not sustained, Reverb (PHP) not sustained, AnyCable (Go) 13.81 ms, Cabby (Rust) 8.48 ms</desc>
 <style>
-  .surface { fill: #fcfcfb; } .actioncable { fill: #1baf7a; } .anycable-go { fill: #2a78d6; } .cabby { fill: #eb6834; }
-  .soketi { fill: #eda100; } .reverb { fill: #e87ba4; }
-  .t1 { fill: #0b0b0b; } .t2 { fill: #52514e; } .grid { stroke: #e4e3df; } .axis { stroke: #b9b8b2; }
+  .surface { fill: #ffffff; } .actioncable { fill: #059669; } .anycable-go { fill: #0284c7; } .cabby { fill: #f43f5e; }
+  .soketi { fill: #d97706; } .reverb { fill: #7c3aed; }
+  .t1 { fill: #0f172a; } .t2 { fill: #475569; } .grid { stroke: #e2e8f0; } .axis { stroke: #94a3b8; }
   @media (prefers-color-scheme: dark) {
-    .surface { fill: #1a1a19; } .actioncable { fill: #199e70; } .anycable-go { fill: #3987e5; } .cabby { fill: #d95926; }
-    .soketi { fill: #c98500; } .reverb { fill: #d55181; }
-    .t1 { fill: #f0efec; } .t2 { fill: #c3c2b7; } .grid { stroke: #383835; } .axis { stroke: #5e5d58; }
+    .surface { fill: #0f172a; } .actioncable { fill: #059669; } .anycable-go { fill: #0ea5e9; } .cabby { fill: #f43f5e; }
+    .soketi { fill: #d97706; } .reverb { fill: #8b5cf6; }
+    .t1 { fill: #f1f5f9; } .t2 { fill: #cbd5e1; } .grid { stroke: #334155; } .axis { stroke: #64748b; }
   }
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
 </style>
@@ -24,35 +24,37 @@
 <text class="t2" x="536" y="74" font-size="12">Cabby (Rust)</text>
 <line class="axis" x1="64" x2="696" y1="292.0" y2="292.0" stroke-width="1"/>
 <text class="t2" x="56" y="296.0" font-size="11" text-anchor="end">0</text>
-<line class="grid" x1="64" x2="696" y1="242.0" y2="242.0" stroke-width="1"/>
-<text class="t2" x="56" y="246.0" font-size="11" text-anchor="end">10</text>
-<line class="grid" x1="64" x2="696" y1="192.0" y2="192.0" stroke-width="1"/>
-<text class="t2" x="56" y="196.0" font-size="11" text-anchor="end">20</text>
-<line class="grid" x1="64" x2="696" y1="142.0" y2="142.0" stroke-width="1"/>
-<text class="t2" x="56" y="146.0" font-size="11" text-anchor="end">30</text>
+<line class="grid" x1="64" x2="696" y1="252.0" y2="252.0" stroke-width="1"/>
+<text class="t2" x="56" y="256.0" font-size="11" text-anchor="end">3</text>
+<line class="grid" x1="64" x2="696" y1="212.0" y2="212.0" stroke-width="1"/>
+<text class="t2" x="56" y="216.0" font-size="11" text-anchor="end">6</text>
+<line class="grid" x1="64" x2="696" y1="172.0" y2="172.0" stroke-width="1"/>
+<text class="t2" x="56" y="176.0" font-size="11" text-anchor="end">9</text>
+<line class="grid" x1="64" x2="696" y1="132.0" y2="132.0" stroke-width="1"/>
+<text class="t2" x="56" y="136.0" font-size="11" text-anchor="end">12</text>
 <line class="grid" x1="64" x2="696" y1="92.0" y2="92.0" stroke-width="1"/>
-<text class="t2" x="56" y="96.0" font-size="11" text-anchor="end">40</text>
+<text class="t2" x="56" y="96.0" font-size="11" text-anchor="end">15</text>
 <text class="t2" x="14" y="192" font-size="11" transform="rotate(-90 14 192)" text-anchor="middle">ms</text>
-<path class="soketi" d="M103.1,292.0 V172.0 Q103.1,168.0 107.1,168.0 H130.7 Q134.7,168.0 134.7,172.0 V292.0 Z"/>
-<text class="t1" x="118.9" y="162.0" font-size="10" text-anchor="middle">24.80</text>
+<path class="soketi" d="M103.1,292.0 V144.5 Q103.1,140.5 107.1,140.5 H130.7 Q134.7,140.5 134.7,144.5 V292.0 Z"/>
+<text class="t1" x="118.9" y="134.5" font-size="10" text-anchor="middle">11.36</text>
 <text class="t2" x="155.5" y="286.0" font-size="10" transform="rotate(-90 155.5 286.0)">not sustained</text>
-<path class="anycable-go" d="M170.3,292.0 V291.5 Q170.3,287.5 174.3,287.5 H197.9 Q201.9,287.5 201.9,291.5 V292.0 Z"/>
-<text class="t1" x="186.1" y="281.5" font-size="10" text-anchor="middle">0.90</text>
-<path class="cabby" d="M203.9,292.0 V292.0 Q203.9,288.3 207.6,288.3 H231.8 Q235.5,288.3 235.5,292.0 V292.0 Z"/>
-<text class="t1" x="219.7" y="282.3" font-size="10" text-anchor="middle">0.74</text>
-<text class="t2" x="169.3" y="312" font-size="12" text-anchor="middle">50k msg/s</text>
+<path class="anycable-go" d="M170.3,292.0 V283.5 Q170.3,279.5 174.3,279.5 H197.9 Q201.9,279.5 201.9,283.5 V292.0 Z"/>
+<text class="t1" x="186.1" y="273.5" font-size="10" text-anchor="middle">0.94</text>
+<path class="cabby" d="M203.9,292.0 V286.7 Q203.9,282.7 207.9,282.7 H231.5 Q235.5,282.7 235.5,286.7 V292.0 Z"/>
+<text class="t1" x="219.7" y="276.7" font-size="10" text-anchor="middle">0.70</text>
+<text class="t2" x="169.3" y="311" font-size="12" text-anchor="middle">50k msg/s</text>
 <text class="t2" x="332.6" y="286.0" font-size="10" transform="rotate(-90 332.6 286.0)">not sustained</text>
 <text class="t2" x="366.2" y="286.0" font-size="10" transform="rotate(-90 366.2 286.0)">not sustained</text>
-<path class="anycable-go" d="M381.0,292.0 V281.5 Q381.0,277.5 385.0,277.5 H408.6 Q412.6,277.5 412.6,281.5 V292.0 Z"/>
-<text class="t1" x="396.8" y="271.5" font-size="10" text-anchor="middle">2.90</text>
-<path class="cabby" d="M414.6,292.0 V287.1 Q414.6,283.1 418.6,283.1 H442.2 Q446.2,283.1 446.2,287.1 V292.0 Z"/>
-<text class="t1" x="430.4" y="277.1" font-size="10" text-anchor="middle">1.78</text>
-<text class="t2" x="380.0" y="312" font-size="12" text-anchor="middle">100k msg/s</text>
+<path class="anycable-go" d="M381.0,292.0 V257.3 Q381.0,253.3 385.0,253.3 H408.6 Q412.6,253.3 412.6,257.3 V292.0 Z"/>
+<text class="t1" x="396.8" y="247.3" font-size="10" text-anchor="middle">2.90</text>
+<path class="cabby" d="M414.6,292.0 V273.5 Q414.6,269.5 418.6,269.5 H442.2 Q446.2,269.5 446.2,273.5 V292.0 Z"/>
+<text class="t1" x="430.4" y="263.5" font-size="10" text-anchor="middle">1.69</text>
+<text class="t2" x="380.0" y="311" font-size="12" text-anchor="middle">100k msg/s</text>
 <text class="t2" x="543.3" y="286.0" font-size="10" transform="rotate(-90 543.3 286.0)">not sustained</text>
 <text class="t2" x="576.9" y="286.0" font-size="10" transform="rotate(-90 576.9 286.0)">not sustained</text>
-<path class="anycable-go" d="M591.7,292.0 V219.9 Q591.7,215.9 595.7,215.9 H619.3 Q623.3,215.9 623.3,219.9 V292.0 Z"/>
-<text class="t1" x="607.5" y="209.9" font-size="10" text-anchor="middle">15.22</text>
-<path class="cabby" d="M625.3,292.0 V251.5 Q625.3,247.5 629.3,247.5 H652.9 Q656.9,247.5 656.9,251.5 V292.0 Z"/>
-<text class="t1" x="641.1" y="241.5" font-size="10" text-anchor="middle">8.90</text>
-<text class="t2" x="590.7" y="312" font-size="12" text-anchor="middle">150k msg/s</text>
+<path class="anycable-go" d="M591.7,292.0 V111.9 Q591.7,107.9 595.7,107.9 H619.3 Q623.3,107.9 623.3,111.9 V292.0 Z"/>
+<text class="t1" x="607.5" y="101.9" font-size="10" text-anchor="middle">13.81</text>
+<path class="cabby" d="M625.3,292.0 V182.9 Q625.3,178.9 629.3,178.9 H652.9 Q656.9,178.9 656.9,182.9 V292.0 Z"/>
+<text class="t1" x="641.1" y="172.9" font-size="10" text-anchor="middle">8.48</text>
+<text class="t2" x="590.7" y="311" font-size="12" text-anchor="middle">150k msg/s</text>
 </svg>

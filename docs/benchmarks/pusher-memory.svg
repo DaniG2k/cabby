@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340" width="720" height="340" role="img" aria-labelledby="t d">
-<title id="t">Server memory (RSS), Pusher protocol</title><desc id="d">Peak resident memory; lower is better. 1,000 idle clients: Soketi (Node.js) 116 MB, Reverb (PHP) 63 MB, AnyCable (Go) 54 MB, Cabby (Rust) 24 MB; 10,000 idle clients: Soketi (Node.js) 149 MB, Reverb (PHP) 233 MB, AnyCable (Go) 280 MB, Cabby (Rust) 103 MB; 5,000-client room, 100k msg/s: Soketi (Node.js) not sustained, Reverb (PHP) not sustained, AnyCable (Go) 180 MB, Cabby (Rust) 61 MB</desc>
+<title id="t">Server memory (RSS), Pusher protocol</title><desc id="d">Peak resident memory; lower is better. 1,000 idle clients: Soketi (Node.js) 114 MB, Reverb (PHP) 63 MB, AnyCable (Go) 53 MB, Cabby (Rust) 23 MB; 10,000 idle clients: Soketi (Node.js) 148 MB, Reverb (PHP) 233 MB, AnyCable (Go) 282 MB, Cabby (Rust) 102 MB; 5,000-client room, 100k msg/s: Soketi (Node.js) not sustained, Reverb (PHP) not sustained, AnyCable (Go) 176 MB, Cabby (Rust) 60 MB</desc>
 <style>
-  .surface { fill: #fcfcfb; } .actioncable { fill: #1baf7a; } .anycable-go { fill: #2a78d6; } .cabby { fill: #eb6834; }
-  .soketi { fill: #eda100; } .reverb { fill: #e87ba4; }
-  .t1 { fill: #0b0b0b; } .t2 { fill: #52514e; } .grid { stroke: #e4e3df; } .axis { stroke: #b9b8b2; }
+  .surface { fill: #ffffff; } .actioncable { fill: #059669; } .anycable-go { fill: #0284c7; } .cabby { fill: #f43f5e; }
+  .soketi { fill: #d97706; } .reverb { fill: #7c3aed; }
+  .t1 { fill: #0f172a; } .t2 { fill: #475569; } .grid { stroke: #e2e8f0; } .axis { stroke: #94a3b8; }
   @media (prefers-color-scheme: dark) {
-    .surface { fill: #1a1a19; } .actioncable { fill: #199e70; } .anycable-go { fill: #3987e5; } .cabby { fill: #d95926; }
-    .soketi { fill: #c98500; } .reverb { fill: #d55181; }
-    .t1 { fill: #f0efec; } .t2 { fill: #c3c2b7; } .grid { stroke: #383835; } .axis { stroke: #5e5d58; }
+    .surface { fill: #0f172a; } .actioncable { fill: #059669; } .anycable-go { fill: #0ea5e9; } .cabby { fill: #f43f5e; }
+    .soketi { fill: #d97706; } .reverb { fill: #8b5cf6; }
+    .t1 { fill: #f1f5f9; } .t2 { fill: #cbd5e1; } .grid { stroke: #334155; } .axis { stroke: #64748b; }
   }
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
 </style>
@@ -33,29 +33,30 @@
 <line class="grid" x1="64" x2="696" y1="92.0" y2="92.0" stroke-width="1"/>
 <text class="t2" x="56" y="96.0" font-size="11" text-anchor="end">400</text>
 <text class="t2" x="14" y="192" font-size="11" transform="rotate(-90 14 192)" text-anchor="middle">MB</text>
-<path class="soketi" d="M103.1,292.0 V237.8 Q103.1,233.8 107.1,233.8 H130.7 Q134.7,233.8 134.7,237.8 V292.0 Z"/>
-<text class="t1" x="118.9" y="227.8" font-size="10" text-anchor="middle">116</text>
+<path class="soketi" d="M103.1,292.0 V238.8 Q103.1,234.8 107.1,234.8 H130.7 Q134.7,234.8 134.7,238.8 V292.0 Z"/>
+<text class="t1" x="118.9" y="228.8" font-size="10" text-anchor="middle">114</text>
 <path class="reverb" d="M136.7,292.0 V264.4 Q136.7,260.4 140.7,260.4 H164.3 Q168.3,260.4 168.3,264.4 V292.0 Z"/>
 <text class="t1" x="152.5" y="254.4" font-size="10" text-anchor="middle">63</text>
-<path class="anycable-go" d="M170.3,292.0 V269.2 Q170.3,265.2 174.3,265.2 H197.9 Q201.9,265.2 201.9,269.2 V292.0 Z"/>
-<text class="t1" x="186.1" y="259.2" font-size="10" text-anchor="middle">54</text>
-<path class="cabby" d="M203.9,292.0 V284.1 Q203.9,280.1 207.9,280.1 H231.5 Q235.5,280.1 235.5,284.1 V292.0 Z"/>
-<text class="t1" x="219.7" y="274.1" font-size="10" text-anchor="middle">24</text>
-<text class="t2" x="169.3" y="312" font-size="12" text-anchor="middle">1,000 idle clients</text>
-<path class="soketi" d="M313.8,292.0 V221.3 Q313.8,217.3 317.8,217.3 H341.4 Q345.4,217.3 345.4,221.3 V292.0 Z"/>
-<text class="t1" x="329.6" y="211.3" font-size="10" text-anchor="middle">149</text>
+<path class="anycable-go" d="M170.3,292.0 V269.4 Q170.3,265.4 174.3,265.4 H197.9 Q201.9,265.4 201.9,269.4 V292.0 Z"/>
+<text class="t1" x="186.1" y="259.4" font-size="10" text-anchor="middle">53</text>
+<path class="cabby" d="M203.9,292.0 V284.6 Q203.9,280.6 207.9,280.6 H231.5 Q235.5,280.6 235.5,284.6 V292.0 Z"/>
+<text class="t1" x="219.7" y="274.6" font-size="10" text-anchor="middle">23</text>
+<text class="t2" x="169.3" y="311" font-size="12" text-anchor="middle">1,000 idle clients</text>
+<path class="soketi" d="M313.8,292.0 V222.1 Q313.8,218.1 317.8,218.1 H341.4 Q345.4,218.1 345.4,222.1 V292.0 Z"/>
+<text class="t1" x="329.6" y="212.1" font-size="10" text-anchor="middle">148</text>
 <path class="reverb" d="M347.4,292.0 V179.4 Q347.4,175.4 351.4,175.4 H375.0 Q379.0,175.4 379.0,179.4 V292.0 Z"/>
 <text class="t1" x="363.2" y="169.4" font-size="10" text-anchor="middle">233</text>
-<path class="anycable-go" d="M381.0,292.0 V155.9 Q381.0,151.9 385.0,151.9 H408.6 Q412.6,151.9 412.6,155.9 V292.0 Z"/>
-<text class="t1" x="396.8" y="145.9" font-size="10" text-anchor="middle">280</text>
-<path class="cabby" d="M414.6,292.0 V244.6 Q414.6,240.6 418.6,240.6 H442.2 Q446.2,240.6 446.2,244.6 V292.0 Z"/>
-<text class="t1" x="430.4" y="234.6" font-size="10" text-anchor="middle">103</text>
-<text class="t2" x="380.0" y="312" font-size="12" text-anchor="middle">10,000 idle clients</text>
+<path class="anycable-go" d="M381.0,292.0 V154.8 Q381.0,150.8 385.0,150.8 H408.6 Q412.6,150.8 412.6,154.8 V292.0 Z"/>
+<text class="t1" x="396.8" y="144.8" font-size="10" text-anchor="middle">282</text>
+<path class="cabby" d="M414.6,292.0 V245.1 Q414.6,241.1 418.6,241.1 H442.2 Q446.2,241.1 446.2,245.1 V292.0 Z"/>
+<text class="t1" x="430.4" y="235.1" font-size="10" text-anchor="middle">102</text>
+<text class="t2" x="380.0" y="311" font-size="12" text-anchor="middle">10,000 idle clients</text>
 <text class="t2" x="543.3" y="286.0" font-size="10" transform="rotate(-90 543.3 286.0)">not sustained</text>
 <text class="t2" x="576.9" y="286.0" font-size="10" transform="rotate(-90 576.9 286.0)">not sustained</text>
-<path class="anycable-go" d="M591.7,292.0 V206.1 Q591.7,202.1 595.7,202.1 H619.3 Q623.3,202.1 623.3,206.1 V292.0 Z"/>
-<text class="t1" x="607.5" y="196.1" font-size="10" text-anchor="middle">180</text>
-<path class="cabby" d="M625.3,292.0 V265.4 Q625.3,261.4 629.3,261.4 H652.9 Q656.9,261.4 656.9,265.4 V292.0 Z"/>
-<text class="t1" x="641.1" y="255.4" font-size="10" text-anchor="middle">61</text>
-<text class="t2" x="590.7" y="312" font-size="12" text-anchor="middle">5,000-client room, 100k msg/s</text>
+<path class="anycable-go" d="M591.7,292.0 V207.9 Q591.7,203.9 595.7,203.9 H619.3 Q623.3,203.9 623.3,207.9 V292.0 Z"/>
+<text class="t1" x="607.5" y="197.9" font-size="10" text-anchor="middle">176</text>
+<path class="cabby" d="M625.3,292.0 V265.9 Q625.3,261.9 629.3,261.9 H652.9 Q656.9,261.9 656.9,265.9 V292.0 Z"/>
+<text class="t1" x="641.1" y="255.9" font-size="10" text-anchor="middle">60</text>
+<text class="t2" x="590.7" y="311" font-size="12" text-anchor="middle">5,000-client room</text>
+<text class="t2" x="590.7" y="326" font-size="12" text-anchor="middle">100k msg/s</text>
 </svg>

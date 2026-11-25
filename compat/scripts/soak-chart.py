@@ -20,13 +20,13 @@ out = Path(args[1]) if len(args) > 1 else root / "docs/benchmarks/soak-memory.sv
 
 SERIES = [("anycable-go", "AnyCable (Go)"), ("cabby", "Cabby (Rust)")]
 STYLE = """
-  .surface { fill: #fcfcfb; } .anycable-go { stroke: #2a78d6; fill: #2a78d6; } .cabby { stroke: #eb6834; fill: #eb6834; }
-  .t1 { fill: #0b0b0b; } .t2 { fill: #52514e; } .grid { stroke: #e4e3df; } .axis { stroke: #b9b8b2; }
-  .mark { stroke: #b9b8b2; }
+  .surface { fill: #ffffff; } .anycable-go { stroke: #0284c7; fill: #0284c7; } .cabby { stroke: #f43f5e; fill: #f43f5e; }
+  .t1 { fill: #0f172a; } .t2 { fill: #475569; } .grid { stroke: #e2e8f0; } .axis { stroke: #94a3b8; }
+  .mark { stroke: #94a3b8; }
   @media (prefers-color-scheme: dark) {
-    .surface { fill: #1a1a19; } .anycable-go { stroke: #3987e5; fill: #3987e5; } .cabby { stroke: #d95926; fill: #d95926; }
-    .t1 { fill: #f0efec; } .t2 { fill: #c3c2b7; } .grid { stroke: #383835; } .axis { stroke: #5e5d58; }
-    .mark { stroke: #5e5d58; }
+    .surface { fill: #0f172a; } .anycable-go { stroke: #0ea5e9; fill: #0ea5e9; } .cabby { stroke: #f43f5e; fill: #f43f5e; }
+    .t1 { fill: #f1f5f9; } .t2 { fill: #cbd5e1; } .grid { stroke: #334155; } .axis { stroke: #64748b; }
+    .mark { stroke: #64748b; }
   }
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
   .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }

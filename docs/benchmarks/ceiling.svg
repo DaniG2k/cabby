@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340" width="720" height="340" role="img" aria-labelledby="t d">
+<title id="t">Highest load one core can hold</title><desc id="d">p99 at most 50 ms and no message lost, 1,000 clients; higher is better. one core, default settings: AnyCable (Go) 100 thousand msg/s, Cabby (Rust) at least 400 thousand msg/s</desc>
+<style>
+  .surface { fill: #ffffff; } .actioncable { fill: #059669; } .anycable-go { fill: #0284c7; } .cabby { fill: #f43f5e; }
+  .soketi { fill: #d97706; } .reverb { fill: #7c3aed; }
+  .t1 { fill: #0f172a; } .t2 { fill: #475569; } .grid { stroke: #e2e8f0; } .axis { stroke: #94a3b8; }
+  @media (prefers-color-scheme: dark) {
+    .surface { fill: #0f172a; } .actioncable { fill: #059669; } .anycable-go { fill: #0ea5e9; } .cabby { fill: #f43f5e; }
+    .soketi { fill: #d97706; } .reverb { fill: #8b5cf6; }
+    .t1 { fill: #f1f5f9; } .t2 { fill: #cbd5e1; } .grid { stroke: #334155; } .axis { stroke: #64748b; }
+  }
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+</style>
+<rect class="surface" width="720" height="340" rx="8"/>
+<text class="t1" x="64" y="30" font-size="16" font-weight="600">Highest load one core can hold</text>
+<text class="t2" x="64" y="50" font-size="12">p99 at most 50 ms and no message lost, 1,000 clients; higher is better</text>
+<rect class="anycable-go" x="64" y="64" width="12" height="12" rx="3"/>
+<text class="t2" x="82" y="74" font-size="12">AnyCable (Go)</text>
+<rect class="cabby" x="210" y="64" width="12" height="12" rx="3"/>
+<text class="t2" x="228" y="74" font-size="12">Cabby (Rust)</text>
+<line class="axis" x1="64" x2="696" y1="292.0" y2="292.0" stroke-width="1"/>
+<text class="t2" x="56" y="296.0" font-size="11" text-anchor="end">0</text>
+<line class="grid" x1="64" x2="696" y1="252.0" y2="252.0" stroke-width="1"/>
+<text class="t2" x="56" y="256.0" font-size="11" text-anchor="end">100</text>
+<line class="grid" x1="64" x2="696" y1="212.0" y2="212.0" stroke-width="1"/>
+<text class="t2" x="56" y="216.0" font-size="11" text-anchor="end">200</text>
+<line class="grid" x1="64" x2="696" y1="172.0" y2="172.0" stroke-width="1"/>
+<text class="t2" x="56" y="176.0" font-size="11" text-anchor="end">300</text>
+<line class="grid" x1="64" x2="696" y1="132.0" y2="132.0" stroke-width="1"/>
+<text class="t2" x="56" y="136.0" font-size="11" text-anchor="end">400</text>
+<line class="grid" x1="64" x2="696" y1="92.0" y2="92.0" stroke-width="1"/>
+<text class="t2" x="56" y="96.0" font-size="11" text-anchor="end">500</text>
+<text class="t2" x="14" y="192" font-size="11" transform="rotate(-90 14 192)" text-anchor="middle">thousand msg/s</text>
+<path class="anycable-go" d="M323.0,292.0 V256.0 Q323.0,252.0 327.0,252.0 H375.0 Q379.0,252.0 379.0,256.0 V292.0 Z"/>
+<text class="t1" x="351.0" y="246.0" font-size="11" text-anchor="middle">100</text>
+<path class="cabby" d="M381.0,292.0 V136.0 Q381.0,132.0 385.0,132.0 H433.0 Q437.0,132.0 437.0,136.0 V292.0 Z"/>
+<text class="t1" x="409.0" y="126.0" font-size="11" text-anchor="middle">at least 400</text>
+<text class="t2" x="380.0" y="311" font-size="12" text-anchor="middle">one core</text>
+<text class="t2" x="380.0" y="326" font-size="12" text-anchor="middle">default settings</text>
+</svg>

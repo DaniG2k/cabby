@@ -28,8 +28,8 @@ compatible with AnyCable server 1.6.21. Two changes to the Rust embedding API ar
 - WebSocket data frames and server pings are written straight to the socket, already framed,
   with one vectored write per batch: payloads are no longer copied into a per-connection write
   buffer, and a batch over 1 KiB is no longer split into several writes. With large messages this
-  saves memory, CPU and latency: a 5,000-client room receiving 32 KiB messages used 63 MB instead of
-  318 MB.
+  saves memory, CPU and latency: a 5,000-client room receiving 32 KiB messages used 62 MB, down
+  from about 318 MB in 0.3.0.
   `--write_buffer_size` is still accepted, but only control frames (pongs, close frames) go
   through that buffer.
 - The write timeout (`--ws_write_timeout`) of a WebSocket batch starts when the batch is
