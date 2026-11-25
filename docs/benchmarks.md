@@ -5,7 +5,7 @@ Every number is the median of 5 runs, in a shuffled server order after a warm-up
 the ceiling; the load generator has 4 other cores. Every message is checked by ID, except in the
 reconnect test, which measures recovery: Cabby lost, duplicated or reordered none in 115 checked
 runs. A run the generator limited is excluded; none was. Raw results are in [`benchmarks/`](benchmarks). Cabby
-is commit `a79dc2b` (0.4.0), and the Go server is AnyCable 1.6.21 at default settings.
+is commit `a79dc2b` (0.4.0), and the Go server is AnyCable 1.6.21, both untuned.
 
 ## One-core ceiling
 

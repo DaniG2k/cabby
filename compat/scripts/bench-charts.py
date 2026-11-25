@@ -188,7 +188,7 @@ if not pusher and ceiling_dir.is_dir():
     two = [(k, n) for k, n in SERIES if k in ("anycable-go", "cabby")]
     pairs = [held(k) for k, _ in two]
     chart(out_dir / "ceiling.svg", "Highest load one core can hold", "p99 at most 50 ms and no message lost, 1,000 clients; higher is better",
-          ["one core, default settings"], [[v] for v, _ in pairs], "thousand msg/s", series=two,
+          ["one core, untuned settings"], [[v] for v, _ in pairs], "thousand msg/s", series=two,
           labels={i: (f"at least {v:,}" if top else f"{v:,}") for i, (v, top) in enumerate(pairs)})
 fan = [("fanout-50k", "50k msg/s"), ("fanout-100k", "100k msg/s"), ("fanout-150k", "150k msg/s")]
 chart(out_dir / f"{PREFIX}latency.svg", f"Broadcast delivery latency, p99{TITLE_SUFFIX}", "Publish to client delivery, 1,000 clients; lower is better",

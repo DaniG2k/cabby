@@ -16,7 +16,7 @@ flags and `anycable.toml`. Swap the binary, keep your channels. It also speaks t
 
 Medians of 5 runs on one machine, the same settings and workloads for every server.
 
-**At least 4× the load on one core,** with p99 kept under 50 ms, at default settings.
+**At least 4× the load on one core,** with p99 kept under 50 ms, at untuned settings.
 
 <p align="center">
   <img src="docs/benchmarks/ceiling.svg" width="720" alt="Highest load one core can hold, p99 at most 50 ms and no message lost. AnyCable 100 thousand messages per second, Cabby at least 400 thousand." />
