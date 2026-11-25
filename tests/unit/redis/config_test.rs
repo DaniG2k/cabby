@@ -359,11 +359,11 @@ fn test_sentinel_implicit_format() {
 }
 
 /// regression-for: redis/config_test.go#TestSentinelImplicitFormat
-/// note: Deviation D-082: resolving an implicit sentinel configuration again gives the same options (AnyCable's second `ToRueidisOptions` takes the Sentinel's address for the master name and localhost:6379 for the Sentinel). With `sentinels` set, the master is still the URL's host.
+/// note: Deviation D-082: resolving an implicit sentinel configuration again gives the same options (the second `ToRueidisOptions` takes the URL's host for the master name and localhost:6379 for the Sentinel). With `sentinels` set, the master is still the URL's host.
 #[test]
 fn deviation_d082_implicit_sentinel_resolves_the_same_every_time() {
     if backend() == Backend::Go {
-        unimplemented!("not_observable: AnyCable's second resolution is the defect D-082 describes");
+        unimplemented!("not_observable: a second resolution is what D-082 describes");
     }
     let mut config = Config::new();
     config.url = "redis://user:pass@localhost:1234/5?master_set=master-name".into();

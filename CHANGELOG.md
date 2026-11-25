@@ -61,23 +61,24 @@ embedding API are breaking (see "Changed").
 - gRPC: after every connection attempt to the RPC backends failed, Cabby reconnects in the
   background with backoff (1 s at first, up to 2 minutes), as AnyCable does. Before, RPC calls
   kept failing with `grpc connection is not ready` after the backend was back on the same
-  address, until Cabby was restarted. A background attempt that gets no answer within 20 s
-  has failed too, and the host name is resolved again.
+  address, until Cabby was restarted. While no backend is connected, a background attempt that gets
+  no answer within 20 s counts as failed too, and the host name is resolved again.
 - The session id is a JSON string in the welcome message and in the identifiers of public and
   no-auth connections, whatever characters it contains (D-076).
 - Sessions with the same id (a proxy may repeat an `X-Request-ID`) are registered, subscribed and
   unregistered independently (D-077).
-- Check a JWT's signature before reading its claims, and limit tokens to 128 KiB and their header
-  segment to 8 KiB (D-079).
+- JWT: tokens over 128 KiB, or with a header segment over 8 KiB, are rejected, and the claims are
+  decoded after the signature has been verified (D-079).
 - Errors about an invalid Redis or NATS URL leave out its user and password (D-080).
 - The warning about unverified Redis TLS certificates also covers `valkeys://` and schemes in
   upper case, and a new one says when a URL asks for TLS but connections do not use it, such as
   a `rediss://` master with Sentinel addresses without TLS (D-081).
-- Durable Streams read the result of authentication as the SSE endpoint does.
+- Durable Streams serve a client only when authentication succeeded, as the SSE endpoint does
+  (D-078).
 - Postgres adapters: a node starting while another session wrote to Cabby's tables, or ran
   `VACUUM` on them, waited without a limit, and the broadcasts of running nodes failed behind it.
-  A start no longer locks tables and indexes that exist, and one that needs a lock another session
-  holds stops after a few seconds with an error naming the statement (see
+  A start no longer takes exclusive locks on tables and indexes that exist, and one that needs a
+  lock another session holds stops after a few seconds with an error naming the statement (see
   [`docs/postgres.md`](docs/postgres.md)).
 - Postgres broadcaster: a connection that went silent while the claim of an empty outbox was being
   committed could stop the node from claiming broadcasts; the commit now has the same timeout as
