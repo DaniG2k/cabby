@@ -568,4 +568,36 @@ mod tests {
         }
         assert_eq!(CbState::Closed, b.current(Instant::now()));
     }
+
+    /// Pins D-075: a cancelled request is taken off the counts it was added to,
+    /// not off those of a later generation.
+    #[tokio::test(start_paused = true)]
+    async fn deviation_d075_a_cancelled_request_does_not_change_a_later_generation() {
+        let mut b = Breaker::new();
+        let old = b.allow().expect("closed");
+        tokio::time::advance(CB_INTERVAL).await;
+        let new = b.allow().expect("closed");
+        assert_ne!(old, new);
+
+        b.discard(old);
+        assert_eq!(1, b.counts.requests);
+        b.discard(new);
+        assert_eq!(0, b.counts.requests);
+    }
+
+    /// Pins D-075: a request that succeeded is counted as a success, also when
+    /// its session closed meanwhile.
+    #[test]
+    fn deviation_d075_a_request_that_succeeded_while_cancelled_is_a_success() {
+        let breaker = Mutex::new(Breaker::new());
+        let cancel = CancellationToken::new();
+        for (success, requests) in [(true, 1), (false, 1)] {
+            let generation = lock(&breaker).allow().expect("closed");
+            let guard = CbGuard { breaker: &breaker, cancel: &cancel, generation, success };
+            cancel.cancel();
+            drop(guard);
+            let counts = lock(&breaker).counts;
+            assert_eq!((requests, 1, 0), (counts.requests, counts.total_successes, counts.total_failures));
+        }
+    }
 }

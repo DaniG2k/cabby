@@ -2253,6 +2253,57 @@ mod tests {
         }
     }
 
+    /// Handles pongs as the node does, on the transport's thread.
+    struct Pongs;
+
+    impl Executor for Pongs {
+        fn handle_command(&self, session: &Arc<Session>, msg: &Message) -> Result<(), NodeError> {
+            assert_eq!("pong", msg.command);
+            session.keepalive();
+            session.reset_pong();
+            Ok(())
+        }
+        fn disconnect(&self, _session: &Arc<Session>) -> Result<(), NodeError> {
+            Ok(())
+        }
+        fn is_inline(&self, _msg: &Message) -> bool {
+            true
+        }
+    }
+
+    /// Deviation D-074: a JSON pong does not count after an undecodable message,
+    /// though it is otherwise handled on the transport's thread.
+    #[test]
+    fn deviation_d074_json_pongs_do_not_count_after_an_undecodable_message() {
+        for undecodable in [false, true] {
+            let clock = TestClock::new();
+            let opts = vec![
+                SessionOption::PingInterval(Duration::from_secs(1)),
+                SessionOption::PongTimeout(Duration::from_secs(4)),
+            ];
+            let (s, _frames) = session(&clock, opts);
+            s.set_executor(Arc::new(Pongs));
+            s.start_timers();
+            let deadline = lock(&s.timers).pong.expect("a pong deadline");
+            let reader = s.reader(Box::new(|| {}));
+            let released = Arc::new(AtomicU64::new(0));
+            if undecodable {
+                reader.message(Bytes::from_static(b"not json"), Box::new(()));
+                // Handled, and nothing scheduled any more: a pong would run inline.
+                let due = Instant::now() + Duration::from_secs(5);
+                while lock(&reader.inner.state).running || !lock(&reader.inner.state).discarding {
+                    assert!(Instant::now() < due, "the message is handled");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+
+            reader.message(Bytes::from_static(br#"{"command":"pong"}"#), Box::new(Permit(released.clone())));
+            assert_eq!(1, released.load(Ordering::SeqCst), "nothing waits");
+            let moved = lock(&s.timers).pong != Some(deadline);
+            assert_eq!(!undecodable, moved);
+        }
+    }
+
     /// A non-blocking transport that takes `capacity` frames, then refuses until
     /// released.
     #[derive(Default)]
