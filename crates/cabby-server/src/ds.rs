@@ -309,8 +309,11 @@ pub struct StreamParams {
 /// decoded; a target with an invalid escape keeps its raw path.
 fn url_path(target: &str) -> String {
     let mut path = target.split(['?', '#']).next().unwrap_or_default();
-    // An absolute URL (`http://host/path`).
-    if let Some(rest) = path.split_once("://").map(|(_, r)| r) {
+    // An absolute URL (`http://host/path`): the path follows the authority. In an
+    // origin-form target (`/path`), a `://` is part of the path, as in Go.
+    if !path.starts_with('/')
+        && let Some((_, rest)) = path.split_once("://")
+    {
         path = rest.find('/').map_or("", |i| &rest[i..]);
     }
     if !path.contains('%') {
@@ -1753,6 +1756,27 @@ data:{"streamCursor":"c","streamNextOffset":"1::e","upToDate":true}"#,
         assert!(stream_params_from_req(&req("/ds/"), &c).is_err());
     }
 
+    /// The stream is the path below the mount path: a `://` in an origin-form
+    /// target is part of it; in an absolute-form target, the scheme and the
+    /// authority are not (Go `r.URL.Path`).
+    #[test]
+    fn a_scheme_is_stripped_from_absolute_targets_only() {
+        let req = |target: &str| HttpRequest { method: "GET".into(), target: target.into(), ..Default::default() };
+        let c = Config::new();
+        for (target, stream) in [
+            ("/ds/https://example.com/feed", "https://example.com/feed"),
+            ("/ds/https://example.com/feed?offset=-1", "https://example.com/feed"),
+            ("/ds/x://y/feed", "x://y/feed"),
+            ("/ds/feed", "feed"),
+            ("http://host/ds/a://b", "a://b"),
+            ("http://host/ds/feed?offset=-1", "feed"),
+            ("/ds/a%3A%2F%2Fb", "a://b"),
+        ] {
+            let sp = stream_params_from_req(&req(target), &c).unwrap();
+            assert_eq!((stream, stream), (sp.name.as_str(), sp.path.as_str()), "{target}");
+        }
+    }
+
     fn message(data: &str) -> StreamMessage {
         StreamMessage { stream: "s".into(), data: data.into(), ..Default::default() }
     }
@@ -1969,6 +1993,27 @@ data:{"streamCursor":"c","streamNextOffset":"1::e","upToDate":true}"#,
             b"event: data\ndata:[{\"n\":1},2]".to_vec(),
             encode_sse_data_event(&[message(r#"{"n":1}"#), message("2")])
         );
+    }
+
+    /// Over a socket, with the request line as written:
+    /// `/ds/https://example.com/feed` reads the stream `https://example.com/feed`,
+    /// as its encoded form does, not `feed`.
+    #[test]
+    fn a_target_with_a_scheme_in_its_path_reads_that_stream() {
+        let endpoint = Served::new(None);
+        for (stream, data) in [("feed", r#"{"from":"feed"}"#), ("https://example.com/feed", r#"{"from":"url"}"#)] {
+            let msg = StreamMessage { stream: stream.into(), data: data.into(), ..Default::default() };
+            endpoint.memory.handle_broadcast(&msg).unwrap();
+        }
+        for (target, body) in [
+            ("/ds/https://example.com/feed?offset=-1", r#"[{"from":"url"}]"#),
+            ("/ds/https%3A%2F%2Fexample.com%2Ffeed?offset=-1", r#"[{"from":"url"}]"#),
+            ("/ds/feed?offset=-1", r#"[{"from":"feed"}]"#),
+        ] {
+            let resp = request(endpoint.addr, "GET", target);
+            assert!(resp.starts_with("http/1.1 200"), "{target}: {resp}");
+            assert!(resp.ends_with(body), "{target}: {resp}");
+        }
     }
 
     #[test]

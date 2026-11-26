@@ -42,6 +42,10 @@ Differences from the AnyCable Go server are listed by ID in
 - Durable Streams SSE: a line terminator in the history data (pretty-printed JSON, for
   example) starts another `data:` field, so the client gets the whole batch. Before, the client
   got the batch up to the first line terminator (D-099).
+- Durable Streams: a stream path with `://` in it (`/ds/https://example.com/feed`) names that
+  stream, as in AnyCable. Before, everything up to the host was dropped, so the request read the
+  stream `feed`, and with a signed stream name it was answered `401`. Absolute-form request
+  targets (`http://host/ds/feed`) are read as before.
 
 ## [0.4.1] - 2026-11-26
 
