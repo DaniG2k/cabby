@@ -147,6 +147,30 @@ const METRICS: [&str; 3] = [
     "--metrics_log_filter=rpc_call_total,rpc_error_total,rpc_retries_total",
 ];
 
+/// The three RPC counters of every metrics line in `logs`.
+fn rpc_counters(logs: &str) -> Vec<[u64; 3]> {
+    logs.lines()
+        .filter(|l| l.contains("rpc_call_total="))
+        .map(|l| {
+            let counter = |key: &str| -> u64 {
+                l.split_whitespace()
+                    .find_map(|w| w.strip_prefix(key))
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or_else(|| panic!("no numeric {key} in {l:?}"))
+            };
+            [counter("rpc_call_total="), counter("rpc_error_total="), counter("rpc_retries_total=")]
+        })
+        .collect()
+}
+
+/// Cabby-only check: at least one metrics line, and every one shows no RPC
+/// call, error or retry.
+fn assert_no_rpc_calls(logs: &str) {
+    let counters = rpc_counters(logs);
+    assert!(!counters.is_empty(), "no metrics line:\n{logs}");
+    assert!(counters.iter().all(|c| *c == [0, 0, 0]), "RPC counters {counters:?} in:\n{logs}");
+}
+
 /// upstream: features/streams.testfile#scenario
 /// note: the `sleep 2` before stopping waits for the next metrics line (rotation 1 s); upstream's log check is weak: it only fails when all three counters are non-zero single digits
 #[test]
@@ -196,4 +220,47 @@ fn turbo_rpc_less() {
 
     // We should not see any rpc calls (same weak upstream check as streams).
     assert!(!has_nonzero_rpc_triplet(&logs), "Expected metrics logs not found:\n{logs}");
+}
+
+/// regression-for: features/streams.testfile#scenario
+/// note: Cabby-only: every metrics line must show rpc_call_total, rpc_error_total and rpc_retries_total at 0 (upstream's check only fails when all three are non-zero single digits)
+#[test]
+fn streams_make_no_rpc_calls() {
+    let mut args = vec!["--public"];
+    args.extend(METRICS);
+    let mut sut = launch(&args, &[]);
+    let url = ws_url(&sut, "/cable");
+
+    let streamer = (|| {
+        let mut c = wsd(&url, Protocol::ActionCable, Connection::default())?;
+        c.subscribe("$pubsub", &[("stream_name", json!("stream/2023"))]).map(drop)
+    })();
+    assert_groups(&[("streamer", streamer)]);
+
+    let mark = sut.process.output().len();
+    assert_no_rpc_calls(&logs_after_next_metrics(&mut sut, mark));
+}
+
+/// regression-for: features/turbo_rpc_less.testfile#scenario
+/// note: Cabby-only: every metrics line must show rpc_call_total, rpc_error_total and rpc_retries_total at 0 (upstream's check only fails when all three are non-zero single digits)
+#[test]
+fn turbo_streams_make_no_rpc_calls() {
+    let mut args = vec!["--turbo_rails_key=s3Krit", "--jwt_id_key=qwerty"];
+    args.extend(METRICS);
+    let mut sut = launch(&args, &[]);
+    let url = ws_url(&sut, "/cable");
+    let signed = signed_stream_name("s3Krit", "chat/2023");
+
+    let turbo = (|| {
+        let mut c = wsd(
+            &url,
+            Protocol::ActionCable,
+            Connection { query: vec![("jid".into(), token("qwerty"))], ..Default::default() },
+        )?;
+        c.subscribe("Turbo::StreamsChannel", &[("signed_stream_name", json!(signed))]).map(drop)
+    })();
+    assert_groups(&[("turbo", turbo)]);
+
+    let mark = sut.process.output().len();
+    assert_no_rpc_calls(&logs_after_next_metrics(&mut sut, mark));
 }
