@@ -1166,8 +1166,161 @@ mod tests {
         fn unsubscribe(&self, _stream: &str) {}
     }
 
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    /// A loopback port that is free now and that no other test of this
+    /// process got: the OS can hand a released port to a second `bind(0)`.
+    /// Another process may still take it before a server binds it, which
+    /// [`NatsProcess::start_on`] reports.
+    fn unique_port() -> u16 {
+        static TAKEN: OnceLock<Mutex<std::collections::HashSet<u16>>> = OnceLock::new();
+        loop {
+            let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+            if lock(TAKEN.get_or_init(Default::default)).insert(port) {
+                return port;
+            }
+        }
+    }
+
+    /// A new, empty directory for one server of this process.
+    fn scratch_dir(tag: &str) -> std::path::PathBuf {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("cabby-broker-{tag}-{}-{seq}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// How long a server may take to start.
+    const SERVER_START: Duration = Duration::from_secs(30);
+
+    /// The client port in a `nats-server` ports file (`--ports_file_dir`);
+    /// `None` while the file is incomplete.
+    fn ports_file_port(text: &str) -> Option<u16> {
+        let ports: Value = serde_json::from_str(text).ok()?;
+        ports["nats"].as_array()?.iter().find_map(|url| url.as_str()?.rsplit(':').next()?.parse().ok())
+    }
+
+    /// A child process (a `nats-server`) and its directory (store, ports
+    /// file, output): the process is killed and the directory removed on
+    /// drop, also when the test panics.
+    struct NatsProcess {
+        child: std::process::Child,
+        dir: std::path::PathBuf,
+        port: u16,
+    }
+
+    impl NatsProcess {
+        /// Runs `cmd` with its output in `dir`, which the guard then owns.
+        fn spawn(mut cmd: std::process::Command, dir: std::path::PathBuf, port: u16) -> Self {
+            let log = std::fs::File::create(dir.join("output.log")).unwrap();
+            cmd.stdout(log.try_clone().unwrap()).stderr(log);
+            match cmd.spawn() {
+                Ok(child) => Self { child, dir, port },
+                Err(e) => {
+                    let _ = std::fs::remove_dir_all(&dir);
+                    panic!("spawning {cmd:?}: {e}");
+                }
+            }
+        }
+
+        fn command(bin: &std::path::Path, jetstream: bool, port: &str, dir: &std::path::Path) -> std::process::Command {
+            let mut cmd = std::process::Command::new(bin);
+            cmd.args(["-a", "127.0.0.1", "-p", port]);
+            if jetstream {
+                cmd.arg("-js").arg("-sd").arg(dir.join("store"));
+            }
+            cmd
+        }
+
+        /// Starts a server on a port it picks itself (`-p -1`), read from the
+        /// ports file it writes into its directory.
+        fn start(bin: &std::path::Path, jetstream: bool, tag: &str) -> Self {
+            let dir = scratch_dir(tag);
+            let mut cmd = Self::command(bin, jetstream, "-1", &dir);
+            cmd.arg("--ports_file_dir").arg(&dir);
+            let mut server = Self::spawn(cmd, dir, 0);
+            server.port = server.wait_for(|dir| {
+                std::fs::read_dir(dir)
+                    .ok()?
+                    .flatten()
+                    .filter(|e| e.path().extension().is_some_and(|x| x == "ports"))
+                    .find_map(|e| ports_file_port(&std::fs::read_to_string(e.path()).ok()?))
+            });
+            server
+        }
+
+        /// Starts a server on `port`, for a test that needs the port before
+        /// the server runs, and waits until it accepts connections.
+        fn start_on(bin: &std::path::Path, jetstream: bool, tag: &str, port: u16) -> Self {
+            let dir = scratch_dir(tag);
+            let cmd = Self::command(bin, jetstream, &port.to_string(), &dir);
+            let mut server = Self::spawn(cmd, dir, port);
+            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+            server.wait_for(|_| std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).ok());
+            server
+        }
+
+        /// Polls `ready` until it gives a value; panics with the server's
+        /// output when the server exits first or the start deadline passes.
+        fn wait_for<T>(&mut self, mut ready: impl FnMut(&std::path::Path) -> Option<T>) -> T {
+            let deadline = Instant::now() + SERVER_START;
+            loop {
+                if let Some(v) = ready(&self.dir) {
+                    return v;
+                }
+                if let Ok(Some(status)) = self.child.try_wait() {
+                    panic!("nats-server exited ({status}), port {}:\n{}", self.port, self.output());
+                }
+                assert!(Instant::now() < deadline, "nats-server not ready within {SERVER_START:?}:\n{}", self.output());
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+
+        fn output(&self) -> String {
+            std::fs::read_to_string(self.dir.join("output.log")).unwrap_or_default()
+        }
+
+        fn url(&self) -> String {
+            format!("nats://127.0.0.1:{}", self.port)
+        }
+    }
+
+    impl Drop for NatsProcess {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[test]
+    fn ports_files_give_the_client_port() {
+        let text = r#"{"nats":["nats://127.0.0.1:41234"],"monitoring":["http://127.0.0.1:8222"]}"#;
+        assert_eq!(Some(41234), ports_file_port(text));
+        assert_eq!(None, ports_file_port(&text[..20]), "a file still being written");
+        assert_eq!(None, ports_file_port(r#"{"monitoring":["http://127.0.0.1:8222"]}"#));
+    }
+
+    /// The guard kills its process and removes its directory when the test
+    /// panics (a stand-in process: `sleep`).
+    #[test]
+    fn a_server_guard_cleans_up_after_a_panic() {
+        let dir = scratch_dir("guard");
+        let mut cmd = std::process::Command::new("sleep");
+        cmd.arg("60");
+        let guard = NatsProcess::spawn(cmd, dir.clone(), 0);
+        let pid = guard.child.id().to_string();
+        let alive = || std::process::Command::new("kill").args(["-0", &pid]).status().unwrap().success();
+        assert!(alive() && dir.is_dir());
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _guard = guard;
+            panic!("a failing test");
+        }));
+
+        assert!(panicked.is_err());
+        assert!(!alive(), "the process is killed and reaped");
+        assert!(!dir.exists(), "the directory is removed");
     }
 
     fn nats_config(port: u16) -> NatsConfig {
@@ -1193,7 +1346,8 @@ mod tests {
     #[test]
     fn deviation_d025_calls_before_jetstream_is_ready_fail() {
         let rec = Arc::new(Recorder::default());
-        let broker = Nats::new(Some(rec.clone()), &Config::new(), &nats_config(free_port()));
+        // Never started: the broker connects to nothing, so any port does.
+        let broker = Nats::new(Some(rec.clone()), &Config::new(), &nats_config(unique_port()));
 
         let timeout = "timeout waiting for JetStream to be ready";
         assert_eq!(timeout, broker.set_epoch("e").unwrap_err().message);
@@ -1211,15 +1365,9 @@ mod tests {
     #[test]
     fn jetstream_initialization_failure_is_reported_and_nothing_is_kept() {
         let Some(bin) = nats_server_binary() else { return };
-        let port = free_port();
-        let mut server = std::process::Command::new(bin)
-            .args(["-a", "127.0.0.1", "-p", &port.to_string()])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .unwrap();
+        let server = NatsProcess::start(&bin, false, "nojs");
         let rec = Arc::new(Recorder::default());
-        let mut broker = Nats::new(Some(rec.clone()), &Config::new(), &nats_config(port));
+        let mut broker = Nats::new(Some(rec.clone()), &Config::new(), &nats_config(server.port));
         Arc::get_mut(&mut broker.inner).expect("not shared yet").retry_delay = |_| Duration::from_millis(10);
         let (done, failed) = std::sync::mpsc::channel();
         broker.set_done(done);
@@ -1232,8 +1380,7 @@ mod tests {
         }
         let kept = lock(&broker.inner.backlog).len();
         broker.shutdown().unwrap();
-        let _ = server.kill();
-        let _ = server.wait();
+        drop(server);
 
         assert!(
             e.message.starts_with(
@@ -1251,8 +1398,8 @@ mod tests {
     #[test]
     fn deviation_d023_backlog_is_published_once_jetstream_is_ready() {
         let Some(bin) = nats_server_binary() else { return };
-        let port = free_port();
-        let store = std::env::temp_dir().join(format!("cabby-broker-backlog-{port}"));
+        // The broker gets the port before the server runs.
+        let port = unique_port();
         let rec = Arc::new(Recorder::default());
         let broker = Nats::new(Some(rec.clone()), &Config::new(), &nats_config(port));
         broker.start().unwrap();
@@ -1262,13 +1409,7 @@ mod tests {
         broker.handle_broadcast(&msg).unwrap();
         assert!(lock(&rec.0).is_empty());
 
-        let mut server = std::process::Command::new(bin)
-            .args(["-js", "-a", "127.0.0.1", "-p", &port.to_string(), "-sd"])
-            .arg(&store)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .unwrap();
+        let server = NatsProcess::start_on(&bin, true, "backlog", port);
 
         let deadline = Instant::now() + Duration::from_secs(30);
         while lock(&rec.0).is_empty() && Instant::now() < deadline {
@@ -1276,9 +1417,7 @@ mod tests {
         }
         let published = lock(&rec.0).clone();
         broker.shutdown().unwrap();
-        let _ = server.kill();
-        let _ = server.wait();
-        let _ = std::fs::remove_dir_all(&store);
+        drop(server);
 
         assert_eq!(1, published.len(), "{published:?}");
         assert_eq!(("a", 1), (published[0].data.as_str(), published[0].offset));
@@ -1302,6 +1441,8 @@ mod tests {
     #[derive(Default)]
     struct FakeKv {
         state: Mutex<(u64, HashMap<String, Revisioned>)>,
+        /// The error every `update` returns, if set.
+        fail_update: Mutex<Option<String>>,
     }
 
     impl FakeKv {
@@ -1332,6 +1473,9 @@ mod tests {
         }
 
         async fn update(&self, key: &str, value: bytes::Bytes, revision: u64) -> Result<bool, String> {
+            if let Some(e) = lock(&self.fail_update).clone() {
+                return Err(e);
+            }
             let mut st = lock(&self.state);
             // A deleted or expired key matches no revision that was read
             // (JetStream compares with its delete marker, or with 0).
@@ -1396,34 +1540,45 @@ mod tests {
         assert_eq!(None, kv.value("sid"));
     }
 
+    /// A write that fails for another reason than a newer revision fails the
+    /// touch with its cause, and nothing is written.
+    #[test]
+    fn deviation_d088_a_touch_reports_a_failed_write() {
+        let kv = FakeKv::default();
+        kv.commit("sid", "a");
+        *lock(&kv.fail_update) = Some("nats: timeout".to_owned());
+
+        assert_eq!(
+            "failed to touch session in NATS, cause: nats: timeout",
+            run(refresh_session(&kv, "sid")).unwrap_err().message
+        );
+        assert_eq!(Some(("a".to_owned(), 1)), kv.value("sid"));
+    }
+
+    /// Connects to the server at `url`, retrying until the start deadline,
+    /// and creates a bucket.
+    async fn session_bucket(url: &str, config: kv::Config) -> Result<kv::Store, String> {
+        let deadline = Instant::now() + SERVER_START;
+        let client = loop {
+            match async_nats::connect(url).await {
+                Ok(c) => break c,
+                Err(e) if Instant::now() > deadline => return Err(e.to_string()),
+                Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+            }
+        };
+        jetstream::new(client).create_key_value(config).await.map_err(|e| e.to_string())
+    }
+
     /// The same interleavings on a JetStream bucket (needs `nats-server`).
     #[test]
     fn deviation_d088_touches_on_jetstream_keep_newer_commits_and_create_nothing() {
         let Some(bin) = nats_server_binary() else { return };
-        let port = free_port();
-        let store = std::env::temp_dir().join(format!("cabby-broker-touch-{port}"));
-        let mut server = std::process::Command::new(bin)
-            .args(["-js", "-a", "127.0.0.1", "-p", &port.to_string(), "-sd"])
-            .arg(&store)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .unwrap();
+        let server = NatsProcess::start(&bin, true, "touch");
+        let url = server.url();
 
         let outcome = block_on(async move {
             let s = |e: &dyn std::fmt::Display| e.to_string();
-            let deadline = Instant::now() + Duration::from_secs(30);
-            let client = loop {
-                match async_nats::connect(format!("nats://127.0.0.1:{port}")).await {
-                    Ok(c) => break c,
-                    Err(e) if Instant::now() > deadline => return Err(s(&e)),
-                    Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
-                }
-            };
-            let kv = jetstream::new(client)
-                .create_key_value(kv::Config { bucket: "touch".into(), ..Default::default() })
-                .await
-                .map_err(|e| s(&e))?;
+            let kv = session_bucket(&url, kv::Config { bucket: "touch".into(), ..Default::default() }).await?;
 
             // A plain touch writes a new revision.
             let first = kv.put("sid", "a".into()).await.map_err(|e| s(&e))?;
@@ -1446,9 +1601,7 @@ mod tests {
             let gone = kv.get("gone").await.map_err(|e| s(&e))?;
             Ok::<_, String>((first, touched, newer, kept, missing, none, gone))
         });
-        let _ = server.kill();
-        let _ = server.wait();
-        let _ = std::fs::remove_dir_all(&store);
+        drop(server);
 
         let (first, touched, newer, kept, missing, none, gone) = outcome.unwrap();
         let (value, revision) = touched.unwrap();
@@ -1456,6 +1609,45 @@ mod tests {
         assert_eq!(Some((bytes::Bytes::from_static(b"b"), newer)), kept);
         assert_eq!(Some("failed to restore session from NATS, cause: nats: key not found".to_owned()), missing);
         assert_eq!((None, None), (none, gone));
+    }
+
+    /// A key that the bucket's `max_age` expires while a touch waits is not
+    /// written back, and a touch after the expiry fails as for a missing key
+    /// (needs `nats-server`).
+    #[test]
+    fn deviation_d088_a_touch_on_jetstream_does_not_recreate_an_expired_session() {
+        let Some(bin) = nats_server_binary() else { return };
+        let server = NatsProcess::start(&bin, true, "expiry");
+        let url = server.url();
+
+        let outcome = block_on(async move {
+            let s = |e: &dyn std::fmt::Display| e.to_string();
+            let config = kv::Config { bucket: "expiry".into(), max_age: Duration::from_secs(1), ..Default::default() };
+            let kv = session_bucket(&url, config).await?;
+            kv.put("sid", "a".into()).await.map_err(|e| s(&e))?;
+            let (value, revision) = kv.latest("sid").await?.ok_or("no value")?;
+
+            // The bucket's TTL removes the message; no delete marker is left.
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while kv.latest("sid").await?.is_some() {
+                if Instant::now() > deadline {
+                    return Err("the key did not expire within 10s".to_owned());
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+
+            write_back_session(&kv, "sid", value, revision).await.map_err(|e| e.message)?;
+            let written_back = kv.get("sid").await.map_err(|e| s(&e))?;
+            let touched = refresh_session(&kv, "sid").await.err().map(|e| e.message);
+            let after_touch = kv.get("sid").await.map_err(|e| s(&e))?;
+            Ok::<_, String>((written_back, touched, after_touch))
+        });
+        drop(server);
+
+        let (written_back, touched, after_touch) = outcome.unwrap();
+        assert_eq!(None, written_back, "the expired key is not written back");
+        assert_eq!(Some("failed to restore session from NATS, cause: nats: key not found".to_owned()), touched);
+        assert_eq!(None, after_touch);
     }
 
     #[test]
