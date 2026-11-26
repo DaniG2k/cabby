@@ -189,7 +189,13 @@ fn a_failed_start_keeps_the_epoch() {
     let port = format!("--port={}", taken.local_addr().unwrap().port());
     let err = sq::try_start(&db, &["--public", &port]).err().expect("the server must not start on a taken port");
     drop(taken);
-    assert_eq!(Some("1".to_owned()), sq::meta(&db, "clean_shutdown"), "after the failed start:\n{err:#}");
+    let err = format!("{err:#}");
+    // The start must fail on the taken port, after the database was opened
+    // (its startup line); any other failure would not exercise the shutdown.
+    assert!(err.to_lowercase().contains("address already in use"), "not the taken port:\n{err}");
+    let opened = format!("(epoch {epoch}, clean shutdown)");
+    assert!(err.contains(&opened), "the failed start did not open the database (no {opened:?}):\n{err}");
+    assert_eq!(Some("1".to_owned()), sq::meta(&db, "clean_shutdown"), "after the failed start:\n{err}");
 
     let mut sut = sq::start(&db, &["--public"]);
     let line = format!("(epoch {epoch}, clean shutdown)");
