@@ -331,6 +331,22 @@ impl fmt::Debug for Controller {
     }
 }
 
+/// The RPC host for the start log: a URL with credentials and query values
+/// masked (upstream `FilteredURL`), redacted as in error texts first when it may
+/// hold part of a password (D-093). Bare `host:port` pairs are not valid URLs
+/// and carry no credentials: they are shown as given.
+pub(crate) fn logged_host(host: &str) -> String {
+    if !host.contains("://") {
+        return host.to_owned();
+    }
+    let shown = if cabby_core::utils::userinfo_may_be_cut(host) {
+        cabby_core::utils::redact_refused_url(host)
+    } else {
+        host.to_owned()
+    };
+    cabby_core::logger::LogValuer::log_value(&cabby_core::logger::filtered_url(&shown)).to_string()
+}
+
 fn millis(ms: i64) -> Duration {
     Duration::from_millis(u64::try_from(ms).unwrap_or(0))
 }
@@ -410,13 +426,7 @@ impl Controller {
         let join = |items: &[String], empty: &str| {
             if items.is_empty() { empty.to_owned() } else { items.join(",") }
         };
-        let host = &config.host;
-        // Bare host:port pairs are not valid URLs and carry no credentials.
-        let logged_host = if host.contains("://") {
-            cabby_core::logger::LogValuer::log_value(&cabby_core::logger::filtered_url(host)).to_string()
-        } else {
-            host.clone()
-        };
+        let logged_host = logged_host(&config.host);
         log(
             Level::Info,
             &format!(

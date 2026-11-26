@@ -410,13 +410,14 @@ impl Broadcaster for RedisBroadcaster {
 
         let mut redis = self.redis.clone();
         let _ = redis.to_client_options();
-        let hosts = format!("[{}]", redis.hostnames().join(" "));
+        // Hosts from a URL that may hold part of a password are shown as `***` (D-093).
+        let hosts = format!("[{}]", redis.logged_hostnames().join(" "));
         let msg = if redis.is_sentinel() {
             format!("Starting Redis broadcaster at {hosts} (sentinels)")
         } else if redis.is_cluster() {
             format!("Starting Redis broadcaster at {hosts} (cluster)")
         } else {
-            format!("Starting Redis broadcaster at {}", redis.hostname())
+            format!("Starting Redis broadcaster at {}", redis.logged_hostname())
         };
         log_info!(self.log, &msg, "stream" => &self.stream);
         Ok(())

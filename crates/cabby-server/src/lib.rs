@@ -25,3 +25,6 @@ pub mod server;
 pub mod sse;
 pub mod version;
 pub mod ws;
+
+#[cfg(test)]
+mod url_redaction_tests;

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use bytes::Bytes;
-use cabby_core::utils::redact_refused_url;
+use cabby_core::utils::{redact_refused_url, userinfo_may_be_cut};
 use http::header::{AUTHORIZATION, HOST, HeaderName, HeaderValue};
 use http::{Method, Request, Uri};
 use http_body_util::{BodyExt, Full, LengthLimitError, Limited};
@@ -74,10 +74,21 @@ pub(crate) struct Origin {
     basic_auth: Option<String>,
     /// The URL as given (for error texts).
     raw: String,
+    /// The URL may hold part of a password after its authority (a `/`, `?` or
+    /// `#` in it ended the authority early): texts show it as error texts do
+    /// (D-093).
+    hidden: bool,
 }
 
 impl std::fmt::Debug for Origin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.hidden {
+            return f
+                .debug_struct("Origin")
+                .field("https", &self.https)
+                .field("raw", &self.raw)
+                .finish_non_exhaustive();
+        }
         f.debug_struct("Origin")
             .field("https", &self.https)
             .field("host", &self.host)
@@ -94,6 +105,7 @@ impl Origin {
     pub(crate) fn parse(raw: &str) -> Result<Self, String> {
         let safe = redact_url(raw);
         let refused = redact_refused_url(raw);
+        let hidden = userinfo_may_be_cut(raw);
         let uri: Uri = raw.parse().map_err(|e| format!("parse {refused:?}: {e}"))?;
         let https = match uri.scheme_str() {
             Some("https") => true,
@@ -130,7 +142,8 @@ impl Origin {
             base_path,
             query: uri.query().map(str::to_owned),
             basic_auth,
-            raw: safe,
+            raw: if hidden { refused } else { safe },
+            hidden,
         })
     }
 
@@ -153,9 +166,13 @@ impl Origin {
         target
     }
 
-    /// The full URL of `path` (for error texts).
+    /// The full URL of `path` (for error texts). When the URL may hold part of
+    /// a password, the redacted URL as given, followed by `path` (D-093).
     pub(crate) fn url(&self, path: &str) -> String {
         let scheme = if self.https { "https" } else { "http" };
+        if self.hidden {
+            return format!("{}/{}", self.raw.trim_end_matches('/'), path.trim_start_matches('/'));
+        }
         format!("{scheme}://{}{}", self.authority, self.target(path))
     }
 

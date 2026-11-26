@@ -189,8 +189,15 @@ fn quotable(raw: &str) -> bool {
 /// Go `url.Parse` (the subset rueidis reads). Errors read like Go's
 /// (`parse "<url>": <reason>`), without credentials (D-080).
 pub(crate) fn parse(raw: &str) -> Result<GoUrl, String> {
-    let wrap = |e: String| format!("parse {:?}: {e}", redact_refused_url(raw));
-    let quote = quotable(raw);
+    parse_listed(raw, None)
+}
+
+/// [`parse`] of a URL of a list. When it may hold part of a password, errors
+/// show it as `shown` (from `cabby_core::utils::url_list`) and quote nothing
+/// of it (D-093).
+fn parse_listed(raw: &str, shown: Option<&str>) -> Result<GoUrl, String> {
+    let wrap = |e: String| format!("parse {:?}: {e}", shown.map_or_else(|| redact_refused_url(raw), str::to_owned));
+    let quote = shown.is_none() && quotable(raw);
     let without_fragment = raw.split_once('#').map_or(raw, |(u, _)| u);
     if without_fragment.bytes().any(|b| b < 0x20 || b == 0x7f) {
         return Err(wrap("net/url: invalid control character in URL".to_owned()));
@@ -253,13 +260,23 @@ pub(crate) struct ParsedRedisUrl {
     pub unix: bool,
     pub master_set: String,
     pub client_name: String,
+    /// For each of `init_address`: whether it comes from a URL that may hold part
+    /// of a password, so texts leave it out (D-093).
+    pub hidden: Vec<bool>,
 }
 
 /// rueidis `ParseURL`, with its error texts (without credentials, D-080).
+#[cfg(test)]
 pub(crate) fn parse_rueidis(raw: &str) -> Result<ParsedRedisUrl, String> {
-    let u = parse(raw)?;
+    parse_rueidis_listed(raw, None)
+}
+
+/// [`parse_rueidis`] of a URL of a list; see [`parse_listed`] (D-093).
+pub(crate) fn parse_rueidis_listed(raw: &str, shown: Option<&str>) -> Result<ParsedRedisUrl, String> {
+    let u = parse_listed(raw, shown)?;
+    let quote = shown.is_none() && quotable(raw);
     let invalid = |what: &str, value: &str| {
-        if quotable(raw) { format!("redis: invalid {what}: {value}") } else { format!("redis: invalid {what}") }
+        if quote { format!("redis: invalid {what}: {value}") } else { format!("redis: invalid {what}") }
     };
     let invalid_quoted = |what: &str, value: &str| invalid(what, &format!("{value:?}"));
     let mut opt = ParsedRedisUrl::default();
@@ -284,6 +301,7 @@ pub(crate) fn parse_rueidis(raw: &str) -> Result<ParsedRedisUrl, String> {
         }
         "rediss" | "valkeys" => opt.tls = true,
         "redis" | "valkey" => {}
+        _ if shown.is_some() => return Err("redis: invalid URL scheme".to_owned()),
         other => return Err(format!("redis: invalid URL scheme: {other}")),
     }
     if opt.init_address.is_empty() {
@@ -326,6 +344,9 @@ pub(crate) fn parse_rueidis(raw: &str) -> Result<ParsedRedisUrl, String> {
     }
     opt.client_name = u.query_get("client_name").unwrap_or("").to_owned();
     opt.master_set = u.query_get("master_set").unwrap_or("").to_owned();
+    // The host of a URL that starts with the rest of a password follows its `@`.
+    let hidden = cabby_core::utils::userinfo_may_be_cut(raw) || (shown.is_some() && !raw.contains('@'));
+    opt.hidden = vec![hidden; opt.init_address.len()];
     Ok(opt)
 }
 

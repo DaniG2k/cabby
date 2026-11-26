@@ -17,6 +17,15 @@ Differences from the AnyCable Go server are listed by ID in
   instead of a commented-out placeholder, so loading the printed file keeps the CA and TLS on
   RPC connections. `--rpc_tls_verify=false`, a `--rpc_command_timeout` of 0 (no limit) and an
   empty `proxy_headers` are written as set too, instead of the commented-out defaults (D-092).
+- Error texts and logs no longer show part of a password in URLs where a `/`, `?` or `#` in
+  the password follows a part that reads as a port (`redis://user:4821#rest@host`), or where a
+  comma in the password splits a URL list (`--redis_url`, `--redis_sentinels`, `--nats_servers`,
+  `--rpc_host`). Such URLs are shown as invalid URLs are (D-080), by their scheme only, or as
+  `***` in the Redis start records; a NATS server written without a scheme and with credentials
+  is logged without them. Connections are unchanged (D-093).
+- Postgres: a password with a `/` and an `@` (`postgres://user:pa/ss@word@db/app`) is read up
+  to the `@` before the host. Before, part of it was read as the host, and the startup records
+  and connection errors showed it.
 
 ## [0.4.1] - 2026-11-26
 

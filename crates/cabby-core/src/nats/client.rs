@@ -39,8 +39,8 @@ use async_nats::{Client, ConnectOptions, ServerAddr};
 use tokio::runtime::{Handle, Runtime, RuntimeFlavor};
 
 use super::{NatsConfig, NatsError};
-use crate::logger::{LogValuer, Logger, filtered_url};
-use crate::utils::{backpressure, redact_refused_url};
+use crate::logger::Logger;
+use crate::utils::{backpressure, redact_refused_url, url_list};
 use crate::{log_error, log_info, log_warn};
 
 /// The process-wide runtime that runs NATS I/O.
@@ -84,15 +84,18 @@ pub fn blocking<R>(f: impl FnOnce() -> R) -> R {
 const RECONNECT_WAIT: Duration = Duration::from_secs(2);
 
 /// Parses the comma-separated server list (`nats.Connect(servers)`). Errors leave
-/// out credentials (D-080).
+/// out credentials (D-080), and all of a URL that may hold part of a password
+/// but its scheme (D-093).
 pub fn server_addrs(servers: &str) -> Result<Vec<ServerAddr>, NatsError> {
-    servers
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| {
-            s.parse::<ServerAddr>()
-                .map_err(|e| NatsError(format!("nats: invalid server URL {:?}: {e}", redact_refused_url(s))))
+    url_list(servers)
+        .into_iter()
+        .map(|(s, shown)| (s.trim(), shown))
+        .filter(|(s, _)| !s.is_empty())
+        .map(|(s, shown)| {
+            s.parse::<ServerAddr>().map_err(|e| {
+                let shown = shown.map_or_else(|| redact_refused_url(s), |t| t.trim().to_owned());
+                NatsError(format!("nats: invalid server URL {shown:?}: {e}"))
+            })
         })
         .collect()
 }
@@ -145,25 +148,35 @@ impl ConnectionEvents {
             }
             // The first connection is not a reconnect (Go calls `ConnectedCB` then).
             async_nats::Event::Connected if disconnected.swap(false, Ordering::SeqCst) => {
-                log_info!(self.log, "connection restored", "url" => filtered_url(&self.connected_url()).log_value());
+                log_info!(self.log, "connection restored", "url" => self.connected_url());
             }
             _ => {}
         }
     }
 
-    /// Go `nc.ConnectedUrl()`: the configured URL of the server connected to.
+    /// Go `nc.ConnectedUrl()` for logs (upstream `FilteredURL`): the configured
+    /// URL of the server connected to. A configured URL that may hold part of a
+    /// password is redacted as in error texts first (D-093).
     fn connected_url(&self) -> String {
-        let configured: Vec<&str> = self.servers.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
-        let normalize = |s: &str| if s.contains("://") { s.to_owned() } else { format!("nats://{s}") };
+        let configured: Vec<(&str, Option<String>)> = url_list(&self.servers)
+            .into_iter()
+            .map(|(s, shown)| (s.trim(), shown))
+            .filter(|(s, _)| !s.is_empty())
+            .collect();
+        let normalize = |(s, shown): &(&str, Option<String>)| match shown {
+            Some(shown) => super::logged_server_url(shown.trim()),
+            None if s.contains("://") => super::logged_server_url(s),
+            None => super::logged_server_url(&format!("nats://{s}")),
+        };
         if configured.len() == 1 {
-            return normalize(configured[0]);
+            return normalize(&configured[0]);
         }
         match self.client.get() {
             Some(c) => {
                 let info = c.server_info();
-                format!("nats://{}:{}", info.host, info.port)
+                super::logged_server_url(&format!("nats://{}:{}", info.host, info.port))
             }
-            None => configured.first().map(|s| normalize(s)).unwrap_or_default(),
+            None => configured.first().map(normalize).unwrap_or_default(),
         }
     }
 }
@@ -451,13 +464,36 @@ mod tests {
             ("nats://u:s3cret/ZQX@host:4222", "nats://host:4222", invalid_port),
             ("nats://u:s3cret#ZQX@host:4222", "nats://host:4222", invalid_port),
             ("u:s3cret?ZQX@host:4222", "host:4222", invalid_port),
-            ("nats://ok:4222, nats://u:s3cret,ZQX@host:4222", "nats://u", invalid_port),
+            // A URL before the one with the `@` shows its scheme only (D-093).
+            ("nats://ok:4222, nats://u:s3cret,ZQX@host:4222", "nats://", invalid_port),
             ("bogus://u:s3cret@h:4222", "bogus://h:4222", "invalid scheme for NATS server URL: bogus"),
         ] {
             let err = server_addrs(servers).unwrap_err().to_string();
             assert_eq!(format!("nats: invalid server URL {url:?}: {reason}"), err, "{servers}");
             assert!(!err.contains("s3cret") && !err.contains("ZQX"), "{servers}: {err}");
         }
+    }
+
+    /// Pins D-093: a URL that may hold part of a password (a comma in it made a
+    /// port of its start) shows its scheme only, in errors and logs.
+    #[test]
+    fn deviation_d093_a_comma_in_a_password_leaves_no_part_of_it() {
+        let err = server_addrs("nats://ok:4222, bogus://u:4821,s3cret@host:4222").unwrap_err().to_string();
+        assert_eq!(r#"nats: invalid server URL "bogus://": invalid scheme for NATS server URL: bogus"#, err);
+
+        let servers = "nats://u:4821,s3cret@host:4222, nats://u:4821#s3cret@other:4222, u:s3cret@third:4222";
+        let config = NatsConfig { servers: servers.to_owned(), ..NatsConfig::new() };
+        assert_eq!("nats://, host:4222, nats://other:4222, third:4222", config.filtered_servers());
+
+        let events = |servers: &str| ConnectionEvents {
+            log: Logger::root(),
+            servers: servers.to_owned(),
+            client: Arc::default(),
+        };
+        assert_eq!("nats://other:4222", events("nats://u:4821#s3cret@other:4222").connected_url());
+        assert_eq!("nats://", events("nats://u:4821,s3cret@host:4222").connected_url());
+        assert_eq!("nats://***:s***t@host:4222", events("nats://u:s3cret@host:4222").connected_url());
+        assert_eq!("nats://host:4222", events("host:4222").connected_url());
     }
 
     #[test]

@@ -24,6 +24,49 @@ pub fn redact_refused_url(raw: &str) -> String {
     }
 }
 
+/// Whether the user info of `raw` may have been cut short (D-080): its
+/// authority has no `@`, but an `@` follows it. A `/`, `?` or `#` in a password
+/// ends the authority early; when what precedes it reads as a port, the URL
+/// parses, with part of the password as the port and the rest in the path,
+/// query or fragment.
+pub fn userinfo_may_be_cut(raw: &str) -> bool {
+    let rest = &raw[authority_start(raw)..];
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    !rest[..end].contains('@') && rest[end..].contains('@')
+}
+
+/// The URLs of a comma-separated list, each with, when it may hold part of a
+/// password, how texts show it (D-093). A comma in a password splits it into
+/// several URLs: the pieces before the one with its `@` read as hosts, and that
+/// one starts with the rest of the password. So a URL may hold part of a
+/// password when its user info may be cut ([`userinfo_may_be_cut`]; shown as
+/// [`redact_refused_url`] shows it), when it has no `@` while a later URL of the
+/// list has one (shown as its scheme only), and when it has an `@` and follows
+/// such a URL (shown as what follows its last `@`).
+pub fn url_list(list: &str) -> Vec<(&str, Option<String>)> {
+    let pieces: Vec<&str> = list.split(',').collect();
+    let mut out = Vec::with_capacity(pieces.len());
+    let mut after_split = false;
+    for (i, &listed) in pieces.iter().enumerate() {
+        // Shown without the spaces around it (NATS lists allow them).
+        let piece = listed.trim();
+        let has_at = piece.contains('@');
+        let split = !has_at && pieces[i + 1..].iter().any(|p| p.contains('@'));
+        let shown = if split {
+            Some(piece[..authority_start(piece)].to_owned())
+        } else if has_at && after_split {
+            piece.rfind('@').map(|at| piece[at + 1..].to_owned())
+        } else if userinfo_may_be_cut(piece) {
+            Some(redact_refused_url(piece))
+        } else {
+            None
+        };
+        after_split = split;
+        out.push((listed, shown));
+    }
+    out
+}
+
 /// Where the authority starts: after `scheme://`, else after any slashes.
 fn authority_start(raw: &str) -> usize {
     let is_scheme = |s: &str| {
@@ -67,5 +110,44 @@ mod tests {
         ] {
             assert_eq!(want, redact_refused_url(raw), "{raw}");
         }
+    }
+
+    #[test]
+    fn deviation_d093_cut_user_info_is_recognized() {
+        for (raw, cut) in [
+            ("redis://u:4821#s3cret@host", true),
+            ("redis://u:4821?s3cret@host", true),
+            ("http://u:4821/s3cret@host/rpc", true),
+            ("u:4821#s3cret@host", true),
+            ("redis://u:s3cret@host/0?client_name=a@b", false),
+            ("redis://host:6379", false),
+            ("redis://host:6379/0?client_name=a@b", true),
+        ] {
+            assert_eq!(cut, userinfo_may_be_cut(raw), "{raw}");
+        }
+    }
+
+    #[test]
+    fn deviation_d093_list_pieces_around_a_comma_in_a_password_are_hidden() {
+        let shown = |list: &str| url_list(list).into_iter().map(|(p, s)| (p.to_owned(), s)).collect::<Vec<_>>();
+        let some = |s: &str| Some(s.to_owned());
+        assert_eq!(
+            vec![
+                ("redis://u:4821".to_owned(), some("redis://")),
+                ("s3cret".to_owned(), some("")),
+                ("ZQX://u@host:1".to_owned(), some("host:1")),
+                ("redis://h2".to_owned(), None),
+            ],
+            shown("redis://u:4821,s3cret,ZQX://u@host:1,redis://h2")
+        );
+        assert_eq!(
+            vec![("redis://:pw@h1".to_owned(), None), ("redis://:pw@h2".to_owned(), None)],
+            shown("redis://:pw@h1,redis://:pw@h2")
+        );
+        assert_eq!(vec![("h1:26379".to_owned(), None), ("h2:26379".to_owned(), None)], shown("h1:26379,h2:26379"));
+        assert_eq!(
+            vec![("redis://u:4821#s3cret@host".to_owned(), some("redis://host"))],
+            shown("redis://u:4821#s3cret@host")
+        );
     }
 }

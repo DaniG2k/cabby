@@ -105,18 +105,24 @@ pub(crate) enum Addr {
 
 impl Addr {
     /// Parses a resolved `host:port` (rueidis init address) or a socket path.
+    #[cfg(test)]
     pub(crate) fn parse(addr: &str, unix: bool) -> Result<Self, String> {
+        Self::parse_shown(addr, unix, true)
+    }
+
+    /// [`Self::parse`]; errors quote the address only when `shown` (not when
+    /// it comes from a URL that may hold part of a password, D-093).
+    pub(crate) fn parse_shown(addr: &str, unix: bool, shown: bool) -> Result<Self, String> {
         if unix {
             return Ok(Addr::Unix(PathBuf::from(addr)));
         }
+        let quoted = if shown { format!(" {addr:?}") } else { String::new() };
+        let invalid = || format!("invalid Redis address{quoted}");
         let (host, port) = match addr.strip_prefix('[') {
-            Some(rest) => {
-                let (h, p) = rest.split_once("]:").ok_or_else(|| format!("invalid Redis address {addr:?}"))?;
-                (h, p)
-            }
-            None => addr.rsplit_once(':').ok_or_else(|| format!("invalid Redis address {addr:?}"))?,
+            Some(rest) => rest.split_once("]:").ok_or_else(invalid)?,
+            None => addr.rsplit_once(':').ok_or_else(invalid)?,
         };
-        let port = port.parse().map_err(|_| format!("invalid port in Redis address {addr:?}"))?;
+        let port = port.parse().map_err(|_| format!("invalid port in Redis address{quoted}"))?;
         Ok(Addr::Tcp(host.to_owned(), port))
     }
 }

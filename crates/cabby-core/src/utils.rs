@@ -16,7 +16,7 @@ pub use localtime::LocalTime;
 pub use message_verifier::{MessageVerifier, VerifierError};
 pub use priority_queue::{ItemId, PriorityQueue, PriorityQueueItem};
 pub use queue::{Item, PushResult, Queue};
-pub use redact::redact_refused_url;
+pub use redact::{redact_refused_url, url_list, userinfo_may_be_cut};
 
 /// Byte-slice comparison through `subtle::ConstantTimeEq`.
 ///

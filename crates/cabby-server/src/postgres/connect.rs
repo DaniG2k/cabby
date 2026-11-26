@@ -196,7 +196,15 @@ pub(crate) fn parse(url: &str) -> Result<(ParsedUrl, tokio_postgres::Config), St
         None => false,
     };
     let mut first_error = None;
-    for lenient in if is_uri { &[false, true][..] } else { &[false][..] } {
+    // tokio-postgres reads a URI's user info up to its first `@`: when the
+    // authority has none but the path does (a `/` in a password), only the
+    // lenient split reads the user info as tokio-postgres does.
+    let attempts = match url.find("://").map(|i| split_userinfo_strict(&url[i + 3..])) {
+        Some((None, hostpart)) if is_uri && hostpart.split('?').next().is_some_and(|b| b.contains('@')) => &[true][..],
+        _ if is_uri => &[false, true][..],
+        _ => &[false][..],
+    };
+    for lenient in attempts {
         let parsed = parse_url_with(url, *lenient).map_err(invalid)?;
         match parsed.conninfo.parse::<tokio_postgres::Config>() {
             Ok(config) => return Ok((parsed, config)),

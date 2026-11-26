@@ -14,7 +14,7 @@ pub(crate) mod connect;
 pub(crate) mod publisher;
 mod streamer;
 pub(crate) mod subscription;
-mod url;
+pub(crate) mod url;
 
 pub use streamer::{StreamHandler, Streamer, StreamerOptions};
 
@@ -54,6 +54,9 @@ pub struct RedisConfig {
     pub max_reconnect_attempts: i64,
     pub disable_cache: bool,
     hosts: Vec<String>,
+    /// For each of `hosts`: whether it comes from a URL that may hold part of a
+    /// password (D-093).
+    hidden_hosts: Vec<bool>,
     sentinel_master: String,
 }
 
@@ -151,6 +154,23 @@ impl RedisConfig {
         self.hosts.clone()
     }
 
+    /// Whether the `i`-th host comes from a URL that may hold part of a password (D-093).
+    fn host_hidden(&self, i: usize) -> bool {
+        self.hidden_hosts.get(i).copied().unwrap_or(false)
+    }
+
+    /// [`Self::hostnames`] for logs: a host from a URL that may hold part of a
+    /// password is shown as `***` (D-093).
+    pub(crate) fn logged_hostnames(&self) -> Vec<String> {
+        let hide = |(i, h): (usize, &String)| if self.host_hidden(i) { "***".to_owned() } else { h.clone() };
+        self.hosts.iter().enumerate().map(hide).collect()
+    }
+
+    /// [`Self::hostname`] for logs, as [`Self::logged_hostnames`] (D-093).
+    pub(crate) fn logged_hostname(&self) -> String {
+        if self.is_sentinel() || !self.host_hidden(0) { self.hostname() } else { "***".to_owned() }
+    }
+
     /// The sentinel master, or the first host (upstream panics without hosts;
     /// this returns `""`).
     pub fn hostname(&self) -> String {
@@ -179,6 +199,7 @@ impl RedisConfig {
             if self.sentinels.is_empty() { parse_redis_url(&self.url)? } else { self.parse_sentinels()? };
 
         self.hosts = options.init_address.clone();
+        self.hidden_hosts = parsed.hidden.clone();
         self.sentinel_master = options.sentinel.master_set.clone();
 
         options.keep_alive = Duration::from_secs(self.keepalive_ping_interval.max(0) as u64);
@@ -217,7 +238,8 @@ impl RedisConfig {
         let addrs = options
             .init_address
             .iter()
-            .map(|a| connect::Addr::parse(a, parsed.unix))
+            .enumerate()
+            .map(|(i, a)| connect::Addr::parse_shown(a, parsed.unix, !self.host_hidden(i)))
             .collect::<Result<Vec<_>, _>>()
             .map_err(RedisError)?;
         let topology = if self.is_sentinel() {
@@ -331,12 +353,16 @@ impl RedisConfig {
 /// the first URL's options.
 fn parse_redis_url(raw: &str) -> Result<(ClientOptions, url::ParsedRedisUrl), RedisError> {
     let mut first: Option<url::ParsedRedisUrl> = None;
-    for addr in raw.split(',') {
+    for (addr, shown) in cabby_core::utils::url_list(raw) {
         let current =
-            url::parse_rueidis(&ensure_redis_scheme(chomp_trailing_slash_hostname(addr))).map_err(RedisError)?;
+            url::parse_rueidis_listed(&ensure_redis_scheme(chomp_trailing_slash_hostname(addr)), shown.as_deref())
+                .map_err(RedisError)?;
         match first.as_mut() {
             None => first = Some(current),
-            Some(f) => f.init_address.extend(current.init_address),
+            Some(f) => {
+                f.init_address.extend(current.init_address);
+                f.hidden.extend(current.hidden);
+            }
         }
     }
     let parsed = first.unwrap_or_default();
@@ -399,14 +425,15 @@ fn load_key_pair(cert_path: &str, key_path: &str) -> Result<(Vec<u8>, Vec<u8>), 
 
 /// Upstream pub/sub start-up log line: `<prefix> (sentinels): [hosts]`,
 /// `<prefix> (cluster): [hosts]` or `<prefix>: host`.
+/// Hosts from a URL that may hold part of a password are shown as `***` (D-093).
 pub(crate) fn pubsub_start_message(prefix: &str, config: &RedisConfig) -> String {
-    let hosts = format!("[{}]", config.hostnames().join(" "));
+    let hosts = format!("[{}]", config.logged_hostnames().join(" "));
     if config.is_sentinel() {
         format!("{prefix} (sentinels): {hosts}")
     } else if config.is_cluster() {
         format!("{prefix} (cluster): {hosts}")
     } else {
-        format!("{prefix}: {}", config.hostname())
+        format!("{prefix}: {}", config.logged_hostname())
     }
 }
 
