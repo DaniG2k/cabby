@@ -1,8 +1,14 @@
 //! Facade for upstream package `pubsub`.
 //!
-//! [`TestHandler`] is upstream's `TestHandler` (pubsub/subscriber_test.go):
-//! receives wait up to 100 ms. On the Go backend handlers and subscribers live in
-//! the bridge (`bridge/pubsub.go`) and talk to the same Redis/NATS servers.
+//! [`TestHandler`] is upstream's `TestHandler` (pubsub/subscriber_test.go).
+//! Upstream's `Receive` waits 100 ms, both where a test requires a message and
+//! where it checks that none arrives; 100 ms is short for a message that must
+//! arrive on a loaded machine. So `receive` returns a [`Received`] that waits
+//! when the test looks at it: up to [`EXPECT_TIMEOUT`] for `expect` (a message
+//! is required, so the longer wait only gives it time), and upstream's
+//! [`RECEIVE_TIMEOUT`] for `is_none`, `is_some` and `is_some_and`. On the Go
+//! backend handlers and subscribers live in the bridge (`bridge/pubsub.go`) and
+//! talk to the same Redis/NATS servers.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
@@ -20,8 +26,12 @@ use super::msg_shapes::{
 };
 use crate::{Backend, backend, bridge};
 
-/// Upstream `TestHandler.Receive` waits this long.
+/// Upstream `TestHandler.Receive` waits this long; kept where a test checks
+/// that nothing arrives.
 pub const RECEIVE_TIMEOUT: Duration = Duration::from_millis(100);
+
+/// How long [`Received::expect`] waits for a message the test requires.
+pub const EXPECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct Queue<T> {
     items: Mutex<VecDeque<T>>,
@@ -60,9 +70,71 @@ impl rs::Handler for RustHandler {
     }
 }
 
+#[derive(Clone)]
 enum HandlerImpl {
     Rust(Arc<RustHandler>),
     Go(i64),
+}
+
+fn next_message(handler: &HandlerImpl, timeout: Duration) -> Option<StreamMessage> {
+    match handler {
+        HandlerImpl::Rust(h) => h.messages.pop(timeout),
+        HandlerImpl::Go(id) => {
+            let v: Vec<GoStreamMessage> =
+                bridge::call("pubsub.HandlerReceive", json!({"Handler": id, "TimeoutMs": timeout.as_millis() as u64}));
+            v.into_iter().next().map(Into::into)
+        }
+    }
+}
+
+fn next_command(handler: &HandlerImpl, timeout: Duration) -> Option<RemoteCommandMessage> {
+    match handler {
+        HandlerImpl::Rust(h) => h.commands.pop(timeout),
+        HandlerImpl::Go(id) => {
+            let v: Vec<GoRemoteCommand> = bridge::call(
+                "pubsub.HandlerReceiveCommand",
+                json!({"Handler": id, "TimeoutMs": timeout.as_millis() as u64}),
+            );
+            v.into_iter().next().map(Into::into)
+        }
+    }
+}
+
+/// The next message or command of a [`TestHandler`], received when the test
+/// looks at it (upstream: the `*StreamMessage` that `Receive` returns, `nil`
+/// after 100 ms). See the module documentation for the waits.
+#[must_use = "the receive happens when the result is looked at"]
+pub struct Received<T> {
+    handler: HandlerImpl,
+    next: fn(&HandlerImpl, Duration) -> Option<T>,
+}
+
+impl<T> Received<T> {
+    /// The next item within `timeout`, if any.
+    pub fn within(self, timeout: Duration) -> Option<T> {
+        (self.next)(&self.handler, timeout)
+    }
+
+    /// The test requires an item: waits up to [`EXPECT_TIMEOUT`], panics with
+    /// `msg` without one.
+    pub fn expect(self, msg: &str) -> T {
+        self.within(EXPECT_TIMEOUT).expect(msg)
+    }
+
+    /// Whether nothing arrives within [`RECEIVE_TIMEOUT`].
+    pub fn is_none(self) -> bool {
+        self.within(RECEIVE_TIMEOUT).is_none()
+    }
+
+    /// Whether an item arrives within [`RECEIVE_TIMEOUT`].
+    pub fn is_some(self) -> bool {
+        self.within(RECEIVE_TIMEOUT).is_some()
+    }
+
+    /// Whether an item arrives within [`RECEIVE_TIMEOUT`] and satisfies `f`.
+    pub fn is_some_and(self, f: impl FnOnce(T) -> bool) -> bool {
+        self.within(RECEIVE_TIMEOUT).is_some_and(f)
+    }
 }
 
 pub struct TestHandler {
@@ -93,32 +165,14 @@ impl TestHandler {
         }
     }
 
-    /// Next broadcast message, or `None` after [`RECEIVE_TIMEOUT`].
-    pub fn receive(&self) -> Option<StreamMessage> {
-        match &self.inner {
-            HandlerImpl::Rust(h) => h.messages.pop(RECEIVE_TIMEOUT),
-            HandlerImpl::Go(id) => {
-                let v: Vec<GoStreamMessage> = bridge::call(
-                    "pubsub.HandlerReceive",
-                    json!({"Handler": id, "TimeoutMs": RECEIVE_TIMEOUT.as_millis() as u64}),
-                );
-                v.into_iter().next().map(Into::into)
-            }
-        }
+    /// Next broadcast message (upstream `Receive`); see [`Received`].
+    pub fn receive(&self) -> Received<StreamMessage> {
+        Received { handler: self.inner.clone(), next: next_message }
     }
 
-    /// Next remote command, or `None` after [`RECEIVE_TIMEOUT`].
-    pub fn receive_command(&self) -> Option<RemoteCommandMessage> {
-        match &self.inner {
-            HandlerImpl::Rust(h) => h.commands.pop(RECEIVE_TIMEOUT),
-            HandlerImpl::Go(id) => {
-                let v: Vec<GoRemoteCommand> = bridge::call(
-                    "pubsub.HandlerReceiveCommand",
-                    json!({"Handler": id, "TimeoutMs": RECEIVE_TIMEOUT.as_millis() as u64}),
-                );
-                v.into_iter().next().map(Into::into)
-            }
-        }
+    /// Next remote command (upstream `ReceiveCommand`); see [`Received`].
+    pub fn receive_command(&self) -> Received<RemoteCommandMessage> {
+        Received { handler: self.inner.clone(), next: next_command }
     }
 }
 
