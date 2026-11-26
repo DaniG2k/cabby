@@ -26,6 +26,12 @@ Differences from the AnyCable Go server are listed by ID in
 - Postgres: a password with a `/` and an `@` (`postgres://user:pa/ss@word@db/app`) is read up
   to the `@` before the host. Before, part of it was read as the host, and the startup records
   and connection errors showed it.
+- SSE (`--sse`): a request is answered from its request line and headers without waiting for
+  its body: a preflight, a method that is not served, a failed sign-in (`401`), a POST body
+  announced over 64 KiB (`400`), and a GET, whose body is never read. Before, the endpoint read
+  the whole body first, so a request whose headers announced a body the client did not send
+  got no response. A POST is now signed in before its body is read, so one whose commands
+  cannot be parsed and whose sign-in fails gets `401` instead of `400` (D-096).
 
 ## [0.4.1] - 2026-11-26
 

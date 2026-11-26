@@ -9,6 +9,14 @@
 //!   response streams until the client goes away, the session closes or the
 //!   server shuts down. [`handler`] mounts it on the HTTP server.
 //!
+//! # Order of checks
+//!
+//! Everything the request line and headers decide is answered before the body
+//! is read (D-096): the preflight, the method, the request id, the commands of a
+//! GET, a POST body announced over [`DEFAULT_MAX_BODY_SIZE`], and the sign-in.
+//! Only a signed-in POST reads its body, at most [`DEFAULT_MAX_BODY_SIZE`] bytes;
+//! other bodies are never read.
+//!
 //! # Execution
 //!
 //! Setting a session up calls the node synchronously (authentication may perform
@@ -25,6 +33,7 @@ use cabby_core::common::{
 };
 use cabby_core::encoders::{EncodeError, EncodedMessageJson, Encoder as NodeEncoder, SentFrame, no_frame};
 use cabby_core::logger::{Attr, Level, LogValue};
+use hyper::body::Incoming;
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
@@ -519,12 +528,16 @@ fn go_parse_error(func: &str, input: &str, e: &std::num::ParseIntError) -> Strin
     format!("strconv.{func}: parsing {input:?}: {reason}")
 }
 
+/// A body over [`DEFAULT_MAX_BODY_SIZE`] (Go `http.MaxBytesError`).
+fn body_too_large() -> Error {
+    Error(server::BodyError::TooLarge(DEFAULT_MAX_BODY_SIZE as u64).to_string())
+}
+
 /// The commands of a POST body: one JSON command per non-empty line (upstream
 /// `subscribeCommandFromPostRequest`).
-fn subscribe_commands_from_post_request(req: &Request) -> Result<Vec<Message>, Error> {
-    let body = req.body();
+fn subscribe_commands_from_post_body(body: &[u8]) -> Result<Vec<Message>, Error> {
     if body.len() > DEFAULT_MAX_BODY_SIZE {
-        return Err(Error("http: request body too large".to_owned()));
+        return Err(body_too_large());
     }
     let mut cmds = Vec::new();
     for line in body.split(|b| *b == b'\n') {
@@ -537,16 +550,22 @@ fn subscribe_commands_from_post_request(req: &Request) -> Result<Vec<Message>, E
     Ok(cmds)
 }
 
-/// The subscribe commands of a request (upstream `subscribeCommandsFromRequest`).
-fn subscribe_commands_from_request(req: &Request) -> Result<Vec<Message>, Error> {
+/// What the request line and headers say about the subscribe commands (upstream
+/// `subscribeCommandsFromRequest` without the body): the command of a GET, and
+/// `None` for a POST, whose body has them. A POST whose `Content-Length` is over
+/// [`DEFAULT_MAX_BODY_SIZE`] fails as reading its body would (D-096).
+fn subscribe_commands_from_head(req: &Request) -> Result<Option<Vec<Message>>, Error> {
     if req.method() == http::Method::GET {
-        match subscribe_command_from_get_request(req)? {
-            Some(cmd) => Ok(vec![cmd]),
+        return match subscribe_command_from_get_request(req)? {
+            Some(cmd) => Ok(Some(vec![cmd])),
             None => Err(Error("no channel provided".to_owned())),
-        }
-    } else {
-        subscribe_commands_from_post_request(req)
+        };
     }
+    let announced = req.headers().get(http::header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()?.parse::<u64>().ok());
+    if announced.is_some_and(|len| len > DEFAULT_MAX_BODY_SIZE as u64) {
+        return Err(body_too_large());
+    }
+    Ok(None)
 }
 
 /// An authenticated session and its connection.
@@ -667,6 +686,17 @@ impl Drop for SessionGuard {
     }
 }
 
+/// A signed-in session whose subscriptions are still to be made: disconnected
+/// when dropped (a blocking node call).
+struct Started {
+    session: Arc<Session>,
+    conn: Arc<Connection>,
+    sid: String,
+    /// The commands of a GET; `None` for a POST, whose body has them.
+    cmds: Option<Vec<Message>>,
+    guard: SessionGuard,
+}
+
 /// Runs a blocking node call off the async executor.
 async fn blocking(f: impl FnOnce() + Send + 'static) {
     let _ = tokio::task::spawn_blocking(f).await;
@@ -687,11 +717,16 @@ impl Handler {
     }
 
     /// [`Handler::serve`] for the async server: blocking node calls run on Tokio's
-    /// blocking pool, the wait is async.
-    async fn serve_async(self: Arc<Self>, req: Request, w: Box<dyn ResponseWriter>, request_done: CancellationToken) {
+    /// blocking pool, the body read and the wait are async.
+    async fn serve_async(
+        self: Arc<Self>,
+        req: Request,
+        body: Incoming,
+        w: Box<dyn ResponseWriter>,
+        request_done: CancellationToken,
+    ) {
         let w = shared_writer(w);
-        let (this, writer) = (self.clone(), w.clone());
-        match tokio::task::spawn_blocking(move || this.prepare(&req, &writer)).await {
+        match self.clone().prepare_async(req, body, w.clone()).await {
             Ok(Some(active)) => {
                 self.wait(&active, &request_done).await;
                 blocking(move || drop(active)).await;
@@ -702,9 +737,79 @@ impl Handler {
         lock_writer(&w).finish();
     }
 
-    /// Everything up to streaming: checks, headers, authentication and
-    /// subscriptions. `None` when the response is complete.
+    /// Everything up to streaming for a request whose body is in memory: the
+    /// checks of [`Handler::start`], the commands, the subscriptions. `None` when
+    /// the response is complete.
     fn prepare(&self, req: &Request, w: &SharedResponseWriter) -> Option<Active> {
+        let mut started = self.start(req, w)?;
+        let cmds = match started.cmds.take() {
+            Some(cmds) => cmds,
+            None => self.body_commands(&started.sid, subscribe_commands_from_post_body(req.body()), w)?,
+        };
+        self.subscribe(started, &cmds, w)
+    }
+
+    /// [`Handler::prepare`] on the server: the body of a POST is read once the
+    /// session is signed in, at most [`DEFAULT_MAX_BODY_SIZE`] bytes; other bodies,
+    /// and those of requests answered before, are not read. `Err` when a blocking step panicked.
+    async fn prepare_async(
+        self: Arc<Self>,
+        req: Request,
+        body: Incoming,
+        w: SharedResponseWriter,
+    ) -> Result<Option<Active>, tokio::task::JoinError> {
+        let (this, writer) = (self.clone(), w.clone());
+        let started = tokio::task::spawn_blocking(move || this.start(&req, &writer)).await?;
+        // The body of a request answered by now, or of a GET, is not read. It is
+        // dropped only here, so a body that has arrived meanwhile is drained by
+        // hyper and the connection stays open.
+        let Some(mut started) = started else { return Ok(None) };
+        let cmds = match started.cmds.take() {
+            Some(cmds) => {
+                drop(body);
+                Ok(cmds)
+            }
+            None => self.read_commands(body).await,
+        };
+        // Leaving out the session (answered 400) disconnects it: a blocking call too.
+        tokio::task::spawn_blocking(move || {
+            let cmds = self.body_commands(&started.sid, cmds, &w)?;
+            self.subscribe(started, &cmds, &w)
+        })
+        .await
+    }
+
+    /// The commands of a POST body, read with the size limit.
+    async fn read_commands(&self, body: Incoming) -> Result<Vec<Message>, Error> {
+        match server::read_body(body, Some(DEFAULT_MAX_BODY_SIZE as u64)).await {
+            Ok(body) => subscribe_commands_from_post_body(&body),
+            Err(e) => Err(Error(e.to_string())),
+        }
+    }
+
+    /// The commands of a POST body, or `None` once a failure to get them is
+    /// answered (400).
+    fn body_commands(
+        &self,
+        sid: &str,
+        cmds: Result<Vec<Message>, Error>,
+        w: &SharedResponseWriter,
+    ) -> Option<Vec<Message>> {
+        match cmds {
+            Ok(cmds) => Some(cmds),
+            Err(e) => {
+                log(Level::Error, "failed to build subscribe command", sid, &[error_attr(e)]);
+                lock_writer(w).write_header(400);
+                None
+            }
+        }
+    }
+
+    /// The checks and the sign-in, from the request line and headers alone
+    /// (D-096): preflight, method, response headers, request id, the commands of
+    /// a GET (or the announced size of a POST body), authentication. `None` when
+    /// the response is complete.
+    fn start(&self, req: &Request, w: &SharedResponseWriter) -> Option<Started> {
         let method = req.method();
         {
             let mut w = lock_writer(w);
@@ -754,7 +859,7 @@ impl Handler {
         };
         let sid = info.uid.clone();
 
-        let cmds = match subscribe_commands_from_request(req) {
+        let cmds = match subscribe_commands_from_head(req) {
             Ok(cmds) => cmds,
             Err(e) => {
                 log(Level::Error, "failed to build subscribe command", &sid, &[error_attr(e)]);
@@ -779,9 +884,17 @@ impl Handler {
         };
 
         // The session leaves the node when done, also when a subscription fails.
-        let mut guard = SessionGuard(Some(session.clone()));
+        let guard = SessionGuard(Some(session.clone()));
+        Some(Started { session, conn, sid, cmds, guard })
+    }
 
-        for cmd in &cmds {
+    /// Subscribes a started session and starts the response. `None` when the
+    /// response is complete.
+    fn subscribe(&self, started: Started, cmds: &[Message], w: &SharedResponseWriter) -> Option<Active> {
+        let Started { session, conn, sid, mut guard, .. } = started;
+        let status = |code: u16| lock_writer(w).write_header(code);
+
+        for cmd in cmds {
             match self.node.subscribe(&session, cmd) {
                 Ok(Some(res)) if res.status == Status::Success => {}
                 Ok(Some(_)) => {
@@ -858,9 +971,10 @@ impl Handler {
     }
 }
 
-/// [`Handler`] on the HTTP server: the request body (POST commands) is read up to
-/// [`DEFAULT_MAX_BODY_SIZE`] (a larger or unreadable body is answered 400, as
-/// upstream's `MaxBytesReader`), the response streams through a
+/// [`Handler`] on the HTTP server: the body of a POST (its commands) is read once
+/// the request is signed in, up to [`DEFAULT_MAX_BODY_SIZE`] (a larger or
+/// unreadable body is answered 400, as upstream's `MaxBytesReader` and read
+/// errors are); other bodies are never read. The response streams through a
 /// [`ChannelResponseWriter`](crate::server::ChannelResponseWriter), and the client
 /// going away ends the request.
 struct Endpoint(Arc<Handler>);
@@ -869,20 +983,11 @@ impl server::Handler for Endpoint {
     fn call(&self, req: server::Request) -> ResponseFuture {
         let handler = self.0.clone();
         let (writer, client_gone, response) = server::channel_response_for(&req);
-        let limit = DEFAULT_MAX_BODY_SIZE as u64;
-        let task = async move {
-            let conn = server::conn_info(&req);
-            let (parts, body) = req.into_parts();
-            let body = match server::read_body(body, Some(limit)).await {
-                Ok(body) => body.to_vec(),
-                // Over the limit or unreadable: reading the commands fails.
-                Err(_) => vec![b'\n'; DEFAULT_MAX_BODY_SIZE + 1],
-            };
-            let mut req = http::Request::from_parts(parts, body);
-            req.extensions_mut().insert(conn);
-            handler.serve_async(req, Box::new(writer), client_gone).await;
-        };
-        server::runtime_handle().spawn(task);
+        let conn = server::conn_info(&req);
+        let (parts, body) = req.into_parts();
+        let mut req = http::Request::from_parts(parts, Vec::new());
+        req.extensions_mut().insert(conn);
+        server::runtime_handle().spawn(handler.serve_async(req, body, Box::new(writer), client_gone));
         Box::pin(response)
     }
 }
@@ -907,11 +1012,20 @@ mod tests {
         );
     }
 
-    /// Accepts every connection and subscription (`streams` is the stream of
-    /// every subscription).
-    struct Accepting;
+    /// Accepts every subscription (`streams` is the stream of every
+    /// subscription) and every connection, or none; counts sign-ins.
+    struct App {
+        sign_in: bool,
+        sign_ins: std::sync::atomic::AtomicUsize,
+    }
 
-    impl cabby_core::common::Controller for Accepting {
+    impl App {
+        fn new(sign_in: bool) -> Self {
+            Self { sign_in, sign_ins: std::sync::atomic::AtomicUsize::new(0) }
+        }
+    }
+
+    impl cabby_core::common::Controller for App {
         fn start(&self) -> Result<(), cabby_core::common::ControllerError> {
             Ok(())
         }
@@ -923,14 +1037,17 @@ mod tests {
             _sid: &str,
             _env: Option<&cabby_core::common::SessionEnv>,
         ) -> cabby_core::common::Outcome<cabby_core::common::ConnectResult> {
-            cabby_core::common::Outcome {
-                result: Some(cabby_core::common::ConnectResult {
+            self.sign_ins.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let result = if self.sign_in {
+                cabby_core::common::ConnectResult {
                     identifier: "ids".into(),
                     transmissions: vec![r#"{"type":"welcome"}"#.into()],
                     ..Default::default()
-                }),
-                error: None,
-            }
+                }
+            } else {
+                cabby_core::common::ConnectResult { status: Status::Failure, ..Default::default() }
+            };
+            cabby_core::common::Outcome { result: Some(result), error: None }
         }
         fn subscribe(
             &self,
@@ -985,7 +1102,7 @@ mod tests {
     fn serves_on_the_http_server() {
         use std::io::{BufRead, BufReader, Write};
 
-        let node = Node::new(node::Config::new(), vec![node::NodeOption::Controller(Arc::new(Accepting))]);
+        let node = Node::new(node::Config::new(), vec![node::NodeOption::Controller(Arc::new(App::new(true)))]);
         let subscriber = Arc::new(node::LegacySubscriber::new(node.clone()));
         node.set_broker(Arc::new(cabby_core::broker::Legacy::new(subscriber)));
         node.start().unwrap();
@@ -1094,5 +1211,166 @@ mod tests {
         let cmd = subscribe_command_from_get_request(&req).unwrap().unwrap();
         let pos = &cmd.history.streams["café"];
         assert_eq!((1, "EPOCH"), (pos.offset, pos.epoch.as_str()));
+    }
+
+    /// The endpoint on a server bound to port 0 over a node with an [`App`].
+    struct Served {
+        node: Arc<Node>,
+        app: Arc<App>,
+        srv: Arc<server::HttpServer>,
+        addr: std::net::SocketAddr,
+    }
+
+    impl Served {
+        fn new(app: App, config: &Config) -> Self {
+            let app = Arc::new(app);
+            let node = Node::new(node::Config::new(), vec![node::NodeOption::Controller(app.clone())]);
+            let subscriber = Arc::new(node::LegacySubscriber::new(node.clone()));
+            node.set_broker(Arc::new(cabby_core::broker::Legacy::new(subscriber)));
+            node.start().unwrap();
+            let srv = server::HttpServer::new("127.0.0.1", "0", None, 0).unwrap();
+            let h = sse_handler(node.clone(), None, srv.shutdown_token(), None, config);
+            srv.setup_handler("/events", Endpoint(Arc::new(h)));
+            let addr = crate::server::tests::support::start(&srv);
+            Self { node, app, srv, addr }
+        }
+
+        fn signing_in(sign_in: bool) -> Self {
+            Self::new(App::new(sign_in), &Config::new())
+        }
+
+        /// Sends a request head with `Host` and the given lines, and nothing else.
+        fn send(&self, head: &str) -> (std::net::TcpStream, Instant) {
+            use std::io::Write;
+            let mut stream = crate::server::tests::support::connect(self.addr);
+            write!(stream, "{head}\r\nHost: x\r\n\r\n").unwrap();
+            (stream, Instant::now())
+        }
+
+        fn wait_for_sessions(&self, n: usize) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while self.node.size() != n {
+                assert!(Instant::now() < deadline, "{} sessions, not {n}", self.node.size());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+
+    impl Drop for Served {
+        fn drop(&mut self) {
+            self.srv.shutdown();
+        }
+    }
+
+    /// An answer that does not wait for a body.
+    const PROMPTLY: Duration = Duration::from_secs(1);
+
+    /// Reads the response to a request whose announced body was not sent: it is
+    /// the final response (no `100 Continue`: the body was never polled), and it
+    /// comes promptly.
+    fn answered_without_the_body(
+        stream: &mut std::net::TcpStream,
+        sent: Instant,
+    ) -> crate::server::tests::support::RawResponse {
+        let resp = crate::server::tests::support::read_response(stream);
+        assert!(sent.elapsed() < PROMPTLY, "answered after {:?}", sent.elapsed());
+        assert_ne!(100, resp.status, "the body was polled");
+        resp
+    }
+
+    /// Reads SSE lines until `needle` has been read.
+    fn read_until(r: &mut impl std::io::BufRead, needle: &str) {
+        let mut seen = String::new();
+        while !seen.contains(needle) {
+            let mut line = String::new();
+            assert!(r.read_line(&mut line).unwrap() > 0, "EOF before {needle:?}: {seen}");
+            seen.push_str(&line);
+        }
+    }
+
+    /// A request with a method the endpoint rejects is answered without waiting
+    /// for the body its headers announce.
+    #[test]
+    fn deviation_d096_a_rejected_method_is_answered_without_its_body() {
+        let endpoint = Served::signing_in(true);
+        for method in ["PUT", "DELETE", "PATCH"] {
+            let (mut stream, sent) =
+                endpoint.send(&format!("{method} /events HTTP/1.1\r\nContent-Length: 10\r\nExpect: 100-continue"));
+            assert_eq!(405, answered_without_the_body(&mut stream, sent).status, "{method}");
+        }
+        assert_eq!(0, endpoint.app.sign_ins.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// The endpoint rejects no origin: a preflight from an origin that is not
+    /// allowed is answered 200 without `Access-Control-Allow-Origin`, and without
+    /// waiting for the body its headers announce.
+    #[test]
+    fn deviation_d096_a_preflight_is_answered_without_its_body() {
+        let mut config = Config::new();
+        config.allowed_origins = "example.com".into();
+        let endpoint = Served::new(App::new(true), &config);
+        let (mut stream, sent) = endpoint.send(
+            "OPTIONS /events HTTP/1.1\r\nOrigin: http://other.example\r\nContent-Length: 10\r\nExpect: 100-continue",
+        );
+        let resp = answered_without_the_body(&mut stream, sent);
+        assert_eq!(200, resp.status);
+        assert_eq!(None, resp.header("access-control-allow-origin"));
+        assert_eq!(Some("Origin"), resp.header("vary"));
+    }
+
+    /// Sign-in needs no body: a failed one is answered 401 without waiting for
+    /// the body, for a POST (whose body would have the commands) and a GET.
+    #[test]
+    fn deviation_d096_a_failed_sign_in_is_answered_without_its_body() {
+        let endpoint = Served::signing_in(false);
+        for target in ["POST /events", "GET /events?stream=s1"] {
+            let (mut stream, sent) =
+                endpoint.send(&format!("{target} HTTP/1.1\r\nContent-Length: 10\r\nExpect: 100-continue"));
+            let resp = answered_without_the_body(&mut stream, sent);
+            assert_eq!(401, resp.status, "{target}");
+            assert!(resp.body.is_empty(), "{target}");
+        }
+        assert_eq!(2, endpoint.app.sign_ins.load(std::sync::atomic::Ordering::SeqCst));
+        endpoint.wait_for_sessions(0);
+    }
+
+    /// Sign-in comes before the body is read: a POST with commands that cannot
+    /// be parsed and a failed sign-in is answered 401 (Go: 400).
+    #[test]
+    fn deviation_d096_sign_in_is_checked_before_the_body() {
+        use std::io::Write;
+        let endpoint = Served::signing_in(false);
+        let (mut stream, _) = endpoint.send("POST /events HTTP/1.1\r\nContent-Length: 5");
+        stream.write_all(b"nope\n").unwrap();
+        assert_eq!(401, crate::server::tests::support::read_response(&mut stream).status);
+    }
+
+    /// A POST body announced over the limit is answered 400 before sign-in, as Go
+    /// answers it once its read of the body fails, and the body is not read.
+    #[test]
+    fn deviation_d096_a_body_announced_over_the_limit_is_answered_before_sign_in() {
+        let endpoint = Served::signing_in(true);
+        let (mut stream, sent) = endpoint.send(&format!(
+            "POST /events HTTP/1.1\r\nContent-Length: {}\r\nExpect: 100-continue",
+            DEFAULT_MAX_BODY_SIZE + 1
+        ));
+        assert_eq!(400, answered_without_the_body(&mut stream, sent).status);
+        assert_eq!(0, endpoint.app.sign_ins.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// A GET has its command in the query: its body is never read, and the
+    /// response streams although the announced body never arrives.
+    #[test]
+    fn deviation_d096_a_get_does_not_read_its_body() {
+        let endpoint = Served::signing_in(true);
+        let (stream, sent) =
+            endpoint.send("GET /events?stream=s1 HTTP/1.1\r\nContent-Length: 10\r\nExpect: 100-continue");
+        let mut r = std::io::BufReader::new(stream);
+        let mut status = String::new();
+        std::io::BufRead::read_line(&mut r, &mut status).unwrap();
+        assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+        read_until(&mut r, "event: confirm_subscription");
+        assert!(sent.elapsed() < PROMPTLY, "streaming after {:?}", sent.elapsed());
+        endpoint.wait_for_sessions(1);
     }
 }
