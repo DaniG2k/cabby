@@ -62,6 +62,10 @@ Differences from the AnyCable Go server are listed by ID in
   writer now starts on a thread of its own, as only the metrics goroutine waits in Go; shutting
   down during the load returns at once. A script that fails to load still stops the server at
   startup with the same error.
+- Prometheus endpoint (`--metrics_http`) served on the main port or another port of the
+  server: when its path is also another route's (health, WebSocket, SSE, Durable Streams, API),
+  that route answers there, as in Go. Before, the metrics endpoint replaced it, because it was
+  mounted after the other routes; it is now mounted first.
 
 ## [0.4.1] - 2026-11-26
 

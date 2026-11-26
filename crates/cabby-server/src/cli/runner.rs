@@ -349,6 +349,7 @@ impl Runner {
         let ws_server = server::for_port(&c.server.port.to_string()).map_err(|e| {
             decorate(e, &format!("failed to initialize WebSocket server at {}:{}", c.server.host, c.server.port))
         })?;
+        let metrics_server = self.mount_metrics()?;
 
         let ws_handler = default_websocket_handler(node.clone(), &c);
         for path in &c.ws.paths {
@@ -397,7 +398,7 @@ impl Runner {
         }
 
         self.start_api_server(&node)?;
-        self.start_metrics()?;
+        self.start_metrics(metrics_server)?;
 
         ws_server
             .start_and_announce("WebSocket server")
@@ -898,15 +899,26 @@ impl Runner {
         Ok(())
     }
 
-    /// Mounts the Prometheus endpoint on the main server for its port (a
-    /// dedicated metrics server is run by `Metrics::run`) and runs the metrics.
-    fn start_metrics(&mut self) -> Result<(), CliError> {
-        if let Some(endpoint) = self.metrics.http_endpoint().filter(|e| e.dedicated_host.is_none()).cloned() {
-            let srv = server::for_port(&endpoint.port.to_string()).map_err(|e| CliError(e.0))?;
-            srv.setup_handler(&endpoint.path, server::metrics_handler(self.metrics.clone()));
+    /// Mounts the Prometheus endpoint on the server for its port, unless a
+    /// dedicated metrics server (run by `Metrics::run`) serves it. This happens
+    /// before any other route, as upstream mounts it in `NewRunner`, so a route
+    /// mounted later at the same path (health, WebSocket, SSE, API) replaces it.
+    fn mount_metrics(&self) -> Result<Option<(Arc<HttpServer>, String)>, CliError> {
+        let Some(endpoint) = self.metrics.http_endpoint().filter(|e| e.dedicated_host.is_none()) else {
+            return Ok(None);
+        };
+        let srv = server::for_port(&endpoint.port.to_string()).map_err(|e| CliError(e.0))?;
+        srv.setup_handler(&endpoint.path, server::metrics_handler(self.metrics.clone()));
+        Ok(Some((srv, endpoint.path.clone())))
+    }
+
+    /// Starts the server of the Prometheus endpoint mounted by
+    /// [`Runner::mount_metrics`], if any, and the metrics task.
+    fn start_metrics(&mut self, mounted: Option<(Arc<HttpServer>, String)>) -> Result<(), CliError> {
+        if let Some((srv, path)) = mounted {
             crate::metrics::log(
                 Level::Info,
-                &format!("Serve metrics at {}{}", srv.address(), endpoint.path),
+                &format!("Serve metrics at {}{path}", srv.address()),
                 &[Attr::new("context", LogValue::String("metrics".into()))],
             );
             srv.start_and_announce("Metrics server")

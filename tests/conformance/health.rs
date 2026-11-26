@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
+use cabby_testkit::raw_http;
 use cabby_testkit::sut::Sut;
 
 const IO_DEADLINE: Duration = Duration::from_secs(5);
@@ -34,4 +35,19 @@ fn health_endpoint_answers_ok() {
 
     let custom = Sut::start(&["--noauth", "--health-path=/healthz"]);
     assert_eq!(200, get_status(&custom, "/healthz"));
+}
+
+/// external-for: server/health_handler_test.go#TestHealthHandler
+/// note: With --metrics_http set to the health path on the main port, the health endpoint answers there: metrics are mounted before the server's other routes, and a later route at the same path replaces an earlier one (Go: initMetrics runs in NewRunner, before the other SetupHandler calls).
+#[test]
+fn metrics_at_the_health_path_leave_the_health_endpoint() {
+    let sut = Sut::start(&["--noauth", "--metrics_http=/health"]);
+
+    let r = raw_http::request(sut.addr(), "GET", "/health", &[], None).unwrap_or_else(|e| {
+        sut.process.propagate_pending();
+        panic!("GET /health failed: {e}\nSUT output:\n{}", sut.process.output())
+    });
+
+    assert_eq!(200, r.status);
+    assert_eq!("Ah, ha, ha, ha, stayin' alive, stayin' alive.", String::from_utf8_lossy(&r.body));
 }
