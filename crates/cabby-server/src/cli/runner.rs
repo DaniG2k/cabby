@@ -1041,7 +1041,11 @@ fn live_only_level(adapters_set: bool) -> Level {
     if adapters_set { Level::Warn } else { Level::Debug }
 }
 
-/// The log record of a start-up note (D-060, D-061). An environment conflict
+/// D-086: the warning for the application secret given as `none`.
+const NONE_SECRET_WARNING: &str = "the application secret is \"none\": treated as not set, and no other secret is \
+derived from it. Remove the setting to silence this warning";
+
+/// The log record of a start-up note (D-060, D-061, D-086). An environment conflict
 /// names both variables and never their values, which may be secrets.
 fn note_record(note: &StartupNote) -> (Level, String, Vec<Attr>) {
     let context = Attr::new("context", LogValue::String("config".into()));
@@ -1058,6 +1062,15 @@ fn note_record(note: &StartupNote) -> (Level, String, Vec<Attr>) {
         StartupNote::EnvConflict { cabby, anycable } => {
             (Level::Warn, format!("both {cabby} and {anycable} are set; using {cabby}"), vec![context])
         }
+        StartupNote::NoneSecret => (Level::Warn, NONE_SECRET_WARNING.to_owned(), vec![context]),
+        StartupNote::NoneSecretBase { section } => (
+            Level::Warn,
+            format!(
+                "SecretBase is \"none\" in the [{section}] section of the configuration file: treated as not set. \
+Remove the key to silence this warning"
+            ),
+            vec![context],
+        ),
     }
 }
 
@@ -1242,6 +1255,27 @@ mod tests {
         assert_eq!(level, Level::Warn);
         assert_eq!(message, "both CABBY_SECRET and ANYCABLE_SECRET are set; using CABBY_SECRET");
         assert_eq!(attrs, vec![Attr::new("context", LogValue::String("config".into()))]);
+    }
+
+    /// Pins D-086: an application secret or a secret base given as `none` is
+    /// reported as a warning.
+    #[test]
+    fn deviation_d086_none_secrets_are_warnings() {
+        let context = vec![Attr::new("context", LogValue::String("config".into()))];
+        let (level, message, attrs) = note_record(&StartupNote::NoneSecret);
+        assert_eq!((level, attrs), (Level::Warn, context.clone()));
+        assert_eq!(
+            message,
+            "the application secret is \"none\": treated as not set, and no other secret is derived from it. \
+Remove the setting to silence this warning"
+        );
+        let (level, message, attrs) = note_record(&StartupNote::NoneSecretBase { section: "rpc" });
+        assert_eq!((level, attrs), (Level::Warn, context));
+        assert_eq!(
+            message,
+            "SecretBase is \"none\" in the [rpc] section of the configuration file: treated as not set. Remove the \
+key to silence this warning"
+        );
     }
 
     /// Pins D-081: TLS without verification, and TLS asked for but not used, are

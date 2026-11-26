@@ -205,7 +205,7 @@ pub struct Config {
     /// Configuration file keys that match no setting (dotted paths).
     pub unknown_config_keys: Vec<String>,
     /// Start-up messages found while the configuration is parsed, before the
-    /// logger exists; the runner logs them (D-060, D-061). Never written to a
+    /// logger exists; the runner logs them (D-060, D-061, D-086). Never written to a
     /// configuration file.
     pub startup_notes: Vec<StartupNote>,
 }
@@ -218,6 +218,12 @@ pub enum StartupNote {
     /// `CABBY_<X>` and `ANYCABLE_<X>` are both set, to different values; the
     /// `CABBY_*` value is used (D-061). Values are never recorded.
     EnvConflict { cabby: String, anycable: String },
+    /// The application secret was given as `none`: it is treated as not set
+    /// (D-086).
+    NoneSecret,
+    /// The configuration file sets `SecretBase = "none"` in `section`: it is
+    /// treated as not set (D-086).
+    NoneSecretBase { section: &'static str },
 }
 
 // Untagged upstream fields decode by their Go names (case-insensitively);
@@ -375,8 +381,7 @@ impl Config {
 
         out.push_str("# The application secret key\n");
         if self.secret.is_empty() {
-            // D-086: "none" is not accepted as the application secret.
-            out.push_str("# secret = \"<not set>\"\n\n");
+            out.push_str("secret = \"none\"\n\n");
         } else {
             out.push_str(&format!("secret = {}\n\n", toml_quote(&self.secret)));
         }
