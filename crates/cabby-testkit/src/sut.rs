@@ -82,19 +82,34 @@ impl Sut {
 
     /// [`Sut::try_start`] with explicit [`SutOptions`].
     pub fn try_start_with(args: &[&str], env: &[(&str, &str)], options: SutOptions) -> Result<Self> {
-        const ATTEMPTS: usize = 3;
-        let mut last = None;
-        for _ in 0..ATTEMPTS {
-            match Self::start_once(args, env, options) {
-                Ok(sut) => return Ok(sut),
-                Err(e) if format!("{e:#}").contains("address already in use") => last = Some(e),
-                Err(e) => return Err(e),
-            }
-        }
-        Err(last.expect("at least one attempt")).context(format!("{ATTEMPTS} attempts hit port collisions"))
+        Self::try_start_with_ports(args, env, options, |[]| Listeners::default()).map(|(sut, [])| sut)
     }
 
-    fn start_once(args: &[&str], env: &[(&str, &str)], options: SutOptions) -> Result<Self> {
+    /// [`Sut::try_start_with`] for a server with `N` more listeners of its own,
+    /// such as `--api_port` or `--pusher_api_port`: `listeners` turns `N` free
+    /// ports into arguments and variables. Every attempt gets new ports, so a
+    /// retry after a collision does not reuse a taken port, and waits until the
+    /// server listens on each of them, so a listener that fails after the main
+    /// one is retried too. The ports must be the server process's own listeners
+    /// (not a child's, such as Cabby's embedded `nats-server`). Returns the
+    /// server and the ports it listens on.
+    pub fn try_start_with_ports<const N: usize>(
+        args: &[&str],
+        env: &[(&str, &str)],
+        options: SutOptions,
+        listeners: impl Fn([u16; N]) -> Listeners,
+    ) -> Result<(Self, [u16; N])> {
+        retry_with_fresh_ports(|ports| {
+            let extra = listeners(ports);
+            let mut all_args = args.to_vec();
+            all_args.extend(extra.args.iter().map(String::as_str));
+            let mut all_env = env.to_vec();
+            all_env.extend(extra.env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+            Self::start_once(&all_args, &all_env, options, &ports)
+        })
+    }
+
+    fn start_once(args: &[&str], env: &[(&str, &str)], options: SutOptions, extra_ports: &[u16]) -> Result<Self> {
         let port = free_port();
         let broadcast_port = if options.separate_broadcast_port { free_port() } else { port };
         let mut cmd = Command::new(sut_binary());
@@ -116,6 +131,9 @@ impl Sut {
         cmd.args(args);
         let mut process = Supervised::spawn("sut", cmd)?;
         process.wait_listening(SocketAddr::from(([127, 0, 0, 1], port)), START_DEADLINE)?;
+        for &p in extra_ports {
+            process.wait_listening(SocketAddr::from(([127, 0, 0, 1], p)), START_DEADLINE)?;
+        }
         Ok(Self { process, port, broadcast_port })
     }
 
@@ -130,6 +148,38 @@ impl Sut {
             panic!("handshake failed: {e:#}\nSUT output:\n{}", self.process.output())
         })
     }
+}
+
+/// Arguments and environment variables for the extra listeners of
+/// [`Sut::try_start_with_ports`].
+#[derive(Debug, Default)]
+pub struct Listeners {
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+}
+
+const START_ATTEMPTS: usize = 3;
+
+/// Runs `attempt` with `N` free ports, again with new ones (up to
+/// [`START_ATTEMPTS`] times) while it fails because a port was taken.
+fn retry_with_fresh_ports<const N: usize, T>(mut attempt: impl FnMut([u16; N]) -> Result<T>) -> Result<(T, [u16; N])> {
+    let mut last = None;
+    for _ in 0..START_ATTEMPTS {
+        let ports = std::array::from_fn(|_| free_port());
+        match attempt(ports) {
+            Ok(t) => return Ok((t, ports)),
+            Err(e) if port_taken(&e) => last = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.expect("at least one attempt")).context(format!("{START_ATTEMPTS} attempts hit port collisions"))
+}
+
+/// Whether a start failed because a listener's port was taken: Go prints
+/// `listen tcp <addr>: bind: address already in use`, Cabby `listen tcp <addr>:
+/// Address already in use (os error 48)` (98 on Linux).
+fn port_taken(e: &anyhow::Error) -> bool {
+    format!("{e:#}").to_ascii_lowercase().contains("address already in use")
 }
 
 impl Drop for Sut {
@@ -182,5 +232,48 @@ mod tests {
         ];
         assert_eq!(scrubbed(vars), vec!["ANYCABLE_PORT", "CABBY_PORT", "CABBY_REDIS_URL", "CABBY_BACKEND", "PORT"]);
         assert_eq!(scrubbed(["REDIS_URL", "HOME"]), vec!["REDIS_URL"]);
+    }
+
+    /// What each server prints when a listener's port is taken (captured from
+    /// the binaries), as [`Supervised::wait_listening`] reports it.
+    fn exited_with(line: &str) -> anyhow::Error {
+        anyhow::anyhow!("sut exited (exit status: 1) before listening on 127.0.0.1:50695. Output:\n{line}")
+    }
+
+    #[test]
+    fn port_collisions_are_recognized_in_both_servers_texts() {
+        for line in [
+            "WebSocket server at http://127.0.0.1:50695 stopped: listen tcp 127.0.0.1:50695: Address already in use (os error 48)",
+            "API HTTP server at http://127.0.0.1:50695 stopped: listen tcp 127.0.0.1:50695: Address already in use (os error 98)",
+            "listen tcp 127.0.0.1:50695: bind: address already in use",
+        ] {
+            assert!(port_taken(&exited_with(line)), "{line}");
+        }
+        assert!(!port_taken(&exited_with("dial tcp 127.0.0.1:6379: connect: connection refused")));
+    }
+
+    /// A collision is retried with new ports; another error is not retried.
+    #[test]
+    fn a_port_collision_is_retried_with_fresh_ports() {
+        let mut seen = Vec::new();
+        let taken = "listen tcp 127.0.0.1:50695: Address already in use (os error 48)";
+        let (n, ports) = retry_with_fresh_ports(|ports: [u16; 2]| {
+            seen.push(ports);
+            if seen.len() == 1 { Err(exited_with(taken)) } else { Ok(seen.len()) }
+        })
+        .expect("the second attempt starts");
+        assert_eq!((2, seen[1]), (n, ports));
+        assert!(seen[1].iter().all(|p| !seen[0].contains(p)), "new ports: {seen:?}");
+
+        let mut calls = 0;
+        let e = retry_with_fresh_ports(|[]| -> Result<()> {
+            calls += 1;
+            Err(exited_with("no such file"))
+        })
+        .expect_err("not a collision");
+        assert_eq!(1, calls, "{e:#}");
+
+        let e = retry_with_fresh_ports(|[]| -> Result<()> { Err(exited_with(taken)) }).expect_err("always taken");
+        assert!(format!("{e:#}").starts_with("3 attempts hit port collisions"), "{e:#}");
     }
 }
