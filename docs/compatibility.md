@@ -30,9 +30,9 @@ Cabby warns at startup when a Redis URL is set but no broadcast adapter uses it 
 to `cabby.toml` and `CABBY_*` when convenient ([`docs/configuration.md`](configuration.md)).
 Two things look different: `cabby --version` prints `cabby 0.5.2 (AnyCable 1.6.21 compatible)`
 instead of `1.6.21`, and Cabby sends no telemetry. The `x-anycable-version` header still says
-`1.6.21`. One setting is refused: Cabby stops at startup when the application secret is `none`
-(`--secret=none`, `ANYCABLE_SECRET=none`, `secret = "none"`); leave it unset instead, or set a real
-secret. `none` still turns off a single secret, such as `--http_rpc_secret=none` (D-086,
+`1.6.21`. The application secret set to `none` (`--secret=none`, `ANYCABLE_SECRET=none`,
+`secret = "none"`) is treated as not set, with a warning at startup; remove the setting, or set a
+real secret. `none` still turns off a single secret, such as `--http_rpc_secret=none` (D-086,
 [`docs/configuration.md`](configuration.md#secrets-and-none)).
 
 ## Supported for compatibility

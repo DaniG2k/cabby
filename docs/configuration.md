@@ -101,15 +101,18 @@ every `CABBY_*` variable can also be set as `ANYCABLE_*`, except the Cabby-only 
 `None` or `NONE` is a secret like any other.
 
 The application secret itself (`--secret`, `CABBY_SECRET`, `ANYCABLE_SECRET`, `secret` in the
-configuration file) can't be `none`. To run without an application secret, leave it unset; Cabby
-stops at startup otherwise:
+configuration file) set to `none` is treated as not set: Cabby runs as without an application
+secret, and no other secret is derived from it. `cabby --print-config` writes `secret = "none"`
+when no secret is set, so a printed configuration loads this way. Cabby logs one warning at
+startup:
 
 ```text
-the application secret is set to "none" (--secret, CABBY_SECRET, ANYCABLE_SECRET or secret in the configuration file): leave it unset to run without an application secret, or set a real secret. "none" still turns off a single secret: --http_rpc_secret, --jwt_secret, --streams_secret, --broadcast_key, --pusher_secret
+WRN the application secret is "none": treated as not set, and no other secret is derived from it. Remove the setting to silence this warning context=config
 ```
 
-AnyCable accepts `secret = none` (deviation D-086). `cabby --print-config` writes `# secret = "<not set>"` when no
-secret is set.
+Remove the setting to run without an application secret and without the warning. A
+`SecretBase = "none"` key under `[rpc]`, `[http_broadcast]` or `[api]` in a configuration file is
+treated as not set too, with a similar warning. AnyCable accepts `secret = none` (deviation D-086).
 
 ## Reserved names
 
