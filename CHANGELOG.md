@@ -31,7 +31,8 @@ Differences from the AnyCable Go server are listed by ID in
   announced over 64 KiB (`400`), and a GET, whose body is never read. Before, the endpoint read
   the whole body first, so a request whose headers announced a body the client did not send
   got no response. A POST is now signed in before its body is read, so one whose commands
-  cannot be parsed and whose sign-in fails gets `401` instead of `400` (D-096).
+  cannot be parsed and whose sign-in fails gets `401` instead of `400`. Durable Streams
+  (`--ds`) already answered without reading a body; a test now pins it (D-096).
 
 ## [0.4.1] - 2026-11-26
 

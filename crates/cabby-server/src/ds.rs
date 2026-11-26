@@ -1910,6 +1910,40 @@ data:{"streamCursor":"c","streamNextOffset":"1::e","upToDate":true}"#,
         assert!(resp.contains(r#"[{"n":2}]"#), "{resp}");
     }
 
+    /// The endpoint never reads a request body: every request is answered
+    /// without waiting for the body its headers announce (no `100 Continue`, so
+    /// the body was never polled): a preflight, a method that is not a read, a
+    /// failed sign-in, and a read.
+    #[test]
+    fn deviation_d096_requests_are_answered_without_their_body() {
+        use crate::server::tests::support::{connect, read_response};
+        use std::io::Write;
+
+        let answer = |endpoint: &Served, head: &str| {
+            let mut stream = connect(endpoint.addr);
+            write!(stream, "{head}\r\nHost: x\r\nContent-Length: 10\r\nExpect: 100-continue\r\n\r\n").unwrap();
+            let sent = Instant::now();
+            let resp = read_response(&mut stream);
+            assert!(sent.elapsed() < Duration::from_secs(1), "{head}: answered after {:?}", sent.elapsed());
+            resp
+        };
+
+        let refusing = Served::new(Some(Arc::new(Answering(Status::Failure))));
+        for (head, status) in [
+            ("OPTIONS /ds/s HTTP/1.1", 200),
+            ("POST /ds/s HTTP/1.1", 405),
+            ("PUT /ds/s HTTP/1.1", 405),
+            ("GET /ds/s?offset=-1 HTTP/1.1", 401),
+            ("GET /ds/s?offset=-1&live=sse HTTP/1.1", 401),
+        ] {
+            assert_eq!(status, answer(&refusing, head).status, "{head}");
+        }
+
+        let open = Served::new(None);
+        let resp = answer(&open, "GET /ds/s?offset=-1 HTTP/1.1");
+        assert_eq!((200, br#"[{"n":1}]"#.to_vec()), (resp.status, resp.body));
+    }
+
     #[test]
     fn close_codes_map_to_statuses() {
         assert_eq!(401, ws_code_to_http(CLOSE_NORMAL_CLOSURE, "Auth Failed"));
