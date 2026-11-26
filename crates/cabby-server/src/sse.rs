@@ -164,22 +164,25 @@ pub struct Encoder {
 /// Formats a payload as one or more SSE `data:` fields: every line terminator
 /// (CRLF, CR or LF) starts a new field (upstream `encodeSSEData`).
 fn encode_sse_data(payload: &str) -> String {
-    let mut out = String::with_capacity(payload.len() + 8);
-    out.push_str("data: ");
-    let mut chars = payload.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\r' => {
-                if chars.peek() == Some(&'\n') {
-                    chars.next();
-                }
-                out.push_str("\ndata: ");
-            }
-            '\n' => out.push_str("\ndata: "),
-            c => out.push(c),
-        }
+    let mut out = Vec::with_capacity(payload.len() + 8);
+    out.extend_from_slice(b"data: ");
+    write_sse_data(&mut out, payload.as_bytes());
+    // Only whole lines of the payload were copied, so it is still UTF-8.
+    String::from_utf8(out).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
+}
+
+/// Appends the value of a `data:` field: every line terminator (CRLF, CR or LF)
+/// in `data` starts a new `data: ` field, so an SSE client joins the lines with
+/// LF and gets the data back with its terminators as LF.
+pub(crate) fn write_sse_data(out: &mut Vec<u8>, data: &[u8]) {
+    let mut rest = data;
+    while let Some(pos) = rest.iter().position(|b| matches!(b, b'\r' | b'\n')) {
+        out.extend_from_slice(&rest[..pos]);
+        out.extend_from_slice(b"\ndata: ");
+        let len = if rest[pos..].starts_with(b"\r\n") { 2 } else { 1 };
+        rest = &rest[pos + len..];
     }
-    out
+    out.extend_from_slice(rest);
 }
 
 /// Whether a value can be written as one SSE field (`event:`, `id:`): it has

@@ -39,6 +39,9 @@ Differences from the AnyCable Go server are listed by ID in
 - SSE: a message type with a line terminator is no longer written as the `event:` field, and a
   stream name or epoch with one no longer as the `id:` field; the event keeps its data. Before,
   the rest of such a value was read as further fields of the event (D-098).
+- Durable Streams SSE: a line terminator in the history data (pretty-printed JSON, for
+  example) starts another `data:` field, so the client gets the whole batch. Before, the client
+  got the batch up to the first line terminator (D-099).
 
 ## [0.4.1] - 2026-11-26
 

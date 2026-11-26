@@ -231,10 +231,14 @@ pub fn encode_json_batch(batch: &[StreamMessage]) -> Vec<u8> {
     buf
 }
 
-/// A batch as an SSE `data` event.
+/// A batch as an SSE `data` event. A line terminator in the messages' data
+/// starts another `data:` field, so the client gets the batch with its line
+/// terminators as LF (D-099).
 pub fn encode_sse_data_event(messages: &[StreamMessage]) -> Vec<u8> {
-    let mut buf = b"event: data\ndata:".to_vec();
-    buf.extend_from_slice(&encode_json_batch(messages));
+    let batch = encode_json_batch(messages);
+    let mut buf = Vec::with_capacity(batch.len() + 17);
+    buf.extend_from_slice(b"event: data\ndata:");
+    sse::write_sse_data(&mut buf, &batch);
     buf
 }
 
@@ -1942,6 +1946,29 @@ data:{"streamCursor":"c","streamNextOffset":"1::e","upToDate":true}"#,
         let open = Served::new(None);
         let resp = answer(&open, "GET /ds/s?offset=-1 HTTP/1.1");
         assert_eq!((200, br#"[{"n":1}]"#.to_vec()), (resp.status, resp.body));
+    }
+
+    /// A line terminator in the data of SSE history starts another `data:`
+    /// field: a client joining the fields gets the batch, which is the JSON of
+    /// the catch-up response.
+    #[test]
+    fn deviation_d099_sse_history_keeps_line_terminators_in_data_fields() {
+        let batch = [message("{\n  \"n\": 1\r\n}"), message("{\"n\":\r2}")];
+        let event = String::from_utf8(encode_sse_data_event(&batch)).unwrap();
+        assert_eq!("event: data\ndata:[{\ndata:   \"n\": 1\ndata: },{\"n\":\ndata: 2}]", event);
+
+        let fields: Vec<&str> = event.split('\n').skip(1).map(|l| l.strip_prefix("data:").unwrap()).collect();
+        let data: Vec<&str> = fields.iter().map(|v| v.strip_prefix(' ').unwrap_or(v)).collect();
+        let joined: serde_json::Value = serde_json::from_str(&data.join("\n")).unwrap();
+        let catch_up: serde_json::Value = serde_json::from_slice(&encode_json_batch(&batch)).unwrap();
+        assert_eq!(serde_json::json!([{"n": 1}, {"n": 2}]), joined);
+        assert_eq!(catch_up, joined);
+
+        // Data without line terminators is written as before.
+        assert_eq!(
+            b"event: data\ndata:[{\"n\":1},2]".to_vec(),
+            encode_sse_data_event(&[message(r#"{"n":1}"#), message("2")])
+        );
     }
 
     #[test]
