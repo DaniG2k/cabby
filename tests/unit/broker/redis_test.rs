@@ -632,16 +632,156 @@ fn an_empty_history_never_fails_a_broadcast() {
 
 /// regression-for: broker/nats_test.go#TestNATSBroker_HistoryFrom
 /// note: Deviation D-069: after Redis forgets its scripts (SCRIPT FLUSH, a restart), operations send the script body again (NOSCRIPT fallback); not_observable on Go: AnyCable rejects --broker=redis.
+//
+// The broker talks to the shared Redis through a private proxy that answers
+// every EVALSHA with NOSCRIPT once told to: a SCRIPT FLUSH on the shared Redis
+// would hit every test using it, and another test's broker could load the
+// scripts again before this one sends its EVALSHA.
 #[test]
 fn a_flushed_script_cache_is_refilled() {
     rb::rust_only();
     let scope = scope();
-    let (broker, sent, epoch) = three_messages(&scope);
-    scope.command(&["SCRIPT", "FLUSH"]).expect("SCRIPT FLUSH");
+    let proxy = NoScriptProxy::start(services::redis().addr());
+    let sent = Recorder::new();
+    let broker =
+        rb::try_new_broker(&scope.url_via(proxy.addr), &Config::new(), &rb::options(&scope), Some(sent.clone()), None)
+            .expect("broker");
+    broker.start().expect("start");
+    for data in ["a", "b", "c"] {
+        broker.handle_broadcast(&msg("test", data)).expect("broadcast");
+    }
+    let epoch = sent.messages()[2].epoch.clone();
+    proxy.forget_scripts();
+    let evals = proxy.evals();
 
     assert_eq!(vec![(3, "c")], offsets_and_data(&broker.history_from("test", &epoch, 2).expect("history")));
     assert_eq!(4, send(&broker, &sent, "test", "d").offset);
     assert_eq!(5, send(&broker, &sent, "test", "e").offset);
+    assert_eq!((3, evals + 3), (proxy.refused(), proxy.evals()), "each call: EVALSHA (NOSCRIPT), then EVAL");
+}
+
+/// A proxy to the shared Redis that, after [`NoScriptProxy::forget_scripts`],
+/// answers every `EVALSHA` with `NOSCRIPT` itself, as a Redis whose script
+/// cache was flushed does; everything else is forwarded. Commands are relayed
+/// one at a time, so replies stay in order.
+struct NoScriptProxy {
+    addr: std::net::SocketAddr,
+    forgotten: Arc<std::sync::atomic::AtomicBool>,
+    refused: Arc<std::sync::atomic::AtomicUsize>,
+    evals: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+/// Reads a CRLF-terminated line into `raw`; returns it without the CRLF.
+fn resp_line(r: &mut impl std::io::BufRead, raw: &mut Vec<u8>) -> Option<Vec<u8>> {
+    let start = raw.len();
+    if r.read_until(b'\n', raw).ok()? == 0 {
+        return None;
+    }
+    let line = &raw[start..];
+    Some(line.strip_suffix(b"\r\n").unwrap_or(line).to_vec())
+}
+
+fn resp_len(line: &[u8]) -> Option<i64> {
+    std::str::from_utf8(&line[1..]).ok()?.parse().ok()
+}
+
+/// Reads one command (an array of bulk strings) into `raw`; returns its name.
+fn resp_command(r: &mut impl std::io::BufRead, raw: &mut Vec<u8>) -> Option<String> {
+    let head = resp_line(r, raw)?;
+    let mut name = None;
+    for _ in 0..resp_len(&head).filter(|_| head.first() == Some(&b'*'))? {
+        let len = usize::try_from(resp_len(&resp_line(r, raw)?)?).ok()?;
+        let start = raw.len();
+        raw.resize(start + len + 2, 0);
+        r.read_exact(&mut raw[start..]).ok()?;
+        name.get_or_insert_with(|| String::from_utf8_lossy(&raw[start..start + len]).to_uppercase());
+    }
+    name
+}
+
+/// Reads one reply (RESP2 or RESP3) into `raw`.
+fn resp_reply(r: &mut impl std::io::BufRead, raw: &mut Vec<u8>) -> Option<()> {
+    let line = resp_line(r, raw)?;
+    match line.first()? {
+        b'$' | b'!' | b'=' => {
+            if let Ok(len) = usize::try_from(resp_len(&line)?) {
+                let start = raw.len();
+                raw.resize(start + len + 2, 0);
+                r.read_exact(&mut raw[start..]).ok()?;
+            }
+        }
+        kind @ (b'*' | b'~' | b'>' | b'%' | b'|') => {
+            let per = if matches!(kind, b'%' | b'|') { 2 } else { 1 };
+            for _ in 0..resp_len(&line)?.max(0) * per {
+                resp_reply(r, raw)?;
+            }
+            // An attribute comes before the reply it describes.
+            if *kind == b'|' {
+                resp_reply(r, raw)?;
+            }
+        }
+        _ => {}
+    }
+    Some(())
+}
+
+impl NoScriptProxy {
+    fn start(upstream: std::net::SocketAddr) -> Self {
+        use std::io::{BufReader, Write};
+        use std::sync::atomic::Ordering::SeqCst;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let proxy = Self { addr, forgotten: Arc::default(), refused: Arc::default(), evals: Arc::default() };
+        let (forgotten, refused, evals) = (proxy.forgotten.clone(), proxy.refused.clone(), proxy.evals.clone());
+        thread::spawn(move || {
+            for client in listener.incoming().flatten() {
+                let Ok(server) = std::net::TcpStream::connect(upstream) else { continue };
+                let (forgotten, refused, evals) = (forgotten.clone(), refused.clone(), evals.clone());
+                thread::spawn(move || {
+                    let (mut to_client, mut to_server) =
+                        (client.try_clone().expect("clone"), server.try_clone().expect("clone"));
+                    let (mut from_client, mut from_server) = (BufReader::new(client), BufReader::new(server));
+                    loop {
+                        let mut command = Vec::new();
+                        let Some(name) = resp_command(&mut from_client, &mut command) else { return };
+                        let mut reply = Vec::new();
+                        if name == "EVALSHA" && forgotten.load(SeqCst) {
+                            refused.fetch_add(1, SeqCst);
+                            reply.extend_from_slice(b"-NOSCRIPT No matching script. Please use EVAL.\r\n");
+                        } else {
+                            if name == "EVAL" {
+                                evals.fetch_add(1, SeqCst);
+                            }
+                            if to_server.write_all(&command).is_err()
+                                || resp_reply(&mut from_server, &mut reply).is_none()
+                            {
+                                return;
+                            }
+                        }
+                        if to_client.write_all(&reply).is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+        });
+        proxy
+    }
+
+    /// From now on, every EVALSHA gets NOSCRIPT.
+    fn forget_scripts(&self) {
+        self.forgotten.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// The EVALSHA calls answered with NOSCRIPT.
+    fn refused(&self) -> usize {
+        self.refused.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The EVAL calls forwarded.
+    fn evals(&self) -> usize {
+        self.evals.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 /// regression-for: broker/nats_test.go#TestNATSBroker_HistoryFrom
