@@ -66,6 +66,10 @@ Differences from the AnyCable Go server are listed by ID in
   server: when its path is also another route's (health, WebSocket, SSE, Durable Streams, API),
   that route answers there, as in Go. Before, the metrics endpoint replaced it, because it was
   mounted after the other routes; it is now mounted first.
+- Error texts that quote a value (for example invalid flag and environment variable values)
+  escape the characters Go escapes: separators such as U+00A0, format characters such as
+  U+200B, private-use characters and noncharacters. Before, only control characters were
+  escaped.
 
 ## [0.4.1] - 2026-11-26
 

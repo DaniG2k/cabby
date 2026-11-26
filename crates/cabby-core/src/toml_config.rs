@@ -353,54 +353,119 @@ crate::toml_section!(crate::logger::Config, "logger.Config" {
 
 // ------------------------------------------------------------------ generation
 
-/// Go `%q` of a string (`strconv.Quote`).
+/// Go `%q` of a string (`strconv.Quote`), for error texts that quote a value
+/// as Go does. Not always valid TOML (`\a`, `\v`, `\x7f`): configuration files
+/// are written with [`toml_quote`].
 pub fn go_quote(s: &str) -> String {
+    quote(s, Escapes::Go)
+}
+
+/// A TOML basic string holding `s`. Wherever Go's `%q` is valid TOML the text is
+/// the same: `"` and `\` are escaped, `\b \t \n \f \r` are used for those
+/// characters, and characters Go does not print (see [`is_go_printable`]) become
+/// `\uXXXX` or `\UXXXXXXXX` (lowercase hex). The escapes Go has and TOML does not
+/// are replaced: U+0007 and U+000B, which Go writes `\a` and `\v`, and the other
+/// control characters below U+0020 and U+007F, which Go writes `\xXX`, become
+/// `\u00XX`. A value with nothing to escape prints as `"value"`.
+pub fn toml_quote(s: &str) -> String {
+    quote(s, Escapes::Toml)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Escapes {
+    Go,
+    Toml,
+}
+
+fn quote(s: &str, escapes: Escapes) -> String {
+    use std::fmt::Write as _;
+
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for c in s.chars() {
         match c {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
-            '\u{07}' => out.push_str("\\a"),
             '\u{08}' => out.push_str("\\b"),
             '\u{0c}' => out.push_str("\\f"),
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            '\u{0b}' => out.push_str("\\v"),
-            c if (c as u32) < 0x20 || c == '\u{7f}' => out.push_str(&format!("\\x{:02x}", c as u32)),
-            c if c.is_control() => {
-                if (c as u32) <= 0xffff {
-                    out.push_str(&format!("\\u{:04x}", c as u32));
-                } else {
-                    out.push_str(&format!("\\U{:08x}", c as u32));
-                }
-            }
-            c => out.push(c),
+            '\u{07}' if escapes == Escapes::Go => out.push_str("\\a"),
+            '\u{0b}' if escapes == Escapes::Go => out.push_str("\\v"),
+            c if (c as u32) < 0x20 || c == '\u{7f}' => match escapes {
+                Escapes::Go => write!(out, "\\x{:02x}", c as u32).expect("writing to a String"),
+                Escapes::Toml => write!(out, "\\u{:04x}", c as u32).expect("writing to a String"),
+            },
+            c if is_go_printable(c) => out.push(c),
+            c if (c as u32) <= 0xffff => write!(out, "\\u{:04x}", c as u32).expect("writing to a String"),
+            c => write!(out, "\\U{:08x}", c as u32).expect("writing to a String"),
         }
     }
     out.push('"');
     out
 }
 
-/// A TOML basic string that decodes back to `s`: quotes, backslashes and control
-/// characters are escaped, everything else is written as is.
-pub fn toml_quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 || c == '\u{7f}' => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
+/// Go's `strconv.IsPrint` for every assigned character: letters, marks, numbers,
+/// punctuation, symbols and the ASCII space. Not printable outside ASCII: control
+/// characters (Cc), separators (Zs, Zl, Zp: `char::is_whitespace` outside ASCII
+/// is those and U+0085), format characters (Cf, [`FORMAT_CHARACTERS`]), private
+/// use characters (Co) and noncharacters. Other unassigned code points count as
+/// printable here, where Go does not print them.
+fn is_go_printable(c: char) -> bool {
+    if c.is_ascii() {
+        return matches!(c, ' '..='~');
     }
-    out.push('"');
-    out
+    let cp = c as u32;
+    let private_use = matches!(cp, 0xe000..=0xf8ff | 0xf_0000..=0xf_fffd | 0x10_0000..=0x10_fffd);
+    let noncharacter = matches!(cp, 0xfdd0..=0xfdef) || cp & 0xfffe == 0xfffe;
+    !(c.is_control()
+        || c.is_whitespace()
+        || private_use
+        || noncharacter
+        || FORMAT_CHARACTERS.iter().any(|&(first, last)| (first..=last).contains(&cp)))
+}
+
+/// The format characters (general category Cf) outside ASCII, as ranges: Unicode
+/// 15.1 (Python's `unicodedata`), whose format characters are those of 15.0.
+const FORMAT_CHARACTERS: [(u32, u32); 21] = [
+    (0x00ad, 0x00ad),
+    (0x0600, 0x0605),
+    (0x061c, 0x061c),
+    (0x06dd, 0x06dd),
+    (0x070f, 0x070f),
+    (0x0890, 0x0891),
+    (0x08e2, 0x08e2),
+    (0x180e, 0x180e),
+    (0x200b, 0x200f),
+    (0x202a, 0x202e),
+    (0x2060, 0x2064),
+    (0x2066, 0x206f),
+    (0xfeff, 0xfeff),
+    (0xfff9, 0xfffb),
+    (0x1_10bd, 0x1_10bd),
+    (0x1_10cd, 0x1_10cd),
+    (0x1_3430, 0x1_343f),
+    (0x1_bca0, 0x1_bca3),
+    (0x1_d173, 0x1_d17a),
+    (0xe_0001, 0xe_0001),
+    (0xe_0020, 0xe_007f),
+];
+
+/// A TOML key: bare when it is a bare key (`A-Za-z0-9_-`), otherwise quoted with
+/// [`toml_quote`], so that a key containing `.` stays one key.
+pub fn toml_key(key: &str) -> String {
+    if !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        key.to_owned()
+    } else {
+        toml_quote(key)
+    }
+}
+
+/// The items of a string list, each quoted with [`toml_quote`] and separated by
+/// `, ` (upstream `strings.Join(v, "\", \"")` between quotes).
+pub fn string_list_items(items: &[String]) -> String {
+    items.iter().map(|item| toml_quote(item)).collect::<Vec<_>>().join(", ")
 }
 
 /// `["a", "b"]` as upstream writes string lists (`"[\"" + strings.Join(v, "\", \"") + "\"]"`).
@@ -498,5 +563,110 @@ mod tests {
     #[test]
     fn go_quote_escapes() {
         assert_eq!(go_quote("a\"b\\c\n\u{1}"), "\"a\\\"b\\\\c\\n\\x01\"");
+    }
+
+    /// `strconv.Quote` output for characters Go escapes, as Go prints them.
+    #[test]
+    fn go_quote_matches_strconv_quote() {
+        for (value, go) in [
+            ("\u{7}\u{b}\u{7f}\u{1b}", r#""\a\v\x7f\x1b""#),
+            ("\u{8}\u{c}\r\t", r#""\b\f\r\t""#),
+            ("\u{85}\u{a0}\u{ad}", r#""\u0085\u00a0\u00ad""#),
+            ("\u{200b}\u{2028}\u{3000}\u{feff}", r#""\u200b\u2028\u3000\ufeff""#),
+            ("\u{e000}\u{fdd0}\u{10ffff}\u{e0041}", r#""\ue000\ufdd0\U0010ffff\U000e0041""#),
+            ("é日本\u{301}\u{1f600}", "\"é日本\u{301}\u{1f600}\""),
+        ] {
+            assert_eq!(go_quote(value), go, "{value:?}");
+        }
+    }
+
+    /// Go's `strconv.IsPrint` for characters of each category outside ASCII.
+    #[test]
+    fn printable_characters_are_those_go_prints() {
+        for c in ['é', '日', '\u{301}', '\u{20dd}', '\u{1f3fb}', '\u{ff9e}', '\u{1f600}', '\u{fffd}', '€', '\u{2014}']
+        {
+            assert!(is_go_printable(c), "{c:?} (U+{:04X}) is printable", c as u32);
+        }
+        for c in ['\u{80}', '\u{9f}', '\u{a0}', '\u{ad}', '\u{200b}', '\u{2028}', '\u{2029}', '\u{3000}', '\u{feff}']
+            .into_iter()
+            .chain(['\u{e000}', '\u{f0000}', '\u{fdd0}', '\u{fffe}', '\u{10ffff}', '\u{e0041}', '\u{1680}'])
+        {
+            assert!(!is_go_printable(c), "U+{:04X} is not printable", c as u32);
+        }
+        assert!((' '..='~').all(is_go_printable));
+        assert!(!('\0'..' ').any(is_go_printable) && !is_go_printable('\u{7f}'));
+    }
+
+    /// A value with nothing to escape prints between quotes as is.
+    #[test]
+    fn toml_quote_keeps_plain_values() {
+        for value in ["", "value", "redis://localhost:6379/1", "*.example.com,example.org", "$pubsub", "a#b", "é日本"]
+        {
+            assert_eq!(toml_quote(value), format!("\"{value}\""));
+        }
+    }
+
+    /// Pins D-102: escapes TOML has no equivalent for are written `\u00XX`.
+    #[test]
+    fn deviation_d102_toml_quote_uses_toml_escapes() {
+        for (value, quoted) in [
+            ("q\"x", r#""q\"x""#),
+            ("b\\x", r#""b\\x""#),
+            ("n\nx\r\t\u{8}\u{c}", r#""n\nx\r\t\b\f""#),
+            ("\u{7}\u{b}\u{0}\u{1b}\u{1f}\u{7f}", r#""\u0007\u000b\u0000\u001b\u001f\u007f""#),
+            ("\u{a0}\u{10ffff}", r#""\u00a0\U0010ffff""#),
+        ] {
+            assert_eq!(toml_quote(value), quoted, "{value:?}");
+        }
+    }
+
+    fn parse_string(document: &str) -> String {
+        let table = DeTable::parse(document).unwrap_or_else(|e| panic!("{document:?}: {e}"));
+        match table.get_ref().get("k").map(|v| v.get_ref()) {
+            Some(DeValue::String(s)) => s.to_string(),
+            other => panic!("{document:?}: {other:?}"),
+        }
+    }
+
+    /// Pins D-102: every Unicode scalar value quotes to a TOML string that loads
+    /// back as itself.
+    #[test]
+    fn deviation_d102_toml_quote_round_trips_every_character() {
+        let all: Vec<char> = ('\0'..=char::MAX).collect();
+        for chunk in all.chunks(4096) {
+            let value: String = chunk.iter().collect();
+            let quoted = toml_quote(&value);
+            assert!(!quoted.contains(|c: char| c.is_control()), "only escapes for control characters: {:?}", chunk[0]);
+            assert_eq!(parse_string(&format!("k = {quoted}\n")), value, "block from U+{:04X}", chunk[0] as u32);
+        }
+    }
+
+    /// Where Go's `%q` is valid TOML, the TOML text is Go's.
+    #[test]
+    fn toml_quote_is_go_quote_where_that_is_valid_toml() {
+        for c in ('\0'..='\u{3000}').chain(['\u{feff}', '\u{e000}', '\u{1f600}', '\u{10ffff}']) {
+            let value = format!("a{c}b");
+            let go = go_quote(&value);
+            if go.contains("\\a") || go.contains("\\v") || go.contains("\\x") {
+                assert_ne!(toml_quote(&value), go);
+            } else {
+                assert_eq!(toml_quote(&value), go, "U+{:04X}", c as u32);
+            }
+        }
+    }
+
+    /// Pins D-102: keys that are not bare keys are quoted, and stay one key.
+    #[test]
+    fn deviation_d102_toml_keys_are_bare_or_quoted() {
+        assert_eq!(toml_key("env"), "env");
+        assert_eq!(toml_key("region-1_a"), "region-1_a");
+        assert_eq!(toml_key("a b"), r#""a b""#);
+        assert_eq!(toml_key("a.b"), r#""a.b""#);
+        assert_eq!(toml_key(""), r#""""#);
+        assert_eq!(toml_key("é"), r#""é""#);
+        let document = format!("t.{} = 1\n", toml_key("a.b"));
+        let table = DeTable::parse(&document).unwrap();
+        let Some(DeValue::Table(t)) = table.get_ref().get("t").map(|v| v.get_ref()) else { panic!("{document:?}") };
+        assert!(t.get("a.b").is_some(), "one key");
     }
 }
