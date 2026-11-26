@@ -383,6 +383,26 @@ pub fn go_quote(s: &str) -> String {
     out
 }
 
+/// A TOML basic string that decodes back to `s`: quotes, backslashes and control
+/// characters are escaped, everything else is written as is.
+pub fn toml_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || c == '\u{7f}' => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// `["a", "b"]` as upstream writes string lists (`"[\"" + strings.Join(v, "\", \"") + "\"]"`).
 pub fn string_list(items: &[String]) -> String {
     format!("[\"{}\"]", items.join("\", \""))
@@ -456,6 +476,23 @@ mod tests {
     fn syntax_errors_name_the_line() {
         let err = decode(&mut Outer::default(), "port = 1\nlist = \n").unwrap_err();
         assert!(err.0.starts_with("toml: line 2: "), "{}", err.0);
+    }
+
+    #[test]
+    fn toml_quote_decodes_back() {
+        for value in [
+            "",
+            "/etc/ssl/ca.pem",
+            "C:\\certs\\ca \"x\".pem",
+            "-----BEGIN CERTIFICATE-----\nMIIB\r\n-----END CERTIFICATE-----\n",
+            "a\tb\u{1}\u{7f}\u{e9}",
+        ] {
+            let quoted = toml_quote(value);
+            let mut decoded = Inner::default();
+            decode(&mut decoded, &format!("name = {quoted}\n")).unwrap();
+            assert_eq!(decoded.name, value, "{quoted}");
+        }
+        assert_eq!(toml_quote("a\"b\\c\n\u{1}"), "\"a\\\"b\\\\c\\n\\u0001\"");
     }
 
     #[test]

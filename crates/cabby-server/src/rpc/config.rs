@@ -3,7 +3,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use cabby_core::toml_config::{self, string_list};
+use cabby_core::toml_config::{self, string_list, toml_quote};
 
 use super::{ClientHelper, RpcClient, RpcError};
 
@@ -163,7 +163,8 @@ impl Config {
         }
     }
 
-    /// The commented TOML section written by `anycable-go --print-config`.
+    /// The commented TOML section written by `anycable-go --print-config`. Decoded on
+    /// top of the defaults, it gives back these settings (D-092).
     pub fn to_toml(&self) -> String {
         let mut out = String::new();
         out.push_str("# RPC implementation (grpc, http, or none)\n");
@@ -172,7 +173,8 @@ impl Config {
         out.push_str(&format!("host = \"{}\"\n", self.host));
         out.push_str("# Specify HTTP headers that must be proxied to the RPC service\n");
         if self.proxy_headers.is_empty() {
-            out.push_str("# proxy_headers = [\"cookie\"]\n");
+            // The default is `["cookie"]`: an empty list is written as such (D-092).
+            out.push_str("proxy_headers = []\n");
         } else {
             out.push_str(&format!("proxy_headers = {}\n", string_list(&self.proxy_headers)));
         }
@@ -187,15 +189,11 @@ impl Config {
         out.push_str("# Enable client-side TLS on RPC connections\n");
         out.push_str(if self.enable_tls { "enable_tls = true\n" } else { "# enable_tls = true\n" });
         out.push_str("# Enable TLS Verify for RPC connections\n");
-        out.push_str(if self.tls_verify { "tls_verify = true\n" } else { "# tls_verify = true\n" });
+        // The default is `true`: `false` is written as such (D-092).
+        out.push_str(if self.tls_verify { "tls_verify = true\n" } else { "tls_verify = false\n" });
         out.push_str("# CA root TLS certificate path\n");
-        // Upstream writes the (empty) path when unset and a placeholder when set;
-        // kept as is.
-        if self.tls_root_ca.is_empty() {
-            out.push_str(&format!("tls_root_ca_path = \"{}\"\n", self.tls_root_ca));
-        } else {
-            out.push_str("# tls_root_ca_path =\n");
-        }
+        // The path or PEM contents, quoted so that it decodes back (D-092); `""` when unset.
+        out.push_str(&format!("tls_root_ca_path = {}\n", toml_quote(&self.tls_root_ca)));
         out.push_str("# HTTP RPC specific settings\n");
         out.push_str("# Secret for HTTP RPC authentication\n");
         if self.secret.is_empty() {
@@ -210,11 +208,8 @@ impl Config {
             out.push_str("# request_timeout = 3000\n");
         }
         out.push_str("# Total timeout for RPC commands including retries (in ms)\n");
-        if self.command_timeout > 0 {
-            out.push_str(&format!("command_timeout = {}\n", self.command_timeout));
-        } else {
-            out.push_str("# command_timeout = 3000\n");
-        }
+        // The default is 3000 and zero means no limit: the value is always written (D-092).
+        out.push_str(&format!("command_timeout = {}\n", self.command_timeout));
         out.push_str(
             "# Max time to wait for a free RPC slot (in ms); defaults to command_timeout, zero means no limit\n",
         );
@@ -236,5 +231,95 @@ impl Config {
     pub fn decode_toml(&mut self, toml: &str) -> Result<(), String> {
         toml_config::decode(self, toml).map_err(|e| e.0)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn printed_and_loaded(config: &Config) -> (String, Config) {
+        let printed = config.to_toml();
+        let mut loaded = Config::new();
+        loaded.decode_toml(&printed).unwrap_or_else(|e| panic!("{e}\n{printed}"));
+        (printed, loaded)
+    }
+
+    #[test]
+    fn deviation_d092_a_root_ca_loads_back() {
+        let mut config = Config::new();
+        config.enable_tls = false;
+        config.tls_root_ca = "/etc/cabby/rpc ca \"private\".pem".to_owned();
+        assert!(config.tls_enabled());
+
+        let (printed, loaded) = printed_and_loaded(&config);
+
+        assert!(printed.contains("tls_root_ca_path = \"/etc/cabby/rpc ca \\\"private\\\".pem\"\n"), "{printed}");
+        assert!(!printed.contains("# tls_root_ca_path"), "{printed}");
+        assert_eq!(loaded.tls_root_ca, config.tls_root_ca);
+        assert!(loaded.tls_enabled());
+        assert_eq!(loaded, config);
+    }
+
+    #[test]
+    fn deviation_d092_root_ca_contents_load_back() {
+        let mut config = Config::new();
+        config.tls_root_ca =
+            "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIU\n-----END CERTIFICATE-----\n".to_owned();
+
+        let (printed, loaded) = printed_and_loaded(&config);
+
+        assert!(
+            printed.contains("tls_root_ca_path = \"-----BEGIN CERTIFICATE-----\\nMIIBszCCAVmgAwIBAgIU\\n"),
+            "{printed}"
+        );
+        assert_eq!(loaded.tls_root_ca, config.tls_root_ca);
+        assert!(loaded.tls_enabled());
+    }
+
+    #[test]
+    fn an_unset_root_ca_prints_as_before() {
+        let (printed, loaded) = printed_and_loaded(&Config::new());
+
+        assert!(printed.contains("# CA root TLS certificate path\ntls_root_ca_path = \"\"\n"), "{printed}");
+        assert!(!loaded.tls_enabled());
+        assert_eq!(loaded, Config::new());
+    }
+
+    #[test]
+    fn deviation_d092_values_other_than_the_defaults_load_back() {
+        let mut config = Config::new();
+        config.tls_verify = false;
+        config.command_timeout = 0;
+        config.proxy_headers = Vec::new();
+
+        let (printed, loaded) = printed_and_loaded(&config);
+
+        assert!(printed.contains("\ntls_verify = false\n"), "{printed}");
+        assert!(printed.contains("\ncommand_timeout = 0\n"), "{printed}");
+        assert!(printed.contains("\nproxy_headers = []\n"), "{printed}");
+        assert_eq!(loaded, config);
+
+        config.command_timeout = -5;
+        assert_eq!(printed_and_loaded(&config).1.command_timeout, -5);
+    }
+
+    #[test]
+    fn defaults_print_as_before() {
+        let printed = Config::new().to_toml();
+
+        for line in [
+            "proxy_headers = [\"cookie\"]\n",
+            "# proxy_cookies = [\"_session_id\"]\n",
+            "# enable_tls = true\n",
+            "tls_verify = true\n",
+            "tls_root_ca_path = \"\"\n",
+            "# secret =\n",
+            "# request_timeout = 3000\n",
+            "command_timeout = 3000\n",
+            "# wait_timeout = 3000\n",
+        ] {
+            assert!(printed.contains(line), "{line:?} in\n{printed}");
+        }
     }
 }

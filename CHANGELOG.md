@@ -8,6 +8,16 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
+## [Unreleased]
+
+### Fixed
+
+- `--print-config`: the `[rpc]` section loads back to the settings it was printed from. A CA set
+  with `--rpc_tls_root_ca` (a path or PEM contents) is written as `tls_root_ca_path = "…"`
+  instead of a commented-out placeholder, so loading the printed file keeps the CA and TLS on
+  RPC connections. `--rpc_tls_verify=false`, a `--rpc_command_timeout` of 0 (no limit) and an
+  empty `proxy_headers` are written as set too, instead of the commented-out defaults (D-092).
+
 ## [0.4.1] - 2026-11-26
 
 Cabby 0.4.1 fixes stream history in the memory, SQLite and NATS brokers, the NATS session
