@@ -46,6 +46,9 @@ Differences from the AnyCable Go server are listed by ID in
   stream, as in AnyCable. Before, everything up to the host was dropped, so the request read the
   stream `feed`, and with a signed stream name it was answered `401`. Absolute-form request
   targets (`http://host/ds/feed`) are read as before.
+- Durable Streams: a stream path that is not valid UTF-8 once decoded (`/ds/%ff`) is answered
+  `400`. Before, every such path read the stream named U+FFFD, so `/ds/%ff`, `/ds/%fe` and
+  `/ds/%EF%BF%BD` read the same stream (D-104).
 
 ## [0.4.1] - 2026-11-26
 

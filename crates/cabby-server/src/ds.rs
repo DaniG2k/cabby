@@ -306,8 +306,9 @@ pub struct StreamParams {
 }
 
 /// The decoded path of a request target (Go `r.URL.Path`): `%XX` escapes are
-/// decoded; a target with an invalid escape keeps its raw path.
-fn url_path(target: &str) -> String {
+/// decoded; a target with an invalid escape keeps its raw path. A path that is
+/// not valid UTF-8 once decoded names no stream (D-104).
+fn url_path(target: &str) -> Result<String, DsError> {
     let mut path = target.split(['?', '#']).next().unwrap_or_default();
     // An absolute URL (`http://host/path`): the path follows the authority. In an
     // origin-form target (`/path`), a `://` is part of the path, as in Go.
@@ -317,7 +318,7 @@ fn url_path(target: &str) -> String {
         path = rest.find('/').map_or("", |i| &rest[i..]);
     }
     if !path.contains('%') {
-        return path.to_owned();
+        return Ok(path.to_owned());
     }
     let bytes = path.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -334,19 +335,19 @@ fn url_path(target: &str) -> String {
                     i += 3;
                     continue;
                 }
-                None => return path.to_owned(),
+                None => return Ok(path.to_owned()),
             }
         }
         out.push(bytes[i]);
         i += 1;
     }
-    String::from_utf8_lossy(&out).into_owned()
+    String::from_utf8(out).map_err(|_| DsError("stream name is not valid UTF-8".to_owned()))
 }
 
 /// Parses and validates a request against the mount path (upstream `StreamParamsFromReq`).
 pub fn stream_params_from_req(req: &HttpRequest, c: &Config) -> Result<StreamParams, DsError> {
     // The stream name is the URL path below the mount path.
-    let path = url_path(&req.target);
+    let path = url_path(&req.target)?;
     let stream_path = path.strip_prefix(c.path.as_str()).unwrap_or(&path);
     let stream_path = stream_path.strip_prefix('/').unwrap_or(stream_path);
 
@@ -1777,6 +1778,20 @@ data:{"streamCursor":"c","streamNextOffset":"1::e","upToDate":true}"#,
         }
     }
 
+    /// A path that is not valid UTF-8 once decoded is refused (Go keeps the
+    /// bytes as the stream name); the encoded U+FFFD is a valid name.
+    #[test]
+    fn deviation_d104_a_stream_name_must_be_valid_utf8() {
+        let req = |target: &str| HttpRequest { method: "GET".into(), target: target.into(), ..Default::default() };
+        let c = Config::new();
+        for target in ["/ds/%ff", "/ds/%fe", "/ds/a%C3", "/ds/%ff?offset=-1&live=sse"] {
+            let err = stream_params_from_req(&req(target), &c).unwrap_err();
+            assert_eq!("stream name is not valid UTF-8", err.0, "{target}");
+        }
+        assert_eq!("\u{FFFD}", stream_params_from_req(&req("/ds/%EF%BF%BD"), &c).unwrap().name);
+        assert_eq!("café", stream_params_from_req(&req("/ds/caf%C3%A9"), &c).unwrap().name);
+    }
+
     fn message(data: &str) -> StreamMessage {
         StreamMessage { stream: "s".into(), data: data.into(), ..Default::default() }
     }
@@ -2014,6 +2029,23 @@ data:{"streamCursor":"c","streamNextOffset":"1::e","upToDate":true}"#,
             assert!(resp.starts_with("http/1.1 200"), "{target}: {resp}");
             assert!(resp.ends_with(body), "{target}: {resp}");
         }
+    }
+
+    /// Over a socket: a path that is not valid UTF-8 once decoded is answered
+    /// 400 with no body, as the other invalid stream requests; the encoded
+    /// U+FFFD reads its stream.
+    #[test]
+    fn deviation_d104_a_path_that_is_not_utf8_is_answered_400() {
+        let endpoint = Served::new(None);
+        let msg = StreamMessage { stream: "\u{FFFD}".into(), data: r#"{"n":9}"#.into(), ..Default::default() };
+        endpoint.memory.handle_broadcast(&msg).unwrap();
+        for target in ["/ds/%ff?offset=-1", "/ds/%fe?offset=-1"] {
+            let resp = request(endpoint.addr, "GET", target);
+            assert!(resp.starts_with("http/1.1 400"), "{target}: {resp}");
+            assert!(resp.ends_with("\r\n\r\n"), "{target}: an empty body: {resp}");
+        }
+        let resp = request(endpoint.addr, "GET", "/ds/%EF%BF%BD?offset=-1");
+        assert!(resp.starts_with("http/1.1 200") && resp.ends_with(r#"[{"n":9}]"#), "{resp}");
     }
 
     #[test]
