@@ -333,9 +333,13 @@ impl Config {
         let path = self.config_file_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
         let contents = std::fs::read_to_string(&path)
             .map_err(|e| ConfigError(format!("failed to read config file, cause: {}", read_error(&path, &e))))?;
+        self.load_from_str(&contents)
+    }
 
+    /// Decodes the contents of a configuration file over the current values.
+    fn load_from_str(&mut self, contents: &str) -> Result<(), ConfigError> {
         let prev_id = self.id.clone();
-        let unknown = toml_config::decode(self, &contents)
+        let unknown = toml_config::decode(self, contents)
             .map_err(|e| ConfigError(format!("failed to parse TOML configuration, cause: {e}")))?;
 
         if self.id != prev_id {
@@ -727,5 +731,282 @@ mod tests {
         d.user_presets = Some(vec!["broker".to_owned()]);
         d.load_presets(&EnvMap::new()).unwrap();
         assert_eq!("memory", d.broker.adapter, "the preset still picks a broker when none was chosen");
+    }
+
+    /// `--print-config` output loads back to the configuration it was printed from.
+    mod print_config {
+        use cabby_core::toml_config::TomlSection;
+
+        use super::*;
+
+        const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/print_config");
+
+        fn fixture(name: &str) -> String {
+            std::fs::read_to_string(format!("{FIXTURES}/{name}")).unwrap_or_else(|e| panic!("{name}: {e}"))
+        }
+
+        /// The default configuration prints what Cabby 0.4.1 printed.
+        #[test]
+        fn the_default_configuration_prints_as_before() {
+            assert_eq!(Config::new().to_toml(), fixture("default.expected.toml"));
+        }
+
+        /// A configuration with plain values in every string setting prints what
+        /// Cabby 0.4.1 printed.
+        #[test]
+        fn plain_values_print_as_before() {
+            let mut c = Config::new();
+            c.load_from_str(&fixture("plain_values.toml")).unwrap();
+            assert!(c.unknown_config_keys.is_empty(), "{:?}", c.unknown_config_keys);
+            assert_eq!(c.to_toml(), fixture("plain_values.expected.toml"));
+        }
+
+        /// The sections of the configuration file and their fields (the loader's
+        /// field tables), by their path in the file. `[rpc]` is left out (`SKIPPED`):
+        /// its fields are covered by their own test.
+        fn sections() -> Vec<(&'static str, &'static [&'static str])> {
+            vec![
+                ("", Config::FIELDS),
+                ("logging", cabby_core::logger::Config::FIELDS),
+                ("server", crate::server::Config::FIELDS),
+                ("server.ssl", crate::server::SslConfig::FIELDS),
+                ("app", AppConfig::FIELDS),
+                ("ws", crate::ws::Config::FIELDS),
+                ("broker", BrokerConfig::FIELDS),
+                ("sqlite", SqliteConfig::FIELDS),
+                ("redis_broker", crate::broker::RedisBrokerConfig::FIELDS),
+                ("postgres", crate::postgres::PostgresConfig::FIELDS),
+                ("redis", RedisConfig::FIELDS),
+                ("redis_pubsub_broadcast", crate::broadcast::LegacyRedisConfig::FIELDS),
+                ("redis_pubsub_broadcast.redis", RedisConfig::FIELDS),
+                ("redis_stream_broadcast", crate::broadcast::RedisConfig::FIELDS),
+                ("redis_stream_broadcast.redis", RedisConfig::FIELDS),
+                ("nats_broadcast", crate::broadcast::LegacyNatsConfig::FIELDS),
+                ("nats_broadcast.nats", crate::nats::NatsConfig::FIELDS),
+                ("http_broadcast", HttpBroadcastConfig::FIELDS),
+                ("redis_pubsub", crate::pubsub::RedisConfig::FIELDS),
+                ("redis_pubsub.Redis", RedisConfig::FIELDS),
+                ("nats_pubsub", crate::pubsub::NatsConfig::FIELDS),
+                ("nats_pubsub.NATS", crate::nats::NatsConfig::FIELDS),
+                ("nats", crate::nats::NatsConfig::FIELDS),
+                ("disconnector", crate::node::DisconnectQueueConfig::FIELDS),
+                ("metrics", MetricsConfig::FIELDS),
+                ("metrics.statsd", StatsdConfig::FIELDS),
+                ("jwt", cabby_core::identity::JwtConfig::FIELDS),
+                ("embedded_nats", EmbeddedNatsConfig::FIELDS),
+                ("sse", SseConfig::FIELDS),
+                ("streams", cabby_core::streams::Config::FIELDS),
+                ("pusher", crate::pusher::Config::FIELDS),
+                ("ds", DsConfig::FIELDS),
+                ("api", crate::api::Config::FIELDS),
+            ]
+        }
+
+        const SKIPPED: &[&str] = &["rpc"];
+
+        /// Fields that load back as another value for a reason other than quoting:
+        /// (field, cases, reason). A field ending in `.*` covers a section. Output
+        /// that does not load, or that has another number of lines, always fails.
+        const NOT_ROUND_TRIPPED: &[(&str, &[&str], &str)] = &[
+            ("ConfigFilePath", &["*"], "not printed: the path of the file itself"),
+            ("secret", &["empty"], "printed as upstream prints it"),
+            ("broadcast_key", &["empty"], "printed as upstream prints it"),
+            ("broadcast_adapters", &["empty list"], "an empty list prints as [\"\"], as upstream writes it"),
+            ("presets", &["empty list"], "an empty list prints the commented-out example (presets are detected)"),
+            ("ws.paths", &["empty list"], "an empty list prints as [\"\"], as upstream writes it"),
+            ("embedded_nats.cluster_name", &["*"], "printed commented out while cluster_addr is empty"),
+            ("metrics.log_filter", &["empty list"], "an empty filter prints commented out, which loads as no filter"),
+            ("metrics.LogFormatter", &["*"], "not printed"),
+            ("metrics.statsd.prefix", &["*"], "printed commented out while statsd.host is empty"),
+            ("metrics.statsd.tags_format", &["*"], "printed commented out while statsd.host is empty"),
+            ("http_broadcast.SecretBase", &["*"], "not printed"),
+            ("http_broadcast.cors_hosts", &["*"], "not printed"),
+            ("api.SecretBase", &["*"], "not printed"),
+            ("api.cors_hosts", &["*"], "not printed"),
+            ("pusher.CORSHosts", &["*"], "not printed"),
+            ("redis_pubsub_broadcast.redis.*", &["*"], "an adapter's own Redis settings are not printed"),
+            ("redis_stream_broadcast.redis.*", &["*"], "an adapter's own Redis settings are not printed"),
+            ("redis_pubsub.Redis.*", &["*"], "an adapter's own Redis settings are not printed"),
+            ("nats_broadcast.nats.*", &["*"], "an adapter's own NATS settings are not printed"),
+            ("nats_pubsub.NATS.*", &["*"], "an adapter's own NATS settings are not printed"),
+        ];
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum Kind {
+            String,
+            List,
+            Map,
+            Section,
+            Other,
+        }
+
+        fn document(section: &str, line: &str) -> String {
+            if section.is_empty() { format!("{line}\n") } else { format!("[{section}]\n{line}\n") }
+        }
+
+        /// The kind of a field, from what the loader accepts for it.
+        fn kind(section: &str, key: &str) -> Kind {
+            let accepts = |value: &str| {
+                let mut c = Config::new();
+                c.load_from_str(&document(section, &format!("{key} = {value}"))).is_ok().then_some(c)
+            };
+            if accepts("\"x\"").is_some() {
+                Kind::String
+            } else if accepts("[\"x\"]").is_some() {
+                Kind::List
+            } else if let Some(c) = accepts("{ zz = \"x\" }") {
+                if c.unknown_config_keys.is_empty() { Kind::Map } else { Kind::Section }
+            } else {
+                Kind::Other
+            }
+        }
+
+        /// A TOML string with every character as a `\U` escape: independent of the
+        /// printer's quoting.
+        fn encode(value: &str) -> String {
+            let escaped: String = value.chars().map(|c| format!("\\U{:08X}", c as u32)).collect();
+            format!("\"{escaped}\"")
+        }
+
+        const VALUES: &[(&str, &str)] = &[
+            ("plain", "value"),
+            ("empty", ""),
+            ("quote", "q\"x"),
+            ("backslash", "b\\x"),
+            ("newline", "n\nx"),
+            ("tab", "a\tb"),
+            ("bell", "\u{7}"),
+            ("delete", "\u{7f}"),
+            ("hash", "a#b"),
+            ("equals", "a=b"),
+            ("comma", "a,b"),
+            ("e-acute", "é"),
+            ("cjk", "日本"),
+            ("nbsp", "\u{a0}"),
+        ];
+
+        /// The cases for a field: a label and the TOML value to set.
+        fn cases(kind: Kind) -> Vec<(String, String)> {
+            let list = |items: &[&str]| format!("[{}]", items.iter().map(|i| encode(i)).collect::<Vec<_>>().join(", "));
+            match kind {
+                Kind::String => VALUES.iter().map(|(label, v)| ((*label).to_owned(), encode(v))).collect(),
+                Kind::List => VALUES
+                    .iter()
+                    .map(|(label, v)| ((*label).to_owned(), list(&[v])))
+                    .chain([
+                        ("two items".to_owned(), list(&["a,b", "c"])),
+                        ("three items".to_owned(), list(&["x", "q\"x", "n\nx"])),
+                        ("empty list".to_owned(), "[]".to_owned()),
+                    ])
+                    .collect(),
+                Kind::Map => VALUES
+                    .iter()
+                    .map(|(label, v)| (format!("value {label}"), format!("{{ k = {} }}", encode(v))))
+                    .chain(
+                        [
+                            ("key with space", "a b"),
+                            ("key with dot", "a.b"),
+                            ("empty key", ""),
+                            ("key with quote", "q\"x"),
+                        ]
+                        .into_iter()
+                        .chain([("key with newline", "n\nx"), ("non-ASCII key", "é"), ("bare key", "region-1_a")])
+                        .map(|(label, k)| (label.to_owned(), format!("{{ {} = \"v\" }}", encode(k)))),
+                    )
+                    .chain([("two keys".to_owned(), TWO_KEYS.to_owned())])
+                    .collect(),
+                Kind::Section | Kind::Other => Vec::new(),
+            }
+        }
+
+        const TWO_KEYS: &str = "{ \"a.b\" = \"1\", \"c d\" = \"2\" }";
+
+        /// A plain value of the same shape as a case's: its output has as many lines.
+        fn plain_of_shape(kind: Kind, value: &str) -> String {
+            match kind {
+                Kind::List => "[\"value\"]".to_owned(),
+                Kind::Map if value == TWO_KEYS => "{ a = \"1\", b = \"2\" }".to_owned(),
+                Kind::Map => "{ k = \"value\" }".to_owned(),
+                _ => "\"value\"".to_owned(),
+            }
+        }
+
+        fn allowed(path: &str, case: &str) -> Option<usize> {
+            NOT_ROUND_TRIPPED.iter().position(|(field, cases, _)| {
+                let matches_field = match field.strip_suffix(".*") {
+                    Some(section) => path.starts_with(&format!("{section}.")),
+                    None => *field == path,
+                };
+                matches_field && (cases.contains(&"*") || cases.contains(&case))
+            })
+        }
+
+        /// Pins D-102: every string, string-list and map field of every section the
+        /// loader knows, set to values with characters TOML escapes, prints with `to_toml`
+        /// and loads back over a fresh default configuration to the same value. The
+        /// output keeps its number of lines, so a commented-out setting stays one
+        /// line.
+        #[test]
+        fn deviation_d102_every_string_setting_loads_back() {
+            let sections = sections();
+            let base = Config::new();
+            let mut failures = Vec::new();
+            let mut used = vec![false; NOT_ROUND_TRIPPED.len()];
+            let mut checked = 0;
+
+            for (section, fields) in &sections {
+                for key in *fields {
+                    let path = if section.is_empty() { (*key).to_owned() } else { format!("{section}.{key}") };
+                    let kind = kind(section, key);
+                    if kind == Kind::Section {
+                        assert!(
+                            SKIPPED.contains(&path.as_str()) || sections.iter().any(|(s, _)| *s == path),
+                            "{path}: a section missing from sections()"
+                        );
+                        continue;
+                    }
+                    let print = |value: &str| {
+                        let set_document = document(section, &format!("{key} = {value}"));
+                        let mut set = base.clone();
+                        set.load_from_str(&set_document).unwrap_or_else(|e| panic!("{path} = {value}: {e}"));
+                        (set.to_toml(), set_document)
+                    };
+                    for (case, value) in cases(kind) {
+                        let (printed, set_document) = print(&value);
+                        let lines = printed.lines().count();
+                        let plain = print(&plain_of_shape(kind, &value)).0.lines().count();
+
+                        let fail = |problem: String| format!("{path} ({case}): {problem}");
+                        if lines != plain {
+                            failures.push(fail(format!("prints {lines} lines instead of {plain}")));
+                        }
+                        checked += 1;
+                        let mut loaded = base.clone();
+                        match loaded.load_from_str(&printed) {
+                            Err(e) => failures.push(fail(format!("does not load: {e}"))),
+                            Ok(()) if !loaded.unknown_config_keys.is_empty() => {
+                                failures.push(fail(format!("unknown keys {:?}", loaded.unknown_config_keys)));
+                            }
+                            Ok(()) => {
+                                // Setting the value again changes nothing when it loaded back.
+                                let mut again = loaded.clone();
+                                again.load_from_str(&set_document).unwrap();
+                                if again != loaded {
+                                    match allowed(&path, &case) {
+                                        Some(entry) => used[entry] = true,
+                                        None => failures.push(fail("loads back as another value".to_owned())),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            assert!(checked > 500, "only {checked} cases");
+            assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));
+            let unused: Vec<_> = NOT_ROUND_TRIPPED.iter().zip(&used).filter(|(_, u)| !**u).map(|(e, _)| e.0).collect();
+            assert!(unused.is_empty(), "entries of NOT_ROUND_TRIPPED that load back: {unused:?}");
+        }
     }
 }

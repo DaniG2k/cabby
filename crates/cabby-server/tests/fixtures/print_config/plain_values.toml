@@ -1,0 +1,114 @@
+node_id = "node-1"
+secret = "app-secret"
+broadcast_key = "broadcast-key"
+broadcast_adapters = ["http", "redisx"]
+pubsub_adapter = "redis"
+presets = ["broker", "fly"]
+
+[logging]
+level = "debug"
+format = "json"
+
+[server]
+host = "0.0.0.0"
+allowed_origins = "*.example.com,example.org"
+health_path = "/up"
+ssl.cert_path = "/etc/ssl/cert.pem"
+ssl.key_path = "/etc/ssl/key.pem"
+
+[broker]
+adapter = "memory"
+
+[sqlite]
+path = "/var/lib/cabby/cabby.db"
+
+[redis_broker]
+key_prefix = "cabby:"
+
+[postgres]
+url = "postgres://localhost:5432/app"
+schema = "cabby"
+table_prefix = "cabby_"
+channel = "cabby"
+tls_ca_cert_path = "/etc/ssl/postgres-ca.pem"
+
+[jwt]
+secret = "jwt-secret"
+param = "jid"
+
+[streams]
+secret = "streams-secret"
+pubsub_channel = "$pubsub"
+turbo_secret = "turbo-secret"
+cable_ready_secret = "cable-ready-secret"
+
+[ws]
+paths = ["/cable", "/ws"]
+
+[sse]
+path = "/sse"
+
+[pusher]
+app_id = "app-id"
+app_key = "app-key"
+secret = "pusher-secret"
+
+[ds]
+path = "/durable"
+
+[api]
+host = "127.0.0.1"
+path = "/v1"
+secret = "api-secret"
+
+[redis]
+url = "redis://localhost:6379/1"
+sentinels = "sentinel-1:26379,sentinel-2:26379"
+tls_ca_cert_path = "/etc/ssl/redis-ca.pem"
+tls_client_cert_path = "/etc/ssl/redis-cert.pem"
+tls_client_key_path = "/etc/ssl/redis-key.pem"
+
+[nats]
+servers = "nats://localhost:4222,nats://localhost:4223"
+
+[http_broadcast]
+path = "/broadcast"
+secret = "http-secret"
+
+[redis_stream_broadcast]
+stream = "cabby-stream"
+group = "cabby-group"
+
+[redis_pubsub_broadcast]
+channel = "cabby-broadcast"
+
+[nats_broadcast]
+channel = "cabby-nats-broadcast"
+
+[redis_pubsub]
+channel = "cabby-internal"
+
+[nats_pubsub]
+channel = "cabby-nats-internal"
+
+[metrics]
+http_path = "/prometheus"
+host = "0.0.0.0"
+log_filter = ["clients_num", "broadcast_msg_total"]
+tags = { env = "production", region-1 = "eu_west" }
+statsd = { host = "localhost:8125", prefix = "cabby.", tags_format = "datadog" }
+
+[app]
+ping_timestamp_precision = "ms"
+disconnect_mode = "always"
+
+[embedded_nats]
+name = "nats-1"
+service_addr = "nats://127.0.0.1:4222"
+cluster_addr = "nats://127.0.0.1:4242"
+cluster_name = "cabby-cluster"
+gateway_addr = "nats://127.0.0.1:7222"
+gateway_advertise = "127.0.0.1:7222"
+gateways = ["nats://127.0.0.1:7223", "nats://127.0.0.1:7224"]
+routes = ["nats://127.0.0.1:4243"]
+jetstream_store_dir = "/var/lib/nats"
