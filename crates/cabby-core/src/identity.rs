@@ -769,6 +769,147 @@ mod tests {
         assert_eq!(vec![DISCONNECT_UNAUTHORIZED.to_owned()], result.transmissions);
     }
 
+    /// The fixed clock of the time-claim tests.
+    const NOW_SECS: u64 = 1_700_000_000;
+
+    fn at(secs: u64) -> SystemTime {
+        UNIX_EPOCH + std::time::Duration::from_secs(secs)
+    }
+
+    /// A token with this header and claims JSON, signed with MAC `M` and "s".
+    fn signed_with<M: Mac + KeyInit>(header: &str, claims: &str) -> String {
+        let input = format!("{}.{}", encode(header.as_bytes()), encode(claims.as_bytes()));
+        let mut mac = <M as KeyInit>::new_from_slice(b"s").unwrap();
+        mac.update(input.as_bytes());
+        format!("{input}.{}", encode(&mac.finalize().into_bytes()))
+    }
+
+    fn hs256(claims: &str) -> String {
+        signed_with::<Hmac<Sha256>>(r#"{"alg":"HS256"}"#, claims)
+    }
+
+    fn verify_at(token: &str, secs: u64) -> Result<Map<String, Value>, JwtError> {
+        verify_hmac_jwt(token, b"s", at(secs))
+    }
+
+    fn invalid(text: &str) -> Result<Map<String, Value>, JwtError> {
+        Err(JwtError::Invalid(text.to_owned()))
+    }
+
+    /// A token naming a method other than HMAC is rejected by the key
+    /// function, whatever its signature; an unknown, missing or non-string
+    /// `alg` is unverifiable.
+    #[test]
+    fn only_hmac_signing_methods_are_accepted() {
+        let claims = r#"{"ext":"x"}"#;
+        for alg in ["RS256", "RS384", "PS256", "ES256", "ES512", "EdDSA", "none"] {
+            let header = format!(r#"{{"alg":"{alg}"}}"#);
+            let token = signed_with::<Hmac<Sha256>>(&header, claims);
+            let expected =
+                format!("token is unverifiable: error while executing keyfunc: unexpected signing method: {alg}");
+            assert_eq!(invalid(&expected), verify_at(&token, NOW_SECS), "{alg}");
+        }
+        // `alg: none` with the empty signature golang-jwt produces.
+        let unsigned = format!("{}.{}.", encode(br#"{"alg":"none"}"#), encode(claims.as_bytes()));
+        assert_eq!(
+            invalid("token is unverifiable: error while executing keyfunc: unexpected signing method: none"),
+            verify_at(&unsigned, NOW_SECS)
+        );
+        for header in [r#"{"alg":"XS256"}"#, r#"{"alg":"hs256"}"#] {
+            let token = signed_with::<Hmac<Sha256>>(header, claims);
+            assert_eq!(
+                invalid("token is unverifiable: signing method (alg) is unavailable"),
+                verify_at(&token, NOW_SECS)
+            );
+        }
+        for header in [r#"{}"#, r#"{"typ":"JWT"}"#, r#"{"alg":256}"#, r#"{"alg":null}"#, r#"{"alg":["HS256"]}"#] {
+            let token = signed_with::<Hmac<Sha256>>(header, claims);
+            assert_eq!(
+                invalid("token is unverifiable: signing method (alg) is unspecified"),
+                verify_at(&token, NOW_SECS),
+                "{header}"
+            );
+        }
+    }
+
+    /// HS384 and HS512 tokens are verified with their own MAC: the header's
+    /// method must match the one the signature was made with.
+    #[test]
+    fn hs384_and_hs512_need_their_own_mac() {
+        let claims = r#"{"ext":"x"}"#;
+        assert!(verify_at(&signed_with::<Hmac<Sha384>>(r#"{"alg":"HS384"}"#, claims), NOW_SECS).is_ok());
+        assert!(verify_at(&signed_with::<Hmac<Sha512>>(r#"{"alg":"HS512"}"#, claims), NOW_SECS).is_ok());
+        let mismatched = [
+            signed_with::<Hmac<Sha256>>(r#"{"alg":"HS384"}"#, claims),
+            signed_with::<Hmac<Sha256>>(r#"{"alg":"HS512"}"#, claims),
+            signed_with::<Hmac<Sha512>>(r#"{"alg":"HS256"}"#, claims),
+            signed_with::<Hmac<Sha384>>(r#"{"alg":"HS512"}"#, claims),
+        ];
+        for token in &mismatched {
+            assert_eq!(invalid("token signature is invalid: signature is invalid"), verify_at(token, NOW_SECS));
+        }
+    }
+
+    /// `exp` is a NumericDate in whole seconds: a token expires at that second
+    /// (no leeway), `0` counts as absent and any other JSON type is invalid.
+    #[test]
+    fn exp_is_checked_against_the_clock() {
+        let exp = |v: &str| hs256(&format!(r#"{{"ext":"x","exp":{v}}}"#));
+        let now = NOW_SECS;
+        assert_eq!(Err(JwtError::Expired), verify_at(&exp(&now.to_string()), now));
+        assert_eq!(Err(JwtError::Expired), verify_at(&exp(&(now - 1).to_string()), now));
+        assert_eq!(Err(JwtError::Expired), verify_at(&exp(&format!("{now}.9")), now));
+        assert!(verify_at(&exp(&(now + 1).to_string()), now).is_ok());
+        assert!(verify_at(&exp("0"), now).is_ok());
+        let invalid_exp = invalid("token has invalid claims: invalid type for claim: exp is invalid");
+        for v in [format!("\"{}\"", now + 60), "true".into(), "null".into(), "{}".into(), format!("[{}]", now + 60)] {
+            assert_eq!(invalid_exp, verify_at(&exp(&v), now), "exp {v}");
+        }
+    }
+
+    /// `nbf` is a NumericDate in whole seconds: the token is valid from that
+    /// second on; any other JSON type is invalid. An expired token is reported
+    /// as expired even if `nbf` fails too.
+    #[test]
+    fn nbf_is_checked_against_the_clock() {
+        let nbf = |v: &str| hs256(&format!(r#"{{"ext":"x","nbf":{v}}}"#));
+        let now = NOW_SECS;
+        assert!(verify_at(&nbf(&now.to_string()), now).is_ok());
+        assert!(verify_at(&nbf(&(now - 1).to_string()), now).is_ok());
+        assert!(verify_at(&nbf("0"), now).is_ok());
+        let not_yet = invalid("token has invalid claims: token is not valid yet");
+        assert_eq!(not_yet, verify_at(&nbf(&(now + 1).to_string()), now));
+        assert_eq!(not_yet, verify_at(&nbf(&format!("{}.5", now + 1)), now));
+        let invalid_nbf = invalid("token has invalid claims: invalid type for claim: nbf is invalid");
+        for v in [format!("\"{now}\""), "false".into(), "null".into()] {
+            assert_eq!(invalid_nbf, verify_at(&nbf(&v), now), "nbf {v}");
+        }
+        let both = hs256(&format!(r#"{{"ext":"x","exp":{now},"nbf":{}}}"#, now + 60));
+        assert_eq!(Err(JwtError::Expired), verify_at(&both, now));
+    }
+
+    /// A valid token without a string `ext` claim is not identified: an error,
+    /// no result.
+    #[test]
+    fn a_token_without_a_string_ext_claim_is_an_error() {
+        let identifier = JwtIdentifier::new(&JwtConfig::new("s"));
+        for claims in [r#"{}"#, r#"{"ext":null}"#, r#"{"ext":15}"#, r#"{"ext":{"user_id":"15"}}"#, r#"{"ext":["15"]}"#]
+        {
+            let headers = std::collections::HashMap::from([("x-jid".to_owned(), hs256(claims))]);
+            let outcome = identifier.identify("1", &SessionEnv { headers: Some(headers), ..Default::default() });
+            assert_eq!(None, outcome.result, "{claims}");
+            assert_eq!(
+                Some("JWT token doesn't contain identifiers: ext claim is missing".to_owned()),
+                outcome.error.map(|e| e.message),
+                "{claims}"
+            );
+        }
+        let headers = std::collections::HashMap::from([("x-jid".to_owned(), hs256(r#"{"ext":""}"#))]);
+        let outcome = identifier.identify("1", &SessionEnv { headers: Some(headers), ..Default::default() });
+        assert_eq!(None, outcome.error);
+        assert_eq!(Status::Success, outcome.result.unwrap().status);
+    }
+
     #[test]
     fn decodes_segments_without_padding() {
         assert_eq!(decode_segment("Zm8"), Ok(b"fo".to_vec()));

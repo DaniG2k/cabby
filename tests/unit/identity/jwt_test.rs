@@ -5,7 +5,7 @@
 
 use cabby_core::common::{SessionEnv, Status, StringMap};
 use cabby_core::identity::JwtConfig;
-use cabby_testkit::jwt::{sign_hs256, unix_from_now, unsigned};
+use cabby_testkit::jwt::{sign_hs256, sign_raw, unix_from_now, unsigned};
 use cabby_testkit::reference::identity::*;
 use serde_json::json;
 
@@ -161,6 +161,61 @@ mod test_jwt_identifier_identify {
         assert_eq!("", res.identifier);
         assert_eq!(Status::Failure, res.status);
         assert_eq!(vec![UNAUTHORIZED.to_owned()], res.transmissions);
+    }
+}
+
+/// Cabby-only checks next to `TestJWTIdentifierIdentify`: upstream covers
+/// `alg: none`, a wrong secret and an expired token. A token whose header names
+/// a non-HMAC method (signed with the secret as an HMAC key), names no method,
+/// is not valid yet or has a non-numeric `exp` is unauthorized too.
+mod rejected_tokens {
+    use super::*;
+
+    fn assert_unauthorized(token: &str) {
+        let env = new_session_env("ws://demo.anycable.io/cable", header("x-jid", token));
+
+        let res = jwt_identify(&new_jwt_config(SECRET), "12", &env);
+
+        assert_eq!(None, res.error, "{token}");
+        let res = res.result.expect("result");
+        assert_eq!("", res.identifier);
+        assert_eq!(Status::Failure, res.status);
+        assert_eq!(vec![UNAUTHORIZED.to_owned()], res.transmissions, "{token}");
+    }
+
+    fn claims() -> String {
+        json!({"ext": IDS, "exp": unix_from_now(3600)}).to_string()
+    }
+
+    /// regression-for: identity/jwt_test.go#TestJWTIdentifierIdentify/with_invalid_algo
+    #[test]
+    fn a_header_naming_another_method_is_unauthorized() {
+        for alg in ["RS256", "ES256", "EdDSA", "PS512", "none", "XS256"] {
+            assert_unauthorized(&sign_raw(&format!(r#"{{"alg":"{alg}","typ":"JWT"}}"#), &claims(), SECRET));
+        }
+    }
+
+    /// regression-for: identity/jwt_test.go#TestJWTIdentifierIdentify/with_invalid_algo
+    #[test]
+    fn a_header_without_a_string_alg_is_unauthorized() {
+        for header in [r#"{"typ":"JWT"}"#, r#"{"alg":256}"#, r#"{"alg":null}"#] {
+            assert_unauthorized(&sign_raw(header, &claims(), SECRET));
+        }
+    }
+
+    /// regression-for: identity/jwt_test.go#TestJWTIdentifierIdentify/when_token_expired
+    #[test]
+    fn a_token_not_valid_yet_is_unauthorized() {
+        assert_unauthorized(&sign_hs256(&json!({"ext": IDS, "nbf": unix_from_now(3600)}), SECRET));
+    }
+
+    /// regression-for: identity/jwt_test.go#TestJWTIdentifierIdentify/when_token_expired
+    #[test]
+    fn a_non_numeric_exp_is_unauthorized() {
+        let exp = unix_from_now(3600);
+        for value in [json!(exp.to_string()), json!(true), json!({"at": exp})] {
+            assert_unauthorized(&sign_hs256(&json!({"ext": IDS, "exp": value}), SECRET));
+        }
     }
 }
 
