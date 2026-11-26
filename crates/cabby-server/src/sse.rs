@@ -182,6 +182,12 @@ fn encode_sse_data(payload: &str) -> String {
     out
 }
 
+/// Whether a value can be written as one SSE field (`event:`, `id:`): it has
+/// no line terminator (D-098).
+fn single_line(value: &str) -> bool {
+    !value.contains(['\r', '\n'])
+}
+
 fn text_frame(payload: String) -> SentFrame {
     SentFrame::text(payload.into_bytes())
 }
@@ -217,13 +223,20 @@ impl Encoder {
             if self.raw_data {
                 return None;
             }
-            payload = format!("event: {msg_type}\n{payload}");
+            // A type with a line terminator cannot be an event name: the event is
+            // sent without one (D-098).
+            if single_line(&msg_type) {
+                payload = format!("event: {msg_type}\n{payload}");
+            }
         }
 
+        // Neither can such an id; the client keeps its last one (D-098).
         if let Some(r) = reply
             && r.offset > 0
             && !r.epoch.is_empty()
             && !r.stream_id.is_empty()
+            && single_line(&r.epoch)
+            && single_line(&r.stream_id)
         {
             payload.push_str(&format!(
                 "\nid: {}{LAST_ID_DELIMITER}{}{LAST_ID_DELIMITER}{}",
@@ -1230,6 +1243,44 @@ mod tests {
         let cmd = subscribe_command_from_get_request(&req).unwrap().unwrap();
         let pos = &cmd.history.streams["café"];
         assert_eq!((1, "EPOCH"), (pos.offset, pos.epoch.as_str()));
+    }
+
+    /// A type, stream or epoch with a line terminator cannot be written as one
+    /// field: the event has no `event:` or no `id:` field, and its data (where
+    /// the JSON escapes the terminator) stays one `data:` field.
+    #[test]
+    fn deviation_d098_event_names_and_ids_are_single_lines() {
+        use cabby_core::common::Reply;
+        let frame = |r: &Reply| String::from_utf8(Encoder::default().encode(r).unwrap().payload.to_vec()).unwrap();
+        let data = |r: &Reply| {
+            let mut json = Vec::new();
+            r.write_json(&mut json);
+            format!("data: {}", String::from_utf8(json).unwrap())
+        };
+
+        let typed = |kind: &str| Reply { kind: kind.into(), ..Default::default() };
+        assert_eq!("event: confirm\ndata: {\"type\":\"confirm\"}", frame(&typed("confirm")));
+        for kind in ["a\nb", "a\rb", "a\r\nb", "x\n\ndata: y"] {
+            let r = typed(kind);
+            assert_eq!(data(&r), frame(&r), "{kind:?}");
+            assert!(!frame(&r).contains(['\r', '\n']), "{kind:?}");
+        }
+
+        let stream = |stream_id: &str, epoch: &str| Reply {
+            identifier: "c".into(),
+            message: Some(serde_json::json!(1)),
+            stream_id: stream_id.into(),
+            epoch: epoch.into(),
+            offset: 2,
+            ..Default::default()
+        };
+        let r = stream("s", "ep");
+        assert_eq!(format!("{}\nid: 2/ep/s", data(&r)), frame(&r));
+        for (stream_id, epoch) in [("s\nx", "ep"), ("s\r\ndata: x", "ep"), ("s", "e\rp")] {
+            let r = stream(stream_id, epoch);
+            assert_eq!(data(&r), frame(&r), "{stream_id:?} {epoch:?}");
+            assert!(!frame(&r).contains(['\r', '\n']), "{stream_id:?} {epoch:?}");
+        }
     }
 
     /// The endpoint on a server bound to port 0 over a node with an [`App`]; POST

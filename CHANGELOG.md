@@ -36,6 +36,9 @@ Differences from the AnyCable Go server are listed by ID in
 - SSE: the body of a POST must arrive within 5 s of the sign-in; a later or stalled body is
   answered `400` (`failed to build subscribe command error="i/o timeout"`) and its session
   is disconnected. Before, reading it had no deadline (D-097).
+- SSE: a message type with a line terminator is no longer written as the `event:` field, and a
+  stream name or epoch with one no longer as the `id:` field; the event keeps its data. Before,
+  the rest of such a value was read as further fields of the event (D-098).
 
 ## [0.4.1] - 2026-11-26
 
