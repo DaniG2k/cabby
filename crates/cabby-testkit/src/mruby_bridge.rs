@@ -50,18 +50,19 @@ fn bridge_binary() -> Result<PathBuf> {
         return Ok(PathBuf::from(p));
     }
     let root = crate::workspace_root();
-    let out = root.join("target/reference-adapters/mruby-bridge");
-    let status = Command::new("go")
-        .args(["build", "-tags", "mrb", "-o"])
-        .arg(&out)
-        .arg(".")
-        .current_dir(root.join("compat/reference-adapters/mruby-bridge"))
-        .status()
-        .context("running `go build` for the mruby bridge (is the Go toolchain on PATH?)")?;
-    if !status.success() {
-        bail!("building the mruby bridge failed; it needs compat/reference/vendorlib/go-mruby/libmruby.a");
-    }
-    Ok(out)
+    let how = crate::go_build::Build {
+        what: "the mruby bridge",
+        hint: "it needs compat/reference/vendorlib/go-mruby/libmruby.a",
+        reuse: crate::go_build::Reuse::Rebuild,
+    };
+    crate::go_build::build(&root.join("target/reference-adapters/mruby-bridge"), &how, |tmp| {
+        let mut cmd = Command::new("go");
+        cmd.args(["build", "-tags", "mrb", "-o"])
+            .arg(tmp)
+            .arg(".")
+            .current_dir(root.join("compat/reference-adapters/mruby-bridge"));
+        cmd
+    })
 }
 
 fn start() -> Result<Shared> {

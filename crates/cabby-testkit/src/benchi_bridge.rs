@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Sender, channel};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -41,34 +41,24 @@ pub fn artifacts_dir() -> PathBuf {
     crate::workspace_root().join("target/reference-adapters/benchi")
 }
 
-fn go_build(out: &std::path::Path, package: &str) -> Result<()> {
-    let root = crate::workspace_root();
-    let status = Command::new("go")
-        .args(["build", "-o"])
-        .arg(out)
-        .arg(package)
-        .current_dir(root.join("compat/reference-adapters/benchi-bridge"))
-        .status()
-        .context("running `go build` for the Benchi bridge (is the Go toolchain on PATH?)")?;
-    if !status.success() {
-        bail!("building {package} failed; run `cargo xtask reference-checkout` first");
-    }
-    Ok(())
-}
-
 /// Path to the bridge binary: `CABBY_GO_BENCHI_BRIDGE`, or built once with `go build`.
 fn bridge_binary() -> Result<PathBuf> {
-    static BUILT: OnceLock<std::result::Result<PathBuf, String>> = OnceLock::new();
     if let Ok(p) = std::env::var("CABBY_GO_BENCHI_BRIDGE") {
         return Ok(PathBuf::from(p));
     }
-    BUILT
-        .get_or_init(|| {
-            let out = artifacts_dir().join("bridge");
-            go_build(&out, ".").map(|()| out).map_err(|e| format!("{e:#}"))
-        })
-        .clone()
-        .map_err(anyhow::Error::msg)
+    let how = crate::go_build::Build {
+        what: "the Benchi bridge",
+        hint: "run `cargo xtask reference-checkout` first",
+        reuse: crate::go_build::Reuse::Rebuild,
+    };
+    crate::go_build::build(&artifacts_dir().join("bridge"), &how, |tmp| {
+        let mut cmd = Command::new("go");
+        cmd.args(["build", "-o"])
+            .arg(tmp)
+            .arg(".")
+            .current_dir(crate::workspace_root().join("compat/reference-adapters/benchi-bridge"));
+        cmd
+    })
 }
 
 /// Path to the test-only shim of an upstream scenario (`stress_publications`,
@@ -81,18 +71,10 @@ fn bridge_binary() -> Result<PathBuf> {
 /// reaches the unexported `run`, `parseFlags`, `runWithConfig` and `commandStall` of
 /// package main without patching upstream files.
 pub fn shim_binary(name: &str) -> PathBuf {
-    static BUILT: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
     if let Ok(dir) = std::env::var("CABBY_GO_BENCHI_SCENARIOS") {
         return PathBuf::from(dir).join(format!("{name}.shim"));
     }
-    let built = BUILT.get_or_init(Default::default);
-    let mut built = built.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(p) = built.get(name) {
-        return p.clone();
-    }
-    let out = build_shim(name).unwrap_or_else(|e| panic!("{e:#}"));
-    built.insert(name.to_owned(), out.clone());
-    out
+    build_shim(name).unwrap_or_else(|e| panic!("{e:#}"))
 }
 
 fn build_shim(name: &str) -> Result<PathBuf> {
@@ -110,26 +92,28 @@ fn build_shim(name: &str) -> Result<PathBuf> {
         pkg.join("zz_cabby_shim_test.go").to_string_lossy().into_owned(),
         json!(adapters.join(format!("benchi-bridge/_scenario_shims/{name}_test.go"))),
     );
-    std::fs::create_dir_all(artifacts_dir())?;
     let overlay_path = artifacts_dir().join(format!("{name}.overlay.json"));
-    std::fs::write(&overlay_path, json!({ "Replace": replace }).to_string())?;
-    let out = artifacts_dir().join(format!("{name}.shim"));
-    // Benchi's own go.mod is stale at the pinned commit; use the tidied copy
-    // (compat/baseline/README.md item 1).
-    let status = Command::new("go")
-        .args(["test", "-c"])
-        .arg(format!("-modfile={}", adapters.join("benchi-modfile/go.mod").display()))
-        .arg(format!("-overlay={}", overlay_path.display()))
-        .arg("-o")
-        .arg(&out)
-        .arg(format!("./scenarios/{name}"))
-        .current_dir(&benchi)
-        .status()
-        .context("running `go test -c` for a Benchi scenario shim (is the Go toolchain on PATH?)")?;
-    if !status.success() {
-        bail!("building the {name} shim failed");
-    }
-    Ok(out)
+    let overlay = json!({ "Replace": replace }).to_string();
+    let how = crate::go_build::Build {
+        what: &format!("the {name} shim"),
+        hint: "run `cargo xtask reference-checkout` first",
+        reuse: crate::go_build::Reuse::Rebuild,
+    };
+    crate::go_build::build(&artifacts_dir().join(format!("{name}.shim")), &how, |tmp| {
+        // Written under the build's lock, so no other process reads it half written.
+        std::fs::write(&overlay_path, overlay).unwrap_or_else(|e| panic!("writing {}: {e}", overlay_path.display()));
+        // Benchi's own go.mod is stale at the pinned commit; use the tidied copy
+        // (compat/baseline/README.md item 1).
+        let mut cmd = Command::new("go");
+        cmd.args(["test", "-c"])
+            .arg(format!("-modfile={}", adapters.join("benchi-modfile/go.mod").display()))
+            .arg(format!("-overlay={}", overlay_path.display()))
+            .arg("-o")
+            .arg(tmp)
+            .arg(format!("./scenarios/{name}"))
+            .current_dir(&benchi);
+        cmd
+    })
 }
 
 /// One bridge process.

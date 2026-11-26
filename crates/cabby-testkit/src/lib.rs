@@ -8,6 +8,7 @@
 //! * [`cable_client`]: synchronous Action Cable WebSocket client (AnyT semantics).
 //! * [`reference`]: per-upstream-package facades that dispatch to Rust or Go. Each
 //!   translated test calls these, so one test body verifies both implementations.
+//! * [`go_build`]: Go test binaries built once, safely for parallel test processes.
 //! * [`process`]: supervised external processes (SUT binaries, fake services).
 //! * [`ports`]: isolated local ports.
 //! * [`services`]: required external Redis/NATS services with per-test scopes.
@@ -28,6 +29,7 @@ pub mod fake_redis_cluster;
 pub mod fake_rpc;
 pub mod fake_sentinel;
 pub mod fault_proxy;
+pub mod go_build;
 pub mod http_stub;
 pub mod mruby_bridge;
 pub mod ports;

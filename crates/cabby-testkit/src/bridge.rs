@@ -33,18 +33,16 @@ fn bridge_binary() -> Result<PathBuf> {
         return Ok(PathBuf::from(p));
     }
     let root = crate::workspace_root();
-    let out = root.join("target/reference-adapters/bridge");
-    let status = Command::new("go")
-        .args(["build", "-o"])
-        .arg(&out)
-        .arg(".")
-        .current_dir(root.join("compat/reference-adapters/bridge"))
-        .status()
-        .context("running `go build` for the reference bridge (is the Go toolchain on PATH?)")?;
-    if !status.success() {
-        bail!("building the reference bridge failed; run `cargo xtask reference-checkout` first");
-    }
-    Ok(out)
+    let how = crate::go_build::Build {
+        what: "the reference bridge",
+        hint: "run `cargo xtask reference-checkout` first",
+        reuse: crate::go_build::Reuse::Rebuild,
+    };
+    crate::go_build::build(&root.join("target/reference-adapters/bridge"), &how, |tmp| {
+        let mut cmd = Command::new("go");
+        cmd.args(["build", "-o"]).arg(tmp).arg(".").current_dir(root.join("compat/reference-adapters/bridge"));
+        cmd
+    })
 }
 
 fn start() -> Result<Bridge> {

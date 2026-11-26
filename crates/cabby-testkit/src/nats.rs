@@ -85,21 +85,19 @@ fn server_binary() -> Result<PathBuf> {
         return Ok(PathBuf::from(p));
     }
     let root = workspace_root();
-    let out = root.join("target/test-services/nats-server");
-    if out.exists() {
-        return Ok(out);
-    }
-    let status = Command::new("go")
-        .args(["build", "-o"])
-        .arg(&out)
-        .arg("github.com/nats-io/nats-server/v2")
-        .current_dir(root.join("compat/reference"))
-        .status()
-        .context("running `go build` for nats-server (is the Go toolchain on PATH?)")?;
-    if !status.success() {
-        bail!("building nats-server failed; run `cargo xtask reference-checkout` first");
-    }
-    Ok(out)
+    let how = crate::go_build::Build {
+        what: "nats-server",
+        hint: "run `cargo xtask reference-checkout` first",
+        reuse: crate::go_build::Reuse::Existing,
+    };
+    crate::go_build::build(&root.join("target/test-services/nats-server"), &how, |tmp| {
+        let mut cmd = Command::new("go");
+        cmd.args(["build", "-o"])
+            .arg(tmp)
+            .arg("github.com/nats-io/nats-server/v2")
+            .current_dir(root.join("compat/reference"));
+        cmd
+    })
 }
 
 pub struct NatsServer {

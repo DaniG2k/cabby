@@ -523,16 +523,20 @@ fn nats_server_binary() -> PathBuf {
                 return root.join(built);
             }
         }
-        let out = root.join("target/reference-adapters/nats-server");
-        let status = Command::new("go")
-            .args(["build", "-o"])
-            .arg(&out)
-            .arg("github.com/nats-io/nats-server/v2")
-            .current_dir(root.join("compat/reference-adapters/bridge"))
-            .status()
-            .expect("running `go build` for nats-server (is the Go toolchain on PATH?)");
-        assert!(status.success(), "building nats-server failed; set CABBY_NATS_SERVER_BIN to a nats-server binary");
-        out
+        let how = crate::go_build::Build {
+            what: "nats-server",
+            hint: "set CABBY_NATS_SERVER_BIN to a nats-server binary",
+            reuse: crate::go_build::Reuse::Existing,
+        };
+        crate::go_build::build(&root.join("target/reference-adapters/nats-server"), &how, |tmp| {
+            let mut cmd = Command::new("go");
+            cmd.args(["build", "-o"])
+                .arg(tmp)
+                .arg("github.com/nats-io/nats-server/v2")
+                .current_dir(root.join("compat/reference-adapters/bridge"));
+            cmd
+        })
+        .unwrap_or_else(|e| panic!("{e:#}"))
     })
     .clone()
 }
