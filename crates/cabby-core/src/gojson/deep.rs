@@ -203,6 +203,14 @@ mod tests {
         format!("{}{}", "[".repeat(depth), "]".repeat(depth))
     }
 
+    /// Taken by every test that uses the process-wide limiter, so that
+    /// `deviation_d056_process_wide_deep_threads_are_capped` can hold all of
+    /// its permits without making another test's call `Busy`.
+    fn exclusive() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     #[test]
     fn depth_is_counted_outside_strings() {
         assert!(check_depth(br#"{"a":"[[[[\"[[["}"#, 1).is_ok());
@@ -221,6 +229,7 @@ mod tests {
 
     #[test]
     fn deep_threads_decode_up_to_go_limit() {
+        let _exclusive = exclusive();
         let ok = with_deep_nesting(|| {
             let doc = nested(MAX_NESTING_DEPTH);
             let mut de = deserializer(doc.as_bytes()).unwrap();
@@ -238,6 +247,7 @@ mod tests {
         fn objects(depth: usize) -> String {
             format!("{}1{}", r#"{"a":"#.repeat(depth), "}".repeat(depth))
         }
+        let _exclusive = exclusive();
         // (whether it became a string, its text), read on the deep thread.
         let kept = |text: String| {
             with_deep_nesting(|| {
@@ -324,5 +334,58 @@ mod tests {
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| limiter.run(Duration::ZERO, || panic!("x"))));
         assert!(r.is_err());
         assert_eq!(0, *limiter.in_use.lock().unwrap());
+    }
+
+    /// Deviation D-056: [`with_deep_nesting`] runs at most
+    /// [`MAX_CONCURRENT_DEEP_THREADS`] (4) closures at once, process-wide: while
+    /// 4 run, another call is refused after [`DEEP_PERMIT_WAIT`] without running
+    /// its closure; once they have ended, a call runs again.
+    #[test]
+    fn deviation_d056_process_wide_deep_threads_are_capped() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::{Arc, mpsc};
+
+        const WAIT: Duration = Duration::from_secs(30);
+        let _exclusive = exclusive();
+        assert_eq!(4, MAX_CONCURRENT_DEEP_THREADS);
+        let running = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let (entered_tx, entered_rx) = mpsc::channel::<()>();
+        let (holders, releases): (Vec<_>, Vec<_>) = (0..MAX_CONCURRENT_DEEP_THREADS)
+            .map(|_| {
+                let (running, peak, entered) = (running.clone(), peak.clone(), entered_tx.clone());
+                let (release_tx, release_rx) = mpsc::channel::<()>();
+                let holder = std::thread::spawn(move || {
+                    with_deep_nesting(move || {
+                        let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(now, Ordering::SeqCst);
+                        entered.send(()).unwrap();
+                        release_rx.recv_timeout(WAIT).expect("released");
+                        running.fetch_sub(1, Ordering::SeqCst);
+                    })
+                });
+                (holder, release_tx)
+            })
+            .unzip();
+        for _ in 0..MAX_CONCURRENT_DEEP_THREADS {
+            entered_rx.recv_timeout(WAIT).expect("a holder runs");
+        }
+        assert_eq!(MAX_CONCURRENT_DEEP_THREADS, running.load(Ordering::SeqCst));
+
+        let ran = AtomicBool::new(false);
+        let started = Instant::now();
+        assert_eq!(Err(DeepNestingError::Busy), with_deep_nesting(|| ran.store(true, Ordering::SeqCst)));
+        assert!(started.elapsed() >= DEEP_PERMIT_WAIT, "refused after the wait");
+        assert!(!ran.load(Ordering::SeqCst), "the refused closure did not run");
+
+        for release in releases {
+            release.send(()).unwrap();
+        }
+        for holder in holders {
+            assert_eq!(Ok(()), holder.join().unwrap());
+        }
+        assert_eq!(MAX_CONCURRENT_DEEP_THREADS, peak.load(Ordering::SeqCst));
+        assert_eq!(Ok(7), with_deep_nesting(|| 7));
+        assert_eq!(0, *DEEP_THREADS.in_use.lock().unwrap());
     }
 }
