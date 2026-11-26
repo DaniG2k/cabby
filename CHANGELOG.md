@@ -10,6 +10,15 @@ Differences from the AnyCable Go server are listed by ID in
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** a configuration with `secret = none` (`--secret=none`, `CABBY_SECRET=none` or
+  `ANYCABLE_SECRET=none`) now stops at startup, with an error saying what to do instead: leave
+  the secret unset to run without an application secret, or set a real one. AnyCable accepts
+  this setting. `none` still turns off a single secret, as before (`--http_rpc_secret=none`,
+  `--jwt_secret=none`, `--streams_secret=none`, `--broadcast_key=none`, `--pusher_secret=none`),
+  and `cabby --print-config` comments the `secret` line out when no secret is set (D-086).
+
 ### Fixed
 
 - Only sessions that the application authenticated are written to the session cache or keep
@@ -18,6 +27,9 @@ Differences from the AnyCable Go server are listed by ID in
   application instead of restoring them from the session cache, for the sessions TTL. Sessions
   authenticated afterwards are restored as usual. Cache entries record when the session was
   authenticated (D-084).
+- A remote disconnect (Rails' `ActionCable.server.remote_connections.where(...).disconnect`)
+  closes every connection of the identifier. Before, as in AnyCable, only one of them was
+  disconnected, and the identifier's other connections stayed open and subscribed (D-085).
 
 ## [0.5.2] - 2026-11-27
 

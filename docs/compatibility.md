@@ -30,7 +30,10 @@ Cabby warns at startup when a Redis URL is set but no broadcast adapter uses it 
 to `cabby.toml` and `CABBY_*` when convenient ([`docs/configuration.md`](configuration.md)).
 Two things look different: `cabby --version` prints `cabby 0.5.2 (AnyCable 1.6.21 compatible)`
 instead of `1.6.21`, and Cabby sends no telemetry. The `x-anycable-version` header still says
-`1.6.21`.
+`1.6.21`. One setting is refused: Cabby stops at startup when the application secret is `none`
+(`--secret=none`, `ANYCABLE_SECRET=none`, `secret = "none"`); leave it unset instead, or set a real
+secret. `none` still turns off a single secret, such as `--http_rpc_secret=none` (D-086,
+[`docs/configuration.md`](configuration.md#secrets-and-none)).
 
 ## Supported for compatibility
 
@@ -66,3 +69,7 @@ builds contain neither.
   pass, so entries whose handling keeps failing don't hold back the ones after them (D-110).
   A failure that repeats on every attempt (a value of another type at the stream key) is
   retried after a growing delay, up to 8 to 16 s, instead of every 250 ms (D-111).
+- **A remote disconnect reaches one connection of the user**: the Go server disconnects one
+  session registered with the identifiers and leaves the others open and subscribed. Cabby
+  disconnects every one of them, as Rails' `remote_connections.where(...).disconnect` expects
+  (D-085).

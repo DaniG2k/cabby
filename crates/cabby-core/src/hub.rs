@@ -498,24 +498,31 @@ impl<S: ?Sized + HubSession> HubInner<S> {
         read(&self.state).sessions.get(&session_key(session)).cloned()
     }
 
-    /// Upstream `disconnectSessions`' scheduled task: disconnects the first
-    /// registered session found for `identifier` (upstream returns after one).
+    /// Upstream `disconnectSessions`' scheduled task: disconnects every session
+    /// registered with `identifier` (D-085; upstream disconnects the first one it
+    /// finds). The sessions are collected under the lock and disconnected after
+    /// it is released, each with the same message, so a session may unregister
+    /// itself while it disconnects.
     fn disconnect_sessions(&self, identifier: &str, reconnect: bool) {
-        let session = {
+        let sessions: Vec<Arc<S>> = {
             let state = read(&self.state);
-            state
-                .identifiers
-                .get(identifier)
-                .and_then(|keys| keys.iter().find_map(|key| state.sessions.get(key)))
-                .map(|info| Arc::clone(&info.session))
+            let keys = state.identifiers.get(identifier).into_iter().flatten();
+            keys.filter_map(|key| state.sessions.get(key)).map(|info| Arc::clone(&info.session)).collect()
         };
-        if let Some(session) = session {
-            let msg = CachedEncodedMessage::new(common::EncodedMessage::Disconnect(DisconnectMessage {
-                kind: common::DISCONNECT_TYPE.to_owned(),
-                reason: common::REMOTE_DISCONNECT_REASON.to_owned(),
-                reconnect,
+        if sessions.is_empty() {
+            return;
+        }
+        let msg = CachedEncodedMessage::new(common::EncodedMessage::Disconnect(DisconnectMessage {
+            kind: common::DISCONNECT_TYPE.to_owned(),
+            reason: common::REMOTE_DISCONNECT_REASON.to_owned(),
+            reconnect,
+        }));
+        for session in &sessions {
+            // A panicking session must not keep the identifier's other sessions
+            // connected (as D-013 for broadcasts).
+            let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                session.disconnect_with_message(&msg, common::REMOTE_DISCONNECT_REASON);
             }));
-            session.disconnect_with_message(&msg, common::REMOTE_DISCONNECT_REASON);
         }
     }
 }
@@ -555,9 +562,9 @@ impl<S: ?Sized + HubSession + 'static> Hub<S> {
         }
     }
 
-    /// Enqueues a remote disconnect command: the first session registered with
+    /// Enqueues a remote disconnect command: every session registered with
     /// `msg.identifier` receives a `remote` disconnect message, on the
-    /// remote-commands pool.
+    /// remote-commands pool (D-085).
     pub fn remote_disconnect(&self, msg: RemoteDisconnectMessage) {
         if !read(&self.inner.state).identifiers.contains_key(msg.identifier.as_str()) {
             log_debug!(self.inner.log, "cannot disconnect session",
@@ -876,6 +883,178 @@ mod tests {
         assert!(hub.find_by_identifier("c").is_some());
         hub.remove_session(&session);
         assert_eq!((0, 0), (hub.size(), hub.uniq_size()));
+        hub.shutdown();
+    }
+
+    /// A session for remote disconnects: records the disconnect frame it gets
+    /// (with its name), closes, and unregisters itself from the hub while it
+    /// disconnects, as a node's session does.
+    struct Connection {
+        name: &'static str,
+        sid: &'static str,
+        identifiers: &'static str,
+        closed: AtomicBool,
+        panics: bool,
+        frames: FrameSender,
+        hub: Weak<Hub>,
+        me: Weak<Connection>,
+    }
+
+    impl HubSession for Connection {
+        fn get_id(&self) -> String {
+            self.sid.to_owned()
+        }
+
+        fn get_identifiers(&self) -> String {
+            self.identifiers.to_owned()
+        }
+
+        fn send(&self, msg: &EncodedMessage) {
+            let _ = self.frames.send((self.name, msg.to_json()));
+        }
+
+        fn disconnect_with_message(&self, msg: &EncodedMessage, code: &str) {
+            assert_eq!(common::REMOTE_DISCONNECT_REASON, code);
+            assert!(!self.panics, "session failure");
+            if let (Some(hub), Some(me)) = (self.hub.upgrade(), self.me.upgrade()) {
+                let me: SessionRef = me;
+                hub.remove_session(&me);
+            }
+            self.closed.store(true, Ordering::SeqCst);
+            self.send(msg);
+        }
+    }
+
+    /// A frame and the name of the session it was sent to.
+    type Frame = (&'static str, Vec<u8>);
+    type FrameSender = std::sync::mpsc::Sender<Frame>;
+    type Frames = std::sync::mpsc::Receiver<Frame>;
+
+    /// A hub (shared with its sessions) and the channel their frames arrive on.
+    fn remote_hub() -> (Arc<Hub>, FrameSender, Frames) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        (Arc::new(Hub::new(1)), tx, rx)
+    }
+
+    fn connection(
+        hub: &Arc<Hub>,
+        frames: &FrameSender,
+        name: &'static str,
+        sid: &'static str,
+        identifiers: &'static str,
+        panics: bool,
+    ) -> Arc<Connection> {
+        let conn = Arc::new_cyclic(|me| Connection {
+            name,
+            sid,
+            identifiers,
+            closed: AtomicBool::new(false),
+            panics,
+            frames: frames.clone(),
+            hub: Arc::downgrade(hub),
+            me: me.clone(),
+        });
+        let session: SessionRef = conn.clone();
+        hub.add_session(Arc::clone(&session));
+        hub.subscribe_session(&session, &format!("stream-{name}"), "c");
+        conn
+    }
+
+    /// The names of the sessions that received `n` frames, sorted; every frame is
+    /// the remote disconnect message.
+    fn disconnected(frames: &Frames, n: usize, reconnect: bool) -> Vec<&'static str> {
+        let want = format!(r#"{{"type":"disconnect","reason":"remote","reconnect":{reconnect}}}"#);
+        let mut names: Vec<_> = (0..n)
+            .map(|_| {
+                let (name, frame) = frames.recv_timeout(std::time::Duration::from_secs(5)).expect("a disconnect frame");
+                assert_eq!(want, String::from_utf8(frame).unwrap(), "frame of {name}");
+                name
+            })
+            .collect();
+        names.sort_unstable();
+        names
+    }
+
+    /// Pins D-085: a remote disconnect closes every session registered with the
+    /// identifier (two of them); a session with other identifiers stays connected.
+    /// Each session unregisters itself while it disconnects, so the hub's lock is
+    /// not held then (the frames arrive within a deadline instead of deadlocking).
+    #[test]
+    fn deviation_d085_remote_disconnect_closes_every_session_of_the_identifier() {
+        let (hub, tx, frames) = remote_hub();
+        let a = connection(&hub, &tx, "a", "1", "user-1", false);
+        let b = connection(&hub, &tx, "b", "2", "user-1", false);
+        let other = connection(&hub, &tx, "other", "3", "user-2", false);
+
+        hub.remote_disconnect(RemoteDisconnectMessage { identifier: "user-1".into(), reconnect: true });
+
+        assert_eq!(vec!["a", "b"], disconnected(&frames, 2, true));
+        assert!(a.closed.load(Ordering::SeqCst) && b.closed.load(Ordering::SeqCst));
+        assert!(!other.closed.load(Ordering::SeqCst));
+        assert_eq!((1, 1, 1), (hub.size(), hub.uniq_size(), hub.streams_size()), "only the other session is left");
+
+        // The other session is still registered and subscribed.
+        hub.broadcast("stream-other", "1");
+        let (name, frame) = frames.recv_timeout(std::time::Duration::from_secs(5)).expect("a broadcast");
+        assert_eq!(("other", r#"{"identifier":"c","message":1}"#), (name, String::from_utf8(frame).unwrap().as_str()));
+        assert!(frames.try_recv().is_err());
+        hub.shutdown();
+    }
+
+    /// Pins D-085 with three sessions, two of which share a session id (D-077):
+    /// each of them gets the same message and is closed.
+    #[test]
+    fn deviation_d085_three_sessions_of_one_identifier_are_closed() {
+        let (hub, tx, frames) = remote_hub();
+        let conns =
+            [("a", "1"), ("b", "1"), ("c", "2")].map(|(name, sid)| connection(&hub, &tx, name, sid, "user-1", false));
+        let other = connection(&hub, &tx, "other", "1", "user-2", false);
+        assert_eq!(4, hub.size());
+
+        hub.remote_disconnect(RemoteDisconnectMessage { identifier: "user-1".into(), reconnect: false });
+
+        assert_eq!(vec!["a", "b", "c"], disconnected(&frames, 3, false));
+        assert!(conns.iter().all(|c| c.closed.load(Ordering::SeqCst)));
+        assert!(!other.closed.load(Ordering::SeqCst));
+        assert_eq!(1, hub.size());
+        assert!(hub.find_by_identifier("user-1").is_none());
+        assert!(hub.find_by_identifier("user-2").is_some_and(|s| s.get_id() == "1"));
+        assert!(frames.try_recv().is_err());
+        hub.shutdown();
+    }
+
+    /// D-085: a remote disconnect for an identifier no session has changes nothing.
+    #[test]
+    fn deviation_d085_unknown_identifier_is_a_no_op() {
+        let (hub, tx, frames) = remote_hub();
+        let a = connection(&hub, &tx, "a", "1", "user-1", false);
+
+        hub.inner.disconnect_sessions("user-2", true);
+        hub.inner.disconnect_sessions("user", true);
+        hub.inner.disconnect_sessions("", true);
+        hub.remote_disconnect(RemoteDisconnectMessage { identifier: "user-2".into(), reconnect: true });
+
+        assert!(frames.try_recv().is_err());
+        assert!(!a.closed.load(Ordering::SeqCst));
+        assert_eq!((1, 1, 1), (hub.size(), hub.uniq_size(), hub.streams_size()));
+        hub.shutdown();
+    }
+
+    /// D-085: a session that panics while it disconnects does not keep the other
+    /// sessions of the identifier connected.
+    #[test]
+    fn deviation_d085_a_panicking_session_does_not_stop_the_others() {
+        let (hub, tx, frames) = remote_hub();
+        let failing = connection(&hub, &tx, "failing", "1", "user-1", true);
+        let a = connection(&hub, &tx, "a", "2", "user-1", false);
+        let b = connection(&hub, &tx, "b", "3", "user-1", false);
+
+        hub.remote_disconnect(RemoteDisconnectMessage { identifier: "user-1".into(), reconnect: true });
+
+        assert_eq!(vec!["a", "b"], disconnected(&frames, 2, true));
+        assert!(a.closed.load(Ordering::SeqCst) && b.closed.load(Ordering::SeqCst));
+        assert!(!failing.closed.load(Ordering::SeqCst));
+        assert_eq!(1, hub.size(), "the failing session is still registered");
         hub.shutdown();
     }
 

@@ -289,7 +289,7 @@ pub fn new_config_from_cli_with(
     flags::run_actions(&flags, &parsed, &mut state);
 
     let print_config = state.print_config;
-    let mut c = finalize(state, &mut emit);
+    let mut c = finalize(state, &mut emit)?;
     c.startup_notes = file_notes.into_iter().chain(env_notes).collect();
 
     if print_config {
@@ -299,6 +299,16 @@ pub fn new_config_from_cli_with(
 
     Ok((c, false))
 }
+
+/// The value that turns a secret off (`--http_rpc_secret=none`, ...), compared
+/// exactly.
+const NONE_SECRET: &str = "none";
+
+/// D-086: the error for the application secret set to [`NONE_SECRET`].
+const NONE_APPLICATION_SECRET: &str = "the application secret is set to \"none\" (--secret, CABBY_SECRET, \
+ANYCABLE_SECRET or secret in the configuration file): leave it unset to run without an application secret, or set \
+a real secret. \"none\" still turns off a single secret: --http_rpc_secret, --jwt_secret, --streams_secret, \
+--broadcast_key, --pusher_secret";
 
 const DEPRECATED_METRICS_LOG_INTERVAL: &str = "DEPRECATION WARNING: metrics_log_interval option is deprecated
 and will be deleted in a future release of Cabby.
@@ -310,8 +320,25 @@ fn deprecated(option: &str, replacement: &str) -> String {
     )
 }
 
+/// D-086: refuses [`NONE_SECRET`] as the application secret, and as a secret
+/// base set in the configuration file, before the secrets fall back to the
+/// application secret. In AnyCable, `none` reaches the secret bases.
+fn refuse_none_secret_bases(c: &Config) -> Result<(), CliError> {
+    if c.secret == NONE_SECRET {
+        return Err(CliError(NONE_APPLICATION_SECRET.to_owned()));
+    }
+    let bases =
+        [("rpc", &c.rpc.secret_base), ("http_broadcast", &c.http_broadcast.secret_base), ("api", &c.api.secret_base)];
+    match bases.into_iter().find(|(_, base)| *base == NONE_SECRET) {
+        Some((section, _)) => Err(CliError(format!(
+            "[{section}] SecretBase = \"none\" in the configuration file is not supported: remove the key"
+        ))),
+        None => Ok(()),
+    }
+}
+
 /// The settings computed from others once every source has been read.
-fn finalize(state: State, emit: &mut dyn FnMut(&str)) -> Config {
+fn finalize(state: State, emit: &mut dyn FnMut(&str)) -> Result<Config, CliError> {
     let State {
         mut c,
         path,
@@ -522,6 +549,7 @@ fn finalize(state: State, emit: &mut dyn FnMut(&str)) -> Config {
     }
 
     // Fallback secrets
+    refuse_none_secret_bases(&c)?;
     if !c.secret.is_empty() {
         if c.streams.secret.is_empty() {
             c.streams.secret = c.secret.clone();
@@ -553,7 +581,7 @@ fn finalize(state: State, emit: &mut dyn FnMut(&str)) -> Config {
         &mut c.http_broadcast.secret,
         &mut c.pusher.secret,
     ] {
-        if secret == "none" {
+        if secret == NONE_SECRET {
             secret.clear();
         }
     }
@@ -572,7 +600,7 @@ fn finalize(state: State, emit: &mut dyn FnMut(&str)) -> Config {
         c.http_broadcast.secret_base.clear();
     }
 
-    c
+    Ok(c)
 }
 
 // --- Flag definitions -----------------------------------------------------------
@@ -1645,15 +1673,188 @@ mod tests {
         assert_eq!(c.streams.secret, "s");
         assert_eq!(c.http_broadcast.secret_base, "s");
         assert_eq!(c.http_broadcast.port, 8080);
-        assert_eq!(c.rpc.secret, "");
-        // As upstream: "none" reaches the secret bases before secrets are nullified,
-        // so HTTP broadcasting still counts as secured.
+        assert_eq!((c.rpc.secret.as_str(), c.rpc.secret_base.as_str()), ("", ""));
+        // D-086: a global "none" stops at startup instead of reaching the secret
+        // bases, as it does upstream.
         let (res, _) = run(&["--secret=none"], &[]);
-        let c = res.unwrap().0;
-        assert_eq!((c.secret.as_str(), c.jwt.secret.as_str()), ("", ""));
-        assert_eq!((c.http_broadcast.secret_base.as_str(), c.http_broadcast.port), ("none", 8080));
+        assert_eq!(res.unwrap_err().0, NONE_APPLICATION_SECRET);
         let (res, _) = run(&[], &[]);
-        assert_eq!(res.unwrap().0.http_broadcast.port, 8090);
+        let c = res.unwrap().0;
+        assert_eq!((c.secret.as_str(), c.http_broadcast.secret_base.as_str()), ("", ""));
+        assert_eq!(c.http_broadcast.port, 8090);
+    }
+
+    /// [`run`] with the configuration file at `path`.
+    fn run_file(path: &std::path::Path, args: &[&str], env: &[(&str, &str)]) -> Result<(Config, bool), CliError> {
+        let env: EnvMap = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let mut full = vec!["cabby", "--config-path", path.to_str().unwrap()];
+        full.extend_from_slice(args);
+        new_config_from_cli_to(&full, &env, vec![], &mut Vec::new())
+    }
+
+    /// Writes `contents` to a temporary configuration file named after `name`.
+    fn config_file(name: &str, contents: &str) -> std::path::PathBuf {
+        let file = std::env::temp_dir().join(format!("cabby-options-{name}-{}.toml", std::process::id()));
+        std::fs::write(&file, contents).unwrap();
+        file
+    }
+
+    /// Pins D-086: the application secret set to `none` stops Cabby at startup,
+    /// wherever it comes from, with a message saying what to do instead.
+    #[test]
+    fn deviation_d086_none_as_the_application_secret_is_refused() {
+        let refused = |args: &[&str], env: &[(&str, &str)]| {
+            let (res, _) = run(args, env);
+            assert_eq!(res.unwrap_err().0, NONE_APPLICATION_SECRET, "{args:?} {env:?}");
+        };
+        refused(&["--secret=none"], &[]);
+        refused(&["--secret", "none"], &[]);
+        refused(&[], &[("CABBY_SECRET", "none")]);
+        refused(&[], &[("ANYCABLE_SECRET", "none")]);
+        refused(&[], &[("CABBY_SECRET", "none"), ("ANYCABLE_SECRET", "s")]);
+        refused(&["--secret=none", "--public"], &[]);
+        refused(&["--secret=none", "--noauth"], &[]);
+        refused(&["--secret=none", "--presets=fly,heroku,broker"], &[]);
+        refused(&["--secret=none", "--http_rpc_secret=r", "--broadcast_key=b", "--jwt_secret=j"], &[]);
+        refused(&["--secret=none", "--print-config"], &[]);
+        refused(&["--secret=s", "--secret=none"], &[]);
+
+        let file = config_file("none-secret", "secret = \"none\"\n");
+        assert_eq!(run_file(&file, &[], &[]).unwrap_err().0, NONE_APPLICATION_SECRET);
+        assert_eq!(run_file(&file, &["--public"], &[]).unwrap_err().0, NONE_APPLICATION_SECRET);
+        // The command line and the environment still win over the file.
+        assert_eq!(run_file(&file, &["--secret=s"], &[]).unwrap().0.http_broadcast.secret_base, "s");
+        assert_eq!(run_file(&file, &[], &[("CABBY_SECRET", "")]).unwrap().0.http_broadcast.secret_base, "");
+        std::fs::remove_file(&file).unwrap();
+
+        // An overridden "none" is not the application secret.
+        let (res, _) = run(&["--secret=s"], &[("CABBY_SECRET", "none")]);
+        assert_eq!(res.unwrap().0.secret, "s");
+        let (res, _) = run(&[], &[("CABBY_SECRET", "s"), ("ANYCABLE_SECRET", "none")]);
+        assert_eq!(res.unwrap().0.secret, "s");
+        // The comparison is exact, as for the other secrets: these are secrets.
+        for secret in ["NONE", "None", " none", "none "] {
+            let (res, _) = run(&[&format!("--secret={secret}")], &[]);
+            let c = res.unwrap().0;
+            assert_eq!((c.secret.as_str(), c.http_broadcast.secret_base.as_str()), (secret, secret));
+        }
+
+        let (res, _) = run(&["--secret=none"], &[]);
+        let text = res.unwrap_err().0;
+        for hint in ["leave it unset", "set a real secret", "--http_rpc_secret", "--jwt_secret", "--streams_secret"] {
+            assert!(text.contains(hint), "{text}");
+        }
+        assert!(text.contains("--broadcast_key") && text.contains("--pusher_secret"), "{text}");
+    }
+
+    /// D-086: `none` still turns off the single secret it is given for, with or
+    /// without an application secret, as before.
+    #[test]
+    fn deviation_d086_none_still_turns_off_a_single_secret() {
+        let config = |args: &[&str]| run(args, &[]).0.unwrap().0;
+
+        let c = config(&["--secret=s", "--http_rpc_secret=none"]);
+        assert_eq!((c.rpc.secret.as_str(), c.rpc.secret_base.as_str()), ("", ""));
+        assert_eq!((c.jwt.secret.as_str(), c.http_broadcast.secret_base.as_str()), ("s", "s"));
+
+        let c = config(&["--secret=s", "--jwt_secret=none"]);
+        assert_eq!((c.jwt.secret.as_str(), c.streams.secret.as_str(), c.rpc.secret_base.as_str()), ("", "s", "s"));
+
+        let c = config(&["--secret=s", "--streams_secret=none"]);
+        assert_eq!((c.streams.secret.as_str(), c.jwt.secret.as_str()), ("", "s"));
+
+        let c = config(&["--secret=s", "--broadcast_key=none"]);
+        assert_eq!((c.http_broadcast.secret.as_str(), c.http_broadcast.secret_base.as_str()), ("", ""));
+        assert_eq!((c.http_broadcast.port, c.rpc.secret_base.as_str()), (8090, "s"));
+
+        let c = config(&["--secret=s", "--pusher_secret=none"]);
+        assert_eq!((c.pusher.secret.as_str(), c.jwt.secret.as_str()), ("", "s"));
+
+        let c = config(&["--http_rpc_secret=none", "--jwt_secret=none", "--streams_secret=none"]);
+        assert_eq!((c.rpc.secret.as_str(), c.jwt.secret.as_str(), c.streams.secret.as_str()), ("", "", ""));
+        let c = config(&["--broadcast_key=none", "--pusher_secret=none"]);
+        assert_eq!((c.http_broadcast.secret.as_str(), c.pusher.secret.as_str(), c.http_broadcast.port), ("", "", 8090));
+
+        let (res, _) =
+            run(&[], &[("CABBY_HTTP_RPC_SECRET", "none"), ("ANYCABLE_JWT_SECRET", "none"), ("CABBY_SECRET", "s")]);
+        let c = res.unwrap().0;
+        assert_eq!((c.rpc.secret.as_str(), c.jwt.secret.as_str(), c.streams.secret.as_str()), ("", "", "s"));
+    }
+
+    /// D-086: a configuration printed without an application secret leaves the
+    /// key commented out, so the printed file starts.
+    #[test]
+    fn deviation_d086_a_printed_configuration_without_a_secret_starts() {
+        let (res, out) = run(&["--print-config"], &[]);
+        assert!(res.unwrap().1);
+        let general = out.split("\n[").next().unwrap();
+        assert!(!general.contains("\nsecret = "), "{general}");
+        assert!(general.contains("\n# secret = \"<not set>\"\n"), "{general}");
+        let file = config_file("printed", &out);
+        let c = run_file(&file, &[], &[]).unwrap().0;
+        assert_eq!((c.secret.as_str(), c.http_broadcast.secret_base.as_str(), c.http_broadcast.port), ("", "", 8090));
+        std::fs::remove_file(&file).unwrap();
+
+        let (res, out) = run(&["--print-config", "--secret=s"], &[]);
+        assert!(res.unwrap().1);
+        assert!(out.split("\n[").next().unwrap().contains("\nsecret = \"s\"\n"), "{out}");
+    }
+
+    /// D-086: the `SecretBase` keys of a configuration file (secret bases set
+    /// directly, without the application secret) refuse `none` too.
+    #[test]
+    fn deviation_d086_secret_base_keys_refuse_none() {
+        for section in ["rpc", "http_broadcast", "api"] {
+            let file = config_file(&format!("secret-base-{section}"), &format!("[{section}]\nSecretBase = \"none\"\n"));
+            let text = run_file(&file, &[], &[]).unwrap_err().0;
+            assert_eq!(
+                text,
+                format!("[{section}] SecretBase = \"none\" in the configuration file is not supported: remove the key")
+            );
+            std::fs::remove_file(&file).unwrap();
+        }
+    }
+
+    /// D-086: after option processing, no secret base is `none`, whatever the
+    /// sources and modes.
+    #[test]
+    fn deviation_d086_no_secret_base_is_none() {
+        let file = config_file("secret-bases", "secret = \"s\"\nbroadcast_key = \"none\"\n[rpc]\nsecret = \"none\"\n");
+        type Case<'a> = (&'a [&'a str], &'a [(&'a str, &'a str)]);
+        let cases: &[Case] = &[
+            (&[], &[]),
+            (&["--secret=s"], &[]),
+            (&["--secret=s", "--public"], &[]),
+            (&["--public"], &[]),
+            (&["--noauth"], &[]),
+            (&["--secret=s", "--http_rpc_secret=none", "--broadcast_key=none"], &[]),
+            (&["--http_rpc_secret=none", "--broadcast_key=none", "--http_broadcast_secret=none"], &[]),
+            (&["--presets=fly,heroku,broker", "--secret=s"], &[]),
+            (&[], &[("CABBY_SECRET", "s"), ("ANYCABLE_HTTP_RPC_SECRET", "none")]),
+            (&["--secret=none"], &[]),
+            (&[], &[("CABBY_SECRET", "none")]),
+            (&[], &[("ANYCABLE_SECRET", "none")]),
+        ];
+        let env =
+            EnvMap::from([("FLY_REGION".to_owned(), "r".to_owned()), ("FLY_APP_NAME".to_owned(), "a".to_owned())]);
+        let from_file = [run_file(&file, &[], &[]), run_file(&file, &["--public"], &[])];
+        let results = cases.iter().map(|(args, vars)| run(args, vars).0).chain(from_file);
+        for (i, res) in results.enumerate() {
+            let mut c = match res {
+                Ok((c, _)) => c,
+                Err(err) => {
+                    assert_eq!(err.0, NONE_APPLICATION_SECRET, "case {i}");
+                    continue;
+                }
+            };
+            // Presets run later, in the runner; they leave secrets alone.
+            c.user_presets = Some(["fly", "heroku", "broker"].map(str::to_owned).to_vec());
+            c.load_presets(&env).unwrap();
+            for base in [&c.secret, &c.http_broadcast.secret_base, &c.rpc.secret_base, &c.api.secret_base] {
+                assert_ne!(base, "none", "case {i}");
+            }
+        }
+        std::fs::remove_file(&file).unwrap();
     }
 
     #[test]

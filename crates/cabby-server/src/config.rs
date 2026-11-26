@@ -375,7 +375,8 @@ impl Config {
 
         out.push_str("# The application secret key\n");
         if self.secret.is_empty() {
-            out.push_str("secret = \"none\"\n\n");
+            // D-086: "none" is not accepted as the application secret.
+            out.push_str("# secret = \"<not set>\"\n\n");
         } else {
             out.push_str(&format!("secret = {}\n\n", toml_quote(&self.secret)));
         }

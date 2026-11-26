@@ -93,6 +93,24 @@ half-finished migration: remove the `ANYCABLE_*` variable.
 `--help` lists only the `CABBY_*` names and the unprefixed aliases, and ends with a reminder that
 every `CABBY_*` variable can also be set as `ANYCABLE_*`, except the Cabby-only ones.
 
+## Secrets and `none`
+
+`none` turns off a single secret, even when `--secret` is set: `--http_rpc_secret=none`,
+`--jwt_secret=none`, `--streams_secret=none`, `--broadcast_key=none` and `--pusher_secret=none`
+(or their variables and configuration keys), as in AnyCable. The value is compared exactly:
+`None` or `NONE` is a secret like any other.
+
+The application secret itself (`--secret`, `CABBY_SECRET`, `ANYCABLE_SECRET`, `secret` in the
+configuration file) can't be `none`. To run without an application secret, leave it unset; Cabby
+stops at startup otherwise:
+
+```text
+the application secret is set to "none" (--secret, CABBY_SECRET, ANYCABLE_SECRET or secret in the configuration file): leave it unset to run without an application secret, or set a real secret. "none" still turns off a single secret: --http_rpc_secret, --jwt_secret, --streams_secret, --broadcast_key, --pusher_secret
+```
+
+AnyCable accepts `secret = none` (deviation D-086). `cabby --print-config` writes `# secret = "<not set>"` when no
+secret is set.
+
 ## Reserved names
 
 `CABBY_NATS_SERVER_BIN` (or its older spelling `CABBY_NATS_SERVER`) names the `nats-server`
