@@ -235,8 +235,13 @@ impl RedisService {
 
     pub fn scope(&'static self, tag: &str) -> RedisScope {
         let admin = self.admin().unwrap_or_else(|e| panic!("connecting to Redis: {e:#}"));
-        let mut scope =
-            RedisScope { prefix: unique(tag), users: Vec::new(), admin: Mutex::new(Some(admin)), svc: self };
+        let mut scope = RedisScope {
+            prefix: unique(tag),
+            users: Vec::new(),
+            admin: Mutex::new(Some(admin)),
+            svc: self,
+            await_delivery: None,
+        };
         let user = scope.create_user("main");
         scope.users.push(user);
         scope
@@ -251,6 +256,8 @@ pub struct RedisScope {
     users: Vec<String>,
     admin: Mutex<Option<RespConn>>,
     svc: &'static RedisService,
+    /// See [`RedisScope::await_stream_delivery`].
+    await_delivery: Option<Duration>,
 }
 
 impl RedisScope {
@@ -329,9 +336,40 @@ impl RedisScope {
         Ok(self.command(&["PUBLISH", channel, payload])?.as_int().unwrap_or(0))
     }
 
-    /// `XADD stream * field value`.
+    /// `XADD stream * field value`; see also [`RedisScope::await_stream_delivery`].
     pub fn xadd(&self, stream: &str, field: &str, value: &str) -> Result<String> {
-        self.command(&["XADD", stream, "*", field, value])?.as_text().ok_or_else(|| anyhow!("XADD reply"))
+        let id = self.command(&["XADD", stream, "*", field, value])?.as_text().ok_or_else(|| anyhow!("XADD reply"))?;
+        if let Some(timeout) = self.await_delivery {
+            // Not an error when it times out: the test's own assertions report
+            // an entry that no consumer read.
+            let _ = wait_until(&format!("delivery of {id} on {stream}"), timeout, || {
+                self.delivered(stream, &id).then_some(())
+            });
+        }
+        Ok(id)
+    }
+
+    /// Makes [`RedisScope::xadd`] return only once every consumer group of
+    /// the stream has delivered the entry to one of its consumers (its
+    /// `last-delivered-id` reached the entry), or after `timeout`. A test that
+    /// adds entries and then starts another consumer of the group knows that
+    /// the consumers running before took them.
+    pub fn await_stream_delivery(&mut self, timeout: Duration) {
+        self.await_delivery = Some(timeout);
+    }
+
+    /// Whether every consumer group of `stream` has delivered entry `id`
+    /// (true when the stream has no group).
+    fn delivered(&self, stream: &str, id: &str) -> bool {
+        let Ok(groups) = self.command(&["XINFO", "GROUPS", stream]) else { return false };
+        groups.items().iter().all(|group| {
+            let fields = group.items();
+            let last = fields
+                .chunks(2)
+                .find(|kv| kv[0].as_text().as_deref() == Some("last-delivered-id"))
+                .and_then(|kv| kv.get(1)?.as_text());
+            last.is_some_and(|last| stream_id(&last) >= stream_id(id))
+        })
     }
 
     /// Kills `user`'s pub/sub connections (upstream: `CLIENT KILL TYPE pubsub`,
@@ -357,6 +395,12 @@ impl RedisScope {
             (self.clients_with_cmd(user, cmd) >= count).then_some(())
         })
     }
+}
+
+/// A stream entry ID (`<ms>-<seq>`) as a comparable pair.
+fn stream_id(id: &str) -> (u64, u64) {
+    let (ms, seq) = id.split_once('-').unwrap_or((id, "0"));
+    (ms.parse().unwrap_or(0), seq.parse().unwrap_or(0))
 }
 
 impl Drop for RedisScope {

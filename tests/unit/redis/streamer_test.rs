@@ -39,7 +39,11 @@ fn config_for(url: String) -> cabby_server::redis::RedisConfig {
 }
 
 fn setup() -> (RedisScope, String, cabby_server::redis::RedisConfig) {
-    let scope = services::redis().scope("streamer");
+    let mut scope = services::redis().scope("streamer");
+    // Each XADD returns once a running consumer has read the entry: upstream
+    // starts a second streamer right after adding entries for the first one,
+    // and the second could otherwise read an entry first.
+    scope.await_stream_delivery(DRAIN);
     let stream = scope.name("__test__");
     let rconfig = config_for(scope.url());
     (scope, stream, rconfig)
