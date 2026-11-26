@@ -49,6 +49,13 @@ Differences from the AnyCable Go server are listed by ID in
 - Durable Streams: a stream path that is not valid UTF-8 once decoded (`/ds/%ff`) is answered
   `400`. Before, every such path read the stream named U+FFFD, so `/ds/%ff`, `/ds/%fe` and
   `/ds/%EF%BF%BD` read the same stream (D-104).
+- StatsD metrics (`--statsd_host`): the host lookup, connect and sends no longer run on a
+  thread of the server's runtime. While the host did not resolve, every metrics interval held a
+  runtime thread for the resolver's timeout (5 s for a `.local` name), so on a one-CPU host the
+  whole server paused, and shutdown waited for the lookup. As in go-statsd, a sender thread of
+  the writer owns the socket and connects again 5 s after a failed connect or send; the metrics
+  task only queues packets. Up to 10 packets wait in the queue; when it is full, new packets are
+  dropped and reported once a minute (`<n> packets lost (overflow)`, as go-statsd).
 
 ## [0.4.1] - 2026-11-26
 

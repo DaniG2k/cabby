@@ -241,7 +241,7 @@ call sites are found by the message text (`grep -rn '"<message>"' crates`).
 | `metrics/printer.go:42` | INF | `log metrics` | `crates/cabby-server/src/metrics/printer.rs:234` | matched |  |
 | `metrics/printer.go:74` | INF | `` | `cabby-server/src/metrics/printer.rs` (snapshot record) | matched |  |
 | `metrics/statsd_writer.go:27` | ERR | `lg.log.Error(fmt.Sprintf(msg, args...))` | `cabby-server/src/metrics/statsd.rs` (`service=statsd`) | matched | error texts: D-050 |
-| `metrics/statsd_writer.go:29` | WRN | `lg.log.Warn(fmt.Sprintf(msg, args...))` | — | n/a | go-statsd's only warning is the send-queue overflow; Cabby sends synchronously and has no queue |
+| `metrics/statsd_writer.go:29` | WRN | `lg.log.Warn(fmt.Sprintf(msg, args...))` | `cabby-server/src/metrics/statsd.rs` (`<n> packets lost (overflow)`, `service=statsd`) | matched | go-statsd's only warning: packets dropped because the send queue was full, reported once a minute |
 | `metrics/statsd_writer.go:86` | INF | `sw.log.Info(` | `cabby-server/src/metrics/statsd.rs` (`Send statsd metrics to ...`) | matched |  |
 | `node/controller.go:35` | INF | `no RPC configured` | `crates/cabby-server/src/node/app.rs:1435` | matched |  |
 | `node/controller.go:43` | DBG | `reject connection` | `crates/cabby-server/src/node/app.rs:1442` | matched |  |

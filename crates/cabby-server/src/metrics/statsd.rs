@@ -1,13 +1,33 @@
 //! StatsD interval writer (upstream `metrics/statsd_writer.go`, built on
 //! `smira/go-statsd`).
+//!
+//! As in go-statsd, the metrics task only renders packets and queues them; a
+//! sender thread of the writer owns the socket: it resolves the host,
+//! connects, sends the queued packets and, after a failed connect or send,
+//! waits [`RETRY_DELAY`] before it connects again. No lookup, connect or send
+//! happens on a runtime worker, and stopping the writer never waits for one.
 
+use std::convert::Infallible;
 use std::net::{ToSocketAddrs, UdpSocket};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError, TrySendError};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use cabby_core::common::StringMap;
 use cabby_core::logger::{Level, Logger};
 
 use super::{IntervalWriter, Metrics, MetricsError, StatsdConfig};
+
+/// How long the sender waits after a failed connect or send before it connects
+/// again (go-statsd `DefaultRetryTimeout`).
+const RETRY_DELAY: Duration = Duration::from_secs(5);
+/// Packets waiting for the sender (go-statsd `DefaultSendQueueCapacity`). When
+/// the queue is full, the packet being queued is dropped, as in go-statsd.
+const QUEUE_CAPACITY: usize = 10;
+/// How often the sender reports dropped packets (go-statsd
+/// `DefaultReportInterval`).
+const REPORT_INTERVAL: Duration = Duration::from_secs(60);
 
 /// go-statsd's logger (upstream `StatsdLogger`: the runner's logger with
 /// `service=statsd`; messages containing `Error` at error level).
@@ -34,49 +54,177 @@ fn resolve_tag_format(name: &str) -> Result<TagFormat, MetricsError> {
     }
 }
 
+/// Resolves `host` and returns a UDP socket connected to its first address
+/// (go-statsd dials `udp`). Blocks for as long as the lookup takes.
+fn connect_udp(host: &str) -> std::io::Result<UdpSocket> {
+    let addr = host
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no address found"))?;
+    let local = if addr.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
+    let socket = UdpSocket::bind(local)?;
+    socket.connect(addr)?;
+    Ok(socket)
+}
+
+type Connect = Arc<dyn Fn(&str) -> std::io::Result<UdpSocket> + Send + Sync>;
+
+/// How the sender thread connects and how long it waits (tests replace them).
+struct Transport {
+    connect: Connect,
+    retry_delay: Duration,
+    report_interval: Duration,
+}
+
+impl Default for Transport {
+    fn default() -> Self {
+        Self { connect: Arc::new(connect_udp), retry_delay: RETRY_DELAY, report_interval: REPORT_INTERVAL }
+    }
+}
+
+/// The metrics task's side of a running writer.
 #[derive(Debug)]
 struct Client {
-    socket: Option<UdpSocket>,
     /// Pre-rendered tags (with the leading separator), placed per `in_name`.
     tags: String,
     in_name: bool,
+    queue: mpsc::SyncSender<Vec<u8>>,
+    /// Never sends; dropping it (with the queue) stops the sender thread.
+    _stop: mpsc::Sender<Infallible>,
+    /// Packets dropped because the queue was full, since the last report.
+    lost: Arc<AtomicU64>,
+}
+
+/// The sender thread (go-statsd `sendLoop` and `reportLoop`).
+struct Sender {
+    host: String,
+    transport: Arc<Transport>,
+    queue: mpsc::Receiver<Vec<u8>>,
+    stop: mpsc::Receiver<Infallible>,
+    lost: Arc<AtomicU64>,
+    next_report: Instant,
+}
+
+impl Sender {
+    fn run(mut self) {
+        loop {
+            match (self.transport.connect)(&self.host) {
+                Ok(socket) => {
+                    if !self.deliver(&socket) {
+                        return;
+                    }
+                }
+                Err(e) => statsd_log(Level::Error, &format!("Error connecting to server: {e}")),
+            }
+            if !self.wait_to_retry() {
+                return;
+            }
+        }
+    }
+
+    /// Sends queued packets until a send fails (`true`: connect again) or the
+    /// writer stops (`false`, once the queued packets are sent).
+    fn deliver(&mut self, socket: &UdpSocket) -> bool {
+        loop {
+            match self.queue.recv_timeout(self.until_report()) {
+                Ok(packet) => {
+                    if let Err(e) = socket.send(&packet) {
+                        // go-statsd logs the failure, closes the socket and reconnects later.
+                        statsd_log(Level::Error, &format!("Error writing to socket: {e}"));
+                        return true;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => self.report_if_due(),
+                Err(RecvTimeoutError::Disconnected) => return false,
+            }
+        }
+    }
+
+    /// Waits the retry delay, leaving queued packets in the queue; `false` when
+    /// the writer stops meanwhile.
+    fn wait_to_retry(&mut self) -> bool {
+        let deadline = Instant::now() + self.transport.retry_delay;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return true;
+            }
+            match self.stop.recv_timeout(left.min(self.until_report())) {
+                Ok(never) => match never {},
+                Err(RecvTimeoutError::Timeout) => self.report_if_due(),
+                Err(RecvTimeoutError::Disconnected) => return false,
+            }
+        }
+    }
+
+    fn until_report(&self) -> Duration {
+        self.next_report.saturating_duration_since(Instant::now())
+    }
+
+    /// go-statsd `reportLoop`: the packets dropped since the last report.
+    fn report_if_due(&mut self) {
+        let now = Instant::now();
+        if now < self.next_report {
+            return;
+        }
+        self.next_report = now + self.transport.report_interval;
+        let lost = self.lost.swap(0, Ordering::Relaxed);
+        if lost > 0 {
+            statsd_log(Level::Warn, &format!("{lost} packets lost (overflow)"));
+        }
+    }
 }
 
 /// Sends counter interval values (`|c`) and gauge values (`|g`) over UDP with the
 /// configured prefix and default tags in the configured tag format.
-#[derive(Debug)]
 pub struct StatsdWriter {
     config: StatsdConfig,
     tags: Option<StringMap>,
-    client: Mutex<Option<Client>>,
+    transport: Arc<Transport>,
+    /// Set by `run` (boxed: the writer stays small, as upstream's `*statsd.Client`).
+    client: Mutex<Option<Box<Client>>>,
+}
+
+impl std::fmt::Debug for StatsdWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StatsdWriter")
+            .field("config", &self.config)
+            .field("tags", &self.tags)
+            .field("client", &self.client)
+            .finish_non_exhaustive()
+    }
 }
 
 impl StatsdWriter {
     pub fn new(config: StatsdConfig, tags: Option<StringMap>) -> Self {
-        Self { config, tags, client: Mutex::new(None) }
+        Self::with_transport(config, tags, Transport::default())
     }
 
-    fn connect(&self) -> Option<UdpSocket> {
-        let connect = || -> std::io::Result<UdpSocket> {
-            let addr = self
-                .config
-                .host
-                .to_socket_addrs()?
-                .next()
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no address found"))?;
-            let local = if addr.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
-            let socket = UdpSocket::bind(local)?;
-            socket.connect(addr)?;
-            socket.set_nonblocking(true)?;
-            Ok(socket)
+    fn with_transport(config: StatsdConfig, tags: Option<StringMap>, transport: Transport) -> Self {
+        Self { config, tags, transport: Arc::new(transport), client: Mutex::new(None) }
+    }
+
+    /// Starts the sender thread, which connects right away (as go-statsd's
+    /// `NewClient`), and returns the queue to it.
+    fn start_sender(
+        &self,
+        lost: &Arc<AtomicU64>,
+    ) -> Result<(mpsc::SyncSender<Vec<u8>>, mpsc::Sender<Infallible>), MetricsError> {
+        let (queue, queue_rx) = mpsc::sync_channel(QUEUE_CAPACITY);
+        let (stop, stop_rx) = mpsc::channel();
+        let sender = Sender {
+            host: self.config.host.clone(),
+            transport: Arc::clone(&self.transport),
+            queue: queue_rx,
+            stop: stop_rx,
+            lost: Arc::clone(lost),
+            next_report: Instant::now() + self.transport.report_interval,
         };
-        match connect() {
-            Ok(socket) => Some(socket),
-            Err(e) => {
-                statsd_log(Level::Error, &format!("Error connecting to server: {e}"));
-                None
-            }
-        }
+        std::thread::Builder::new()
+            .name("statsd-sender".into())
+            .spawn(move || sender.run())
+            .map_err(|e| MetricsError(format!("starting the StatsD sender: {e}")))?;
+        Ok((queue, stop))
     }
 }
 
@@ -101,8 +249,10 @@ impl IntervalWriter for StatsdWriter {
                 rendered.push_str(v);
             }
         }
-        let socket = self.connect();
-        *self.client.lock().unwrap_or_else(|e| e.into_inner()) = Some(Client { socket, tags: rendered, in_name });
+        let lost = Arc::new(AtomicU64::new(0));
+        let (queue, stop) = self.start_sender(&lost)?;
+        *self.client.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(Box::new(Client { tags: rendered, in_name, queue, _stop: stop, lost }));
 
         let tags_info = match &self.tags {
             // Go's `%v` of a map: sorted `map[k:v ...]`.
@@ -130,13 +280,10 @@ impl IntervalWriter for StatsdWriter {
     }
 
     fn write(&self, metrics: &Metrics) -> Result<(), MetricsError> {
-        let mut guard = self.client.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(client) = guard.as_mut() else {
+        let guard = self.client.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(client) = guard.as_ref() else {
             return Ok(());
         };
-        if client.socket.is_none() {
-            client.socket = self.connect();
-        }
 
         let prefix = &self.config.prefix;
         let mut lines: Vec<String> = Vec::new();
@@ -174,9 +321,6 @@ impl IntervalWriter for StatsdWriter {
             line(g.name(), v, "g");
         });
 
-        let Some(socket) = client.socket.as_ref() else {
-            return Ok(());
-        };
         let max = usize::try_from(self.config.max_packet_size).unwrap_or(0).max(1);
         let mut packets = Vec::new();
         let mut packet = String::with_capacity(max);
@@ -190,13 +334,206 @@ impl IntervalWriter for StatsdWriter {
             packets.push(packet);
         }
         for packet in packets {
-            if let Err(e) = socket.send(packet.as_bytes()) {
-                // go-statsd logs the failure, closes the socket and reconnects later.
-                statsd_log(Level::Error, &format!("Error writing to socket: {e}"));
-                client.socket = None;
-                break;
+            match client.queue.try_send(packet.into_bytes()) {
+                Ok(()) => {}
+                // go-statsd drops the packet being queued and reports the count.
+                Err(TrySendError::Full(_)) => {
+                    client.lost.fetch_add(1, Ordering::Relaxed);
+                }
+                Err(TrySendError::Disconnected(_)) => break,
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::SocketAddr;
+    use std::time::{Duration, Instant};
+
+    use super::*;
+    use crate::metrics::Instrumenter;
+    use crate::metrics::worker_tests::{assert_beats, heartbeat, one_worker};
+
+    /// How long a test waits for something that must happen.
+    const DEADLINE: Duration = Duration::from_secs(2);
+    /// How long a test waits to see that something does not happen.
+    const QUIET: Duration = Duration::from_millis(150);
+
+    /// A loopback StatsD server.
+    fn sink() -> (UdpSocket, SocketAddr) {
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("UDP sink");
+        socket.set_read_timeout(Some(DEADLINE)).expect("read timeout");
+        let addr = socket.local_addr().expect("sink address");
+        (socket, addr)
+    }
+
+    fn recv(socket: &UdpSocket) -> Option<String> {
+        let mut buf = [0u8; 2048];
+        let n = socket.recv(&mut buf).ok()?;
+        Some(String::from_utf8_lossy(&buf[..n]).into_owned())
+    }
+
+    /// A connect that reports each call on the returned receiver and then
+    /// waits for what the returned sender gives it: a sink's address to
+    /// connect to, or an error. It fails once the sender is dropped, so a
+    /// failing test does not leave the sender thread blocked.
+    fn gated_connect() -> (Connect, mpsc::Receiver<Instant>, mpsc::Sender<std::io::Result<SocketAddr>>) {
+        let (called, calls) = mpsc::channel();
+        let (release, gate) = mpsc::channel::<std::io::Result<SocketAddr>>();
+        let gate = Mutex::new(gate);
+        let connect: Connect = Arc::new(move |_host: &str| {
+            let _ = called.send(Instant::now());
+            let target = gate.lock().unwrap_or_else(|e| e.into_inner()).recv();
+            match target {
+                Ok(Ok(addr)) => connect_udp(&addr.to_string()),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err(std::io::Error::other("the test ended")),
+            }
+        });
+        (connect, calls, release)
+    }
+
+    /// A writer for a host that is never resolved (`connect` replaces the lookup).
+    fn writer(connect: Connect, retry_delay: Duration) -> Arc<StatsdWriter> {
+        let mut config = StatsdConfig::new();
+        config.host = "statsd.invalid:8125".into();
+        let transport = Transport { connect, retry_delay, report_interval: REPORT_INTERVAL };
+        Arc::new(StatsdWriter::with_transport(config, None, transport))
+    }
+
+    /// Metrics with one gauge set to `value`: one packet per write.
+    fn metrics(value: i64) -> Arc<Metrics> {
+        let m = Arc::new(Metrics::new(Vec::new(), 0));
+        m.register_gauge("test_gauge", "");
+        m.gauge("test_gauge").expect("gauge").set(value);
+        m
+    }
+
+    fn packet(value: i64) -> String {
+        format!("anycable_go.test_gauge:{value}|g\n")
+    }
+
+    /// While the host lookup and connect are blocked, `run` and `write` return
+    /// at once on a one-worker runtime and the worker keeps running other
+    /// tasks; the metrics written meanwhile are sent once the connect succeeds.
+    /// Before, `run` and every `write` without a socket resolved the host on the
+    /// worker (5 s per interval for a `.local` name that does not resolve).
+    #[test]
+    fn a_blocked_connect_blocks_no_runtime_worker() {
+        let rt = one_worker();
+        let (connect, calls, release) = gated_connect();
+        let w = writer(connect, Duration::from_secs(60));
+        let m = metrics(123);
+        let beats = heartbeat(&rt);
+
+        let (done, written) = mpsc::channel();
+        let (w2, m2) = (Arc::clone(&w), Arc::clone(&m));
+        rt.spawn(async move {
+            w2.run(1).expect("run");
+            for _ in 0..5 {
+                w2.write(&m2).expect("write");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            let _ = done.send(());
+        });
+        calls.recv_timeout(DEADLINE).expect("the sender connects");
+        assert_beats(&beats, 10);
+        written.recv_timeout(DEADLINE).expect("run and the writes return while connecting");
+
+        let (socket, addr) = sink();
+        release.send(Ok(addr)).expect("release the connect");
+        for i in 0..5 {
+            assert_eq!(Some(packet(123)), recv(&socket), "packet {i}");
+        }
+        w.stop();
+    }
+
+    /// Metrics::shutdown returns at once while the connect is still blocked,
+    /// and so does Metrics::run.
+    #[test]
+    fn shutdown_does_not_wait_for_a_blocked_connect() {
+        let rt = one_worker();
+        let (connect, calls, _release) = gated_connect();
+        let w = writer(connect, Duration::from_secs(60));
+        let m = Arc::new(Metrics::new(vec![w as Arc<dyn IntervalWriter>], 1));
+        let beats = heartbeat(&rt);
+
+        let (done, ran) = mpsc::channel();
+        let m2 = Arc::clone(&m);
+        rt.spawn(async move {
+            let _ = done.send(m2.run().await);
+        });
+        calls.recv_timeout(DEADLINE).expect("the sender connects");
+        assert_beats(&beats, 10);
+
+        let started = Instant::now();
+        rt.block_on(m.shutdown()).expect("shutdown");
+        assert!(started.elapsed() < Duration::from_millis(200), "shutdown took {:?}", started.elapsed());
+        assert_eq!(Ok(Ok(())), ran.recv_timeout(DEADLINE), "run returns once shut down");
+    }
+
+    /// After a failed connect, the sender waits the retry delay before it
+    /// connects again (go-statsd: 5 s), whatever the writes in between; the
+    /// metrics queued meanwhile are sent after the reconnect.
+    #[test]
+    fn a_failed_connect_is_retried_after_the_delay() {
+        let (connect, calls, release) = gated_connect();
+        let w = writer(connect, Duration::from_secs(60));
+        let m = metrics(1);
+        release.send(Err(std::io::Error::other("lookup failed"))).expect("fail the first connect");
+        w.run(1).expect("run");
+        calls.recv_timeout(DEADLINE).expect("the first connect");
+        let (done, written) = mpsc::channel();
+        let (w2, m2) = (Arc::clone(&w), Arc::clone(&m));
+        std::thread::spawn(move || {
+            for _ in 0..5 {
+                w2.write(&m2).expect("write");
+            }
+            let _ = done.send(());
+        });
+        written.recv_timeout(DEADLINE).expect("the writes return without connecting");
+        assert!(calls.recv_timeout(QUIET).is_err(), "no connect before the retry delay");
+        w.stop();
+
+        let retry_delay = Duration::from_millis(100);
+        let (connect, calls, release) = gated_connect();
+        let w = writer(connect, retry_delay);
+        let (socket, addr) = sink();
+        release.send(Err(std::io::Error::other("lookup failed"))).expect("fail the first connect");
+        release.send(Ok(addr)).expect("let the second connect succeed");
+        w.run(1).expect("run");
+        let first = calls.recv_timeout(DEADLINE).expect("the first connect");
+        w.write(&m).expect("write");
+        let second = calls.recv_timeout(DEADLINE).expect("the connect after the delay");
+        assert!(second.duration_since(first) >= retry_delay, "retried after {:?}", second.duration_since(first));
+        assert_eq!(Some(packet(1)), recv(&socket));
+        w.stop();
+    }
+
+    /// With the sender's queue full, a write drops the packets it cannot
+    /// queue (the newest, as go-statsd) and counts them, instead of waiting.
+    #[test]
+    fn a_full_queue_drops_the_newest_packets() {
+        let (connect, calls, release) = gated_connect();
+        let w = writer(connect, Duration::from_secs(60));
+        w.run(1).expect("run");
+        calls.recv_timeout(DEADLINE).expect("the sender connects");
+        let extra = 3;
+        for value in 0..(QUEUE_CAPACITY + extra) as i64 {
+            w.write(&metrics(value)).expect("write");
+        }
+        let lost = |w: &StatsdWriter| w.client.lock().unwrap().as_ref().map(|c| c.lost.load(Ordering::Relaxed));
+        assert_eq!(Some(extra as u64), lost(&w));
+
+        let (socket, addr) = sink();
+        release.send(Ok(addr)).expect("release the connect");
+        for value in 0..QUEUE_CAPACITY as i64 {
+            assert_eq!(Some(packet(value)), recv(&socket));
+        }
+        socket.set_read_timeout(Some(QUIET)).expect("read timeout");
+        assert_eq!(None, recv(&socket), "the dropped packets are not sent");
+        w.stop();
     }
 }

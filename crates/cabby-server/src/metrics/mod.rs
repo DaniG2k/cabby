@@ -463,6 +463,52 @@ fn go_duration_secs(secs: u64) -> String {
     }
 }
 
+/// A runtime like the server's with one worker, and a heartbeat on it: tests
+/// that a metrics writer never blocks a runtime worker.
+#[cfg(test)]
+pub(crate) mod worker_tests {
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    /// The longest pause between two heartbeats that counts as a live worker.
+    pub(crate) const MAX_GAP: Duration = Duration::from_millis(250);
+
+    /// A multi-thread runtime with a single worker (the server's on a one-CPU host).
+    pub(crate) fn one_worker() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().expect("runtime")
+    }
+
+    /// A task on `rt` that reports a beat every 10 ms until the receiver is dropped.
+    pub(crate) fn heartbeat(rt: &tokio::runtime::Runtime) -> mpsc::Receiver<Instant> {
+        let (tx, rx) = mpsc::channel();
+        rt.spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_millis(10));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                if tx.send(Instant::now()).is_err() {
+                    return;
+                }
+            }
+        });
+        rx
+    }
+
+    /// Discards the beats so far, then requires `n` more, each within
+    /// [`MAX_GAP`] of the previous one.
+    pub(crate) fn assert_beats(beats: &mpsc::Receiver<Instant>, n: usize) {
+        while beats.try_recv().is_ok() {}
+        let mut last = Instant::now();
+        for i in 0..n {
+            let beat = beats.recv_timeout(MAX_GAP).unwrap_or_else(|_| {
+                panic!("heartbeat {i} of {n} missing: the runtime worker is blocked for over {MAX_GAP:?}")
+            });
+            assert!(beat.duration_since(last) < MAX_GAP, "heartbeat {i} came {:?} late", beat.duration_since(last));
+            last = beat;
+        }
+    }
+}
+
 #[cfg(test)]
 mod duration_tests {
     #[test]
