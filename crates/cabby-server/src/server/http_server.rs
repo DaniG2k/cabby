@@ -1095,9 +1095,27 @@ mod tests {
         let server = HttpServer::new("127.0.0.1", "0", None, 0).unwrap();
         server.setup_handler("/a/*", |_req: Request| async { status_response(201) });
         server.setup_handler("/a/b", |_req: Request| async { status_response(202) });
+        server.setup_handler("/a/b/*", |_req: Request| async { status_response(204) });
         server.setup_handler("/a/b", |_req: Request| async { status_response(203) });
-        let routes = server.inner.routes.load();
-        assert_eq!(2, routes.len());
-        assert!(routes.iter().any(|r| r.prefix && r.path == "/a/"));
+        // The second `/a/b` replaces the first and moves to the end.
+        let routes: Vec<(String, bool)> =
+            server.inner.routes.load().iter().map(|r| (r.path.clone(), r.prefix)).collect();
+        assert_eq!(vec![("/a/".to_owned(), true), ("/a/b/".to_owned(), true), ("/a/b".to_owned(), false)], routes);
+
+        // An exact path wins over every wildcard, then the longest prefix wins.
+        let addr = crate::server::tests::support::start(&server);
+        for (path, status) in [
+            ("/a/b", 203),
+            ("/a/b/", 204),
+            ("/a/b/c", 204),
+            ("/a/c", 201),
+            ("/a/", 201),
+            ("/a/bc", 201),
+            ("/a", 404),
+            ("/b", 404),
+        ] {
+            assert_eq!(status, crate::server::tests::support::get(addr, path).status, "GET {path}");
+        }
+        server.shutdown();
     }
 }
