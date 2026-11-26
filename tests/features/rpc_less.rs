@@ -6,7 +6,7 @@ use std::time::Duration;
 use base64::Engine;
 use cabby_testkit::jwt;
 use cabby_testkit::pusher_auth::hmac_sha256_hex;
-use cabby_testkit::wsdirector::{Connection, Expect, Protocol};
+use cabby_testkit::wsdirector::{Connection, Expect, Protocol, identifier};
 use serde_json::json;
 
 use crate::support::*;
@@ -85,6 +85,34 @@ fn standalone() {
         c.receive(&Expect::Exact(json!({"type": "disconnect", "reason": "unauthorized", "reconnect": false}))).map(drop)
     })();
     assert_groups(&[("default", unauthenticated)]);
+}
+
+/// regression-for: features/standalone.testfile#scenario
+/// note: Cabby-only: the confirmation and the disconnect frame must have exactly the expected keys (wsdirector's exact match, kept in the translation, accepts `{}` or a frame with keys missing)
+#[test]
+fn standalone_frames_are_exact() {
+    let sut = launch(&["--secret=s3Krit", "--norpc"], &[]);
+    let url = ws_url(&sut, "/cable");
+    let token = token("s3Krit");
+    let signed = signed_stream_name("s3Krit", "chat/2023");
+
+    let turbo = (|| {
+        let mut c = wsd(
+            &url,
+            Protocol::ActionCable,
+            Connection { query: vec![("jid".into(), token.clone())], ..Default::default() },
+        )?;
+        let id = identifier("$pubsub", &[("signed_stream_name", json!(signed))]);
+        c.send(&json!({"command": "subscribe", "identifier": id}));
+        c.receive(&Expect::Strict(json!({"type": "confirm_subscription", "identifier": id}))).map(drop)
+    })();
+    let unauthenticated = (|| {
+        let mut c = wsd(&url, Protocol::Base, Connection::default())?;
+        c.receive(&Expect::Strict(json!({"type": "disconnect", "reason": "unauthorized", "reconnect": false})))
+            .map(drop)
+    })();
+
+    assert_groups(&[("turbo", turbo), ("default", unauthenticated)]);
 }
 
 /// `logs =~ /rpc_call_total=[1-9] rpc_error_total=[1-9] rpc_retries_total=[1-9]/`.

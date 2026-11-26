@@ -3,7 +3,9 @@
 //!
 //! * [`Expect`]: a `receive` expectation, `data` (exact) or `data>` (partial),
 //!   with wsdirector's matching rules ported literally (see [`matches`] and
-//!   [`partially_matches`]).
+//!   [`partially_matches`]). wsdirector's "exact" match only checks the keys
+//!   the received frame has, so `{}` or a frame missing expected keys passes;
+//!   Cabby-only scenarios use [`Expect::Strict`] ([`strictly_matches`]).
 //! * [`Client`]: one scenario client. `receive` scans the mailbox and new
 //!   messages for the first match, keeping non-matching messages for later
 //!   steps (`Client#each_message` / `#consumed`), and fails after the step
@@ -29,6 +31,9 @@ pub enum Expect {
     Exact(Value),
     /// `data>:` (`PartialMatcher`).
     Partial(Value),
+    /// Cabby only, not a wsdirector step: the frame has exactly the expected
+    /// keys and elements, recursively ([`strictly_matches`]).
+    Strict(Value),
 }
 
 impl Expect {
@@ -36,6 +41,7 @@ impl Expect {
         match self {
             Expect::Exact(e) => matches(e, actual),
             Expect::Partial(e) => partially_matches(e, actual),
+            Expect::Strict(e) => strictly_matches(e, actual),
         }
     }
 }
@@ -84,6 +90,25 @@ pub fn matches(receiver: &Value, other: &Value) -> bool {
             r.iter().enumerate().all(|(i, e)| matches(e, &index_at(&actual, i)))
         }
         _ => scalar_eq(receiver, other),
+    }
+}
+
+/// Cabby only: `actual` has exactly the keys of an expected Hash and the
+/// elements of an expected Array, recursively, with equal scalars (Ruby `==`,
+/// so `1` equals `1.0`). A JSON string is parsed where a Hash or an Array is
+/// expected, as in wsdirector's refinements. Unlike [`matches`], a missing
+/// key fails.
+pub fn strictly_matches(expected: &Value, actual: &Value) -> bool {
+    match expected {
+        Value::Object(e) => {
+            let Some(Value::Object(a)) = coerce(actual, true) else { return false };
+            e.len() == a.len() && e.iter().all(|(k, v)| a.get(k).is_some_and(|av| strictly_matches(v, av)))
+        }
+        Value::Array(e) => {
+            let Some(Value::Array(a)) = coerce(actual, false) else { return false };
+            e.len() == a.len() && e.iter().zip(&a).all(|(ev, av)| strictly_matches(ev, av))
+        }
+        _ => scalar_eq(expected, actual),
     }
 }
 
@@ -301,6 +326,48 @@ mod tests {
         assert!(!matches(&json!({"m": {"a": 1, "b": 2}}), &json!({"m": {"a": 1}})));
         assert!(matches(&json!({"m": {"a": 1}}), &json!({"m": {"a": 1, "b": 2}})));
         assert!(matches(&json!({"n": 1}), &json!({"n": 1.0})));
+    }
+
+    /// wsdirector's exact match (kept as upstream has it) accepts an empty or
+    /// truncated frame; the strict match does not.
+    #[test]
+    fn exact_matching_accepts_missing_keys_and_strict_matching_does_not() {
+        let disconnect = json!({"type": "disconnect", "reason": "unauthorized", "reconnect": false});
+        for truncated in
+            [json!({}), json!({"type": "disconnect"}), json!({"type": "disconnect", "reason": "unauthorized"})]
+        {
+            assert!(matches(&disconnect, &truncated), "{truncated}");
+            assert!(!strictly_matches(&disconnect, &truncated), "{truncated}");
+        }
+        let message = json!({"identifier": "id", "message": {"message": "hello", "action": "broadcast"}});
+        assert!(matches(&message, &json!({"identifier": "id"})));
+        // One level down the roles swap, so there the expected keys are checked.
+        assert!(!matches(&message, &json!({"identifier": "id", "message": {"message": "hello"}})));
+        assert!(!strictly_matches(&message, &json!({"identifier": "id"})));
+        assert!(!strictly_matches(&message, &json!({"identifier": "id", "message": {"message": "hello"}})));
+    }
+
+    #[test]
+    fn strict_matching_needs_the_same_keys_and_elements() {
+        let expected = json!({"type": "confirm_subscription", "identifier": "{\"channel\":\"C\"}"});
+        assert!(strictly_matches(&expected, &expected.clone()));
+        assert!(strictly_matches(&expected, &json!(expected.to_string())));
+        assert!(!strictly_matches(&expected, &json!({"type": "confirm_subscription"})));
+        let mut extra = expected.clone();
+        extra["sid"] = json!("x");
+        assert!(!strictly_matches(&expected, &extra));
+        assert!(!strictly_matches(&expected, &json!({"type": "confirm_subscription", "identifier": null})));
+        assert!(!strictly_matches(&json!({"a": null}), &json!({})));
+        assert!(strictly_matches(&json!({"a": null}), &json!({"a": null})));
+        // Nested values: no missing or extra key at any level.
+        assert!(strictly_matches(&json!({"m": {"a": [1, {"b": 2}]}}), &json!({"m": {"a": [1.0, {"b": 2}]}})));
+        assert!(!strictly_matches(&json!({"m": {"a": [1, {"b": 2}]}}), &json!({"m": {"a": [1, {}]}})));
+        assert!(!strictly_matches(&json!({"m": {"a": [1, {"b": 2}]}}), &json!({"m": {"a": [1]}})));
+        assert!(!strictly_matches(&json!({"m": {"a": 1}}), &json!({"m": {"a": 1, "b": 2}})));
+        // A JSON string is parsed where a Hash is expected; a String expectation compares the raw text.
+        assert!(strictly_matches(&json!({"data": {"a": 1}}), &json!({"data": "{\"a\":1}"})));
+        assert!(!strictly_matches(&json!({"data": {"a": 1}}), &json!({"data": "{\"a\":1,\"b\":2}"})));
+        assert!(!strictly_matches(&json!({"data": "{\"a\": 1}"}), &json!({"data": "{\"a\":1}"})));
     }
 
     #[test]
