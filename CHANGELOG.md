@@ -8,7 +8,10 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
-## [Unreleased]
+## [0.4.1] - 2026-11-26
+
+Cabby 0.4.1 fixes stream history in the memory, SQLite and NATS brokers, the NATS session
+keepalive, and Durable Streams live reads. It stays compatible with AnyCable server 1.6.21.
 
 ### Fixed
 
