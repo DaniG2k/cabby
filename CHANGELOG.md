@@ -8,6 +8,19 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
+## [Unreleased]
+
+### Fixed
+
+- Memory broker, and the history of the SQLite broker and the NATS broker's local copy: a
+  message broadcast while the expiry pass dropped its stream could be missing from history, and
+  the next message to that stream got the same offset. Every stored message is now kept with its
+  own offset (D-087).
+- NATS broker: a session keepalive that finished after a newer commit of the same session
+  replaced it with the older state, which a restore then returned. The keepalive now writes
+  only over the revision it read, and no longer writes back a session that expired or was
+  deleted meanwhile (D-088).
+
 ## [0.4.0] - 2026-11-26
 
 Cabby 0.4.0 delivers broadcasts with less CPU and lower latency, and uses far less memory when

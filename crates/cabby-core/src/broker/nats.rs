@@ -864,6 +864,70 @@ impl Inner {
     }
 }
 
+/// A session's value and the revision it was read at.
+type Revisioned = (bytes::Bytes, u64);
+
+/// The key-value operations of a session keepalive, so that its interleavings
+/// with commits can be tested without a server.
+trait SessionKv {
+    /// The value of `key` and its revision; `None` when the key is missing or
+    /// deleted.
+    fn latest(&self, key: &str) -> impl Future<Output = Result<Option<Revisioned>, String>> + Send;
+
+    /// Writes `value` to `key` if `revision` is still the key's latest
+    /// revision (JetStream's expected last subject sequence); `Ok(false)` when
+    /// it is not, including when the key has been deleted or has expired.
+    fn update(
+        &self,
+        key: &str,
+        value: bytes::Bytes,
+        revision: u64,
+    ) -> impl Future<Output = Result<bool, String>> + Send;
+}
+
+impl SessionKv for kv::Store {
+    async fn latest(&self, key: &str) -> Result<Option<Revisioned>, String> {
+        match self.entry(key).await.map_err(|e| e.to_string())? {
+            Some(entry) if entry.operation == kv::Operation::Put => Ok(Some((entry.value, entry.revision))),
+            _ => Ok(None),
+        }
+    }
+
+    async fn update(&self, key: &str, value: bytes::Bytes, revision: u64) -> Result<bool, String> {
+        match kv::Store::update(self, key, value, revision).await {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == kv::UpdateErrorKind::WrongLastRevision => Ok(false),
+            // The publish error says more than the kind ("failed getting entry").
+            Err(e) => Err(std::error::Error::source(&e).map_or_else(|| e.to_string(), ToString::to_string)),
+        }
+    }
+}
+
+/// Upstream `TouchSession`: writes the session's value back to restart its
+/// TTL. AnyCable writes it back unconditionally; Cabby writes it only over the
+/// revision it read (deviation D-088), so a commit that lands meanwhile stays
+/// the latest value, and a key deleted or expired meanwhile is not created.
+async fn refresh_session(kv: &impl SessionKv, key: &str) -> Result<(), BrokerError> {
+    let (value, revision) = kv
+        .latest(key)
+        .await
+        .map_err(|e| decorate("failed to restore session from NATS", e))?
+        .ok_or_else(|| decorate("failed to restore session from NATS", "nats: key not found"))?;
+    write_back_session(kv, key, value, revision).await
+}
+
+/// The write of [`refresh_session`]: `value` as read at `revision`. A newer
+/// revision means a commit has written the key since, which restarted its TTL
+/// too, so the touch has nothing left to do and succeeds.
+async fn write_back_session(
+    kv: &impl SessionKv,
+    key: &str,
+    value: bytes::Bytes,
+    revision: u64,
+) -> Result<(), BrokerError> {
+    kv.update(key, value, revision).await.map(|_| ()).map_err(|e| decorate("failed to touch session in NATS", e))
+}
+
 /// Upstream `fetchBucketWithTTL`: creates the bucket, or reuses an existing
 /// one, recreating it when its TTL differs from `ttl`.
 async fn fetch_bucket_with_ttl(js: &jetstream::Context, key: &str, ttl: Duration) -> Result<kv::Store, BrokerError> {
@@ -1027,16 +1091,7 @@ impl Broker for Nats {
     fn touch_session(&self, sid: &str) -> Result<(), BrokerError> {
         let js = self.inner.js_ready()?;
         let key = format!("{SESSIONS_PREFIX}{sid}");
-        block_on(async move {
-            let value = js
-                .kv
-                .get(key.clone())
-                .await
-                .map_err(|e| decorate("failed to restore session from NATS", e))?
-                .ok_or_else(|| decorate("failed to restore session from NATS", "nats: key not found"))?;
-            js.kv.put(key, value).await.map_err(|e| decorate("failed to touch session in NATS", e))?;
-            Ok(())
-        })
+        block_on(async move { refresh_session(&js.kv, &key).await })
     }
 
     fn supports_presence(&self) -> bool {
@@ -1240,6 +1295,167 @@ mod tests {
         assert_eq!("1h0m0s", go_duration(Duration::from_secs(3600)));
         assert_eq!("50h0m0s", go_duration(Duration::from_secs(180_000)));
         assert_eq!("1.5\u{b5}s", go_duration(Duration::from_nanos(1500)));
+    }
+
+    /// A key-value bucket in memory with revisions as JetStream counts them
+    /// (one sequence for the whole bucket).
+    #[derive(Default)]
+    struct FakeKv {
+        state: Mutex<(u64, HashMap<String, Revisioned>)>,
+    }
+
+    impl FakeKv {
+        /// A commit (`commit_session`): an unconditional put.
+        fn commit(&self, key: &str, value: &'static str) -> u64 {
+            let mut st = lock(&self.state);
+            st.0 += 1;
+            let revision = st.0;
+            st.1.insert(key.to_owned(), (bytes::Bytes::from_static(value.as_bytes()), revision));
+            revision
+        }
+
+        /// A deletion, or an expiry by the bucket's TTL.
+        fn remove(&self, key: &str) {
+            let mut st = lock(&self.state);
+            st.0 += 1;
+            st.1.remove(key);
+        }
+
+        fn value(&self, key: &str) -> Option<(String, u64)> {
+            lock(&self.state).1.get(key).map(|(v, r)| (String::from_utf8_lossy(v).into_owned(), *r))
+        }
+    }
+
+    impl SessionKv for FakeKv {
+        async fn latest(&self, key: &str) -> Result<Option<Revisioned>, String> {
+            Ok(lock(&self.state).1.get(key).cloned())
+        }
+
+        async fn update(&self, key: &str, value: bytes::Bytes, revision: u64) -> Result<bool, String> {
+            let mut st = lock(&self.state);
+            // A deleted or expired key matches no revision that was read
+            // (JetStream compares with its delete marker, or with 0).
+            if st.1.get(key).map_or(0, |(_, r)| *r) != revision {
+                return Ok(false);
+            }
+            st.0 += 1;
+            let next = st.0;
+            st.1.insert(key.to_owned(), (value, next));
+            Ok(true)
+        }
+    }
+
+    fn run<F: Future>(fut: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(fut)
+    }
+
+    /// A touch writes the value back as a new revision, which restarts the
+    /// key's TTL.
+    #[test]
+    fn deviation_d088_a_touch_writes_the_session_back() {
+        let kv = FakeKv::default();
+        kv.commit("sid", "a");
+
+        run(refresh_session(&kv, "sid")).unwrap();
+
+        assert_eq!(Some(("a".to_owned(), 2)), kv.value("sid"));
+    }
+
+    /// A commit that lands while a touch waits for JetStream stays the latest
+    /// value: the touch's write is conditional on the revision it read, and
+    /// a newer revision counts as refreshed.
+    #[test]
+    fn deviation_d088_a_touch_does_not_overwrite_a_newer_commit() {
+        let kv = FakeKv::default();
+        kv.commit("sid", "a");
+        let (value, revision) = run(kv.latest("sid")).unwrap().unwrap();
+        let newer = kv.commit("sid", "b");
+
+        run(write_back_session(&kv, "sid", value, revision)).unwrap();
+
+        assert_eq!(Some(("b".to_owned(), newer)), kv.value("sid"));
+    }
+
+    /// A touch of a missing key fails, as in AnyCable, and a key that expires
+    /// or is deleted while a touch waits is not written back.
+    #[test]
+    fn deviation_d088_a_touch_does_not_create_a_session() {
+        let kv = FakeKv::default();
+        assert_eq!(
+            "failed to restore session from NATS, cause: nats: key not found",
+            run(refresh_session(&kv, "sid")).unwrap_err().message
+        );
+        assert_eq!(None, kv.value("sid"));
+
+        kv.commit("sid", "a");
+        let (value, revision) = run(kv.latest("sid")).unwrap().unwrap();
+        kv.remove("sid");
+
+        run(write_back_session(&kv, "sid", value, revision)).unwrap();
+
+        assert_eq!(None, kv.value("sid"));
+    }
+
+    /// The same interleavings on a JetStream bucket (needs `nats-server`).
+    #[test]
+    fn deviation_d088_touches_on_jetstream_keep_newer_commits_and_create_nothing() {
+        let Some(bin) = nats_server_binary() else { return };
+        let port = free_port();
+        let store = std::env::temp_dir().join(format!("cabby-broker-touch-{port}"));
+        let mut server = std::process::Command::new(bin)
+            .args(["-js", "-a", "127.0.0.1", "-p", &port.to_string(), "-sd"])
+            .arg(&store)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+
+        let outcome = block_on(async move {
+            let s = |e: &dyn std::fmt::Display| e.to_string();
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let client = loop {
+                match async_nats::connect(format!("nats://127.0.0.1:{port}")).await {
+                    Ok(c) => break c,
+                    Err(e) if Instant::now() > deadline => return Err(s(&e)),
+                    Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+                }
+            };
+            let kv = jetstream::new(client)
+                .create_key_value(kv::Config { bucket: "touch".into(), ..Default::default() })
+                .await
+                .map_err(|e| s(&e))?;
+
+            // A plain touch writes a new revision.
+            let first = kv.put("sid", "a".into()).await.map_err(|e| s(&e))?;
+            refresh_session(&kv, "sid").await.map_err(|e| e.message)?;
+            let touched: Option<Revisioned> = kv.latest("sid").await?;
+
+            // A commit between the touch's read and its write stays the latest.
+            let (value, revision) = kv.latest("sid").await?.ok_or("no value")?;
+            let newer = kv.put("sid", "b".into()).await.map_err(|e| s(&e))?;
+            write_back_session(&kv, "sid", value, revision).await.map_err(|e| e.message)?;
+            let kept: Option<Revisioned> = kv.latest("sid").await?;
+
+            // A missing key, and one deleted meanwhile, are not created.
+            let missing = refresh_session(&kv, "none").await.err().map(|e| e.message);
+            let none: Option<Revisioned> = kv.latest("none").await?;
+            kv.put("gone", "a".into()).await.map_err(|e| s(&e))?;
+            let (value, revision) = kv.latest("gone").await?.ok_or("no value")?;
+            kv.delete("gone").await.map_err(|e| s(&e))?;
+            write_back_session(&kv, "gone", value, revision).await.map_err(|e| e.message)?;
+            let gone = kv.get("gone").await.map_err(|e| s(&e))?;
+            Ok::<_, String>((first, touched, newer, kept, missing, none, gone))
+        });
+        let _ = server.kill();
+        let _ = server.wait();
+        let _ = std::fs::remove_dir_all(&store);
+
+        let (first, touched, newer, kept, missing, none, gone) = outcome.unwrap();
+        let (value, revision) = touched.unwrap();
+        assert_eq!(("a", true), (std::str::from_utf8(&value).unwrap(), revision > first));
+        assert_eq!(Some((bytes::Bytes::from_static(b"b"), newer)), kept);
+        assert_eq!(Some("failed to restore session from NATS, cause: nats: key not found".to_owned()), missing);
+        assert_eq!((None, None), (none, gone));
     }
 
     #[test]

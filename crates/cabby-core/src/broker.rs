@@ -289,6 +289,11 @@ pub struct Recorded {
 /// limit and expiring from the front are O(1) per entry, and an offset lookup
 /// is index arithmetic from the lowest stored offset (upstream's `low`, which
 /// is always the front entry's offset, or 0 when the stream is empty).
+///
+/// A stream in a [`Memory`] broker is written without the broker's map lock:
+/// the expiry pass marks a stream it drops as removed while it holds the
+/// stream's lock, and a writer that finds the mark looks the stream up again
+/// (deviation D-087). Locks are always taken map first, then stream.
 pub struct Memstream {
     state: RwLock<MemstreamState>,
     ttl: i64,
@@ -302,6 +307,9 @@ struct MemstreamState {
     /// Unix seconds after which the whole stream may be dropped.
     deadline: i64,
     data: VecDeque<Entry>,
+    /// Set when the expiry pass has dropped the stream from its broker's map;
+    /// nothing is written to it after that.
+    removed: bool,
 }
 
 impl MemstreamState {
@@ -312,35 +320,50 @@ impl MemstreamState {
 
 impl Memstream {
     pub fn new(ttl: i64, limit: usize, clock: Arc<dyn Clock>) -> Self {
-        Self { state: RwLock::new(MemstreamState { offset: 0, deadline: 0, data: VecDeque::new() }), ttl, limit, clock }
+        Self {
+            state: RwLock::new(MemstreamState { offset: 0, deadline: 0, data: VecDeque::new(), removed: false }),
+            ttl,
+            limit,
+            clock,
+        }
     }
 
     pub fn add(&self, data: &str) -> u64 {
-        self.add_recorded(data).offset
+        let now = self.clock.now();
+        self.add_locked(&mut write(&self.state), data, now).offset
     }
 
-    /// [`Memstream::add`], returning the assigned offset and timestamp.
-    fn add_recorded(&self, data: &str) -> Recorded {
+    /// [`Memstream::add`] for a stream of a broker's map, returning the
+    /// assigned offset and timestamp; `None` when the stream was removed.
+    fn add_recorded(&self, data: &str) -> Option<Recorded> {
         let now = self.clock.now();
         let mut st = write(&self.state);
+        (!st.removed).then(|| self.add_locked(&mut st, data, now))
+    }
+
+    fn add_locked(&self, st: &mut MemstreamState, data: &str, now: SystemTime) -> Recorded {
         st.offset += 1;
         let recorded = Recorded { offset: st.offset, timestamp: unix_secs(now) };
         let entry = Entry { offset: recorded.offset, timestamp: recorded.timestamp, data: data.to_owned() };
-        self.append(&mut st, entry, now);
+        self.append(st, entry, now);
         recorded
     }
 
-    /// Stores an entry at an explicit offset (upstream `insert`); `ts: None` is "now".
-    fn insert(&self, data: &str, offset: u64, ts: Option<SystemTime>) -> Result<u64, BrokerError> {
+    /// Stores an entry at an explicit offset (upstream `insert`); `ts: None` is
+    /// "now". `None` when the stream was removed.
+    fn insert(&self, data: &str, offset: u64, ts: Option<SystemTime>) -> Option<Result<u64, BrokerError>> {
         let now = self.clock.now();
         let ts = ts.unwrap_or(now);
         let mut st = write(&self.state);
+        if st.removed {
+            return None;
+        }
         if st.offset >= offset {
-            return Err(BrokerError { message: format!("offset {offset} is already taken") });
+            return Some(Err(BrokerError { message: format!("offset {offset} is already taken") }));
         }
         st.offset = offset;
         self.append(&mut st, Entry { offset, timestamp: unix_secs(ts), data: data.to_owned() }, now);
-        Ok(offset)
+        Some(Ok(offset))
     }
 
     /// The latest stored offset, 0 when the stream holds no entries.
@@ -348,20 +371,21 @@ impl Memstream {
         read(&self.state).data.back().map_or(0, |e| e.offset)
     }
 
-    fn deadline(&self) -> i64 {
-        read(&self.state).deadline
-    }
-
     /// Installs restored state: the last assigned offset, the deadline (unix
     /// seconds) and the newest entries in ascending offsets, at most `limit`.
-    fn restore(&self, offset: u64, deadline: i64, entries: Vec<Entry>) {
+    /// `None`, with `entries` left in place, when the stream was removed.
+    fn restore(&self, offset: u64, deadline: i64, entries: &mut Vec<Entry>) -> Option<()> {
         let mut st = write(&self.state);
+        if st.removed {
+            return None;
+        }
         st.offset = offset;
         st.deadline = deadline;
-        st.data = VecDeque::from(entries);
+        st.data = VecDeque::from(std::mem::take(entries));
         while st.data.len() > self.limit {
             st.data.pop_front();
         }
+        Some(())
     }
 
     fn append(&self, st: &mut MemstreamState, entry: Entry, now: SystemTime) {
@@ -375,11 +399,25 @@ impl Memstream {
     }
 
     pub fn expire(&self) {
-        let deadline = unix_secs(self.clock.now()) - self.ttl;
-        let mut st = write(&self.state);
-        while st.data.front().is_some_and(|e| e.timestamp < deadline) {
+        let now = unix_secs(self.clock.now());
+        Self::expire_entries(&mut write(&self.state), now - self.ttl);
+    }
+
+    fn expire_entries(st: &mut MemstreamState, cutoff: i64) {
+        while st.data.front().is_some_and(|e| e.timestamp < cutoff) {
             st.data.pop_front();
         }
+    }
+
+    /// One expiry pass over a stream of a broker's map (the caller holds the
+    /// map's write lock): expires entries and, when the stream's deadline is
+    /// before `now` (unix seconds), marks it removed in the same critical
+    /// section. Returns whether the map keeps it.
+    fn sweep(&self, now: i64) -> bool {
+        let mut st = write(&self.state);
+        Self::expire_entries(&mut st, now - self.ttl);
+        st.removed = st.deadline < now;
+        !st.removed
     }
 
     /// Calls `callback` for every entry after `offset`.
@@ -550,14 +588,15 @@ impl Memory {
 
     /// Appends a message and returns its offset.
     pub fn add(&self, stream: &str, data: &str) -> u64 {
-        self.inner.stream_or_create(stream).add(data)
+        self.inner.on_stream(stream, |s| s.add_recorded(data)).offset
     }
 
     /// Stores a message at an explicit offset; `ts: None` means "now".
     pub fn store(&self, stream: &str, data: &[u8], offset: u64, ts: Option<SystemTime>) -> Result<u64, BrokerError> {
         // Go converts the bytes with `string(data)`, which keeps invalid UTF-8;
         // history data is text here, so invalid sequences become U+FFFD.
-        self.inner.stream_or_create(stream).insert(&String::from_utf8_lossy(data), offset, ts)
+        let data = String::from_utf8_lossy(data);
+        self.inner.on_stream(stream, |s| s.insert(&data, offset, ts))
     }
 
     /// One expiration pass over history, sessions and presence.
@@ -574,7 +613,7 @@ impl Memory {
             }
             return Ok(None);
         }
-        let recorded = self.inner.stream_or_create(&msg.stream).add_recorded(&msg.data);
+        let recorded = self.inner.on_stream(&msg.stream, |s| s.add_recorded(&msg.data));
         let msg = StreamMessage { epoch: self.epoch(), offset: recorded.offset, ..msg.clone() };
         if let Some(b) = &self.inner.broadcaster {
             b.broadcast(&msg);
@@ -591,7 +630,7 @@ impl Memory {
         name: &str,
         max_offset: u64,
         deadline: i64,
-        entries: Vec<Entry>,
+        mut entries: Vec<Entry>,
     ) -> Result<(), BrokerError> {
         let contiguous = entries.windows(2).all(|w| w[1].offset == w[0].offset + 1);
         let anchored = entries.last().is_none_or(|e| e.offset == max_offset);
@@ -600,7 +639,7 @@ impl Memory {
                 message: format!("restored entries of {name} must be contiguous and end at offset {max_offset}"),
             });
         }
-        self.inner.stream_or_create(name).restore(max_offset, deadline, entries);
+        self.inner.on_stream(name, |s| s.restore(max_offset, deadline, &mut entries));
         Ok(())
     }
 
@@ -643,6 +682,19 @@ impl MemoryInner {
             .clone()
     }
 
+    /// Runs `write` on the stream `name`, created if missing. `write` returns
+    /// `None` when the expiry pass removed the stream after it was looked up;
+    /// the stream is then looked up again, so every write lands in a stream
+    /// the map holds. A retry needs a pass to drop this very stream between
+    /// the lookup and the write, so it is rare and a second one rarer still.
+    fn on_stream<R>(&self, name: &str, mut write: impl FnMut(&Memstream) -> Option<R>) -> R {
+        loop {
+            if let Some(done) = write(&self.stream_or_create(name)) {
+                return done;
+            }
+        }
+    }
+
     fn get(&self, name: &str) -> Option<Arc<Memstream>> {
         read(&self.streams).get(name).cloned()
     }
@@ -673,11 +725,8 @@ impl MemoryInner {
     fn expire(&self) {
         {
             let now = unix_secs(self.clock.now());
-            let mut streams = write(&self.streams);
-            streams.retain(|_, stream| {
-                stream.expire();
-                stream.deadline() >= now
-            });
+            // Lock order: map, then each stream (`Memstream::sweep`).
+            write(&self.streams).retain(|_, stream| stream.sweep(now));
         }
         self.expire_sessions_cache();
         self.expire_presence();
@@ -1476,5 +1525,194 @@ mod tests {
         broker.start().unwrap();
         broker.shutdown().unwrap();
         assert!(broker.stop.wait(Duration::ZERO));
+    }
+
+    /// A [`TestClock`] that stops the first `now()` call made on the thread
+    /// named `paused` until [`PausingClock::resume`]: a writer reads the clock
+    /// after it has looked up its stream and before it locks it. Every wait
+    /// has a deadline.
+    struct PausingClock {
+        clock: Arc<TestClock>,
+        paused: &'static str,
+        armed: Mutex<bool>,
+        reached: Channel,
+        resumed: Channel,
+    }
+
+    struct Channel {
+        tx: Mutex<std::sync::mpsc::Sender<()>>,
+        rx: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl Channel {
+        fn new() -> Self {
+            let (tx, rx) = std::sync::mpsc::channel();
+            Self { tx: Mutex::new(tx), rx: Mutex::new(rx) }
+        }
+
+        fn send(&self) {
+            lock(&self.tx).send(()).unwrap();
+        }
+
+        fn recv(&self, what: &str) {
+            lock(&self.rx).recv_timeout(Duration::from_secs(10)).unwrap_or_else(|e| panic!("{what}: {e}"));
+        }
+    }
+
+    impl PausingClock {
+        fn new(paused: &'static str) -> Arc<Self> {
+            Arc::new(Self {
+                clock: TestClock::new(),
+                paused,
+                armed: Mutex::new(true),
+                reached: Channel::new(),
+                resumed: Channel::new(),
+            })
+        }
+
+        /// Returns once the paused thread is waiting in `now()`.
+        fn wait_paused(&self) {
+            self.reached.recv("the writer reads the clock");
+        }
+
+        fn resume(&self) {
+            self.resumed.send();
+        }
+    }
+
+    impl Clock for PausingClock {
+        fn now(&self) -> SystemTime {
+            let pause = std::thread::current().name() == Some(self.paused) && std::mem::take(&mut *lock(&self.armed));
+            if pause {
+                self.reached.send();
+                self.resumed.recv("the test resumes the writer");
+            }
+            self.clock.now()
+        }
+    }
+
+    /// Runs `write` on a thread named `writer` that stops in its first clock
+    /// read, runs one expiry pass meanwhile, then lets the writer finish.
+    fn write_across_an_expiry_pass<R: Send + 'static>(
+        broker: &Arc<Memory>,
+        clock: &PausingClock,
+        write: impl FnOnce(&Memory) -> R + Send + 'static,
+    ) -> R {
+        let b = broker.clone();
+        let writer = std::thread::Builder::new().name("writer".into()).spawn(move || write(&b)).unwrap();
+        clock.wait_paused();
+        broker.expire();
+        clock.resume();
+        writer.join().unwrap()
+    }
+
+    /// A new stream has no deadline yet, so an expiry pass between its
+    /// creation and the first append removes it; the append still lands in
+    /// the stream the broker holds (D-087).
+    #[test]
+    fn deviation_d087_an_append_to_a_new_stream_is_not_lost_to_an_expiry_pass() {
+        let clock = PausingClock::new("writer");
+        let broker = Arc::new(Memory::new(None, None, &Config::new(), clock.clone()));
+
+        let recorded = write_across_an_expiry_pass(&broker, &clock, |b| {
+            b.handle_broadcast_recorded(&msg("s", false)).unwrap().unwrap().offset
+        });
+
+        assert_eq!(1, recorded);
+        let stored: Vec<(u64, String)> =
+            broker.history_since("s", 0).unwrap().unwrap_or_default().into_iter().map(|m| (m.offset, m.data)).collect();
+        assert_eq!(vec![(1, "x".to_owned())], stored, "the message is in history");
+        assert_eq!(Some(1), broker.peak("s").unwrap().map(|m| m.offset));
+        assert_eq!(2, broker.add("s", "y"), "the next offset follows it");
+    }
+
+    /// A stream past its deadline is removed by the pass even when a writer
+    /// already looked it up: the writer's message starts a new stream, as a
+    /// message after the pass does (D-087).
+    #[test]
+    fn deviation_d087_an_append_to_an_expired_stream_is_not_lost_to_an_expiry_pass() {
+        let clock = PausingClock::new("writer");
+        let mut config = Config::new();
+        config.history_ttl = 1;
+        let broker = Arc::new(Memory::new(None, None, &config, clock.clone()));
+        broker.add("s", "a");
+        broker.add("s", "b");
+        // Ten TTLs after the last message, the stream may be dropped.
+        clock.clock.advance(Duration::from_secs(11));
+
+        let offset = write_across_an_expiry_pass(&broker, &clock, |b| b.add("s", "c"));
+
+        assert_eq!(1, offset, "the pass dropped the old stream and its offsets");
+        let stored: Vec<(u64, String)> =
+            broker.history_since("s", 0).unwrap().unwrap_or_default().into_iter().map(|m| (m.offset, m.data)).collect();
+        assert_eq!(vec![(1, "c".to_owned())], stored, "the message is in history");
+        assert_eq!(2, broker.add("s", "d"), "the next offset follows it");
+    }
+
+    /// The NATS broker copies messages into its local broker with `store`;
+    /// the same pass must not lose them (D-087).
+    #[test]
+    fn deviation_d087_a_stored_message_is_not_lost_to_an_expiry_pass() {
+        let clock = PausingClock::new("writer");
+        let broker = Arc::new(Memory::new(None, None, &Config::new(), clock.clone()));
+
+        let stored = write_across_an_expiry_pass(&broker, &clock, |b| b.store("s", b"m", 5, None));
+
+        assert_eq!(5, stored.unwrap());
+        assert_eq!(Some(5), broker.peak("s").unwrap().map(|m| m.offset), "the message is in history");
+        assert!(broker.store("s", b"m", 5, None).is_err(), "the offset stays taken");
+    }
+
+    /// Concurrent appends to new streams while expiry passes run back to
+    /// back: every append is kept and each stream's offsets are 1..=n. Which
+    /// appends meet a pass depends on scheduling (without the removed mark
+    /// most runs lose some); the tests above pin the interleaving itself.
+    #[test]
+    fn deviation_d087_concurrent_appends_and_expiry_passes_keep_offsets_contiguous() {
+        const WRITERS: usize = 4;
+        const STREAMS: usize = 1000;
+        let mut config = Config::new();
+        config.history_limit = WRITERS;
+        let broker = Memory::new(None, None, &config, TestClock::new());
+        let done = std::sync::atomic::AtomicBool::new(false);
+
+        let offsets: Vec<Vec<u64>> = std::thread::scope(|s| {
+            let sweeper = s.spawn(|| {
+                let mut passes = 0u64;
+                while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                    broker.expire();
+                    passes += 1;
+                }
+                passes
+            });
+            let writers: Vec<_> = (0..WRITERS)
+                .map(|w| {
+                    let broker = &broker;
+                    s.spawn(move || {
+                        (0..STREAMS).map(|i| broker.add(&format!("s{i}"), &format!("w{w}"))).collect::<Vec<u64>>()
+                    })
+                })
+                .collect();
+            let offsets = writers.into_iter().map(|w| w.join().unwrap()).collect();
+            done.store(true, std::sync::atomic::Ordering::Relaxed);
+            assert!(sweeper.join().unwrap() > 0);
+            offsets
+        });
+
+        for i in 0..STREAMS {
+            let mut got: Vec<u64> = offsets.iter().map(|w| w[i]).collect();
+            got.sort_unstable();
+            assert_eq!((1..=WRITERS as u64).collect::<Vec<u64>>(), got, "offsets of s{i}");
+            let mut stored: Vec<(u64, String)> = broker
+                .history_since(&format!("s{i}"), 0)
+                .unwrap()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|m| (m.offset, m.data))
+                .collect();
+            stored.sort_unstable();
+            assert_eq!(WRITERS, stored.len(), "history of s{i}: {stored:?}");
+            assert_eq!(got, stored.iter().map(|(o, _)| *o).collect::<Vec<u64>>(), "history of s{i}");
+        }
     }
 }
