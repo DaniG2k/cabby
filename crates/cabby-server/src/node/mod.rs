@@ -31,7 +31,10 @@ mod config;
 mod deps;
 mod disconnect_queue;
 mod live_hold;
+mod revocations;
 mod session;
+#[cfg(test)]
+mod session_cache_tests;
 mod subscription_state;
 mod tasks;
 #[cfg(test)]

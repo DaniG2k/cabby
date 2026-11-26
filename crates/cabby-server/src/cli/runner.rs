@@ -483,6 +483,7 @@ impl Runner {
             self.new_broker(&node, &subscriber).map_err(|e| decorate(e, "failed to initialize broker"))?;
         log_info(&runner_broker.announce());
         node.set_broker(node_broker.clone());
+        node.set_sessions_ttl(Duration::from_secs(u64::try_from(self.config.broker.sessions_ttl).unwrap_or(0)));
         self.node_broker = Some(node_broker);
 
         let disconnector: Arc<dyn Disconnector> = if self.config.disconnector_disabled {

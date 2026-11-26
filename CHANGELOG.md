@@ -8,6 +8,17 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
+## [Unreleased]
+
+### Fixed
+
+- Only sessions that the application authenticated are written to the session cache or keep
+  their entry alive. A session with a failed authentication is no longer cached (D-083).
+- After a remote disconnect, a node authenticates the identifiers' earlier sessions through the
+  application instead of restoring them from the session cache, for the sessions TTL. Sessions
+  authenticated afterwards are restored as usual. Cache entries record when the session was
+  authenticated (D-084).
+
 ## [0.5.2] - 2026-11-27
 
 Cabby 0.5.2 gives request bodies a time limit in the HTTP broadcast endpoint, the API and the

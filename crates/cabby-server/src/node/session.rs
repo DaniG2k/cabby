@@ -260,6 +260,9 @@ struct Settings {
     resume_interval: Duration,
     prev_sid: String,
     inactive: bool,
+    /// The node of [`Session::new`]: it decides whether the keepalive may
+    /// touch the cache entry (D-083, D-084).
+    node: Weak<Node>,
     /// The session's logger (upstream `Session.Log`: the node's with `sid`).
     log: Logger,
 }
@@ -271,6 +274,13 @@ struct Lifecycle {
     disconnect_interest: bool,
     /// An undecodable message ended the reading of commands (D-074).
     discarding: bool,
+    /// The application authenticated the session, or it was restored from
+    /// the cache: only such sessions are cached (D-083).
+    authenticated: bool,
+    /// When the application authenticated it (unix microseconds; `None`:
+    /// unknown, e.g. restored from an entry without the time). Kept in the
+    /// cache entry and carried over by restores (D-084).
+    authenticated_at: Option<i64>,
     internal_state: Option<HashMap<String, Value>>,
 }
 
@@ -417,15 +427,20 @@ struct CacheEntryOut<'a> {
     istate: Option<BTreeMap<&'a str, BTreeMap<&'a str, &'a str>>>,
     #[serde(rename = "Disconnectable")]
     disconnectable: bool,
+    /// Cabby only (D-084); Go ignores unknown fields when it restores an entry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    authenticated_at: Option<i64>,
 }
 
+/// A decoded cache entry.
 #[derive(Default)]
-struct CacheEntryIn {
-    ids: String,
+pub(super) struct CacheEntryIn {
+    pub(super) ids: String,
     subs: HashMap<String, Vec<String>>,
     cstate: Option<StringMap>,
     istate: HashMap<String, StringMap>,
     disconnectable: bool,
+    pub(super) authenticated_at: Option<i64>,
 }
 
 fn json_error(e: impl std::fmt::Display) -> NodeError {
@@ -435,8 +450,8 @@ fn json_error(e: impl std::fmt::Display) -> NodeError {
 /// Decodes a cache entry like Go's `json.Unmarshal` into `cacheEntry`: field
 /// names match exactly or case-insensitively, `null` leaves a field unset,
 /// unknown fields are ignored.
-fn decode_cache_entry(cached: &[u8]) -> Result<CacheEntryIn, NodeError> {
-    const FIELDS: [&str; 5] = ["ids", "subs", "cstate", "istate", "disconnectable"];
+pub(super) fn decode_cache_entry(cached: &[u8]) -> Result<CacheEntryIn, NodeError> {
+    const FIELDS: [&str; 6] = ["ids", "subs", "cstate", "istate", "disconnectable", "authenticated_at"];
     let value: Value = serde_json::from_slice(cached).map_err(json_error)?;
     let mut entry = CacheEntryIn::default();
     let Value::Object(map) = value else {
@@ -461,6 +476,7 @@ fn decode_cache_entry(cached: &[u8]) -> Result<CacheEntryIn, NodeError> {
                 entry.istate = istate.into_iter().map(|(k, v)| (k, v.unwrap_or_default())).collect();
             }
             Some(4) => entry.disconnectable = serde_json::from_value(v).map_err(json_error)?,
+            Some(5) => entry.authenticated_at = serde_json::from_value(v).map_err(json_error)?,
             _ => {}
         }
     }
@@ -506,6 +522,7 @@ impl Session {
             resume_interval: Duration::ZERO,
             prev_sid: String::new(),
             inactive: false,
+            node: Weak::new(),
             log: Logger::default(),
         };
         let hot = ArcSwap::from_pointee(HotConfig::from_settings(&initial_settings));
@@ -571,6 +588,7 @@ impl Session {
             s.ping_precision.clone_from(&config.ping_timestamp_precision);
             s.native_ping = config.enable_native_ping;
             s.uid = uid.to_owned();
+            s.node = Arc::downgrade(node);
             s.log = node.logger().with("sid", uid);
             session.hot.store(Arc::new(HotConfig::from_settings(&s)));
         }
@@ -956,12 +974,19 @@ impl Session {
                 self.schedule();
             }
             TimerEvent::Expire => {
-                let (broker, interval) = {
+                let (broker, interval, node) = {
                     let s = self.settings();
-                    (s.broker.clone(), s.resume_interval)
+                    (s.broker.clone(), s.resume_interval, s.node.upgrade())
                 };
                 if let Some(b) = broker {
-                    let _ = b.touch_session(&self.get_id());
+                    let touch = || {
+                        let _ = b.touch_session(&self.get_id());
+                    };
+                    match node {
+                        Some(node) => node.write_session_cache(self, touch),
+                        None if self.is_authenticated() => touch(),
+                        None => {}
+                    }
                 }
                 let now = self.clock_now();
                 {
@@ -1184,6 +1209,24 @@ impl Session {
 
     pub fn set_identifiers(&self, ids: &str) {
         lock(&self.env).identifiers = ids.to_owned();
+    }
+
+    /// Whether the application authenticated the session or it was restored
+    /// from the cache (D-083).
+    pub(super) fn is_authenticated(&self) -> bool {
+        lock(&self.lifecycle).authenticated
+    }
+
+    /// When the application authenticated the session (unix microseconds),
+    /// if known (D-084).
+    pub(super) fn authenticated_at(&self) -> Option<i64> {
+        lock(&self.lifecycle).authenticated_at
+    }
+
+    pub(super) fn mark_authenticated(&self, at: Option<i64>) {
+        let mut l = lock(&self.lifecycle);
+        l.authenticated = true;
+        l.authenticated_at = at;
     }
 
     pub fn is_disconnectable(&self) -> bool {
@@ -1567,8 +1610,12 @@ impl Session {
     /// Restores identifiers, states, subscriptions and the Disconnect interest
     /// from a cache entry (upstream `RestoreFromCache`).
     pub fn restore_from_cache(&self, cached: &[u8]) -> Result<(), NodeError> {
-        let entry = decode_cache_entry(cached)?;
+        self.apply_cache_entry(decode_cache_entry(cached)?);
+        Ok(())
+    }
 
+    /// The state part of [`Session::restore_from_cache`].
+    pub(super) fn apply_cache_entry(&self, entry: CacheEntryIn) {
         self.mark_disconnectable(entry.disconnectable);
         {
             let mut env = lock(&self.env);
@@ -1587,8 +1634,6 @@ impl Session {
                 self.subscriptions.add_channel_stream(id, stream);
             }
         }
-
-        Ok(())
     }
 
     pub fn prev_sid(&self) -> String {
@@ -1909,7 +1954,10 @@ impl cabby_core::hub::HubSession for Session {
 /// `Disconnectable` (upstream `ToCacheEntry`).
 impl Cacheable for Session {
     fn to_cache_entry(&self) -> Result<Vec<u8>, BrokerError> {
-        let disconnectable = self.is_disconnectable();
+        let (disconnectable, authenticated_at) = {
+            let l = lock(&self.lifecycle);
+            (l.disconnect_interest, l.authenticated_at)
+        };
         let subs: BTreeMap<String, Vec<String>> = self.subscriptions.to_map().into_iter().collect();
         let env = lock(&self.env);
         let entry = CacheEntryOut {
@@ -1923,6 +1971,7 @@ impl Cacheable for Session {
                     .collect()
             }),
             disconnectable,
+            authenticated_at,
         };
         Ok(cabby_core::gojson::to_vec(&entry))
     }
@@ -2389,6 +2438,23 @@ mod tests {
             r#"{"ids":"user:1","subs":{"chat":["s1"]},"cstate":{"a":"1","b":"2"},"istate":{},"Disconnectable":false}"#,
             entry
         );
+    }
+
+    /// Deviation D-084: the cache entry keeps when the application
+    /// authenticated the session (sessions without one write Go's entry).
+    #[test]
+    fn deviation_d084_cache_entry_keeps_the_authentication_time() {
+        let clock = TestClock::new();
+        let (s, _rx) = session(&clock, vec![]);
+        s.set_identifiers("user:1");
+        s.mark_authenticated(Some(1_800_000_000_000_000));
+        let entry = String::from_utf8(s.to_cache_entry().unwrap()).unwrap();
+        assert_eq!(
+            r#"{"ids":"user:1","subs":{},"cstate":{},"istate":{},"Disconnectable":false,"authenticated_at":1800000000000000}"#,
+            entry
+        );
+        assert_eq!(Some(1_800_000_000_000_000), decode_cache_entry(entry.as_bytes()).unwrap().authenticated_at);
+        assert_eq!(None, decode_cache_entry(br#"{"ids":"x"}"#).unwrap().authenticated_at);
     }
 
     #[test]

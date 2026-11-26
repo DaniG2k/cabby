@@ -1,9 +1,9 @@
 //! The node itself (upstream `node/node.go` and `node/controller.go`) and its
 //! time abstraction.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, RwLock, Weak};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cabby_core::broker::{Broker, BrokerError, Cacheable, PresenceInfoOptions, Presenter};
 use cabby_core::common::{
@@ -22,7 +22,8 @@ use cabby_core::{log_debug, log_error, log_info, log_warn};
 
 use super::call_context::with_close_context;
 use super::disconnect_queue::context_done;
-use super::session::go_value_text;
+use super::revocations::Revocations;
+use super::session::{decode_cache_entry, go_value_text};
 use super::*;
 use crate::cli::SubscriberHandler;
 use crate::metrics::{Instrumenter, NoopMetrics};
@@ -51,6 +52,16 @@ pub trait Clock: Send + Sync {
     /// Runs `f` once after `delay` unless the returned timer is stopped first.
     fn after(&self, delay: Duration, f: Box<dyn FnOnce() + Send>) -> Box<dyn Timer>;
     fn ticker(&self, period: Duration) -> Arc<dyn Ticker>;
+    /// Wall-clock time in microseconds since the Unix epoch: when sessions are
+    /// authenticated and remote disconnects arrive (D-084). Defaults to the
+    /// system clock.
+    fn unix_micros(&self) -> i64 {
+        system_unix_micros()
+    }
+}
+
+fn system_unix_micros() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX))
 }
 
 /// The operating system clock: one timer thread for the whole process, fired
@@ -287,6 +298,11 @@ pub struct Node {
     pusher_channel_reserved: AtomicBool,
     /// Pub/sub subscriptions not active yet (D-105).
     activations: Arc<Activations>,
+    /// Identifiers disconnected remotely: their earlier sessions are not
+    /// restored or written to the cache (D-084).
+    revocations: Revocations,
+    /// How long cache entries live (milliseconds; see [`Node::set_sessions_ttl`]).
+    sessions_ttl_ms: AtomicU64,
 }
 
 impl std::fmt::Debug for Node {
@@ -329,6 +345,10 @@ impl Node {
             lifecycle_changed: Condvar::new(),
             pusher_channel_reserved: AtomicBool::new(false),
             activations: Arc::new(Activations::new()),
+            revocations: Revocations::new(),
+            sessions_ttl_ms: AtomicU64::new(
+                u64::try_from(cabby_core::broker::Config::new().sessions_ttl).unwrap_or(0).saturating_mul(1000),
+            ),
         });
 
         if registered {
@@ -647,16 +667,45 @@ impl Node {
         }
     }
 
+    /// How long the broker keeps session cache entries (its `sessions_ttl`;
+    /// default: the broker default, 5 minutes). A remote disconnect makes the
+    /// sessions cached before it unusable for this long (D-084).
+    pub fn set_sessions_ttl(&self, ttl: Duration) {
+        self.sessions_ttl_ms.store(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX), Ordering::Relaxed);
+    }
+
+    fn sessions_ttl(&self) -> Duration {
+        Duration::from_millis(self.sessions_ttl_ms.load(Ordering::Relaxed))
+    }
+
     pub fn lookup_session(&self, identifiers: &str) -> Option<Arc<Session>> {
         self.hub.find_by_identifier(identifiers)
     }
 
-    fn commit_session(&self, s: &Arc<Session>) {
-        if s.is_resumeable()
-            && let Err(e) = self.broker().commit_session(&s.get_id(), s.as_ref())
-        {
-            log_error!(s.logger(), "failed to persist session in cache", "error" => e.message);
+    /// Runs `write` (a commit or touch of the session's cache entry) only for
+    /// sessions that the application authenticated, or that were restored
+    /// (D-083; Go writes the session after every authentication result). A
+    /// session authenticated before a remote disconnect of its identifiers
+    /// leaves its entry as it is (D-084).
+    pub(super) fn write_session_cache(&self, s: &Session, write: impl FnOnce()) {
+        if !s.is_resumeable() || !s.is_authenticated() {
+            return;
         }
+        let (identifiers, authenticated_at) = (s.get_identifiers(), s.authenticated_at());
+        if self.revocations.refuses(&identifiers, authenticated_at, self.clock.now()) {
+            return;
+        }
+        write();
+        // A remote disconnect recorded meanwhile outlives the entry just written.
+        self.revocations.extend(&identifiers, authenticated_at, self.clock.now(), self.sessions_ttl());
+    }
+
+    fn commit_session(&self, s: &Arc<Session>) {
+        self.write_session_cache(s, || {
+            if let Err(e) = self.broker().commit_session(&s.get_id(), s.as_ref()) {
+                log_error!(s.logger(), "failed to persist session in cache", "error" => e.message);
+            }
+        });
     }
 
     /// Restores the session from the broker cache or calls the controller; on
@@ -676,6 +725,9 @@ impl Node {
             }
         }
 
+        // A session counts as authenticated when its authentication started
+        // (D-084: a remote disconnect meanwhile makes it an earlier session).
+        let started = self.clock.unix_micros();
         let env = s.get_env();
         let Outcome { result, error } =
             with_close_context(s.close_context(), || self.controller().authenticate(&s.get_id(), Some(&env)));
@@ -700,7 +752,7 @@ impl Node {
 
         let mut disconnect_after = false;
         if res.status == Status::Success {
-            self.authenticated(s, &res.identifier);
+            self.authenticated_since(s, &res.identifier, started);
         } else {
             if res.status == Status::Failure {
                 self.metrics.counter_increment(METRICS_FAILED_AUTHS);
@@ -722,11 +774,16 @@ impl Node {
     /// Marks the session authenticated and registers it with the hub unless it
     /// is already closed (upstream `Authenticated`).
     pub fn authenticated(&self, s: &Arc<Session>, identifiers: &str) {
+        self.authenticated_since(s, identifiers, self.clock.unix_micros());
+    }
+
+    fn authenticated_since(&self, s: &Arc<Session>, identifiers: &str, at: i64) {
         let _reg = s.registration();
         if s.is_closed() {
             return;
         }
         s.set_identifiers(identifiers);
+        s.mark_authenticated(Some(at));
         if !s.is_inactive() {
             self.hub.add_session(s.clone());
         }
@@ -758,20 +815,36 @@ impl Node {
             return false;
         }
 
-        if let Err(e) = s.restore_from_cache(&cached) {
-            log_error!(s.logger(), "failed to restore session from cache", "old_sid" => &prev_sid, "error" => e.0);
-            return false;
-        }
-
-        log_debug!(s.logger(), "session restored", "old_sid" => &prev_sid);
+        let entry = match decode_cache_entry(&cached) {
+            Ok(entry) => entry,
+            Err(e) => {
+                log_error!(s.logger(), "failed to restore session from cache", "old_sid" => &prev_sid, "error" => e.0);
+                return false;
+            }
+        };
 
         {
             let _reg = s.registration();
             if s.is_closed() {
                 return false;
             }
+            // Registered before the remote disconnects are checked: one recorded
+            // after the check finds the session in the hub.
+            s.set_identifiers(&entry.ids);
             self.hub.add_session(s.clone());
+            if self.revocations.refuses(&entry.ids, entry.authenticated_at, self.clock.now()) {
+                // Disconnected remotely after this snapshot (D-084): the
+                // application authenticates the session instead.
+                self.hub.remove_session(s);
+                s.set_identifiers("");
+                log_debug!(s.logger(), "session not restored: disconnected remotely", "old_sid" => &prev_sid);
+                return false;
+            }
+            let authenticated_at = entry.authenticated_at;
+            s.apply_cache_entry(entry);
+            log_debug!(s.logger(), "session restored", "old_sid" => &prev_sid);
             s.set_connected(true);
+            s.mark_authenticated(authenticated_at);
 
             // Resubscribe to streams
             for (identifier, streams) in s.subscriptions().to_map() {
@@ -1188,9 +1261,9 @@ impl Node {
         }
 
         let sid = s.get_id();
-        if s.is_resumeable() {
+        self.write_session_cache(s, || {
             let _ = broker.touch_session(&sid);
-        }
+        });
         let _ = broker.touch_presence(&sid);
 
         if !s.is_disconnectable() {
@@ -1226,9 +1299,14 @@ impl Node {
         res.map_err(|e| NodeError(e.message))
     }
 
+    /// Disconnects the identifiers' sessions (upstream `RemoteDisconnect`).
+    /// Recorded first: for the sessions TTL, the sessions of these identifiers
+    /// authenticated before now, connected or cached, are authenticated by the
+    /// application instead of restored (D-084).
     pub fn remote_disconnect(&self, msg: &RemoteDisconnectMessage) {
         self.metrics.counter_increment(METRICS_BROADCAST_MSG);
         log_debug!(self.log, "incoming pubsub command", "data" => msg.log_value());
+        self.revocations.revoke(&msg.identifier, self.clock.unix_micros(), self.clock.now(), self.sessions_ttl());
         self.hub.remote_disconnect(msg.clone());
     }
 
