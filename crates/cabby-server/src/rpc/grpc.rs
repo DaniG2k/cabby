@@ -762,7 +762,7 @@ impl ClientHelper for GrpcClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::net::TcpListener;
+    use tokio::net::{TcpListener, TcpSocket};
 
     /// A TCP backend that counts accepted connections; aborting `task` stops
     /// it and closes its connections (like a pod going away).
@@ -773,7 +773,10 @@ mod tests {
     }
 
     async fn backend() -> Backend {
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        serve(TcpListener::bind("127.0.0.1:0").await.expect("bind"))
+    }
+
+    fn serve(listener: TcpListener) -> Backend {
         let addr = listener.local_addr().expect("addr");
         let accepts = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&accepts);
@@ -864,7 +867,9 @@ mod tests {
     /// backend is back on its address.
     #[tokio::test]
     async fn reconnects_when_the_backend_returns_on_the_same_address() {
-        let b = backend().await;
+        // The port stays reserved while the backend is away.
+        let port = Refusing::new().await;
+        let b = serve(port.listen());
         let config = Config { host: b.addr.to_string(), ..Config::default() };
         let client = GrpcClient::new(&config).expect("client");
         let _ = client.connect(&call_context(), protos::ConnectionRequest::default()).await;
@@ -880,7 +885,7 @@ mod tests {
         let not_ready = RpcError::Other("grpc connection is not ready".into());
         assert_eq!(Err(not_ready), client.ready(), "one immediate attempt is allowed");
 
-        let listener = TcpListener::bind(b.addr).await.expect("bind the same address");
+        let listener = port.listen();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         while client.ready().is_err() {
             assert!(tokio::time::Instant::now() < deadline, "the client reconnects");
@@ -897,32 +902,70 @@ mod tests {
         let config = Config { host: refusing.addr.to_string(), ..Config::default() };
         let client = GrpcClient::new(&config).expect("client");
         call(&client).await;
+        let subchannel = only_subchannel(&client);
         client.close();
+        // `close` cancels the reconnecting task, which ends when it next runs.
+        until("the reconnecting task ended", || Arc::strong_count(&subchannel) == 2).await;
 
-        let listener = refusing.listen().await;
+        let listener = refusing.listen();
         assert!(tokio::time::timeout(Duration::from_secs(2), listener.accept()).await.is_err());
     }
 
-    /// An address that refuses connections until it listens. A connection holds
-    /// its port meanwhile, so that no other test gets it.
+    /// An address that refuses connections until it listens, whose port stays
+    /// reserved for the whole test. A connected socket holds the port: a socket
+    /// bound without listening would hold it too, but macOS drops connection
+    /// attempts to such a socket instead of refusing them. The holder is bound
+    /// before it connects, because Linux gives a port that only connected sockets
+    /// use to other sockets' `connect` as well. It is bound with `SO_REUSEPORT`, so
+    /// that [`Refusing::listen`] can bind the address next to it without the port
+    /// being released in between.
     struct Refusing {
         addr: SocketAddr,
-        holder: TcpStream,
+        _holder: TcpStream,
         _peer: TcpStream,
     }
 
     impl Refusing {
         async fn new() -> Self {
             let helper = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-            let holder = TcpStream::connect(helper.local_addr().expect("addr")).await.expect("connect");
+            let socket = TcpSocket::new_v4().expect("socket");
+            socket.set_reuseport(true).expect("SO_REUSEPORT");
+            socket.bind(SocketAddr::from(([127, 0, 0, 1], 0))).expect("bind");
+            let holder = socket.connect(helper.local_addr().expect("addr")).await.expect("connect");
             let (peer, addr) = helper.accept().await.expect("accept");
-            Self { addr, holder, _peer: peer }
+            Self { addr, _holder: holder, _peer: peer }
         }
 
-        async fn listen(self) -> TcpListener {
-            self.holder.set_zero_linger().expect("no TIME_WAIT");
-            drop(self.holder);
-            TcpListener::bind(self.addr).await.expect("bind the same address")
+        /// A listener on the address; once it is dropped, the address refuses
+        /// connections again.
+        fn listen(&self) -> TcpListener {
+            let socket = TcpSocket::new_v4().expect("socket");
+            socket.set_reuseaddr(true).expect("SO_REUSEADDR");
+            socket.set_reuseport(true).expect("SO_REUSEPORT");
+            socket.bind(self.addr).expect("bind the same address");
+            socket.listen(1024).expect("listen")
+        }
+    }
+
+    /// The address refuses connections whenever no listener of
+    /// [`Refusing::listen`] is open, also between two of them, and the port
+    /// stays taken throughout.
+    #[tokio::test]
+    async fn refusing_keeps_its_port_between_listeners() {
+        let refusing = Refusing::new().await;
+        let refused = |r: io::Result<TcpStream>| matches!(r, Err(e) if e.kind() == io::ErrorKind::ConnectionRefused);
+        assert!(refused(TcpStream::connect(refusing.addr).await), "refused before it listens");
+        for _ in 0..2 {
+            let listener = refusing.listen();
+            let _client = TcpStream::connect(refusing.addr).await.expect("connects while it listens");
+            let _ = listener.accept().await.expect("a connection");
+            drop(listener);
+            assert!(refused(TcpStream::connect(refusing.addr).await), "refused once the listener is gone");
+            #[cfg(target_os = "linux")]
+            assert_eq!(
+                io::ErrorKind::AddrInUse,
+                TcpListener::bind(refusing.addr).await.expect_err("the port is still taken").kind()
+            );
         }
     }
 
@@ -983,7 +1026,7 @@ mod tests {
         let subchannel = only_subchannel(&client);
         let refused = subchannel.channel.load_full();
 
-        let listener = refusing.listen().await;
+        let listener = refusing.listen();
         let accepts = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&accepts);
         let server = tokio::spawn(async move {
@@ -1023,7 +1066,10 @@ mod tests {
 
         *current.lock().expect("lock") = new.addr;
         until("connected to the new address", || new.accepts.load(Ordering::SeqCst) > 0).await;
-        let listener = refusing.listen().await;
+        // `update_addresses` cancels the old subchannel's reconnecting task, which
+        // ends when it next runs; then only this test holds the subchannel.
+        until("the removed subchannel is released", || Arc::strong_count(&removed) == 1).await;
+        let listener = refusing.listen();
         assert!(tokio::time::timeout(Duration::from_millis(500), listener.accept()).await.is_err());
         client.close();
         new.task.abort();
@@ -1086,7 +1132,7 @@ mod tests {
         until("the retry panics", || panicked.load(Ordering::SeqCst)).await;
         assert!(client.inner.transient_failure());
 
-        let listener = refusing.listen().await;
+        let listener = refusing.listen();
         until("the client reconnects", || !client.inner.transient_failure()).await;
         let _ = listener.accept().await.expect("a connection");
         client.close();
