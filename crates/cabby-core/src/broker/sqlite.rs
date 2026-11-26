@@ -680,6 +680,14 @@ mod tests {
         let blocker = rusqlite::Connection::open(dir.db()).unwrap();
         blocker.execute_batch("BEGIN EXCLUSIVE").unwrap();
         broker.handle_broadcast(&msg("s", "a", false)).unwrap();
+        // Stop only once the writer has taken the op: it then writes it whether
+        // or not the queue is closed. Closed first, the writer would skip to its
+        // final flush, whose deadline has already passed (`Unclean`).
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while broker.queue.len() > 0 {
+            assert!(Instant::now() < deadline, "the writer takes the op");
+            std::thread::sleep(Duration::from_millis(1));
+        }
 
         let started = Instant::now();
         assert_eq!(Ending::TimedOut, broker.stop(Duration::ZERO));
