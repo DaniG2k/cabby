@@ -16,6 +16,14 @@ health_path = "/up"
 ssl.cert_path = "/etc/ssl/cert.pem"
 ssl.key_path = "/etc/ssl/key.pem"
 
+[rpc]
+implementation = "grpc"
+host = "rpc.internal:50051"
+secret = "rpc-secret"
+tls_root_ca_path = "/etc/ssl/rpc-ca.pem"
+proxy_headers = ["cookie", "x-api-token"]
+proxy_cookies = ["_session_id", "remember_token"]
+
 [broker]
 adapter = "memory"
 

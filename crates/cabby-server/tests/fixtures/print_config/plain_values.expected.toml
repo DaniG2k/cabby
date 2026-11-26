@@ -55,13 +55,13 @@ format = "json"
 # RPC configuration
 [rpc]
 # RPC implementation (grpc, http, or none)
-implementation = ""
+implementation = "grpc"
 # RPC service hostname (including port, e.g., 'anycable-rpc:50051')
-host = "localhost:50051"
+host = "rpc.internal:50051"
 # Specify HTTP headers that must be proxied to the RPC service
-proxy_headers = ["cookie"]
+proxy_headers = ["cookie", "x-api-token"]
 # Specify which cookies must be kept in the proxied Cookie header
-# proxy_cookies = ["_session_id"]
+proxy_cookies = ["_session_id", "remember_token"]
 # RPC concurrency (max number of concurrent RPC requests)
 concurrency = 28
 # Enable client-side TLS on RPC connections
@@ -69,10 +69,10 @@ concurrency = 28
 # Enable TLS Verify for RPC connections
 tls_verify = true
 # CA root TLS certificate path
-tls_root_ca_path = ""
+tls_root_ca_path = "/etc/ssl/rpc-ca.pem"
 # HTTP RPC specific settings
 # Secret for HTTP RPC authentication
-# secret =
+secret = "rpc-secret"
 # Timeout for RPC requests (in ms)
 # request_timeout = 3000
 # Total timeout for RPC commands including retries (in ms)

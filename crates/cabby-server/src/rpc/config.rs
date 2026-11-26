@@ -168,9 +168,9 @@ impl Config {
     pub fn to_toml(&self) -> String {
         let mut out = String::new();
         out.push_str("# RPC implementation (grpc, http, or none)\n");
-        out.push_str(&format!("implementation = \"{}\"\n", self.implementation));
+        out.push_str(&format!("implementation = {}\n", toml_quote(&self.implementation)));
         out.push_str("# RPC service hostname (including port, e.g., 'anycable-rpc:50051')\n");
-        out.push_str(&format!("host = \"{}\"\n", self.host));
+        out.push_str(&format!("host = {}\n", toml_quote(&self.host)));
         out.push_str("# Specify HTTP headers that must be proxied to the RPC service\n");
         if self.proxy_headers.is_empty() {
             // The default is `["cookie"]`: an empty list is written as such (D-092).
@@ -199,7 +199,7 @@ impl Config {
         if self.secret.is_empty() {
             out.push_str("# secret =\n");
         } else {
-            out.push_str(&format!("secret = \"{}\"\n", self.secret));
+            out.push_str(&format!("secret = {}\n", toml_quote(&self.secret)));
         }
         out.push_str("# Timeout for RPC requests (in ms)\n");
         if self.request_timeout > 0 {

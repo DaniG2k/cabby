@@ -67,12 +67,12 @@ Differences from the AnyCable Go server are listed by ID in
   that route answers there, as in Go. Before, the metrics endpoint replaced it, because it was
   mounted after the other routes; it is now mounted first.
 - `--print-config`: string values that contain `"`, `\`, a newline or another control character
-  are escaped, so the printed file loads back to the same settings. Before, such a value made
-  the file fail to load, or load as another value. The same goes for list items and for metrics
-  tag keys that are not bare TOML keys (`tags."a.b"`, which loaded as a nested table before).
-  Characters TOML has no short escape for are written `\u00XX` (Go writes `\a`, `\v` and
-  `\x7f`, which TOML does not define). Values with nothing to escape print as before, as AnyCable
-  prints them (D-102).
+  are escaped in every section, `[rpc]` included, so the printed file loads back to the same
+  settings. Before, such a value made the file fail to load, or load as another value. The same
+  goes for list items and for metrics tag keys that are not bare TOML keys (`tags."a.b"`, which
+  loaded as a nested table before). Characters TOML has no short escape for are written `\u00XX`
+  (Go writes `\a`, `\v` and `\x7f`, which TOML does not define). Values with nothing to escape
+  print as before, as AnyCable prints them (D-102).
 - Error texts that quote a value (for example invalid flag and environment variable values)
   escape the characters Go escapes: separators such as U+00A0, format characters such as
   U+200B, private-use characters and noncharacters. Before, only control characters were

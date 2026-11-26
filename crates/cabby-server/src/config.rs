@@ -762,11 +762,11 @@ mod tests {
         }
 
         /// The sections of the configuration file and their fields (the loader's
-        /// field tables), by their path in the file. `[rpc]` is left out (`SKIPPED`):
-        /// its fields are covered by their own test.
+        /// field tables), by their path in the file.
         fn sections() -> Vec<(&'static str, &'static [&'static str])> {
             vec![
                 ("", Config::FIELDS),
+                ("rpc", RpcConfig::FIELDS),
                 ("logging", cabby_core::logger::Config::FIELDS),
                 ("server", crate::server::Config::FIELDS),
                 ("server.ssl", crate::server::SslConfig::FIELDS),
@@ -802,8 +802,6 @@ mod tests {
             ]
         }
 
-        const SKIPPED: &[&str] = &["rpc"];
-
         /// Fields that load back as another value for a reason other than quoting:
         /// (field, cases, reason). A field ending in `.*` covers a section. Output
         /// that does not load, or that has another number of lines, always fails.
@@ -824,6 +822,7 @@ mod tests {
             ("api.SecretBase", &["*"], "not printed"),
             ("api.cors_hosts", &["*"], "not printed"),
             ("pusher.CORSHosts", &["*"], "not printed"),
+            ("rpc.SecretBase", &["*"], "not printed"),
             ("redis_pubsub_broadcast.redis.*", &["*"], "an adapter's own Redis settings are not printed"),
             ("redis_stream_broadcast.redis.*", &["*"], "an adapter's own Redis settings are not printed"),
             ("redis_pubsub.Redis.*", &["*"], "an adapter's own Redis settings are not printed"),
@@ -959,10 +958,7 @@ mod tests {
                     let path = if section.is_empty() { (*key).to_owned() } else { format!("{section}.{key}") };
                     let kind = kind(section, key);
                     if kind == Kind::Section {
-                        assert!(
-                            SKIPPED.contains(&path.as_str()) || sections.iter().any(|(s, _)| *s == path),
-                            "{path}: a section missing from sections()"
-                        );
+                        assert!(sections.iter().any(|(s, _)| *s == path), "{path}: a section missing from sections()");
                         continue;
                     }
                     let print = |value: &str| {

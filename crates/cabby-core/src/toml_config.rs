@@ -549,23 +549,6 @@ mod tests {
     }
 
     #[test]
-    fn toml_quote_decodes_back() {
-        for value in [
-            "",
-            "/etc/ssl/ca.pem",
-            "C:\\certs\\ca \"x\".pem",
-            "-----BEGIN CERTIFICATE-----\nMIIB\r\n-----END CERTIFICATE-----\n",
-            "a\tb\u{1}\u{7f}\u{e9}",
-        ] {
-            let quoted = toml_quote(value);
-            let mut decoded = Inner::default();
-            decode(&mut decoded, &format!("name = {quoted}\n")).unwrap();
-            assert_eq!(decoded.name, value, "{quoted}");
-        }
-        assert_eq!(toml_quote("a\"b\\c\n\u{1}"), "\"a\\\"b\\\\c\\n\\u0001\"");
-    }
-
-    #[test]
     fn go_quote_escapes() {
         assert_eq!(go_quote("a\"b\\c\n\u{1}"), "\"a\\\"b\\\\c\\n\\x01\"");
     }
@@ -625,16 +608,16 @@ mod tests {
         }
     }
 
-    fn parse_string(document: &str) -> String {
-        let table = DeTable::parse(document).unwrap_or_else(|e| panic!("{document:?}: {e}"));
-        match table.get_ref().get("k").map(|v| v.get_ref()) {
-            Some(DeValue::String(s)) => s.to_string(),
-            other => panic!("{document:?}: {other:?}"),
-        }
+    /// `value` quoted with [`toml_quote`] and decoded back by the loader.
+    fn decoded(value: &str) -> String {
+        let quoted = toml_quote(value);
+        let mut inner = Inner::default();
+        decode(&mut inner, &format!("name = {quoted}\n")).unwrap_or_else(|e| panic!("{quoted}: {e}"));
+        inner.name
     }
 
     /// Pins D-102: every Unicode scalar value quotes to a TOML string that loads
-    /// back as itself.
+    /// back as itself, and so do paths and PEM contents.
     #[test]
     fn deviation_d102_toml_quote_round_trips_every_character() {
         let all: Vec<char> = ('\0'..=char::MAX).collect();
@@ -642,7 +625,15 @@ mod tests {
             let value: String = chunk.iter().collect();
             let quoted = toml_quote(&value);
             assert!(!quoted.contains(|c: char| c.is_control()), "only escapes for control characters: {:?}", chunk[0]);
-            assert_eq!(parse_string(&format!("k = {quoted}\n")), value, "block from U+{:04X}", chunk[0] as u32);
+            assert_eq!(decoded(&value), value, "block from U+{:04X}", chunk[0] as u32);
+        }
+        for value in [
+            "",
+            "/etc/ssl/ca.pem",
+            "C:\\certs\\ca \"x\".pem",
+            "-----BEGIN CERTIFICATE-----\nMIIB\r\n-----END CERTIFICATE-----\n",
+        ] {
+            assert_eq!(decoded(value), value);
         }
     }
 
