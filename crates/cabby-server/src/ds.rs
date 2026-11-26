@@ -5,10 +5,19 @@
 //!   array, with `Stream-Next-Offset`, `Stream-Cursor`, `Stream-Up-To-Date`,
 //!   `Cache-Control` and an `ETag` (`304 Not Modified` on a match).
 //! * Long-poll (`live=long-poll`): history if there is any, otherwise the session
-//!   subscribes and the first live message is the response ([`PollConnection`]);
-//!   `204` after `poll_interval`, `410` on shutdown.
-//! * SSE (`live=sse`): the history as a `data` event plus a `control` event, then
-//!   live messages ([`SseEncoder`] over an [`sse::Connection`]) for up to `sse_ttl`.
+//!   subscribes, reads the history again, and the first message the client does
+//!   not have is the response ([`PollConnection`]); `204` after `poll_interval`,
+//!   `410` on shutdown.
+//! * SSE (`live=sse`): the session subscribes, then the history is written as a
+//!   `data` event plus a `control` event, then live messages for up to `sse_ttl`:
+//!   each message's data event is encoded once for all sessions of the stream, and
+//!   each session writes it with a control event carrying its own cursor
+//!   (`SseDataEncoder` over an `SseStream`, D-090).
+//!
+//! Live reads install the subscription before they read the history and hold live
+//! messages until the history is written; messages the history delivered are
+//! dropped (`Watermark`, D-089). A client that follows the offsets it gets
+//! receives every message once, in order.
 //! * `HEAD`: the tail offset.
 //!
 //! Requests are authenticated like any session (unless `skip_auth`), and the
@@ -229,23 +238,50 @@ pub fn encode_sse_data_event(messages: &[StreamMessage]) -> Vec<u8> {
     buf
 }
 
-/// The `control` event payload: Go marshals a `map[string]interface{}`, so the
-/// keys are sorted.
-fn control_json(offset: &str, cursor: &str, up_to_date: bool) -> String {
-    let mut control = std::collections::BTreeMap::new();
-    control.insert("streamNextOffset", serde_json::Value::from(offset));
+/// Appends the `control` event payload. Go marshals a `map[string]interface{}`,
+/// so the keys are sorted: `streamCursor`, `streamNextOffset`, `upToDate`.
+fn write_control_json(out: &mut Vec<u8>, offset: &str, cursor: &str, up_to_date: bool) {
+    out.push(b'{');
     if !cursor.is_empty() {
-        control.insert("streamCursor", serde_json::Value::from(cursor));
+        out.extend_from_slice(br#""streamCursor":"#);
+        cabby_core::gojson::write(out, cursor);
+        out.push(b',');
     }
+    out.extend_from_slice(br#""streamNextOffset":"#);
+    cabby_core::gojson::write(out, offset);
     if up_to_date {
-        control.insert("upToDate", serde_json::Value::Bool(true));
+        out.extend_from_slice(br#","upToDate":true"#);
     }
-    cabby_core::gojson::to_string(&control)
+    out.push(b'}');
+}
+
+/// Appends an SSE `control` event (without the blank line that ends it).
+fn write_control_event(out: &mut Vec<u8>, offset: &str, cursor: &str, up_to_date: bool) {
+    out.extend_from_slice(b"event: control\ndata:");
+    write_control_json(out, offset, cursor, up_to_date);
+}
+
+/// The `control` event payload.
+#[cfg(test)]
+fn control_json(offset: &str, cursor: &str, up_to_date: bool) -> String {
+    let mut out = Vec::new();
+    write_control_json(&mut out, offset, cursor, up_to_date);
+    String::from_utf8(out).expect("JSON is UTF-8")
 }
 
 /// An SSE `control` event with the next offset, the cursor and the up-to-date flag.
 pub fn encode_sse_control_event(offset: &str, cursor: &str, up_to_date: bool) -> Vec<u8> {
-    format!("event: control\ndata:{}", control_json(offset, cursor, up_to_date)).into_bytes()
+    let mut out = Vec::with_capacity(96);
+    write_control_event(&mut out, offset, cursor, up_to_date);
+    out
+}
+
+/// Appends the SSE `data` event of one live message (an array, as catch-up data),
+/// without the blank line that ends it.
+fn write_data_event(out: &mut Vec<u8>, reply: &cabby_core::common::Reply) {
+    out.extend_from_slice(b"event: data\ndata:[");
+    cabby_core::gojson::write(out, &reply.message);
+    out.push(b']');
 }
 
 // ------------------------------------------------------------------ request parameters
@@ -489,6 +525,7 @@ impl Stream {
 const DS_NOOP_ENCODER_ID: &str = "dsnull";
 const DS_POLL_ENCODER_ID: &str = "dspoll";
 const DS_SSE_ENCODER_ID: &str = "dsse";
+const DS_SSE_DATA_ENCODER_ID: &str = "dssedata";
 
 fn unsupported() -> EncodeError {
     EncodeError("unsupported".to_owned())
@@ -578,6 +615,12 @@ impl NodeEncoder for PollEncoder {
 
 /// SSE encoder: data replies become a `data` event plus a `control` event; pings
 /// become comments (upstream `SSEEncoder`).
+///
+/// Its frames carry its cursor and up-to-date flag, so its ID includes them: the
+/// hub shares a frame only between sessions whose encoders write the same one
+/// (D-090; upstream's ID is `dsse` for every cursor). The endpoint's live
+/// sessions use `SseDataEncoder` and `SseStream` instead, which encode the
+/// data once for every session of a stream.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SseEncoder {
     pub cursor: String,
@@ -586,12 +629,7 @@ pub struct SseEncoder {
 
 impl NodeEncoder for SseEncoder {
     fn id(&self) -> String {
-        DS_SSE_ENCODER_ID.to_owned()
-    }
-
-    #[inline]
-    fn id_str(&self) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Borrowed(DS_SSE_ENCODER_ID)
+        format!("{DS_SSE_ENCODER_ID}:{}:{}", u8::from(self.up_to_date), self.cursor)
     }
 
     fn encode(&self, msg: &dyn EncodedMessageJson) -> Result<SentFrame, EncodeError> {
@@ -613,18 +651,243 @@ impl NodeEncoder for SseEncoder {
 
         let Some(reply) = data_reply(msg) else { return Ok(None) };
 
-        // A data event (an array, as catch-up data), then a control event.
-        let mut payload = b"event: data\ndata:[".to_vec();
-        cabby_core::gojson::write(&mut payload, &reply.message);
-        payload.extend_from_slice(b"]\n\nevent: control\ndata:");
-        let offset = encode_offset(reply.offset, &reply.epoch);
-        payload.extend_from_slice(control_json(&offset, &self.cursor, self.up_to_date).as_bytes());
+        // A data event, then a control event.
+        let mut payload = Vec::with_capacity(160);
+        write_data_event(&mut payload, reply);
+        payload.extend_from_slice(b"\n\n");
+        write_control_event(&mut payload, &encode_offset(reply.offset, &reply.epoch), &self.cursor, self.up_to_date);
 
         Ok(Some(SentFrame::text(payload)))
     }
 
     fn encode_transmission_optional(&self, _raw: &str) -> Result<Option<SentFrame>, EncodeError> {
         Ok(None)
+    }
+}
+
+/// Encoder of the endpoint's live SSE sessions: the part of an event that is the
+/// same for every session, `<offset>\n<data event>`, so the hub encodes a message
+/// once for all of them; [`SseStream`] writes it with the session's control event
+/// (D-090). Pings become comments, as with [`SseEncoder`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct SseDataEncoder;
+
+impl NodeEncoder for SseDataEncoder {
+    fn id(&self) -> String {
+        DS_SSE_DATA_ENCODER_ID.to_owned()
+    }
+
+    #[inline]
+    fn id_str(&self) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(DS_SSE_DATA_ENCODER_ID)
+    }
+
+    fn encode(&self, msg: &dyn EncodedMessageJson) -> Result<SentFrame, EncodeError> {
+        self.encode_optional(msg)?.ok_or_else(no_frame)
+    }
+
+    fn encode_transmission(&self, _raw: &str) -> Result<SentFrame, EncodeError> {
+        Err(no_frame())
+    }
+
+    fn decode(&self, _raw: &[u8]) -> Result<Message, EncodeError> {
+        Err(unsupported())
+    }
+
+    fn encode_optional(&self, msg: &dyn EncodedMessageJson) -> Result<Option<SentFrame>, EncodeError> {
+        if msg.get_type() == PING_TYPE {
+            return Ok(Some(SentFrame::text(sse::COMMENT_PING.as_bytes().to_vec())));
+        }
+
+        let Some(reply) = data_reply(msg) else { return Ok(None) };
+
+        let mut payload = encode_offset(reply.offset, &reply.epoch).into_bytes();
+        payload.push(b'\n');
+        write_data_event(&mut payload, reply);
+        Ok(Some(SentFrame::text(payload)))
+    }
+
+    fn encode_transmission_optional(&self, _raw: &str) -> Result<Option<SentFrame>, EncodeError> {
+        Ok(None)
+    }
+}
+
+/// The offset and the rest of a `<offset>\n<rest>` frame ([`PollEncoder`],
+/// [`SseDataEncoder`]); `None` for other frames (pings).
+fn split_frame(frame: &[u8]) -> Option<(&str, &[u8])> {
+    let pos = frame.iter().position(|b| *b == b'\n')?;
+    let offset = std::str::from_utf8(&frame[..pos]).ok()?;
+    Some((offset, &frame[pos + 1..]))
+}
+
+// ------------------------------------------------------------------ live delivery
+
+/// What the client of a live request has, to compare live messages with (D-089).
+///
+/// The live subscription is installed before the history is read, so a live
+/// message can also be in the history, and the stream's epoch can change in
+/// between.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Watermark {
+    /// The epoch and offset of the last message the client has: the last of the
+    /// history, else its offset (the tail for `now`); `None` without one.
+    position: Option<(String, u64)>,
+    /// The epoch of `position` is not the one the stream had before the
+    /// subscription: a live message of another epoch may be older or newer than
+    /// the position. Cleared by the first message delivered.
+    strict: bool,
+}
+
+/// What to do with a live message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Admit {
+    /// Write it: it follows the client's position.
+    Deliver,
+    /// Drop it: the client has it.
+    Skip,
+    /// End the response without it: it is of another epoch and may be older than
+    /// the position. The client's next request reads from its position.
+    End,
+}
+
+impl Watermark {
+    /// Compares a live message with the position, which moves to it when it is
+    /// delivered.
+    fn admit(&mut self, epoch: &str, offset: u64) -> Admit {
+        match &mut self.position {
+            Some((e, o)) if *e == epoch => {
+                if offset <= *o {
+                    return Admit::Skip;
+                }
+                *o = offset;
+            }
+            Some(_) if self.strict => return Admit::End,
+            // A later epoch (the stream's messages reach the hub in order), or the
+            // client's first message.
+            position => *position = Some((epoch.to_owned(), offset)),
+        }
+        self.strict = false;
+        Admit::Deliver
+    }
+}
+
+/// `(offset, epoch)` of an encoded `<offset>::<epoch>`.
+fn frame_position(offset: &str) -> Option<(u64, &str)> {
+    let (offset, epoch) = offset.split_once(OFFSET_SEPARATOR)?;
+    Some((offset.parse().ok()?, epoch))
+}
+
+/// The live frames of a request: held from before the subscription until the
+/// history is written, then compared with the watermark (D-089).
+#[derive(Debug, Default)]
+struct LiveGate {
+    /// The frames written while held, in order.
+    held: Option<Vec<Vec<u8>>>,
+    mark: Watermark,
+}
+
+impl LiveGate {
+    fn held() -> Self {
+        Self { held: Some(Vec::new()), mark: Watermark::default() }
+    }
+
+    /// Keeps a copy of `frame` while held; false once open.
+    fn keep(&mut self, frame: &[u8]) -> bool {
+        match &mut self.held {
+            Some(held) => {
+                held.push(frame.to_vec());
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Opens at `mark`; returns the frames held, to be written now.
+    fn open(&mut self, mark: Watermark) -> Vec<Vec<u8>> {
+        self.mark = mark;
+        self.held.take().unwrap_or_default()
+    }
+
+    /// What to do with a frame at `offset`; an offset without an epoch is not
+    /// compared.
+    fn admit(&mut self, offset: &str) -> Admit {
+        match frame_position(offset) {
+            Some((offset, epoch)) => self.mark.admit(epoch, offset),
+            None => Admit::Deliver,
+        }
+    }
+}
+
+// ------------------------------------------------------------------ SSE stream
+
+/// The connection of a live SSE session: writes each [`SseDataEncoder`] frame as
+/// its data event and a control event with this session's cursor (D-090); other
+/// frames (pings) as they are. Frames are held until [`SseStream::release`], and
+/// the frames of messages the client has are dropped (D-089).
+struct SseStream {
+    conn: Arc<sse::Connection>,
+    cursor: String,
+    up_to_date: bool,
+    gate: Mutex<LiveGate>,
+}
+
+impl SseStream {
+    fn new(conn: Arc<sse::Connection>, cursor: String) -> Self {
+        Self { conn, cursor, up_to_date: false, gate: Mutex::new(LiveGate::held()) }
+    }
+
+    /// Writes the frames held and then every frame as it comes, compared with
+    /// `mark`: call it once the history is written.
+    fn release(&self, mark: Watermark) {
+        let mut gate = lock(&self.gate);
+        for frame in gate.open(mark) {
+            // As for live writes, a failed write ends the response.
+            let _ = self.deliver(&mut gate, &frame, Instant::now());
+        }
+    }
+
+    fn deliver(&self, gate: &mut LiveGate, msg: &[u8], deadline: Instant) -> Result<(), ConnectionError> {
+        let Some((offset, data)) = split_frame(msg) else { return self.conn.write(msg, deadline) };
+        match gate.admit(offset) {
+            Admit::Deliver => {}
+            Admit::Skip => return Ok(()),
+            Admit::End => {
+                // The stream ends, as at its TTL; the client reconnects with its offset.
+                self.conn.close(CLOSE_NORMAL_CLOSURE, "");
+                return Ok(());
+            }
+        }
+        let mut event = Vec::with_capacity(data.len() + 96);
+        event.extend_from_slice(data);
+        event.extend_from_slice(b"\n\n");
+        write_control_event(&mut event, offset, &self.cursor, self.up_to_date);
+        self.conn.write(&event, deadline)
+    }
+}
+
+impl Connection for SseStream {
+    fn write(&self, msg: &[u8], deadline: Instant) -> Result<(), ConnectionError> {
+        let mut gate = lock(&self.gate);
+        if gate.keep(msg) {
+            return Ok(());
+        }
+        self.deliver(&mut gate, msg, deadline)
+    }
+
+    fn write_binary(&self, msg: &[u8], deadline: Instant) -> Result<(), ConnectionError> {
+        self.conn.write_binary(msg, deadline)
+    }
+
+    fn write_ping(&self, deadline: Instant) -> Result<(), ConnectionError> {
+        self.conn.write_ping(deadline)
+    }
+
+    fn read(&self) -> Result<Vec<u8>, ConnectionError> {
+        self.conn.read()
+    }
+
+    fn close(&self, code: i32, reason: &str) {
+        self.conn.close(code, reason);
     }
 }
 
@@ -636,14 +899,25 @@ pub type ETagFn = Arc<dyn Fn(&str) -> String + Send + Sync>;
 /// Long-poll connection: turns the first encoded message into a response body and
 /// headers, then is done (upstream `PollConnection`). Closing it sends the status
 /// matching the close code.
+///
+/// The endpoint holds its messages while it reads the history after subscribing,
+/// and drops those the client has (D-089).
 pub struct PollConnection {
     writer: SharedResponseWriter,
-    done: Mutex<bool>,
+    state: Mutex<PollState>,
     ctx: CancellationToken,
     /// `Cache-Control` of data responses (upstream field `CacheControl`).
     pub cache_control: Mutex<String>,
     /// `ETag` of data responses (upstream field `ETag`).
     pub etag: Mutex<Option<ETagFn>>,
+}
+
+#[derive(Debug, Default)]
+struct PollState {
+    /// A response was written or the connection closed (upstream field `done`).
+    done: bool,
+    /// Open unless the endpoint holds the messages.
+    gate: LiveGate,
 }
 
 fn lock<T: ?Sized>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -679,7 +953,7 @@ impl PollConnection {
     pub fn with_writer(writer: SharedResponseWriter) -> Self {
         Self {
             writer,
-            done: Mutex::new(false),
+            state: Mutex::new(PollState::default()),
             ctx: CancellationToken::new(),
             cache_control: Mutex::new(String::new()),
             etag: Mutex::new(None),
@@ -694,30 +968,51 @@ impl PollConnection {
     /// Whether a response was written or the connection closed (upstream unexported
     /// `done` field).
     pub fn is_done(&self) -> bool {
-        *lock(&self.done)
+        lock(&self.state).done
     }
 
     /// Always `None` (upstream `Descriptor()`).
     pub fn descriptor(&self) -> Option<std::net::TcpStream> {
         None
     }
-}
 
-impl Connection for PollConnection {
-    /// Writes `[<body>]` with the offset headers of an encoded `<offset>\n<body>`
-    /// message (see [`PollEncoder`]); only the first write or close counts.
-    fn write(&self, msg: &[u8], _deadline: Instant) -> Result<(), ConnectionError> {
-        let mut done = lock(&self.done);
-        if *done {
-            return Ok(());
+    /// Holds the messages written from now on, until [`PollConnection::release`].
+    fn hold(&self) {
+        lock(&self.state).gate = LiveGate::held();
+    }
+
+    /// Answers with the first held message the client does not have, if any;
+    /// later messages are compared with `mark` too.
+    fn release(&self, mark: Watermark) {
+        let mut st = lock(&self.state);
+        for frame in st.gate.open(mark) {
+            if st.done {
+                break;
+            }
+            // As for live writes, the error ends the response.
+            let _ = self.respond(&mut st, &frame);
         }
-        *done = true;
-        let _cancel = self.ctx.clone().drop_guard();
+    }
 
+    fn respond(&self, st: &mut PollState, msg: &[u8]) -> Result<(), ConnectionError> {
         let Some(pos) = msg.iter().position(|b| *b == b'\n') else {
+            st.done = true;
+            self.ctx.cancel();
             return Err(ConnectionError("invalid poll message format: missing newline separator".to_owned()));
         };
         let offset = String::from_utf8_lossy(&msg[..pos]).into_owned();
+        match st.gate.admit(&offset) {
+            Admit::Deliver => {}
+            Admit::Skip => return Ok(()),
+            // As when the poll interval elapses: the client polls again.
+            Admit::End => {
+                self.close_with(st, 204, "No content");
+                return Ok(());
+            }
+        }
+        st.done = true;
+        let _cancel = self.ctx.clone().drop_guard();
+
         let mut body = Vec::with_capacity(msg.len() + 1);
         body.push(b'[');
         body.extend_from_slice(&msg[pos + 1..]);
@@ -741,6 +1036,36 @@ impl Connection for PollConnection {
         Ok(())
     }
 
+    fn close_with(&self, st: &mut PollState, code: i32, reason: &str) {
+        if st.done {
+            return;
+        }
+        st.done = true;
+        let _cancel = self.ctx.clone().drop_guard();
+
+        let status = ws_code_to_http(code, reason);
+
+        let mut w = lock_writer(&self.writer);
+        // Only data responses may be cached (204 No Content, errors, etc. must not);
+        // 304 Not Modified keeps the headers of the data response it stands for.
+        if status != 200 && status != 304 {
+            set_header(w.headers_mut(), "cache-control", "no-store");
+        }
+        w.write_header(status);
+    }
+}
+
+impl Connection for PollConnection {
+    /// Writes `[<body>]` with the offset headers of an encoded `<offset>\n<body>`
+    /// message (see [`PollEncoder`]); only the first write or close counts.
+    fn write(&self, msg: &[u8], _deadline: Instant) -> Result<(), ConnectionError> {
+        let mut st = lock(&self.state);
+        if st.done || st.gate.keep(msg) {
+            return Ok(());
+        }
+        self.respond(&mut st, msg)
+    }
+
     fn write_binary(&self, _msg: &[u8], _deadline: Instant) -> Result<(), ConnectionError> {
         Err(ConnectionError("unsupported".to_owned()))
     }
@@ -755,22 +1080,8 @@ impl Connection for PollConnection {
 
     /// Writes the status for `code` (WebSocket close codes map to HTTP statuses).
     fn close(&self, code: i32, reason: &str) {
-        let mut done = lock(&self.done);
-        if *done {
-            return;
-        }
-        *done = true;
-        let _cancel = self.ctx.clone().drop_guard();
-
-        let status = ws_code_to_http(code, reason);
-
-        let mut w = lock_writer(&self.writer);
-        // Only data responses may be cached (204 No Content, errors, etc. must not);
-        // 304 Not Modified keeps the headers of the data response it stands for.
-        if status != 200 && status != 304 {
-            set_header(w.headers_mut(), "cache-control", "no-store");
-        }
-        w.write_header(status);
+        let mut st = lock(&self.state);
+        self.close_with(&mut st, code, reason);
     }
 }
 
@@ -879,7 +1190,7 @@ struct DsSession {
     stream: Stream,
     session: Arc<Session>,
     poll: Arc<PollConnection>,
-    sse: Option<Arc<sse::Connection>>,
+    sse: Option<(Arc<sse::Connection>, Arc<SseStream>)>,
 }
 
 /// Runs a blocking node call off the async executor.
@@ -943,10 +1254,12 @@ impl Handler {
             }
             SSE_MODE => {
                 let c = Arc::new(sse::Connection::with_writer(w.clone()));
-                conn = c.clone();
-                sse_conn = Some(c);
-                let encoder = SseEncoder { cursor: stream.next_cursor(), up_to_date: false };
-                let mut opts = vec![SessionOption::Encoder(Arc::new(encoder))];
+                // The data is encoded once per message for every session of the
+                // stream; the session's connection adds its cursor (D-090).
+                let live = Arc::new(SseStream::new(c.clone(), stream.next_cursor()));
+                conn = live.clone();
+                sse_conn = Some((c, live));
+                let mut opts = vec![SessionOption::Encoder(Arc::new(SseDataEncoder))];
                 if self.config.sse_ping_interval > 0 {
                     opts.push(SessionOption::PingInterval(Duration::from_secs(self.config.sse_ping_interval as u64)));
                 }
@@ -1075,7 +1388,7 @@ impl Handler {
 
         let live = match sse_conn {
             None => self.prepare_http(req, w, &stream, &poll, tail, &mut guard)?,
-            Some(conn) => self.prepare_sse(w, &stream, &session, &poll, conn, tail, &mut guard)?,
+            Some((conn, live)) => self.prepare_sse(w, &stream, &session, &poll, (conn, live), tail, &mut guard)?,
         };
         Some(Active { live, guard })
     }
@@ -1087,7 +1400,7 @@ impl Handler {
         w: &SharedResponseWriter,
         s: &Stream,
         poll: &Arc<PollConnection>,
-        mut tail: StreamMessage,
+        tail: StreamMessage,
         guard: &mut StreamGuard,
     ) -> Option<Live> {
         let slog = guard.log.clone();
@@ -1109,37 +1422,10 @@ impl Handler {
             }
         };
 
-        if let Some(last) = backlog.last() {
-            tail = last.clone();
-        }
-
         let cache_control = read_cache_control(&self.config, req, &s.params);
 
         if !backlog.is_empty() || s.params.live_mode != LONG_POLL_MODE {
-            let next_offset = encode_offset(tail.offset, &tail.epoch);
-            {
-                let mut w = lock_writer(w);
-                let h = w.headers_mut();
-                set_header(h, "cache-control", &cache_control);
-                set_header(h, STREAM_OFFSET_HEADER, &next_offset);
-                set_header(h, STREAM_UP_TO_DATE_HEADER, "true");
-            }
-
-            if s.params.raw_offset != NOW_OFFSET {
-                let etag = stream_etag(&s.params, &next_offset);
-                set_header(lock_writer(w).headers_mut(), "etag", &etag);
-
-                if etag_matches(req.header("If-None-Match"), &etag) {
-                    log_debug!(slog, "not modified");
-                    poll.close(304, "");
-                    return None;
-                }
-            }
-
-            log_debug!(slog, "write history", "len" => backlog.len());
-            poll.close(200, "");
-            // Upstream ignores this error too.
-            let _ = lock_writer(w).write(&encode_json_batch(&backlog));
+            self.write_history(req, w, s, poll, &tail, &backlog, &cache_control, &slog);
             return None;
         }
 
@@ -1149,20 +1435,119 @@ impl Handler {
             guard.gauge = Some((m.clone(), METRICS_POLL_NUM));
         }
 
-        // Set before subscribing: the response may be written right away.
-        *lock(&poll.cache_control) = cache_control;
+        // Set before the messages are released: the response may be written right away.
+        *lock(&poll.cache_control) = cache_control.clone();
         if s.params.raw_offset != NOW_OFFSET {
             let params = s.params.clone();
             *lock(&poll.etag) = Some(Arc::new(move |next: &str| stream_etag(&params, next)));
         }
 
+        // Live messages wait until the history is read again with the subscription
+        // installed: what was published since the first read is in one or the
+        // other (D-089).
+        poll.hold();
         if let Err(e) = self.node.subscribe(&guard.session, &s.params.to_subscribe_command()) {
             log_error!(slog, "failed to subscribe", "err" => e.to_string());
             poll.close(500, "");
             return None;
         }
 
+        let (backlog, mark) = match self.read_after_subscribe(&s.params, &tail) {
+            Ok(read) => read,
+            Err(e) => {
+                log_error!(slog, "failed to fetch history", "err" => e.to_string());
+                poll.close(410, "");
+                return None;
+            }
+        };
+        if !backlog.is_empty() {
+            self.write_history(req, w, s, poll, &tail, &backlog, &cache_control, &slog);
+            return None;
+        }
+
+        poll.release(mark);
         Some(Live::LongPoll(poll.clone()))
+    }
+
+    /// The data response of a catch-up or long-poll read (`304` when the client
+    /// has it).
+    #[allow(clippy::too_many_arguments)]
+    fn write_history(
+        &self,
+        req: &HttpRequest,
+        w: &SharedResponseWriter,
+        s: &Stream,
+        poll: &PollConnection,
+        tail: &StreamMessage,
+        backlog: &[StreamMessage],
+        cache_control: &str,
+        slog: &Logger,
+    ) {
+        let tail = backlog.last().unwrap_or(tail);
+        let next_offset = encode_offset(tail.offset, &tail.epoch);
+        {
+            let mut w = lock_writer(w);
+            let h = w.headers_mut();
+            set_header(h, "cache-control", cache_control);
+            set_header(h, STREAM_OFFSET_HEADER, &next_offset);
+            set_header(h, STREAM_UP_TO_DATE_HEADER, "true");
+        }
+
+        if s.params.raw_offset != NOW_OFFSET {
+            let etag = stream_etag(&s.params, &next_offset);
+            set_header(lock_writer(w).headers_mut(), "etag", &etag);
+
+            if etag_matches(req.header("If-None-Match"), &etag) {
+                log_debug!(slog, "not modified");
+                poll.close(304, "");
+                return;
+            }
+        }
+
+        log_debug!(slog, "write history", "len" => backlog.len());
+        poll.close(200, "");
+        // Upstream ignores this error too.
+        let _ = lock_writer(w).write(&encode_json_batch(backlog));
+    }
+
+    /// The history of a live read, read once the subscription is installed, and
+    /// what live messages are compared with (D-089). `tail` was read before the
+    /// subscription: for `now`, the history is what follows it, and none if the
+    /// epoch changed since; when the stream had no entries then, everything it
+    /// holds now.
+    fn read_after_subscribe(
+        &self,
+        sp: &StreamParams,
+        tail: &StreamMessage,
+    ) -> Result<(Vec<StreamMessage>, Watermark), DsError> {
+        let (backlog, client) = if sp.raw_offset == NOW_OFFSET && tail.epoch.is_empty() {
+            (self.read_since_empty(sp), None)
+        } else if sp.raw_offset == NOW_OFFSET {
+            let client = Some((tail.epoch.clone(), tail.offset));
+            match self.broker.history_from(&sp.path, &tail.epoch, tail.offset) {
+                Ok(backlog) => (backlog, client),
+                Err(_) => return Ok((Vec::new(), Watermark { position: client, strict: true })),
+            }
+        } else {
+            let client = (!sp.epoch.is_empty()).then(|| (sp.epoch.clone(), sp.offset));
+            (fetch_history(self.broker.as_ref(), sp)?, client)
+        };
+        let position = backlog.last().map(|m| (m.epoch.clone(), m.offset)).or(client);
+        // Another epoch than before the subscription: the epoch changed meanwhile.
+        let strict = position.as_ref().is_some_and(|(epoch, _)| *epoch != tail.epoch);
+        Ok((backlog, Watermark { position, strict }))
+    }
+
+    /// For `now` on a stream that had no entries at the tail read: what it holds
+    /// now was published since. The tail is read again first, and the history only
+    /// when there is one: a broker that reports no tail for a stream with entries
+    /// (the NATS broker never does) keeps its history out of a `now` read. A failed
+    /// read gives nothing, as before.
+    fn read_since_empty(&self, sp: &StreamParams) -> Vec<StreamMessage> {
+        match self.broker.peak(&sp.path) {
+            Ok(Some(_)) => self.broker.history_since(&sp.path, 0).ok().flatten().unwrap_or_default(),
+            _ => Vec::new(),
+        }
     }
 
     /// SSE reads (upstream unexported `handleSSE` up to its wait).
@@ -1173,8 +1558,8 @@ impl Handler {
         s: &Stream,
         session: &Arc<Session>,
         poll: &Arc<PollConnection>,
-        conn: Arc<sse::Connection>,
-        mut tail: StreamMessage,
+        (conn, live): (Arc<sse::Connection>, Arc<SseStream>),
+        tail: StreamMessage,
         guard: &mut StreamGuard,
     ) -> Option<Live> {
         let slog = guard.log.clone();
@@ -1195,18 +1580,25 @@ impl Handler {
             guard.gauge = Some((m.clone(), METRICS_SSE_NUM));
         }
 
-        let backlog = match fetch_history(self.broker.as_ref(), &s.params) {
-            Ok(b) => b,
+        // Subscribed before the history is read; the session's connection holds
+        // live messages until the history is written (D-089).
+        let subscribed = match self.node.subscribe(session, &s.params.to_subscribe_command()) {
+            Ok(_) => true,
+            Err(e) => {
+                log_error!(slog, "failed to subscribe", "err" => e.to_string());
+                false
+            }
+        };
+
+        let (backlog, mark) = match self.read_after_subscribe(&s.params, &tail) {
+            Ok(read) => read,
             Err(e) => {
                 log_error!(slog, "failed to fetch history", "err" => e.to_string());
                 poll.close(410, "");
                 return None;
             }
         };
-
-        if let Some(last) = backlog.last() {
-            tail = last.clone();
-        }
+        let tail = backlog.last().unwrap_or(&tail);
 
         poll.close(200, "");
         lock_writer(w).flush();
@@ -1228,11 +1620,11 @@ impl Handler {
 
         conn.established();
 
-        if let Err(e) = self.node.subscribe(session, &s.params.to_subscribe_command()) {
-            log_error!(slog, "failed to subscribe", "err" => e.to_string());
+        if !subscribed {
             return None;
         }
 
+        live.release(mark);
         Some(Live::Sse(conn))
     }
 
@@ -1526,5 +1918,786 @@ data:{"streamCursor":"c","streamNextOffset":"1::e","upToDate":true}"#,
         assert_eq!(400, ws_code_to_http(CLOSE_ABNORMAL_CLOSURE, ""));
         assert_eq!(500, ws_code_to_http(CLOSE_INTERNAL_SERVER_ERR, ""));
         assert_eq!(204, ws_code_to_http(204, ""));
+    }
+
+    // ------------------------------------------------------------ live requests
+
+    use cabby_core::broker::{Broadcaster, BrokerError, Cacheable, Memory, PresenceInfoOptions};
+    use cabby_core::common::{PresenceEvent, PresenceInfo, RemoteCommandMessage};
+    use std::sync::Condvar;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Bound for every wait.
+    const WAIT: Duration = Duration::from_secs(5);
+
+    /// A response as the client sees it.
+    #[derive(Debug, Default, Clone)]
+    struct RecState {
+        status: Option<u16>,
+        headers: http::HeaderMap,
+        body: Vec<u8>,
+        finished: bool,
+    }
+
+    impl RecState {
+        fn header(&self, name: &str) -> &str {
+            self.headers.get(name).map_or("", |v| v.to_str().unwrap())
+        }
+    }
+
+    /// A recorded response; waiters are woken on every change.
+    #[derive(Default)]
+    struct Rec {
+        state: Mutex<RecState>,
+        changed: Condvar,
+    }
+
+    impl Rec {
+        fn update(&self, f: impl FnOnce(&mut RecState)) {
+            f(&mut lock(&self.state));
+            self.changed.notify_all();
+        }
+
+        /// Waits up to `timeout` until `done` holds; the state then, if it does.
+        fn wait_up_to(&self, timeout: Duration, done: impl Fn(&RecState) -> bool) -> Option<RecState> {
+            let deadline = Instant::now() + timeout;
+            let mut st = lock(&self.state);
+            while !done(&st) {
+                let left = deadline.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    return None;
+                }
+                st = self.changed.wait_timeout(st, left).unwrap_or_else(PoisonError::into_inner).0;
+            }
+            Some(st.clone())
+        }
+
+        /// Waits (bounded) until `done` holds.
+        fn wait(&self, what: &str, done: impl Fn(&RecState) -> bool) -> RecState {
+            self.wait_up_to(WAIT, done).unwrap_or_else(|| {
+                let st = lock(&self.state);
+                panic!("timed out waiting for {what}: {:?} {:?}", st.status, String::from_utf8_lossy(&st.body))
+            })
+        }
+    }
+
+    /// Writes into a [`Rec`]; the head goes out with the first write, flush or finish.
+    struct RecWriter {
+        rec: Arc<Rec>,
+        headers: http::HeaderMap,
+    }
+
+    impl RecWriter {
+        fn send(&self, status: u16, f: impl FnOnce(&mut RecState)) {
+            self.rec.update(|st| {
+                if st.status.is_none() {
+                    st.status = Some(status);
+                    st.headers = self.headers.clone();
+                }
+                f(st);
+            });
+        }
+    }
+
+    impl ResponseWriter for RecWriter {
+        fn headers_mut(&mut self) -> &mut http::HeaderMap {
+            &mut self.headers
+        }
+        fn write_header(&mut self, status: u16) {
+            self.send(status, |_| {});
+        }
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            self.send(200, |st| st.body.extend_from_slice(data));
+            Ok(data.len())
+        }
+        fn flush(&mut self) {
+            self.send(200, |_| {});
+        }
+        fn finish(&mut self) {
+            self.send(200, |st| st.finished = true);
+        }
+    }
+
+    /// Where a hook runs: after the n-th tail read, after the broker has the
+    /// subscription (the hub gets it next), before or after the n-th history read
+    /// (1-based).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum At {
+        Peak(usize),
+        Subscribe,
+        BeforeRead(usize),
+        AfterRead(usize),
+    }
+
+    type Hook = Box<dyn FnOnce(&Memory) + Send>;
+
+    /// The memory broker with hooks at the steps of a live request (each runs once).
+    struct Hooked {
+        memory: Arc<Memory>,
+        peaks: AtomicUsize,
+        reads: AtomicUsize,
+        /// Reports no tail for any stream, as the NATS broker does.
+        no_tail: std::sync::atomic::AtomicBool,
+        hooks: Mutex<Vec<(At, Hook)>>,
+    }
+
+    impl Hooked {
+        fn on(&self, at: At, hook: impl FnOnce(&Memory) + Send + 'static) {
+            lock(&self.hooks).push((at, Box::new(hook)));
+        }
+
+        fn run(&self, at: At) {
+            let hook = {
+                let mut hooks = lock(&self.hooks);
+                hooks.iter().position(|(a, _)| *a == at).map(|i| hooks.remove(i).1)
+            };
+            if let Some(hook) = hook {
+                hook(&self.memory);
+            }
+        }
+
+        fn read<T>(&self, read: impl FnOnce() -> T) -> T {
+            let n = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
+            self.run(At::BeforeRead(n));
+            let result = read();
+            self.run(At::AfterRead(n));
+            result
+        }
+    }
+
+    impl Broker for Hooked {
+        fn start(&self) -> Result<(), BrokerError> {
+            self.memory.start()
+        }
+        fn shutdown(&self) -> Result<(), BrokerError> {
+            self.memory.shutdown()
+        }
+        fn announce(&self) -> String {
+            self.memory.announce()
+        }
+        fn handle_broadcast(&self, msg: &StreamMessage) -> Result<(), BrokerError> {
+            self.memory.handle_broadcast(msg)
+        }
+        fn handle_command(&self, msg: &RemoteCommandMessage) -> Result<(), BrokerError> {
+            self.memory.handle_command(msg)
+        }
+        fn subscribe(&self, stream: &str) -> String {
+            let id = self.memory.subscribe(stream);
+            self.run(At::Subscribe);
+            id
+        }
+        fn unsubscribe(&self, stream: &str) -> String {
+            self.memory.unsubscribe(stream)
+        }
+        fn history_from(&self, stream: &str, epoch: &str, offset: u64) -> Result<Vec<StreamMessage>, BrokerError> {
+            self.read(|| self.memory.history_from(stream, epoch, offset))
+        }
+        fn history_since(&self, stream: &str, ts: i64) -> Result<Option<Vec<StreamMessage>>, BrokerError> {
+            self.read(|| self.memory.history_since(stream, ts))
+        }
+        fn commit_session(&self, sid: &str, session: &dyn Cacheable) -> Result<(), BrokerError> {
+            self.memory.commit_session(sid, session)
+        }
+        fn restore_session(&self, sid: &str) -> Result<Option<Vec<u8>>, BrokerError> {
+            self.memory.restore_session(sid)
+        }
+        fn touch_session(&self, sid: &str) -> Result<(), BrokerError> {
+            self.memory.touch_session(sid)
+        }
+        fn supports_presence(&self) -> bool {
+            self.memory.supports_presence()
+        }
+        fn presence_add(
+            &self,
+            stream: &str,
+            sid: &str,
+            pid: &str,
+            info: serde_json::Value,
+        ) -> Result<Option<PresenceEvent>, BrokerError> {
+            self.memory.presence_add(stream, sid, pid, info)
+        }
+        fn presence_remove(&self, stream: &str, sid: &str) -> Result<Option<PresenceEvent>, BrokerError> {
+            self.memory.presence_remove(stream, sid)
+        }
+        fn presence_info(&self, stream: &str, opts: Option<&PresenceInfoOptions>) -> Result<PresenceInfo, BrokerError> {
+            self.memory.presence_info(stream, opts)
+        }
+        fn touch_presence(&self, sid: &str) -> Result<(), BrokerError> {
+            self.memory.touch_presence(sid)
+        }
+        fn peak(&self, stream: &str) -> Result<Option<StreamMessage>, BrokerError> {
+            let tail = if self.no_tail.load(Ordering::SeqCst) { Ok(None) } else { self.memory.peak(stream) };
+            self.run(At::Peak(self.peaks.fetch_add(1, Ordering::SeqCst) + 1));
+            tail
+        }
+    }
+
+    /// Publishes `{"n":<n>}` to `s`.
+    fn publish(memory: &Memory, n: u64) {
+        publish_in(memory, "s", n);
+    }
+
+    /// Publishes `{"n":<n>}` to `stream`.
+    fn publish_in(memory: &Memory, stream: &str, n: u64) {
+        let msg = StreamMessage { stream: stream.into(), data: format!(r#"{{"n":{n}}}"#), ..Default::default() };
+        memory.handle_broadcast(&msg).unwrap();
+    }
+
+    /// Waits (bounded) until `cond` holds.
+    fn wait_for(what: &str, cond: impl Fn() -> bool) {
+        let deadline = Instant::now() + WAIT;
+        while !cond() {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// The endpoint over [`Hooked`], served without a socket: public streams,
+    /// `{"n":1}` at `1::ep` in `s`.
+    struct Live {
+        node: Arc<Node>,
+        memory: Arc<Memory>,
+        broker: Arc<Hooked>,
+        handler: Arc<Handler>,
+    }
+
+    /// A request served on its own thread.
+    struct InFlight {
+        rec: Arc<Rec>,
+        done: CancellationToken,
+        thread: std::thread::JoinHandle<()>,
+    }
+
+    impl Live {
+        fn new() -> Self {
+            let mut nconf = node::Config::new();
+            nconf.disconnect_mode = node::DISCONNECT_MODE_NEVER.into();
+            let mut sconf = cabby_core::streams::Config::new();
+            sconf.public = true;
+            let streams = Arc::new(StreamsController::for_config(&sconf));
+            let mut conf = Config::new();
+            conf.skip_auth = true;
+            conf.poll_interval = 3;
+            let node = Node::new(nconf, vec![node::NodeOption::Controller(streams.clone())]);
+            let subscriber = Arc::new(node::LegacySubscriber::new(node.clone()));
+            let memory = Arc::new(Memory::new(
+                Some(subscriber as Arc<dyn Broadcaster>),
+                None,
+                &cabby_core::broker::Config::new(),
+                Arc::new(cabby_core::broker::SystemClock),
+            ));
+            memory.set_epoch("ep");
+            let broker = Arc::new(Hooked {
+                memory: memory.clone(),
+                peaks: AtomicUsize::new(0),
+                reads: AtomicUsize::new(0),
+                no_tail: Default::default(),
+                hooks: Mutex::default(),
+            });
+            node.set_broker(broker.clone());
+            memory.start().unwrap();
+            node.start().unwrap();
+            publish(&memory, 1);
+            let handler =
+                ds_handler(node.clone(), broker.clone(), Some(streams), None, CancellationToken::new(), None, &conf);
+            Self { node, memory, broker, handler: Arc::new(handler.unwrap()) }
+        }
+
+        fn publish(&self, n: u64) {
+            publish(&self.memory, n);
+        }
+
+        fn get(&self, target: &str) -> InFlight {
+            let rec = Arc::new(Rec::default());
+            let done = CancellationToken::new();
+            let writer = RecWriter { rec: rec.clone(), headers: http::HeaderMap::new() };
+            let req =
+                HttpRequest { method: "GET".into(), target: target.into(), host: "x".into(), ..Default::default() };
+            let (handler, token) = (self.handler.clone(), done.clone());
+            let thread = std::thread::spawn(move || handler.serve(&req, Box::new(writer), &token));
+            InFlight { rec, done, thread }
+        }
+
+        /// Waits (bounded) until a live session is subscribed in the hub (`s` has none).
+        fn wait_subscribed(&self) {
+            wait_for("a live subscription", || self.node.hub().streams_size() == 1);
+        }
+    }
+
+    impl InFlight {
+        /// The response of a request that ends by itself.
+        fn response(self) -> RecState {
+            let st = self.rec.wait("the end of the response", |st| st.finished);
+            self.thread.join().unwrap();
+            st
+        }
+
+        /// Ends the request as a client going away does.
+        fn close(self) -> RecState {
+            self.done.cancel();
+            self.response()
+        }
+
+        /// Waits (bounded) until the SSE client has `n` messages.
+        fn wait_sse(&self, n: usize) -> RecState {
+            self.rec.wait(&format!("{n} SSE messages"), |st| sse_read(&st.body).0.len() >= n)
+        }
+    }
+
+    /// The complete events of an SSE body as `(event, data)`, pings left out.
+    fn sse_events(body: &[u8]) -> Vec<(String, String)> {
+        let text = String::from_utf8_lossy(body);
+        let mut events: Vec<&str> = text.split("\n\n").collect();
+        events.pop(); // incomplete, or empty
+        events
+            .into_iter()
+            .filter(|e| *e != sse::COMMENT_PING)
+            .map(|e| {
+                let (event, data) = e.split_once('\n').expect("an event and its data");
+                (event.strip_prefix("event: ").unwrap().to_owned(), data.strip_prefix("data:").unwrap().to_owned())
+            })
+            .collect()
+    }
+
+    /// What a client following an SSE body got: the `n` of the messages and the
+    /// offset of each control event, in order.
+    fn sse_read(body: &[u8]) -> (Vec<u64>, Vec<String>) {
+        let (mut ns, mut offsets) = (Vec::new(), Vec::new());
+        for (event, data) in sse_events(body) {
+            let v: serde_json::Value = serde_json::from_str(&data).unwrap();
+            if event == "data" {
+                ns.extend(v.as_array().unwrap().iter().map(|m| m["n"].as_u64().unwrap()));
+            } else {
+                offsets.push(v["streamNextOffset"].as_str().unwrap().to_owned());
+            }
+        }
+        (ns, offsets)
+    }
+
+    /// The `n` of the messages in a long-poll or catch-up body.
+    fn json_read(body: &[u8]) -> Vec<u64> {
+        let v: Vec<serde_json::Value> = serde_json::from_slice(body).unwrap();
+        v.iter().map(|m| m["n"].as_u64().unwrap()).collect()
+    }
+
+    fn offsets(range: std::ops::RangeInclusive<u64>, epoch: &str) -> Vec<String> {
+        range.map(|n| encode_offset(n, epoch)).collect()
+    }
+
+    /// The data and control event of the live event for `{"n":<n>}`, if the body has it.
+    fn live_event(body: &[u8], n: u64) -> Option<(String, String)> {
+        let events = sse_events(body);
+        let i = events.iter().position(|(e, d)| e == "data" && *d == format!(r#"[{{"n":{n}}}]"#))?;
+        let (event, control) = events.get(i + 1)?;
+        (event == "control" && !control.contains("upToDate")).then(|| (events[i].1.clone(), control.clone()))
+    }
+
+    // ------------------------------------------------------------ D-090
+
+    /// D-090: SSE encoders with different cursors, fed one cached message in
+    /// either order, write their own cursor and the same data.
+    #[test]
+    fn deviation_d090_sse_encoders_keep_their_cursor_for_a_shared_message() {
+        use cabby_core::common::{EncodedMessage, Reply};
+        use cabby_core::encoders::CachedEncodedMessage;
+
+        let a = SseEncoder { cursor: "100".into(), up_to_date: false };
+        let b = SseEncoder { cursor: "200".into(), up_to_date: true };
+        for (first, second) in [(&a, &b), (&b, &a)] {
+            let msg = CachedEncodedMessage::new(EncodedMessage::Reply(Reply {
+                message: Some(serde_json::json!({"n": 1})),
+                offset: 7,
+                epoch: "ep".into(),
+                stream_id: "s".into(),
+                ..Default::default()
+            }));
+            for e in [first, second] {
+                let frame = String::from_utf8(msg.fetch_with(e).unwrap().payload.to_vec()).unwrap();
+                let (data, control) = frame.split_once("\n\n").unwrap();
+                assert_eq!("event: data\ndata:[{\"n\":1}]", data);
+                assert_eq!(
+                    String::from_utf8(encode_sse_control_event("7::ep", &e.cursor, e.up_to_date)).unwrap(),
+                    control
+                );
+            }
+        }
+    }
+
+    /// D-090: the endpoint's live SSE sessions share one encoded frame per message
+    /// (whichever session fetches it first), and each writes its own cursor.
+    #[test]
+    fn deviation_d090_live_sse_sessions_share_the_data_and_keep_their_cursor() {
+        use cabby_core::common::{EncodedMessage, Reply};
+        use cabby_core::encoders::CachedEncodedMessage;
+
+        let session = |cursor: &str| {
+            let rec = Arc::new(Rec::default());
+            let conn =
+                Arc::new(sse::Connection::new(Box::new(RecWriter { rec: rec.clone(), headers: Default::default() })));
+            conn.established();
+            let stream = SseStream::new(conn, cursor.to_owned());
+            stream.release(Watermark::default());
+            (stream, rec)
+        };
+        let (a, b) = (session("100"), session("200"));
+        for (offset, (first, second)) in [(7, (&a, &b)), (8, (&b, &a))] {
+            let msg = CachedEncodedMessage::new(EncodedMessage::Reply(Reply {
+                message: Some(serde_json::json!({"n": 1})),
+                offset,
+                epoch: "ep".into(),
+                stream_id: "s".into(),
+                ..Default::default()
+            }));
+            let frames = [first, second].map(|_| msg.fetch_with(&SseDataEncoder).unwrap());
+            assert!(Arc::ptr_eq(&frames[0], &frames[1]), "the frame is encoded once");
+            for ((conn, rec), frame) in [first, second].into_iter().zip(&frames) {
+                lock(&rec.state).body.clear();
+                conn.write(&frame.payload, Instant::now()).unwrap();
+                let body = String::from_utf8(lock(&rec.state).body.clone()).unwrap();
+                let want = format!(
+                    "event: data\ndata:[{{\"n\":1}}]\n\nevent: control\ndata:{{\"streamCursor\":\"{}\",\"streamNextOffset\":\"{offset}::ep\"}}\n\n",
+                    conn.cursor
+                );
+                assert_eq!(want, body);
+            }
+        }
+
+        // Pings are written as they are.
+        let ping = SseDataEncoder.encode(&EncodedMessage::Ping(Default::default())).unwrap();
+        lock(&a.1.state).body.clear();
+        a.0.write(&ping.payload, Instant::now()).unwrap();
+        assert_eq!(format!("{}\n\n", sse::COMMENT_PING), String::from_utf8(lock(&a.1.state).body.clone()).unwrap());
+    }
+
+    /// D-090: SSE clients of one stream with different cursors each get their own
+    /// in the control events of the same broadcasts, and the same data events.
+    #[test]
+    fn deviation_d090_sse_clients_get_their_own_cursor() {
+        let live = Live::new();
+        let cursors = [1_000_000_000_000_u64, 2_000_000_000_000];
+        let clients: Vec<_> =
+            cursors.iter().map(|c| live.get(&format!("/ds/s?offset=1::ep&live=sse&cursor={c}"))).collect();
+
+        // Broadcast until both clients got the same message live (history is
+        // written per request).
+        let mut n = 1;
+        let deadline = Instant::now() + WAIT;
+        let events = loop {
+            assert!(Instant::now() < deadline, "the clients did not get a live broadcast");
+            n += 1;
+            live.publish(n);
+            let live_event = |c: &InFlight| {
+                let st = c.rec.wait_up_to(Duration::from_millis(100), |st| live_event(&st.body, n).is_some())?;
+                live_event(&st.body, n)
+            };
+            if let [Some(a), Some(b)] = [live_event(&clients[0]), live_event(&clients[1])] {
+                break [a, b];
+            }
+        };
+
+        assert_eq!(events[0].0, events[1].0, "the data events differ");
+        for (client, (_, control)) in cursors.iter().zip(&events) {
+            let control: serde_json::Value = serde_json::from_str(control).unwrap();
+            let cursor: u64 = control["streamCursor"].as_str().unwrap().parse().unwrap();
+            // A client cursor ahead of the clock gets 1 to 60 intervals more.
+            assert!(cursor > *client && cursor <= client + 60, "client {client} got cursor {cursor}");
+            assert_eq!(encode_offset(n, "ep"), control["streamNextOffset"]);
+        }
+        for c in clients {
+            c.close();
+        }
+    }
+
+    /// D-089: how live messages compare with what the client has.
+    #[test]
+    fn deviation_d089_live_messages_follow_the_watermark() {
+        let at = |epoch: &str, offset| Some((epoch.to_owned(), offset));
+
+        let mut mark = Watermark { position: at("ep", 2), strict: false };
+        assert_eq!(Admit::Skip, mark.admit("ep", 2));
+        assert_eq!(Admit::Deliver, mark.admit("ep", 3));
+        assert_eq!(Admit::Skip, mark.admit("ep", 3));
+        // A later epoch.
+        assert_eq!(Admit::Deliver, mark.admit("ep2", 1));
+        assert_eq!(at("ep2", 1), mark.position);
+
+        // The epoch changed around the subscription: another epoch ends the
+        // response until a message of the position's epoch was delivered.
+        let mut mark = Watermark { position: at("ep2", 2), strict: true };
+        assert_eq!(Admit::Skip, mark.admit("ep2", 1));
+        assert_eq!(Admit::End, mark.admit("ep", 3));
+        assert_eq!(Admit::Deliver, mark.admit("ep2", 3));
+        assert_eq!(Admit::Deliver, mark.admit("ep3", 1));
+
+        // No position yet: the first message sets it.
+        let mut mark = Watermark::default();
+        assert_eq!(Admit::Deliver, mark.admit("ep", 5));
+        assert_eq!(Admit::Skip, mark.admit("ep", 5));
+    }
+
+    // ------------------------------------------------------------ D-089: SSE
+
+    fn sse(offset: &str) -> String {
+        format!("/ds/s?offset={offset}&live=sse")
+    }
+
+    fn long_poll(offset: &str) -> String {
+        format!("/ds/s?offset={offset}&live=long-poll")
+    }
+
+    /// D-089: a message published while the subscription is installed and one
+    /// published after the history read reach the SSE client once, in order.
+    #[test]
+    fn deviation_d089_sse_delivers_what_lands_between_catch_up_and_live() {
+        let live = Live::new();
+        live.broker.on(At::Subscribe, |m| publish(m, 2));
+        live.broker.on(At::AfterRead(1), |m| publish(m, 3));
+        let c = live.get(&sse("1::ep"));
+        c.wait_sse(2);
+        live.publish(4);
+        c.wait_sse(3);
+        assert_eq!((vec![2, 3, 4], offsets(2..=4, "ep")), sse_read(&c.close().body));
+    }
+
+    /// D-089: with nothing to catch up on, a message published after the history
+    /// read reaches the SSE client.
+    #[test]
+    fn deviation_d089_sse_empty_history_then_a_message_before_live() {
+        let live = Live::new();
+        live.broker.on(At::AfterRead(1), |m| publish(m, 2));
+        let c = live.get(&sse("1::ep"));
+        c.wait_sse(1);
+        live.publish(3);
+        c.wait_sse(2);
+        assert_eq!((vec![2, 3], offsets(2..=3, "ep")), sse_read(&c.close().body));
+    }
+
+    /// D-089: a message both in the history and in the live queue reaches the SSE
+    /// client once, with the history.
+    #[test]
+    fn deviation_d089_sse_a_message_in_history_and_live_once() {
+        let live = Live::new();
+        live.broker.on(At::BeforeRead(1), |m| publish(m, 2));
+        let c = live.get(&sse("1::ep"));
+        let st = c.wait_sse(1);
+        assert!(live_event(&st.body, 2).is_none(), "not with the history: {:?}", String::from_utf8_lossy(&st.body));
+        live.publish(3);
+        c.wait_sse(2);
+        assert_eq!((vec![2, 3], offsets(2..=3, "ep")), sse_read(&c.close().body));
+    }
+
+    /// D-089: `offset=now` delivers what is published after the tail is read,
+    /// before and after the subscription is installed.
+    #[test]
+    fn deviation_d089_sse_now() {
+        let live = Live::new();
+        live.broker.on(At::Peak(1), |m| publish(m, 2));
+        live.broker.on(At::AfterRead(1), |m| publish(m, 3));
+        let c = live.get(&sse(NOW_OFFSET));
+        c.wait_sse(2);
+        live.publish(4);
+        c.wait_sse(3);
+        assert_eq!((vec![2, 3, 4], offsets(2..=4, "ep")), sse_read(&c.close().body));
+    }
+
+    /// D-089: when the epoch changes between the subscription and the history
+    /// read, a live message of the previous epoch ends the stream after the
+    /// history; the client resumes from the history's offset.
+    #[test]
+    fn deviation_d089_sse_epoch_change_before_the_history_read() {
+        let live = Live::new();
+        live.broker.on(At::BeforeRead(1), |m| {
+            publish(m, 2);
+            m.set_epoch("ep2");
+        });
+        let st = live.get(&sse(START_OFFSET)).response();
+        assert_eq!((vec![1, 2], offsets(2..=2, "ep2")), sse_read(&st.body));
+
+        live.broker.on(At::AfterRead(2), |m| publish(m, 3));
+        let c = live.get(&sse("2::ep2"));
+        c.wait_sse(1);
+        assert_eq!((vec![3], offsets(3..=3, "ep2")), sse_read(&c.close().body));
+    }
+
+    /// D-089: an offset of an epoch that ended before the history read is gone,
+    /// as before.
+    #[test]
+    fn deviation_d089_sse_offset_of_a_previous_epoch_is_gone() {
+        let live = Live::new();
+        live.broker.on(At::BeforeRead(1), |m| m.set_epoch("ep2"));
+        assert_eq!(Some(410), live.get(&sse("1::ep")).response().status);
+    }
+
+    /// D-089: an epoch change after the history read is delivered live, as before.
+    #[test]
+    fn deviation_d089_sse_a_later_epoch_is_delivered() {
+        let live = Live::new();
+        live.broker.on(At::AfterRead(1), |m| {
+            m.set_epoch("ep2");
+            publish(m, 2);
+        });
+        let c = live.get(&sse("1::ep"));
+        c.wait_sse(1);
+        live.publish(3);
+        c.wait_sse(2);
+        assert_eq!((vec![2, 3], offsets(2..=3, "ep2")), sse_read(&c.close().body));
+    }
+
+    // ------------------------------------------------------------ D-089: long-poll
+
+    /// A long-poll data response with these messages and next offset.
+    fn assert_poll(st: &RecState, ns: &[u64], next: &str) {
+        assert_eq!(Some(200), st.status, "{st:?}");
+        assert_eq!(ns, json_read(&st.body));
+        assert_eq!(next, st.header(STREAM_OFFSET_HEADER));
+    }
+
+    /// D-089: with nothing to catch up on, a long-poll returns a message published
+    /// after the history read instead of timing out.
+    #[test]
+    fn deviation_d089_long_poll_returns_what_lands_before_live() {
+        let live = Live::new();
+        live.broker.on(At::AfterRead(1), |m| publish(m, 2));
+        assert_poll(&live.get(&long_poll("1::ep")).response(), &[2], "2::ep");
+    }
+
+    /// D-089: a long-poll client following the offsets it gets receives every
+    /// message once, in order.
+    #[test]
+    fn deviation_d089_long_poll_follows_the_offsets() {
+        let live = Live::new();
+        live.broker.on(At::AfterRead(1), |m| publish(m, 2));
+        live.broker.on(At::Subscribe, |m| publish(m, 3));
+        assert_poll(&live.get(&long_poll("1::ep")).response(), &[2, 3], "3::ep");
+        // The next poll reads nothing (read 3), subscribes and reads again (read 4).
+        live.broker.on(At::AfterRead(4), |m| publish(m, 4));
+        assert_poll(&live.get(&long_poll("3::ep")).response(), &[4], "4::ep");
+    }
+
+    /// D-089: a message both in the history and in the live queue is returned once.
+    #[test]
+    fn deviation_d089_long_poll_a_message_in_history_and_live_once() {
+        let live = Live::new();
+        live.broker.on(At::BeforeRead(2), |m| publish(m, 2));
+        assert_poll(&live.get(&long_poll("1::ep")).response(), &[2], "2::ep");
+        live.broker.on(At::AfterRead(4), |m| publish(m, 3));
+        assert_poll(&live.get(&long_poll("2::ep")).response(), &[3], "3::ep");
+    }
+
+    /// D-089: `offset=now` returns a message published after the tail is read,
+    /// with the headers of `now` reads (not cacheable, no `ETag`).
+    #[test]
+    fn deviation_d089_long_poll_now() {
+        let live = Live::new();
+        live.broker.on(At::Peak(1), |m| publish(m, 2));
+        let st = live.get(&long_poll(NOW_OFFSET)).response();
+        assert_poll(&st, &[2], "2::ep");
+        assert_eq!("no-store", st.header("cache-control"));
+        assert_eq!("", st.header("etag"));
+    }
+
+    /// D-089: when the epoch changes between the subscription and the history
+    /// read, the long-poll is gone, as when it changes before.
+    #[test]
+    fn deviation_d089_long_poll_epoch_change_before_the_history_read() {
+        let live = Live::new();
+        live.broker.on(At::BeforeRead(2), |m| m.set_epoch("ep2"));
+        assert_eq!(Some(410), live.get(&long_poll("1::ep")).response().status);
+    }
+
+    /// D-089: `offset=now` when the epoch changed after the tail was read: a live
+    /// message of another epoch ends the long-poll with `204` at once, and the
+    /// client polls again.
+    #[test]
+    fn deviation_d089_long_poll_now_and_an_epoch_change() {
+        let live = Live::new();
+        live.broker.on(At::BeforeRead(1), |m| m.set_epoch("ep2"));
+        live.broker.on(At::AfterRead(1), |m| publish(m, 2));
+        let started = Instant::now();
+        let st = live.get(&long_poll(NOW_OFFSET)).response();
+        assert_eq!(Some(204), st.status, "{st:?}");
+        assert!(started.elapsed() < Duration::from_secs(2), "answered at the poll interval");
+    }
+
+    /// D-089: an epoch change after the history read is delivered, as before.
+    #[test]
+    fn deviation_d089_long_poll_a_later_epoch_is_delivered() {
+        let live = Live::new();
+        live.broker.on(At::AfterRead(2), |m| {
+            m.set_epoch("ep2");
+            publish(m, 2);
+        });
+        assert_poll(&live.get(&long_poll("1::ep")).response(), &[2], "2::ep2");
+    }
+
+    // ------------------------------------------------------------ D-089: `now` on an empty stream
+
+    /// D-089: `offset=now` on a stream without entries: a message published after
+    /// the tail read and before the subscription, and one after, reach the SSE
+    /// client once, in order.
+    #[test]
+    fn deviation_d089_sse_now_on_an_empty_stream() {
+        let live = Live::new();
+        live.broker.on(At::Peak(1), |m| publish_in(m, "e", 1));
+        let c = live.get("/ds/e?offset=now&live=sse");
+        c.wait_sse(1);
+        publish_in(&live.memory, "e", 2);
+        c.wait_sse(2);
+        assert_eq!((vec![1, 2], offsets(1..=2, "ep")), sse_read(&c.close().body));
+    }
+
+    /// D-089: `offset=now` on a stream without entries and nothing published
+    /// before the subscription: live messages, as before.
+    #[test]
+    fn deviation_d089_sse_now_on_an_empty_stream_without_a_gap() {
+        let live = Live::new();
+        let c = live.get("/ds/e?offset=now&live=sse");
+        live.wait_subscribed();
+        publish_in(&live.memory, "e", 1);
+        c.wait_sse(1);
+        publish_in(&live.memory, "e", 2);
+        c.wait_sse(2);
+        assert_eq!((vec![1, 2], offsets(1..=2, "ep")), sse_read(&c.close().body));
+    }
+
+    /// D-089: `offset=now` on a stream without entries: a long-poll returns a
+    /// message published after the tail read and before the subscription, and the
+    /// next poll the one after.
+    #[test]
+    fn deviation_d089_long_poll_now_on_an_empty_stream() {
+        let live = Live::new();
+        live.broker.on(At::Peak(1), |m| publish_in(m, "e", 1));
+        let st = live.get("/ds/e?offset=now&live=long-poll").response();
+        assert_poll(&st, &[1], "1::ep");
+        assert_eq!("no-store", st.header("cache-control"));
+
+        let next = live.get("/ds/e?offset=1::ep&live=long-poll");
+        live.wait_subscribed();
+        publish_in(&live.memory, "e", 2);
+        assert_poll(&next.response(), &[2], "2::ep");
+    }
+
+    /// D-089: `offset=now` on a stream without entries and nothing published
+    /// before the subscription: the first live message, as before.
+    #[test]
+    fn deviation_d089_long_poll_now_on_an_empty_stream_without_a_gap() {
+        let live = Live::new();
+        let pending = live.get("/ds/e?offset=now&live=long-poll");
+        live.wait_subscribed();
+        publish_in(&live.memory, "e", 1);
+        assert_poll(&pending.response(), &[1], "1::ep");
+    }
+
+    /// D-089: `offset=now` with a broker that reports no tail for a stream with
+    /// entries: its history is not read, and only later messages are delivered.
+    #[test]
+    fn deviation_d089_now_ignores_history_when_the_broker_reports_no_tail() {
+        let live = Live::new();
+        live.broker.no_tail.store(true, Ordering::SeqCst);
+        let c = live.get(&sse(NOW_OFFSET));
+        live.wait_subscribed();
+        live.publish(2);
+        c.wait_sse(1);
+        assert_eq!((vec![2], offsets(2..=2, "ep")), sse_read(&c.close().body));
     }
 }

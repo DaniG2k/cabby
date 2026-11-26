@@ -20,6 +20,14 @@ Differences from the AnyCable Go server are listed by ID in
   replaced it with the older state, which a restore then returned. The keepalive now writes
   only over the revision it read, and no longer writes back a session that expired or was
   deleted meanwhile (D-088).
+- Durable Streams live reads (`live=long-poll`, `live=sse`): a message published while the read
+  starts is no longer skipped. The subscription is installed before the history is read, live
+  messages wait until the history is written, and messages the history delivered are not sent
+  again. A long-poll with nothing to catch up on returns such a message instead of waiting for a
+  later one or answering `204` (D-089).
+- Durable Streams SSE: every client's `control` events carry its own `streamCursor`. Before, the
+  SSE clients of a stream got the cursor of one of them with each live message. The data is still
+  encoded once per message (D-090).
 
 ## [0.4.0] - 2026-11-26
 
