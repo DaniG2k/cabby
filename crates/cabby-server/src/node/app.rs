@@ -1371,18 +1371,14 @@ impl Node {
                 } else if !reply.stopped_streams.is_empty() {
                     dirty = true;
                     for stream in &reply.stopped_streams {
-                        let stream_id = broker.unsubscribe(stream);
-                        self.hub.unsubscribe_session(s, &stream_id, id);
-                        s.subscriptions().remove_channel_stream(id, &stream_id);
+                        self.stop_channel_stream(s, broker.as_ref(), id, stream);
                     }
                 }
 
                 if !reply.streams.is_empty() {
                     dirty = true;
                     for stream in &reply.streams {
-                        let stream_id = broker.subscribe(stream);
-                        self.hub.subscribe_session(s, &stream_id, id);
-                        s.subscriptions().add_channel_stream(id, &stream_id);
+                        self.start_channel_stream(s, broker.as_ref(), id, stream);
                     }
                 }
                 false
@@ -1416,6 +1412,38 @@ impl Node {
         }
 
         dirty && !closed
+    }
+
+    /// Starts `stream` for the channel `id` (deviation D-091): the broker
+    /// reference and the hub subscription are added only when the stream is
+    /// new to a channel the session has, so the broker's count matches the
+    /// session's memberships. Runs under the session's registration lock.
+    fn start_channel_stream(&self, s: &Arc<Session>, broker: &dyn Broker, id: &str, stream: &str) {
+        let subscriptions = s.subscriptions();
+        if !subscriptions.lacks_channel_stream(id, stream) {
+            return;
+        }
+        let stream_id = broker.subscribe(stream);
+        if subscriptions.insert_channel_stream(id, &stream_id) {
+            self.hub.subscribe_session(s, &stream_id, id);
+        } else {
+            // The broker identifies the stream by one the channel already has:
+            // that membership holds its reference already.
+            broker.unsubscribe(stream);
+        }
+    }
+
+    /// Stops `stream` for the channel `id` (deviation D-091): the broker
+    /// reference and the hub subscription are dropped only when the channel
+    /// had the stream. Streams are matched by name, the identifier every
+    /// Cabby broker returns (stopping all streams, restoring and disconnecting
+    /// pass the stored identifiers to the broker too). Runs under the
+    /// session's registration lock.
+    fn stop_channel_stream(&self, s: &Arc<Session>, broker: &dyn Broker, id: &str, stream: &str) {
+        if s.subscriptions().take_channel_stream(id, stream) {
+            let stream_id = broker.unsubscribe(stream);
+            self.hub.unsubscribe_session(s, &stream_id, id);
+        }
     }
 
     /// Applies the connection-level part of a result (upstream unexported

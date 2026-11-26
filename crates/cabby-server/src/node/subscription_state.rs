@@ -52,15 +52,29 @@ impl SubscriptionState {
 
     /// Adds a stream to a known channel; unknown channels are ignored.
     pub fn add_channel_stream(&self, id: &str, stream: &str) {
-        if let Some(streams) = self.lock().get_mut(id) {
-            streams.insert(stream.to_owned());
-        }
+        self.insert_channel_stream(id, stream);
+    }
+
+    /// [`SubscriptionState::add_channel_stream`], returning whether the stream
+    /// was added: false for unknown channels and for streams the channel has.
+    pub fn insert_channel_stream(&self, id: &str, stream: &str) -> bool {
+        self.lock().get_mut(id).is_some_and(|streams| streams.insert(stream.to_owned()))
+    }
+
+    /// Whether `stream` can be added to `id`: the channel is known and does
+    /// not have the stream yet.
+    pub fn lacks_channel_stream(&self, id: &str, stream: &str) -> bool {
+        self.lock().get(id).is_some_and(|streams| !streams.contains(stream))
     }
 
     pub fn remove_channel_stream(&self, id: &str, stream: &str) {
-        if let Some(streams) = self.lock().get_mut(id) {
-            streams.remove(stream);
-        }
+        self.take_channel_stream(id, stream);
+    }
+
+    /// [`SubscriptionState::remove_channel_stream`], returning whether the
+    /// channel had the stream.
+    pub fn take_channel_stream(&self, id: &str, stream: &str) -> bool {
+        self.lock().get_mut(id).is_some_and(|streams| streams.remove(stream))
     }
 
     /// Clears a channel's streams and returns them (`None` for unknown channels,
@@ -72,5 +86,28 @@ impl SubscriptionState {
     /// A channel's streams in unspecified order (`None` for unknown channels).
     pub fn streams_for(&self, id: &str) -> Option<Vec<String>> {
         self.lock().get(id).map(|streams| streams.iter().cloned().collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert_and_take_report_membership_changes() {
+        let subs = SubscriptionState::new();
+        assert!(!subs.lacks_channel_stream("chat", "s"), "unknown channel");
+        assert!(!subs.insert_channel_stream("chat", "s"), "unknown channel");
+
+        subs.add_channel("chat");
+        assert!(subs.lacks_channel_stream("chat", "s"));
+        assert!(subs.insert_channel_stream("chat", "s"));
+        assert!(!subs.lacks_channel_stream("chat", "s"));
+        assert!(!subs.insert_channel_stream("chat", "s"), "already there");
+
+        assert!(subs.take_channel_stream("chat", "s"));
+        assert!(!subs.take_channel_stream("chat", "s"), "already removed");
+        assert!(!subs.take_channel_stream("other", "s"), "unknown channel");
+        assert_eq!(Some(Vec::new()), subs.streams_for("chat"));
     }
 }

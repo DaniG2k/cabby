@@ -26,6 +26,13 @@ Differences from the AnyCable Go server are listed by ID in
   is set) is treated as not set: no other secret is derived from it, and Cabby logs a warning at
   startup. Before, as in AnyCable, `none` was used as the application secret. `none` still turns
   off a single secret, such as `--http_rpc_secret=none` (D-086).
+- The node's pub/sub subscription for a stream now follows the sessions that hold it (D-091). A
+  channel that starts a stream it already has holds it once, so the node unsubscribes when the
+  last session leaves; before, the extra reference kept the subscription until restart. A stop
+  for a stream the channel does not hold changes nothing; before, it could unsubscribe the node
+  while another session still held the stream, and that session stopped receiving broadcasts
+  from other nodes. Streams in a reply for a channel the session does not have (such as a
+  rejected subscription) are not subscribed.
 
 ## [0.5.2] - 2026-11-27
 

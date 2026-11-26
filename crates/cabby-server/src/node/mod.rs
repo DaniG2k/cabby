@@ -35,6 +35,8 @@ mod revocations;
 mod session;
 #[cfg(test)]
 mod session_cache_tests;
+#[cfg(test)]
+mod stream_refs_tests;
 mod subscription_state;
 mod tasks;
 #[cfg(test)]
