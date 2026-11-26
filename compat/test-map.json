@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 182
+      "cases": 211
     },
     "translation": {
       "reviewed": 923
@@ -26236,6 +26236,69 @@
   ],
   "rust_only": [
     {
+      "rust_case": "broadcast::http_test::http_handler_calls::a_broadcast_is_handled_exactly_once",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broadcast/http_test.go#TestHttpHandler/Handles_broadcasts"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broadcast::http_test::http_handler_calls::a_malformed_authorization_header_is_rejected_and_broadcasts_nothing",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broadcast/http_test.go#TestHttpHandler/Rejects_when_authorization_header_is_missing"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broadcast::http_test::http_handler_calls::a_missing_authorization_header_broadcasts_nothing",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broadcast/http_test.go#TestHttpHandler/Rejects_when_authorization_header_is_missing"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broadcast::http_test::http_handler_calls::a_non_post_request_broadcasts_nothing",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broadcast/http_test.go#TestHttpHandler/Rejects_non-POST_requests"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broadcast::http_test::http_handler_calls::a_too_large_body_broadcasts_nothing",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broadcast/http_test.go#TestHttpHandler/Rejects_too_large_bodies"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broadcast::http_test::http_handler_calls::a_wrong_token_is_rejected_and_broadcasts_nothing",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broadcast/http_test.go#TestHttpHandler/Rejects_when_authorization_header_is_missing"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "broadcast::http_test::http_handler_calls::an_authorized_broadcast_is_handled_exactly_once",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broadcast/http_test.go#TestHttpHandler/Accepts_when_authorization_header_is_valid"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
       "rust_case": "broadcast::legacy_redis_test::deviation_d082_implicit_sentinel_url",
       "relation": "regression",
       "links": [
@@ -27514,6 +27577,33 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "features::rpc_less::standalone_frames_are_exact",
+      "relation": "regression",
+      "links": [
+        "26a1a703:features/standalone.testfile#scenario"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::rpc_less::streams_make_no_rpc_calls",
+      "relation": "regression",
+      "links": [
+        "26a1a703:features/streams.testfile#scenario"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::rpc_less::turbo_streams_make_no_rpc_calls",
+      "relation": "regression",
+      "links": [
+        "26a1a703:features/turbo_rpc_less.testfile#scenario"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
       "rust_case": "features::sqlite::a_crash_restart_uses_a_new_epoch_and_clients_resync",
       "relation": "regression",
       "links": [
@@ -27608,6 +27698,42 @@
       "relation": "regression",
       "links": [
         "26a1a703:identity/identity_test.go#TestIdentifiableController/Authenticate_(success)"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "identity::jwt_test::rejected_tokens::a_header_naming_another_method_is_unauthorized",
+      "relation": "regression",
+      "links": [
+        "26a1a703:identity/jwt_test.go#TestJWTIdentifierIdentify/with_invalid_algo"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "identity::jwt_test::rejected_tokens::a_header_without_a_string_alg_is_unauthorized",
+      "relation": "regression",
+      "links": [
+        "26a1a703:identity/jwt_test.go#TestJWTIdentifierIdentify/with_invalid_algo"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "identity::jwt_test::rejected_tokens::a_non_numeric_exp_is_unauthorized",
+      "relation": "regression",
+      "links": [
+        "26a1a703:identity/jwt_test.go#TestJWTIdentifierIdentify/when_token_expired"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "identity::jwt_test::rejected_tokens::a_token_not_valid_yet_is_unauthorized",
+      "relation": "regression",
+      "links": [
+        "26a1a703:identity/jwt_test.go#TestJWTIdentifierIdentify/when_token_expired"
       ],
       "reference_status": "pass",
       "rust_status": "pass"
@@ -27856,10 +27982,145 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "pusher::executor_test::rejected_subscriptions::a_presence_subscription_with_a_bad_signature_is_rejected",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/executor_test.go#TestHandleCommand/Subscribe_(private_+_failure_bad_signature)"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::executor_test::rejected_subscriptions::a_presence_subscription_with_other_channel_data_is_rejected",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/executor_test.go#TestHandleCommand/Subscribe_(private_+_failure_bad_signature)"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::executor_test::rejected_subscriptions::a_private_or_presence_subscription_without_auth_data_is_rejected",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/executor_test.go#TestHandleCommand/Subscribe_(private_+_failure_bad_signature)"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::http_test::rejected_requests::a_body_that_does_not_match_the_signature_broadcasts_nothing",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/http_test.go#TestHttpHandler/Rejects_when_body_does_not_match_signature"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::http_test::rejected_requests::a_large_body_with_an_invalid_signature_broadcasts_nothing",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/http_test.go#TestHttpHandler/Rejects_large_body_with_invalid_signature_without_reading_it"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::http_test::rejected_requests::a_malformed_auth_timestamp_is_rejected",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/http_test.go#TestHttpHandler/Rejects_when_auth_timestamp_is_too_far_from_current_time"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::http_test::rejected_requests::a_stale_auth_timestamp_broadcasts_nothing",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/http_test.go#TestHttpHandler/Rejects_when_auth_timestamp_is_too_far_from_current_time"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::http_test::rejected_requests::a_validly_signed_body_over_the_limit_is_rejected",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/http_test.go#TestHttpHandler/Rejects_large_body_with_invalid_signature_without_reading_it"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::http_test::rejected_requests::an_auth_timestamp_in_the_future_is_rejected",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/http_test.go#TestHttpHandler/Rejects_when_auth_timestamp_is_too_far_from_current_time"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::http_test::rejected_requests::an_unsupported_method_broadcasts_nothing",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/http_test.go#TestHttpHandler/Rejects_unsupported_methods"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::http_test::rejected_requests::incorrect_authorization_data_broadcasts_nothing",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/http_test.go#TestHttpHandler/Rejects_when_authorization_data_is_incorrect"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
       "rust_case": "pusher::http_test::test_http_handler::handles_broadcasts_exactly_once",
       "relation": "regression",
       "links": [
         "26a1a703:pusher/http_test.go#TestHttpHandler/Handles_broadcasts"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::verifier_test::signature_format::a_verifier_for_an_app_id_sharing_a_prefix_rejects_the_signature",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/verifier_test.go#TestVerifyChannel"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::verifier_test::signature_format::channel_signatures_must_match_exactly",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/verifier_test.go#TestVerifyChannel"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::verifier_test::signature_format::presence_signatures_must_match_exactly",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/verifier_test.go#TestVerifyPresenceChannel"
+      ],
+      "reference_status": "pass",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::verifier_test::signature_format::user_signatures_must_match_exactly",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pusher/verifier_test.go#TestVerifyUser"
       ],
       "reference_status": "pass",
       "rust_status": "pass"
