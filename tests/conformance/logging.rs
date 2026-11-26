@@ -111,16 +111,34 @@ fn normalized(output: &str, sids: &[String], ports: &[u16], epoch: Option<&str>)
     lines
 }
 
+/// Compares the lines as multisets: each line must appear as many times as
+/// Go printed it.
 fn assert_lines(actual: &[String], expected: &[&str], output: &str) {
-    let mut expected: Vec<String> = expected.iter().map(|s| (*s).to_owned()).collect();
-    expected.sort();
-    let missing: Vec<&String> = expected.iter().filter(|l| !actual.contains(l)).collect();
-    let extra: Vec<&String> = actual.iter().filter(|l| !expected.contains(l)).collect();
+    let mut expected: Vec<&str> = expected.to_vec();
+    expected.sort_unstable();
+    let mut sorted: Vec<&str> = actual.iter().map(String::as_str).collect();
+    sorted.sort_unstable();
+    // Walk both sorted lists: what only one side has is missing or unexpected,
+    // counting repeated lines.
+    let (mut missing, mut extra): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
+    let (mut e, mut a) = (expected.iter().peekable(), sorted.iter().peekable());
+    loop {
+        match (e.peek(), a.peek()) {
+            (Some(x), Some(y)) if x == y => {
+                e.next();
+                a.next();
+            }
+            (Some(x), Some(y)) if x < y => missing.extend(e.next().copied()),
+            (Some(_), Some(_)) | (None, Some(_)) => extra.extend(a.next().copied()),
+            (Some(_), None) => missing.extend(e.next().copied()),
+            (None, None) => break,
+        }
+    }
     assert!(
-        missing.is_empty() && extra.is_empty() && actual.len() == expected.len(),
+        missing.is_empty() && extra.is_empty(),
         "log lines differ from Go's\nmissing:\n{}\nunexpected:\n{}\nall (normalised):\n{}\nSUT output:\n{output}",
-        missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
-        extra.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
+        missing.join("\n"),
+        extra.join("\n"),
         actual.join("\n"),
     );
 }
