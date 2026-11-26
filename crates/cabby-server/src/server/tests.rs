@@ -371,24 +371,35 @@ fn header_timeout_runs_while_a_head_is_read() {
     let addr = start(&server);
     let t0 = std::time::Instant::now();
 
+    // Each socket is watched on its own thread from the moment its last bytes
+    // are sent, so every close is timed against `t0` when it happens (read one
+    // after another, a socket closed too early would only be seen once the
+    // previous one had closed).
+    let watch = |name: &'static str, mut stream: TcpStream| {
+        std::thread::spawn(move || {
+            let closed = closed_within(&mut stream, Duration::from_secs(10));
+            (name, closed.map(|(_, data)| (t0.elapsed().as_secs_f64(), data)))
+        })
+    };
+
     // A connection that sends nothing.
-    let mut silent = connect(addr);
+    let silent = watch("silent", connect(addr));
     // A first head that never completes.
     let mut partial = connect(addr);
     write!(partial, "GET /health HTTP/1.1\r\nHost: x\r\n").unwrap();
+    let partial = watch("partial", partial);
     // A second head that never completes, after 2 s of idling.
     let mut later = connect(addr);
     write!(later, "GET /health HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
     assert_eq!(200, read_response(&mut later).status);
     std::thread::sleep(Duration::from_secs(2));
     write!(later, "GET /health HTTP/1.1\r\n").unwrap();
+    let later = watch("later", later);
 
     // Closed 5 s after the accept, or 5 s after the second head started (t0 + 2 s).
-    for (name, stream, min) in
-        [("silent", &mut silent, 4.5), ("partial", &mut partial, 4.5), ("later", &mut later, 6.5)]
-    {
-        let (_, data) = closed_within(stream, Duration::from_secs(10)).unwrap_or_else(|| panic!("{name} stays open"));
-        let after = t0.elapsed().as_secs_f64();
+    for (watcher, min) in [(silent, 4.5), (partial, 4.5), (later, 6.5)] {
+        let (name, closed) = watcher.join().expect("watcher thread");
+        let (after, data) = closed.unwrap_or_else(|| panic!("{name} stays open"));
         assert!(data.is_empty(), "{name}: no response, got {data:?}");
         assert!((min..min + 2.0).contains(&after), "{name}: closed {after:.1} s after the start");
     }
