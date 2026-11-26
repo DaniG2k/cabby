@@ -54,16 +54,35 @@ fn messages_nested_up_to_go_limit_are_processed() {
     }
 }
 
-/// Threads of process `pid` named `name` (Linux procfs; 0 elsewhere).
-fn threads_named(pid: u32, name: &str) -> usize {
+/// Threads of process `pid` named `name` that have not begun to exit (Linux
+/// procfs). An exiting thread stays listed until the kernel reaps it, and
+/// `pthread_join` returns early in its exit: when the kernel clears the thread's
+/// id, after it set `PF_EXITING` and before the thread is a zombie (`Z`) or dead
+/// (`X`). Threads without either are those whose join has not returned yet. Each
+/// one counted was listed and had not begun to exit when its `stat` was read, so
+/// all of them were running at once when the directory was listed.
+#[cfg(target_os = "linux")]
+fn running_threads_named(pid: u32, name: &str) -> usize {
+    const PF_EXITING: u64 = 0x4;
     let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else { return 0 };
     tasks
         .filter_map(Result::ok)
-        .filter(|t| std::fs::read_to_string(t.path().join("comm")).is_ok_and(|c| c.trim_end() == name))
+        .filter(|t| {
+            let Ok(stat) = std::fs::read_to_string(t.path().join("stat")) else { return false };
+            // `<tid> (<comm>) <state> <ppid> <pgrp> <session> <tty_nr> <tpgid> <flags> ...`
+            let (Some(open), Some(close)) = (stat.find('('), stat.rfind(')')) else { return false };
+            let mut fields = stat[close + 1..].split_whitespace();
+            let state = fields.next();
+            let flags = fields.nth(5).and_then(|f| f.parse::<u64>().ok());
+            &stat[open + 1..close] == name
+                && !matches!(state, Some("Z" | "X"))
+                && flags.is_some_and(|f| f & PF_EXITING == 0)
+        })
         .count()
 }
 
 /// Cabby's cap on concurrent deep-nesting threads (`MAX_CONCURRENT_DEEP_THREADS`).
+#[cfg(target_os = "linux")]
 const MAX_DEEP_THREADS: usize = 4;
 
 /// regression-for: encoders/json_test.go#TestJSONEncoder/.Decode
@@ -73,21 +92,23 @@ fn deviation_d056_concurrent_deep_messages_are_capped() {
     const SESSIONS: usize = 24;
     const MESSAGES: usize = 3;
     let sut = Sut::start(&["--public", "--broadcast_adapter=http", "--disconnect_mode=never"]);
-    let pid = sut.process.pid();
     let mut clients: Vec<CableClient> = (0..SESSIONS).map(|_| connect(&sut)).collect();
 
-    // Count the deep threads while the messages are being handled.
-    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let sampler = {
-        let done = done.clone();
-        std::thread::spawn(move || {
+    // Count the deep threads while the messages are being handled (Linux only).
+    #[cfg(target_os = "linux")]
+    let (done, sampler) = {
+        let pid = sut.process.pid();
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = done.clone();
+        let sampler = std::thread::spawn(move || {
             let mut peak = 0;
-            while !done.load(std::sync::atomic::Ordering::SeqCst) {
-                peak = peak.max(threads_named(pid, "cabby-deep-json"));
-                std::thread::yield_now();
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                peak = peak.max(running_threads_named(pid, "cabby-deep-json"));
+                std::thread::sleep(Duration::from_millis(1));
             }
             peak
-        })
+        });
+        (done, sampler)
     };
 
     let message = nested_message(GO_MAX_DEPTH);
@@ -106,16 +127,15 @@ fn deviation_d056_concurrent_deep_messages_are_capped() {
             .unwrap_or_else(|e| panic!("session {i}: no reply after deep messages: {e}"));
         assert_eq!(Some("confirm_subscription"), ack["type"].as_str(), "session {i}: {ack}");
     }
-    done.store(true, std::sync::atomic::Ordering::SeqCst);
-    let peak = sampler.join().expect("sampler");
-
-    if cabby_testkit::backend() == cabby_testkit::Backend::Rust {
-        // At most MAX_DEEP_THREADS decodes run at once: a slot is released only
-        // after `join` returns. `pthread_join` returns when the exiting thread has
-        // signalled its exit, slightly before the kernel drops its
-        // /proc/<pid>/task entry, so under load the sampler can see one finishing
-        // thread next to MAX_DEEP_THREADS new ones.
-        assert!(peak <= MAX_DEEP_THREADS + 1, "{peak} deep-nesting threads at once");
+    #[cfg(target_os = "linux")]
+    {
+        done.store(true, std::sync::atomic::Ordering::SeqCst);
+        let peak = sampler.join().expect("sampler");
+        if cabby_testkit::backend() == cabby_testkit::Backend::Rust {
+            // A slot is released only after `join` returns, so at most
+            // MAX_DEEP_THREADS deep threads run at once; the sampler saw them.
+            assert!((1..=MAX_DEEP_THREADS).contains(&peak), "{peak} deep-nesting threads at once");
+        }
     }
 }
 
