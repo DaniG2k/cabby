@@ -1667,6 +1667,8 @@ mod tests {
     /// back: every append is kept and each stream's offsets are 1..=n. Which
     /// appends meet a pass depends on scheduling (without the removed mark
     /// most runs lose some); the tests above pin the interleaving itself.
+    /// The sweeper runs its first pass before the writers start (a barrier),
+    /// so the passes counted are never zero.
     #[test]
     fn deviation_d087_concurrent_appends_and_expiry_passes_keep_offsets_contiguous() {
         const WRITERS: usize = 4;
@@ -1675,10 +1677,13 @@ mod tests {
         config.history_limit = WRITERS;
         let broker = Memory::new(None, None, &config, TestClock::new());
         let done = std::sync::atomic::AtomicBool::new(false);
+        let start = std::sync::Barrier::new(WRITERS + 1);
 
         let offsets: Vec<Vec<u64>> = std::thread::scope(|s| {
             let sweeper = s.spawn(|| {
-                let mut passes = 0u64;
+                broker.expire();
+                let mut passes = 1u64;
+                start.wait();
                 while !done.load(std::sync::atomic::Ordering::Relaxed) {
                     broker.expire();
                     passes += 1;
@@ -1687,8 +1692,9 @@ mod tests {
             });
             let writers: Vec<_> = (0..WRITERS)
                 .map(|w| {
-                    let broker = &broker;
+                    let (broker, start) = (&broker, &start);
                     s.spawn(move || {
+                        start.wait();
                         (0..STREAMS).map(|i| broker.add(&format!("s{i}"), &format!("w{w}"))).collect::<Vec<u64>>()
                     })
                 })
@@ -1714,5 +1720,23 @@ mod tests {
             assert_eq!(WRITERS, stored.len(), "history of s{i}: {stored:?}");
             assert_eq!(got, stored.iter().map(|(o, _)| *o).collect::<Vec<u64>>(), "history of s{i}");
         }
+    }
+
+    /// A restore that finds its stream removed by the expiry pass installs
+    /// nothing and leaves the entries with the caller, so that
+    /// `restore_stream` can install them in the stream the map holds (D-087).
+    #[test]
+    fn deviation_d087_a_restore_into_a_removed_stream_returns_none_and_keeps_the_entries() {
+        let stream = Memstream::new(1, 10, TestClock::new());
+        // A new stream has no deadline yet, so a pass removes it.
+        assert!(!stream.sweep(unix_secs(stream.clock.now())));
+        let entry = |offset| Entry { timestamp: 1, offset, data: format!("m{offset}") };
+        let mut entries = vec![entry(2), entry(3)];
+
+        assert_eq!(None, stream.restore(3, i64::MAX, &mut entries));
+
+        assert_eq!(vec![entry(2), entry(3)], entries, "the entries stay with the caller");
+        let st = read(&stream.state);
+        assert_eq!((0, 0, 0), (st.offset, st.deadline, st.data.len()), "nothing is installed");
     }
 }
