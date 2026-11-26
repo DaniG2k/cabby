@@ -19,7 +19,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cabby_core::toml_config::{self, go_quote};
+use cabby_core::toml_config::{self, go_quote, toml_quote};
 
 use crate::metrics::Instrumenter;
 
@@ -115,14 +115,14 @@ impl PostgresConfig {
         if self.url.is_empty() {
             out.push_str("# url = \"postgres://cabby:secret@localhost:5432/app?sslmode=require\"\n");
         } else {
-            out.push_str(&format!("url = {}\n", go_quote(&self.url)));
+            out.push_str(&format!("url = {}\n", toml_quote(&self.url)));
         }
         out.push_str("# Schema for Cabby's tables\n");
-        out.push_str(&format!("schema = {}\n", go_quote(&self.schema)));
+        out.push_str(&format!("schema = {}\n", toml_quote(&self.schema)));
         out.push_str("# Prefix for Cabby's table names\n");
-        out.push_str(&format!("table_prefix = {}\n", go_quote(&self.table_prefix)));
+        out.push_str(&format!("table_prefix = {}\n", toml_quote(&self.table_prefix)));
         out.push_str("# Base LISTEN/NOTIFY channel name\n");
-        out.push_str(&format!("channel = {}\n", go_quote(&self.channel)));
+        out.push_str(&format!("channel = {}\n", toml_quote(&self.channel)));
         out.push_str("# Create Cabby's tables at startup (false: they must exist, see docs/postgres.md)\n");
         out.push_str(&format!("auto_migrate = {}\n", self.auto_migrate));
         out.push_str("# Heartbeat interval of the LISTEN connection (seconds, 0 to disable)\n");
@@ -133,7 +133,7 @@ impl PostgresConfig {
         if self.tls_ca_cert_path.is_empty() {
             out.push_str("# tls_ca_cert_path = \"/etc/ssl/certs/postgres-ca.pem\"\n");
         } else {
-            out.push_str(&format!("tls_ca_cert_path = {}\n", go_quote(&self.tls_ca_cert_path)));
+            out.push_str(&format!("tls_ca_cert_path = {}\n", toml_quote(&self.tls_ca_cert_path)));
         }
         out.push_str(
             "# Create the history, sessions and pub/sub tables as UNLOGGED (faster; emptied after a database crash)\n",

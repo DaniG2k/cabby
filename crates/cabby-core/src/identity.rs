@@ -232,9 +232,9 @@ impl JwtConfig {
     pub fn to_toml(&self) -> String {
         let mut out = String::new();
         out.push_str("# Secret key\n");
-        out.push_str(&format!("secret = \"{}\"\n", self.secret));
+        out.push_str(&format!("secret = {}\n", toml_config::toml_quote(&self.secret)));
         out.push_str("# Parameter name (an URL query or a header name carrying a token, e.g., `x-<param>`)\n");
-        out.push_str(&format!("param = \"{}\"\n", self.param));
+        out.push_str(&format!("param = {}\n", toml_config::toml_quote(&self.param)));
         out.push_str("# Enfore JWT authentication\n");
         out.push_str(if self.force { "force = true\n" } else { "# force = true\n" });
         out.push('\n');

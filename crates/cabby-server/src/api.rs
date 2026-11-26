@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use cabby_core::broker::{Broker, PresenceInfoOptions};
 use cabby_core::logger::Logger;
+use cabby_core::toml_config::toml_quote;
 use cabby_core::{log_debug, log_error};
 
 /// Upstream `defaultAPIPath`.
@@ -89,17 +90,17 @@ impl Config {
         if self.host.is_empty() {
             out.push_str("# host = \"localhost\"\n");
         } else {
-            out.push_str(&format!("host = \"{}\"\n", self.host));
+            out.push_str(&format!("host = {}\n", toml_quote(&self.host)));
         }
         out.push_str("# API server port (0 = use main server port)\n");
         out.push_str(&format!("port = {}\n", self.port));
         out.push_str("# Base path for API endpoints\n");
-        out.push_str(&format!("path = \"{}\"\n", self.path));
+        out.push_str(&format!("path = {}\n", toml_quote(&self.path)));
         out.push_str("# Secret token to authenticate API requests\n");
         if self.secret.is_empty() {
             out.push_str("# secret = \"\"\n");
         } else {
-            out.push_str(&format!("secret = \"{}\"\n", self.secret));
+            out.push_str(&format!("secret = {}\n", toml_quote(&self.secret)));
         }
         out.push_str("# Enable CORS headers\n");
         out.push_str(if self.add_cors_headers { "cors_headers = true\n" } else { "# cors_headers = false\n" });

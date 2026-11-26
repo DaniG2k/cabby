@@ -88,7 +88,7 @@ impl RedisBrokerConfig {
     /// Renders the annotated TOML section.
     pub fn to_toml(&self) -> String {
         let mut out = String::from("# Prefix of the keys the Redis broker writes (--broker=redis)\n");
-        out.push_str(&format!("key_prefix = {}\n", toml_config::go_quote(&self.key_prefix)));
+        out.push_str(&format!("key_prefix = {}\n", toml_config::toml_quote(&self.key_prefix)));
         out.push_str("# Timeout of one Redis broker operation (seconds)\n");
         out.push_str(&format!("timeout = {}\n", self.timeout));
         out.push('\n');

@@ -79,7 +79,7 @@ impl NatsConfig {
     pub fn to_toml(&self) -> String {
         let mut out = String::new();
         out.push_str("# NATS server URLs (comma-separated)\n");
-        out.push_str(&format!("servers = \"{}\"\n", self.servers));
+        out.push_str(&format!("servers = {}\n", crate::toml_config::toml_quote(&self.servers)));
         out.push_str("# Don't randomize servers during connection\n");
         out.push_str(if self.dont_randomize_servers {
             "dont_randomize_servers = true\n"

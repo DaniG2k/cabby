@@ -85,7 +85,7 @@ impl Config {
             if value.is_empty() {
                 out.push_str(&format!("# {key} = \"\"\n"));
             } else {
-                out.push_str(&format!("{key} = \"{value}\"\n"));
+                out.push_str(&format!("{key} = {}\n", cabby_core::toml_config::toml_quote(value)));
             }
         }
 

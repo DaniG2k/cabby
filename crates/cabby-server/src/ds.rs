@@ -138,7 +138,7 @@ impl Config {
         out.push_str("# Skip authentication (only authorize per-stream access)\n");
         out.push_str(if self.skip_auth { "skip_auth = true\n" } else { "# skip_auth = true\n" });
         out.push_str("# Durable Streams mount path\n");
-        out.push_str(&format!("path = \"{}\"\n", self.path));
+        out.push_str(&format!("path = {}\n", cabby_core::toml_config::toml_quote(&self.path)));
         out.push_str("# Poll interval for live=poll mode (in seconds)\n");
         out.push_str(&format!("poll_interval = {}\n", self.poll_interval));
         out.push_str("# Max time to live for a SSE connection (in seconds)\n");

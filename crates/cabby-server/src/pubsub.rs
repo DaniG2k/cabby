@@ -12,7 +12,7 @@ use cabby_core::gojson;
 use cabby_core::logger::{LogValuer, Logger, compact_value_bytes};
 use cabby_core::nats::client::{Connection, Incoming};
 use cabby_core::pubsub::{Handler, PubSubError, Published, Subscriber};
-use cabby_core::toml_config::{self, TomlSection};
+use cabby_core::toml_config::{self, TomlSection, toml_quote};
 use cabby_core::{log_debug, log_error, log_info, log_warn};
 
 use crate::nats::NatsConfig as NatsClientConfig;
@@ -47,7 +47,7 @@ impl RedisConfig {
     }
 
     pub fn to_toml(&self) -> String {
-        format!("channel = \"{}\"\n\n", self.channel)
+        format!("channel = {}\n\n", toml_quote(&self.channel))
     }
 
     pub fn decode_toml(&mut self, toml: &str) -> Result<(), PubSubError> {
@@ -75,7 +75,7 @@ impl NatsConfig {
     }
 
     pub fn to_toml(&self) -> String {
-        format!("channel = \"{}\"\n\n", self.channel)
+        format!("channel = {}\n\n", toml_quote(&self.channel))
     }
 
     pub fn decode_toml(&mut self, toml: &str) -> Result<(), PubSubError> {

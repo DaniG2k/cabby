@@ -107,7 +107,7 @@ impl Config {
         out.push_str("# Enable Server-sent events support\n");
         out.push_str(if self.enabled { "enabled = true\n" } else { "# enabled = true\n" });
         out.push_str("# Server-sent events endpoint path\n");
-        out.push_str(&format!("path = \"{}\"\n", self.path));
+        out.push_str(&format!("path = {}\n", cabby_core::toml_config::toml_quote(&self.path)));
         out.push_str("# Send pings as SSE comments (\": ping\") instead of ping events (always enabled in raw mode)\n");
         out.push_str(if self.comment_pings { "comment_pings = true\n" } else { "# comment_pings = true\n" });
         out.push_str("# Keepalive interval for comment-based pings (seconds)\n");

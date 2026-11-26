@@ -7,6 +7,7 @@
 
 use std::time::Duration;
 
+use cabby_core::toml_config::toml_quote;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
@@ -311,16 +312,16 @@ impl RedisConfig {
             if value.is_empty() {
                 out.push_str(&format!("# {key} = \"{placeholder}\"\n"));
             } else {
-                out.push_str(&format!("{key} = \"{value}\"\n"));
+                out.push_str(&format!("{key} = {}\n", toml_quote(value)));
             }
         }
 
         let mut out = String::new();
         out.push_str("# Redis instance URL or master name in case of sentinels usage\n");
         out.push_str("# or list of URLs if cluster usage\n");
-        out.push_str(&format!("url = \"{}\"\n", self.url));
+        out.push_str(&format!("url = {}\n", toml_quote(&self.url)));
         out.push_str("# Sentinel addresses (comma-separated list)\n");
-        out.push_str(&format!("sentinels = \"{}\"\n", self.sentinels));
+        out.push_str(&format!("sentinels = {}\n", toml_quote(&self.sentinels)));
         out.push_str("# Sentinel discovery interval (seconds)\n");
         out.push_str(&format!("sentinel_discovery_interval = {}\n", self.sentinel_discovery_interval));
         out.push_str("# Keepalive ping interval (seconds)\n");

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use cabby_core::broadcast::{BroadcastError, Broadcaster, Handler};
 use cabby_core::logger::{Attr, Level, LogValue, Logger};
-use cabby_core::toml_config::{self, TomlSection};
+use cabby_core::toml_config::{self, TomlSection, toml_quote};
 use cabby_core::utils::MessageVerifier;
 use cabby_core::{log_at, log_debug, log_info};
 
@@ -69,12 +69,12 @@ impl HttpConfig {
         out.push_str("# HTTP server port (can be the same as the main server port)\n");
         out.push_str(&format!("port = {}\n", self.port));
         out.push_str("# HTTP endpoint path for broadcasts\n");
-        out.push_str(&format!("path = \"{}\"\n", self.path));
+        out.push_str(&format!("path = {}\n", toml_quote(&self.path)));
         out.push_str("# Secret token to authenticate broadcasting requests\n");
         if self.secret.is_empty() {
             out.push_str("# secret = \"\"\n");
         } else {
-            out.push_str(&format!("secret = \"{}\"\n", self.secret));
+            out.push_str(&format!("secret = {}\n", toml_quote(&self.secret)));
         }
         out.push_str("# Enable CORS headers (allowed origins are used as allowed hosts)\n");
         out.push_str(if self.add_cors_headers { "cors_headers = true\n" } else { "# cors_headers = false\n" });
@@ -349,9 +349,9 @@ impl RedisConfig {
     pub fn to_toml(&self) -> String {
         let mut out = String::new();
         out.push_str("# Redis stream name for broadcasts\n");
-        out.push_str(&format!("stream = \"{}\"\n", self.stream));
+        out.push_str(&format!("stream = {}\n", toml_quote(&self.stream)));
         out.push_str("# Stream consumer group name\n");
-        out.push_str(&format!("group = \"{}\"\n", self.group));
+        out.push_str(&format!("group = {}\n", toml_quote(&self.group)));
         out.push_str("# Streams read wait time in milliseconds\n");
         out.push_str(&format!("stream_read_block_milliseconds = {}\n", self.stream_read_block_milliseconds));
         out.push('\n');
@@ -451,7 +451,7 @@ impl LegacyRedisConfig {
     }
 
     pub fn to_toml(&self) -> String {
-        format!("channel = \"{}\"\n\n", self.channel)
+        format!("channel = {}\n\n", toml_quote(&self.channel))
     }
 
     pub fn decode_toml(&mut self, toml: &str) -> Result<(), BroadcastError> {
@@ -564,7 +564,7 @@ impl LegacyNatsConfig {
     }
 
     pub fn to_toml(&self) -> String {
-        format!("channel = \"{}\"\n\n", self.channel)
+        format!("channel = {}\n\n", toml_quote(&self.channel))
     }
 
     pub fn decode_toml(&mut self, toml: &str) -> Result<(), BroadcastError> {

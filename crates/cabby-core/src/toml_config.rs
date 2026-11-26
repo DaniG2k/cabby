@@ -468,9 +468,14 @@ pub fn string_list_items(items: &[String]) -> String {
     items.iter().map(|item| toml_quote(item)).collect::<Vec<_>>().join(", ")
 }
 
-/// `["a", "b"]` as upstream writes string lists (`"[\"" + strings.Join(v, "\", \"") + "\"]"`).
+/// `["a", "b"]` as upstream writes string lists (`"[\"" + strings.Join(v, "\", \"") + "\"]"`),
+/// with each item quoted with [`toml_quote`]. An empty list is written `[""]`, as
+/// upstream writes it.
 pub fn string_list(items: &[String]) -> String {
-    format!("[\"{}\"]", items.join("\", \""))
+    if items.is_empty() {
+        return "[\"\"]".to_owned();
+    }
+    format!("[{}]", string_list_items(items))
 }
 
 #[cfg(test)]
@@ -668,5 +673,14 @@ mod tests {
         let table = DeTable::parse(&document).unwrap();
         let Some(DeValue::Table(t)) = table.get_ref().get("t").map(|v| v.get_ref()) else { panic!("{document:?}") };
         assert!(t.get("a.b").is_some(), "one key");
+    }
+
+    /// Lists as upstream writes them, with each item quoted.
+    #[test]
+    fn string_lists_quote_each_item() {
+        let list = |items: &[&str]| string_list(&items.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+        assert_eq!(list(&["http", "redis"]), r#"["http", "redis"]"#);
+        assert_eq!(list(&["a,b", "q\"x"]), r#"["a,b", "q\"x"]"#);
+        assert_eq!(list(&[]), r#"[""]"#, "an empty list as upstream writes it");
     }
 }

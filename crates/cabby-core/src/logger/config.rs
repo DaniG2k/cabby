@@ -37,9 +37,9 @@ impl Config {
     pub fn to_toml(&self) -> String {
         let mut out = String::new();
         out.push_str("# Logging level (debug, info, warn, error)\n");
-        out.push_str(&format!("level = \"{}\"\n", self.log_level));
+        out.push_str(&format!("level = {}\n", crate::toml_config::toml_quote(&self.log_level)));
         out.push_str("# Logs formatting (e.g., 'text' or 'json')\n");
-        out.push_str(&format!("format = \"{}\"\n", self.log_format));
+        out.push_str(&format!("format = {}\n", crate::toml_config::toml_quote(&self.log_format)));
         out.push_str("# Enable debug (verbose) logging\n");
         out.push_str(if self.debug { "debug = true\n" } else { "# debug = true\n" });
         out.push('\n');

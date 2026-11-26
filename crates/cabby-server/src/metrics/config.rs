@@ -1,6 +1,7 @@
 //! Metrics configuration (upstream `metrics/config.go`, `StatsdConfig`).
 
 use cabby_core::common::StringMap;
+use cabby_core::toml_config::{string_list_items, toml_key, toml_quote};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -77,13 +78,13 @@ impl Config {
         if http.is_empty() {
             out.push_str("# http_path = \"/metrics\"\n");
         } else {
-            out.push_str(&format!("http_path = \"{http}\"\n"));
+            out.push_str(&format!("http_path = {}\n", toml_quote(http)));
         }
         out.push_str("# Standalone metrics HTTP server host to bind to\n");
         if host.is_empty() {
             out.push_str("# host = \"localhost\"\n");
         } else {
-            out.push_str(&format!("host = \"{host}\"\n"));
+            out.push_str(&format!("host = {}\n", toml_quote(host)));
         }
         out.push_str("# Metrics HTTP server port to listen on\n# (can be the same as the main server's port)\n");
         if *port == 0 {
@@ -99,7 +100,7 @@ impl Config {
         if log_filter.is_empty() {
             out.push_str("# log_filter = []\n");
         } else {
-            out.push_str(&format!("log_filter = [ \"{}\" ]\n", log_filter.join("\", \"")));
+            out.push_str(&format!("log_filter = [ {} ]\n", string_list_items(log_filter)));
         }
         out.push_str("# Metrics tags\n");
         match self.tags.as_ref().filter(|t| !t.is_empty()) {
@@ -108,16 +109,16 @@ impl Config {
                 let mut sorted: Vec<_> = tags.iter().collect();
                 sorted.sort();
                 for (key, value) in sorted {
-                    out.push_str(&format!("tags.{key} = \"{value}\"\n"));
+                    out.push_str(&format!("tags.{} = {}\n", toml_key(key), toml_quote(value)));
                 }
             }
             None => out.push_str("# tags.key = \"value\"\n"),
         }
         out.push_str("# StatsD configuration\n");
         let prefix = if statsd.enabled() { "" } else { "# " };
-        out.push_str(&format!("{prefix}statsd.host = \"{}\"\n", statsd.host));
-        out.push_str(&format!("{prefix}statsd.prefix = \"{}\"\n", statsd.prefix));
-        out.push_str(&format!("{prefix}statsd.tags_format = \"{}\"\n", statsd.tag_format));
+        out.push_str(&format!("{prefix}statsd.host = {}\n", toml_quote(&statsd.host)));
+        out.push_str(&format!("{prefix}statsd.prefix = {}\n", toml_quote(&statsd.prefix)));
+        out.push_str(&format!("{prefix}statsd.tags_format = {}\n", toml_quote(&statsd.tag_format)));
         out.push_str(&format!("{prefix}statsd.max_packet_size = {}\n", statsd.max_packet_size));
         out.push('\n');
         out

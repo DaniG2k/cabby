@@ -87,7 +87,7 @@ impl Config {
         if self.adapter.is_empty() {
             out.push_str("# adapter = \"memory\"\n");
         } else {
-            out.push_str(&format!("adapter = \"{}\"\n", self.adapter));
+            out.push_str(&format!("adapter = {}\n", crate::toml_config::toml_quote(&self.adapter)));
         }
         out.push_str("# For how long to keep streams history (seconds)\n");
         out.push_str(&format!("history_ttl = {}\n", self.history_ttl));

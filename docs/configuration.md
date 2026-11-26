@@ -32,6 +32,14 @@ loaded; the others are ignored, and with `--debug` Cabby logs each one:
 `--ignore-config-path` skips the search. The format and keys are the same for every name;
 `cabby --print-config` prints the current configuration in that format.
 
+The printed file loads back to the same settings. String values are TOML basic strings: `"` and
+`\` are escaped, and so are control characters (`\n`, `\t`, `\u0007`) and other characters
+that Go does not print as they are (` `). A metrics tag key that is not a bare TOML key is
+quoted, so `tags."a.b"` stays one key. A value with nothing to escape prints exactly as AnyCable
+prints it (D-102). Some settings print commented out, or as an example, until another setting is
+set: for example `cluster_name` without `cluster_addr`, and the `statsd.*` settings without
+`statsd.host`.
+
 ## Environment variables
 
 Every flag `--<name>` reads `CABBY_<NAME>`, then `ANYCABLE_<NAME>` (the name upper-cased, `-`

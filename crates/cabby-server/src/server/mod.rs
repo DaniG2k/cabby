@@ -3,7 +3,7 @@
 //! [`for_port`]), request inspection ([`RequestInfo`], [`fetch_uid`], the headers
 //! extractor), origin matching and CORS headers.
 
-use cabby_core::toml_config::go_quote;
+use cabby_core::toml_config::toml_quote;
 
 mod http_server;
 mod mounts;
@@ -179,11 +179,11 @@ impl Config {
     pub fn to_toml(&self) -> String {
         let mut out = String::new();
         out.push_str("# Host address to bind to\n");
-        out.push_str(&format!("host = {}\n", go_quote(&self.host)));
+        out.push_str(&format!("host = {}\n", toml_quote(&self.host)));
         out.push_str("# Port to listen on\n");
         out.push_str(&format!("port = {}\n", self.port));
         out.push_str("# Allowed origins (a comma-separated list)\n");
-        out.push_str(&format!("allowed_origins = \"{}\"\n", self.allowed_origins));
+        out.push_str(&format!("allowed_origins = {}\n", toml_quote(&self.allowed_origins)));
         out.push_str("# Maximum number of allowed concurrent connections\n");
         if self.max_conn == 0 {
             out.push_str("# max_conn = 1000\n");
@@ -191,17 +191,17 @@ impl Config {
             out.push_str(&format!("max_conn = {}\n", self.max_conn));
         }
         out.push_str("# Health check endpoint path\n");
-        out.push_str(&format!("health_path = {}\n", go_quote(&self.health_path)));
+        out.push_str(&format!("health_path = {}\n", toml_quote(&self.health_path)));
         out.push_str("# SSL configuration\n");
         if self.ssl.cert_path.is_empty() {
             out.push_str("# ssl.cert_path =\n");
         } else {
-            out.push_str(&format!("ssl.cert_path = {}\n", go_quote(&self.ssl.cert_path)));
+            out.push_str(&format!("ssl.cert_path = {}\n", toml_quote(&self.ssl.cert_path)));
         }
         if self.ssl.key_path.is_empty() {
             out.push_str("# ssl.key_path =\n");
         } else {
-            out.push_str(&format!("ssl.key_path = {}\n", go_quote(&self.ssl.key_path)));
+            out.push_str(&format!("ssl.key_path = {}\n", toml_quote(&self.ssl.key_path)));
         }
         out.push('\n');
         out

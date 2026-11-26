@@ -2,7 +2,7 @@
 //! half of `node/disconnect_queue.go`).
 
 use cabby_core::logger::TomlError;
-use cabby_core::toml_config;
+use cabby_core::toml_config::{self, toml_quote};
 
 /// Invoke the Disconnect callback for every session.
 pub const DISCONNECT_MODE_ALWAYS: &str = "always";
@@ -73,7 +73,7 @@ impl Config {
         out.push_str("# Server-to-client heartbeat interval (seconds)\n");
         out.push_str(&format!("ping_interval = {}\n", self.ping_interval));
         out.push_str("# Timestamp format for ping messages (s, ms, or ns)\n");
-        out.push_str(&format!("ping_timestamp_precision = \"{}\"\n", self.ping_timestamp_precision));
+        out.push_str(&format!("ping_timestamp_precision = {}\n", toml_quote(&self.ping_timestamp_precision)));
         out.push_str("# Client-to-server pong timeout (seconds)\n");
         if self.pong_timeout == 0 {
             out.push_str("# pong_timeout = 6\n");
@@ -89,7 +89,7 @@ impl Config {
             out.push_str("enable_native_ping = true\n");
         }
         out.push_str("# Define when to invoke Disconnect RPC callback\n");
-        out.push_str(&format!("disconnect_mode = \"{}\"\n", self.disconnect_mode));
+        out.push_str(&format!("disconnect_mode = {}\n", toml_quote(&self.disconnect_mode)));
         out.push_str("# Graceful shutdown period (seconds)\n");
         out.push_str(&format!("shutdown_timeout = {}\n", self.shutdown_timeout));
         out.push_str("# How often to refresh system-wide metrics (seconds)\n");

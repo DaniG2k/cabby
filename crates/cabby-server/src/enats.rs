@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use cabby_core::logger::{Level, Logger};
-use cabby_core::toml_config::string_list;
+use cabby_core::toml_config::{string_list, toml_quote};
 use cabby_core::{log_at, log_debug, log_error};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,7 +92,7 @@ impl Config {
             if value.is_empty() {
                 out.push_str(&format!("# {key} = \"\"\n"));
             } else {
-                out.push_str(&format!("{key} = \"{value}\"\n"));
+                out.push_str(&format!("{key} = {}\n", toml_quote(value)));
             }
         }
         fn list(out: &mut String, key: &str, values: &[String]) {
@@ -109,17 +109,17 @@ impl Config {
         flag(&mut out, "debug", self.debug);
         flag(&mut out, "trace", self.trace);
         out.push_str("#\n# Service name\n");
-        out.push_str(&format!("name = \"{}\"\n", self.name));
+        out.push_str(&format!("name = {}\n", toml_quote(&self.name)));
         out.push_str("#\n# Service address\n");
-        out.push_str(&format!("service_addr = \"{}\"\n", self.service_addr));
+        out.push_str(&format!("service_addr = {}\n", toml_quote(&self.service_addr)));
         out.push_str("#\n# Cluster configuration\n#\n");
         optional(&mut out, "cluster_addr", &self.cluster_addr);
         if self.cluster_name.is_empty() {
             out.push_str("# cluster_name = \"\"\n");
         } else if self.cluster_addr.is_empty() {
-            out.push_str(&format!("# cluster_name = \"{}\"\n", self.cluster_name));
+            out.push_str(&format!("# cluster_name = {}\n", toml_quote(&self.cluster_name)));
         } else {
-            out.push_str(&format!("cluster_name = \"{}\"\n", self.cluster_name));
+            out.push_str(&format!("cluster_name = {}\n", toml_quote(&self.cluster_name)));
         }
         optional(&mut out, "gateway_addr", &self.gateway_addr);
         optional(&mut out, "gateway_advertise", &self.gateway_advertise);

@@ -70,7 +70,7 @@ impl Config {
             if value.is_empty() {
                 out.push_str(&format!("# {key} = \"\"\n"));
             } else {
-                out.push_str(&format!("{key} = \"{value}\"\n"));
+                out.push_str(&format!("{key} = {}\n", crate::toml_config::toml_quote(value)));
             }
         }
 
@@ -80,7 +80,7 @@ impl Config {
         flag(&mut out, "# Enable whispering support for pub/sub streams\n", "whisper", self.whisper);
         flag(&mut out, "# Enable presence support for pub/sub streams\n", "presence", self.presence);
         out.push_str("# Name of the channel used for pub/sub\n");
-        out.push_str(&format!("pubsub_channel = \"{}\"\n", self.pubsub_channel));
+        out.push_str(&format!("pubsub_channel = {}\n", crate::toml_config::toml_quote(&self.pubsub_channel)));
         flag(&mut out, "# Enable Turbo Streams support\n", "turbo", self.turbo);
         secret(&mut out, "# Custom secret key used to verify Turbo Streams\n", "turbo_secret", &self.turbo_secret);
         flag(&mut out, "# Enable CableReady support\n", "cable_ready", self.cable_ready);
