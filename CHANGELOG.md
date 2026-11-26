@@ -56,6 +56,12 @@ Differences from the AnyCable Go server are listed by ID in
   the writer owns the socket and connects again 5 s after a failed connect or send; the metrics
   task only queues packets. Up to 10 packets wait in the queue; when it is full, new packets are
   dropped and reported once a minute (`<n> packets lost (overflow)`, as go-statsd).
+- mruby metrics formatter (`--metrics_log_formatter`): loading the script no longer holds a
+  thread of the server's runtime. A script whose top-level code ran for a long time paused the
+  server meanwhile on a one-CPU host, and one that never finished stopped it. Each metrics
+  writer now starts on a thread of its own, as only the metrics goroutine waits in Go; shutting
+  down during the load returns at once. A script that fails to load still stops the server at
+  startup with the same error.
 
 ## [0.4.1] - 2026-11-26
 

@@ -197,6 +197,76 @@ mod tests {
         assert!(e.file.ends_with(".rb") && e.line == 3, "{}:{}", e.file, e.line);
     }
 
+    #[cfg(feature = "mruby")]
+    fn script(name: &str, source: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("cabby-{name}-{}.rb", std::process::id()));
+        std::fs::write(&path, source).expect("script written");
+        path
+    }
+
+    /// A formatter script whose top-level code runs for a long time (here a
+    /// loop of about a second) leaves a one-worker runtime running, and the
+    /// metrics shut down while it still runs. Before, `Metrics::run` waited for
+    /// the script on the runtime worker, so a script that never finished
+    /// stopped the whole server on a one-CPU host.
+    #[cfg(feature = "mruby")]
+    #[test]
+    fn a_slow_formatter_script_blocks_no_runtime_worker() {
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        use crate::metrics::worker_tests::{assert_beats, heartbeat, one_worker};
+
+        let rt = one_worker();
+        let path = script(
+            "formatter-with-a-slow-load",
+            "t = Time.now\nwhile Time.now - t < 1.0\nend\nmodule MetricsFormatter\n  def self.call(data)\n    'formatted'\n  end\nend\n",
+        );
+        let printer: Arc<dyn IntervalWriter> = Arc::new(RubyPrinter::new(&path.to_string_lossy()).expect("printer"));
+        let metrics = Arc::new(Metrics::new(vec![printer], 1));
+        let beats = heartbeat(&rt);
+
+        let (done, ran) = mpsc::channel();
+        let m = Arc::clone(&metrics);
+        rt.spawn(async move {
+            let _ = done.send(m.run().await);
+        });
+        assert_beats(&beats, 20);
+        assert!(ran.try_recv().is_err(), "run waits for the script");
+
+        let started = Instant::now();
+        rt.block_on(metrics.shutdown()).expect("shutdown");
+        assert_eq!(Ok(Ok(())), ran.recv_timeout(Duration::from_secs(2)), "run returns once shut down");
+        assert!(started.elapsed() < Duration::from_millis(500), "shutdown took {:?}", started.elapsed());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A formatter script that fails to load still fails `Metrics::run` with
+    /// its error, which stops the server at startup, as upstream.
+    #[cfg(feature = "mruby")]
+    #[test]
+    fn a_formatter_script_that_fails_to_load_fails_the_metrics_run() {
+        use std::sync::Arc;
+
+        use crate::metrics::worker_tests::one_worker;
+
+        let rt = one_worker();
+        for (name, source, error) in [
+            ("formatter-raising-at-load", "raise 'formatter is broken'\n", "formatter is broken"),
+            ("formatter-without-the-module", "x = 1\n", "MetricsFormatter module is not defined"),
+        ] {
+            let path = script(name, source);
+            let printer: Arc<dyn IntervalWriter> =
+                Arc::new(RubyPrinter::new(&path.to_string_lossy()).expect("printer"));
+            let metrics = Metrics::new(vec![printer], 1);
+
+            let e = rt.block_on(metrics.run()).expect_err("the script does not load");
+
+            assert!(e.0.contains(error), "{name}: {}", e.0);
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
     /// Pins D-062: without the `mruby` feature, the formatter's error names the
     /// feature. Runs only in a build without mruby (`cargo test -p cabby-server`).
     #[cfg(not(feature = "mruby"))]

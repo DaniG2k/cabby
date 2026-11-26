@@ -51,7 +51,9 @@ pub const DEFAULT_SERVER_HOST: &str = "localhost";
 #[error("{0}")]
 pub struct MetricsError(pub String);
 
-/// A periodic metrics writer (upstream `IntervalWriter`).
+/// A periodic metrics writer (upstream `IntervalWriter`). [`Metrics::run`]
+/// calls `run` once on a thread of its own, then `write` every interval on the
+/// metrics task, which runs on the server's runtime: `write` must not block.
 pub trait IntervalWriter: Send + Sync {
     /// Called once before the rotation loop with the interval in seconds.
     fn run(&self, interval: u64) -> Result<(), MetricsError>;
@@ -248,8 +250,10 @@ impl Metrics {
     }
 
     /// Starts the metrics server (if any) and the writers, then rotates every
-    /// interval until [`Metrics::shutdown`]. Returns when shut down or the
-    /// dedicated server fails.
+    /// interval until [`Metrics::shutdown`]. Returns when shut down, when the
+    /// dedicated server fails, or with the first writer's `run` error. Each
+    /// writer's `run` is called off the runtime (`start_writer`), so a slow
+    /// start holds no runtime worker; shutting down meanwhile returns at once.
     pub async fn run(&self) -> Result<(), MetricsError> {
         let mut has_server = false;
         if let Some(HttpEndpoint { path, port, dedicated_host: Some(host) }) = &self.http {
@@ -292,7 +296,10 @@ impl Metrics {
         };
 
         for writer in &writers {
-            writer.run(interval.as_secs())?;
+            tokio::select! {
+                () = self.shutdown.cancelled() => return Ok(()),
+                started = start_writer(Arc::clone(writer), interval.as_secs()) => started?,
+            }
         }
 
         loop {
@@ -449,6 +456,25 @@ impl Instrumenter for Metrics {
     fn counter_handle(&self, name: &str) -> Option<Arc<Counter>> {
         self.counter(name)
     }
+}
+
+/// Calls the writer's `run` on a thread of its own and waits for it without
+/// holding a runtime worker: starting a writer may take long (the mruby
+/// formatter runs its script's top-level code), as upstream, where only the
+/// metrics goroutine waits. The thread has the runtime's context. A `run` that
+/// never returns keeps its thread, but not the server or its shutdown: unlike
+/// `spawn_blocking`, nothing waits for the thread when the runtime is dropped.
+async fn start_writer(writer: Arc<dyn IntervalWriter>, interval: u64) -> Result<(), MetricsError> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let runtime = tokio::runtime::Handle::current();
+    std::thread::Builder::new()
+        .name("metrics-writer".into())
+        .spawn(move || {
+            let _guard = runtime.enter();
+            let _ = tx.send(writer.run(interval));
+        })
+        .map_err(|e| MetricsError(format!("starting a metrics writer: {e}")))?;
+    rx.await.unwrap_or_else(|_| Err(MetricsError("a metrics writer stopped while starting".into())))
 }
 
 /// Go's `time.Duration.String()` for a whole number of seconds (`15s`, `1m0s`, `1h0m0s`).

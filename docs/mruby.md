@@ -216,7 +216,11 @@ TestMrbDefineMethodConcurrent check this). Upstream shares one `DefaultEngine` p
 behind a mutex. Cabby keeps one default engine per thread that asks for it. The metrics
 printer (`metrics/custom_printer.rs`) owns a thread that holds its engine and receives
 snapshots over a channel, and restores the GC arena after each snapshot (upstream's arena
-grows with every print). See deviation D-033.
+grows with every print). See deviation D-033. The metrics task waits for the script to load
+on a thread of its own, not on a runtime worker: a script whose top-level code runs for a
+long time (or never ends) holds only that thread and the printer's, as upstream holds only
+the metrics goroutine; the server keeps serving and shuts down as usual. A script that fails
+to load still stops the server at startup with its error.
 
 ## Translated tests
 
