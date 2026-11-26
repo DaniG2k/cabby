@@ -1310,7 +1310,11 @@ mod tests {
         cmd.arg("60");
         let guard = NatsProcess::spawn(cmd, dir.clone(), 0);
         let pid = guard.child.id().to_string();
-        let alive = || std::process::Command::new("kill").args(["-0", &pid]).status().unwrap().success();
+        let alive = || {
+            let probe =
+                std::process::Command::new("kill").args(["-0", &pid]).stderr(std::process::Stdio::null()).status();
+            probe.unwrap().success()
+        };
         assert!(alive() && dir.is_dir());
 
         let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
