@@ -114,3 +114,61 @@ mod test_handle_command {
         );
     }
 }
+
+/// Cabby-only checks next to `TestHandleCommand`: upstream rejects only a bad
+/// `private-` signature. A `presence-` subscription with an invalid signature,
+/// with `channel_data` other than the signed one, or a `private-`/`presence-`
+/// subscription without auth data must be rejected the same way.
+mod rejected_subscriptions {
+    use super::*;
+
+    const REJECTED: &str = r#"{"event":"pusher:error","data":{"message":"rejected","code":4009}}"#;
+
+    /// regression-for: pusher/executor_test.go#TestHandleCommand/Subscribe_(private_+_failure_bad_signature)
+    #[test]
+    fn a_presence_subscription_with_a_bad_signature_is_rejected() {
+        // The signature of the private channel, a truncated one, values that are
+        // not signatures.
+        for auth in [SIGNATURE, "278d425bdf160c739803:00", "bla-bla", ""] {
+            let msg = Message {
+                command: "subscribe".into(),
+                identifier: identifier(PRESENCE_STREAM),
+                data: subscription(PusherSubscriptionData {
+                    auth: auth.into(),
+                    channel: PRESENCE_STREAM.into(),
+                    channel_data: PRESENCE_DATA.into(),
+                }),
+                ..Default::default()
+            };
+
+            assert_eq!(REJECTED, handle_and_read(&msg), "auth {auth:?}");
+        }
+    }
+
+    /// regression-for: pusher/executor_test.go#TestHandleCommand/Subscribe_(private_+_failure_bad_signature)
+    #[test]
+    fn a_presence_subscription_with_other_channel_data_is_rejected() {
+        let msg = Message {
+            command: "subscribe".into(),
+            identifier: identifier(PRESENCE_STREAM),
+            data: subscription(PusherSubscriptionData {
+                auth: PRESENCE_SIGNATURE.into(),
+                channel: PRESENCE_STREAM.into(),
+                channel_data: "{\"user_id\":\"11\",\"user_info\":{\"name\":\"Mr. Channels\"}}".into(),
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(REJECTED, handle_and_read(&msg));
+    }
+
+    /// regression-for: pusher/executor_test.go#TestHandleCommand/Subscribe_(private_+_failure_bad_signature)
+    #[test]
+    fn a_private_or_presence_subscription_without_auth_data_is_rejected() {
+        for stream in [STREAM, PRESENCE_STREAM] {
+            let msg = Message { command: "subscribe".into(), identifier: identifier(stream), ..Default::default() };
+
+            assert_eq!(REJECTED, handle_and_read(&msg), "{stream}");
+        }
+    }
+}

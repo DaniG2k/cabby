@@ -36,6 +36,24 @@ fn assert_broadcasts_match_expectation(api: &RestApi) {
     }
 }
 
+/// Nothing reached `HandleBroadcast` (Cabby-only checks: upstream's mock
+/// accepts the expected payload any number of times, including zero).
+fn assert_nothing_broadcast(api: &RestApi) {
+    assert_eq!(Vec::<Vec<u8>>::new(), api.broadcasts(), "broadcasts");
+    assert_eq!(Vec::<String>::new(), api.unexpected_calls());
+}
+
+/// A signed `POST /events` target for `body` with this `auth_timestamp`.
+fn signed_events_target(config: &Config, auth_timestamp: &str, body: &[u8]) -> String {
+    let auth_params = format!(
+        "auth_key={}&auth_timestamp={auth_timestamp}&auth_version=1.0&body_md5={}",
+        config.app_key,
+        md5_hex(body)
+    );
+    let auth_signature = verifier(config).sign(&format!("POST\n/events\n{auth_params}"));
+    format!("/events?{auth_params}&auth_signature={auth_signature}")
+}
+
 mod test_http_handler {
     use super::*;
 
@@ -184,6 +202,133 @@ mod test_http_handler {
         assert_eq!(401, rr.status);
         assert_eq!(0, rr.body_read);
         assert_broadcasts_match_expectation(&small_api);
+    }
+}
+
+/// Cabby-only checks next to `TestHttpHandler`: every rejected request
+/// broadcasts nothing, and the timestamp and body limit checks the upstream
+/// subtests do not reach.
+mod rejected_requests {
+    use super::*;
+
+    fn api(config: &Config) -> RestApi {
+        RestApi::new(ApiBroker::Mock, HandlerMock::AcceptBroadcasts, config)
+    }
+
+    /// regression-for: pusher/http_test.go#TestHttpHandler/Rejects_unsupported_methods
+    #[test]
+    fn an_unsupported_method_broadcasts_nothing() {
+        let config = http_config();
+        let rest_api = api(&config);
+        let signed = signed_events_target(&config, &now_timestamp(), PAYLOAD);
+
+        assert_eq!(422, rest_api.serve("DELETE", "/", PAYLOAD).status);
+        for method in ["PUT", "PATCH", "DELETE"] {
+            assert_eq!(422, rest_api.serve(method, &signed, PAYLOAD).status, "{method}");
+        }
+        assert_nothing_broadcast(&rest_api);
+    }
+
+    /// regression-for: pusher/http_test.go#TestHttpHandler/Rejects_when_authorization_data_is_incorrect
+    #[test]
+    fn incorrect_authorization_data_broadcasts_nothing() {
+        let config = http_config();
+        let rest_api = api(&config);
+        let auth_params = format!(
+            "auth_key={}&body_md5={}&auth_version=1.0&auth_timestamp={}",
+            config.app_key,
+            md5_hex(PAYLOAD),
+            now_timestamp()
+        );
+
+        let rr =
+            rest_api.serve("POST", &format!("/events?{auth_params}&auth_signature=qwewe123wqee1eqweqweqwe"), PAYLOAD);
+
+        assert_eq!(401, rr.status);
+        assert_nothing_broadcast(&rest_api);
+    }
+
+    /// regression-for: pusher/http_test.go#TestHttpHandler/Rejects_when_auth_timestamp_is_too_far_from_current_time
+    #[test]
+    fn a_stale_auth_timestamp_broadcasts_nothing() {
+        let config = http_config();
+        let rest_api = api(&config);
+        let stale = (now_timestamp().parse::<i64>().unwrap() - 15 * 60).to_string();
+
+        assert_eq!(401, rest_api.serve("POST", &signed_events_target(&config, &stale, PAYLOAD), PAYLOAD).status);
+        assert_nothing_broadcast(&rest_api);
+    }
+
+    /// regression-for: pusher/http_test.go#TestHttpHandler/Rejects_when_auth_timestamp_is_too_far_from_current_time
+    #[test]
+    fn an_auth_timestamp_in_the_future_is_rejected() {
+        let config = http_config();
+        let rest_api = api(&config);
+        let future = (now_timestamp().parse::<i64>().unwrap() + 15 * 60).to_string();
+
+        assert_eq!(401, rest_api.serve("POST", &signed_events_target(&config, &future, PAYLOAD), PAYLOAD).status);
+        assert_nothing_broadcast(&rest_api);
+    }
+
+    /// regression-for: pusher/http_test.go#TestHttpHandler/Rejects_when_auth_timestamp_is_too_far_from_current_time
+    #[test]
+    fn a_malformed_auth_timestamp_is_rejected() {
+        let config = http_config();
+        let rest_api = api(&config);
+        let now = now_timestamp();
+
+        for timestamp in
+            ["", "abc", format!("{now}abc").as_str(), format!("{now}.5").as_str(), "0x10", "99999999999999999999"]
+        {
+            let rr = rest_api.serve("POST", &signed_events_target(&config, timestamp, PAYLOAD), PAYLOAD);
+            assert_eq!(401, rr.status, "auth_timestamp={timestamp:?}");
+        }
+        assert_nothing_broadcast(&rest_api);
+    }
+
+    /// regression-for: pusher/http_test.go#TestHttpHandler/Rejects_when_body_does_not_match_signature
+    #[test]
+    fn a_body_that_does_not_match_the_signature_broadcasts_nothing() {
+        let config = http_config();
+        let rest_api = api(&config);
+        let another_payload = br#"{"name":"test-event","channel":"test-channel","data":"{\"message\":\"hola!\"}"}"#;
+
+        let rr = rest_api.serve("POST", &signed_events_target(&config, &now_timestamp(), PAYLOAD), another_payload);
+
+        assert_eq!(401, rr.status);
+        assert_nothing_broadcast(&rest_api);
+    }
+
+    /// regression-for: pusher/http_test.go#TestHttpHandler/Rejects_large_body_with_invalid_signature_without_reading_it
+    #[test]
+    fn a_large_body_with_an_invalid_signature_broadcasts_nothing() {
+        let mut config = http_config();
+        config.max_body_size = 16;
+        let rest_api = api(&config);
+        let target = format!(
+            "/events?auth_key={}&auth_timestamp={}&auth_version=1.0&body_md5=deadbeef&auth_signature=deadbeef",
+            config.app_key,
+            now_timestamp()
+        );
+
+        let rr = rest_api.serve("POST", &target, "x".repeat(1024).as_bytes());
+
+        assert_eq!(401, rr.status);
+        assert_nothing_broadcast(&rest_api);
+    }
+
+    /// regression-for: pusher/http_test.go#TestHttpHandler/Rejects_large_body_with_invalid_signature_without_reading_it
+    #[test]
+    fn a_validly_signed_body_over_the_limit_is_rejected() {
+        let mut config = http_config();
+        config.max_body_size = 16;
+        let rest_api = api(&config);
+        assert!(PAYLOAD.len() > 16);
+
+        let rr = rest_api.serve("POST", &signed_events_target(&config, &now_timestamp(), PAYLOAD), PAYLOAD);
+
+        assert_eq!(413, rr.status);
+        assert_nothing_broadcast(&rest_api);
     }
 }
 
