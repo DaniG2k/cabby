@@ -10,7 +10,7 @@ server written in Rust: the same client protocols, the same RPC contract with yo
 flags and `anycable.toml`. Swap the binary, keep your channels. It also speaks the Pusher protocol
 (pusher-js, Laravel Echo).
 
-**[Documentation](https://docs.cabbyhq.com/install)** · [Releases](https://github.com/DaniG2k/cabby-releases/releases) · [Changelog](CHANGELOG.md)
+**[Website](https://cabbyhq.com)** · **[Documentation](https://docs.cabbyhq.com/install)** · [Releases](https://github.com/DaniG2k/cabby-releases/releases) · [Changelog](CHANGELOG.md)
 
 ## Benchmarks
 
