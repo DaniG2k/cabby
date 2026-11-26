@@ -66,8 +66,9 @@ use cabby_core::logger::{Attr, Level, LogValue};
 
 use super::SslConfig;
 
-/// Upstream `ReadHeaderTimeout`; also bounds TLS handshakes.
-const READ_HEADER_TIMEOUT: Duration = Duration::from_secs(5);
+/// Upstream `ReadHeaderTimeout`; also bounds TLS handshakes and, in the SSE
+/// endpoint, reading a POST body.
+pub(crate) const READ_HEADER_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// net/http reads at most `DefaultMaxHeaderBytes` (1 MiB) plus 4096 bytes of
 /// slack for a request line and its headers.

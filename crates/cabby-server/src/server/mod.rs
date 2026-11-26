@@ -12,6 +12,7 @@ mod response_writer;
 #[cfg(test)]
 pub(crate) mod tests;
 
+pub(crate) use http_server::READ_HEADER_TIMEOUT;
 pub use mounts::{api_handler, metrics_handler};
 
 pub use cabby_core::logger::TomlError;

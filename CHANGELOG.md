@@ -33,6 +33,9 @@ Differences from the AnyCable Go server are listed by ID in
   got no response. A POST is now signed in before its body is read, so one whose commands
   cannot be parsed and whose sign-in fails gets `401` instead of `400`. Durable Streams
   (`--ds`) already answered without reading a body; a test now pins it (D-096).
+- SSE: the body of a POST must arrive within 5 s of the sign-in; a later or stalled body is
+  answered `400` (`failed to build subscribe command error="i/o timeout"`) and its session
+  is disconnected. Before, reading it had no deadline (D-097).
 
 ## [0.4.1] - 2026-11-26
 

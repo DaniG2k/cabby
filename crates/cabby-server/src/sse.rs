@@ -14,8 +14,8 @@
 //! Everything the request line and headers decide is answered before the body
 //! is read (D-096): the preflight, the method, the request id, the commands of a
 //! GET, a POST body announced over [`DEFAULT_MAX_BODY_SIZE`], and the sign-in.
-//! Only a signed-in POST reads its body, at most [`DEFAULT_MAX_BODY_SIZE`] bytes;
-//! other bodies are never read.
+//! Only a signed-in POST reads its body, at most [`DEFAULT_MAX_BODY_SIZE`] bytes
+//! within 5 s (D-097); other bodies are never read.
 //!
 //! # Execution
 //!
@@ -56,6 +56,10 @@ pub const RETRY_NO_RECONNECT: i64 = 31_536_000_000;
 
 /// Maximum POST body size (upstream `defaultMaxBodySize`, 64 kB).
 pub const DEFAULT_MAX_BODY_SIZE: usize = 65_536;
+
+/// How long reading a POST body may take, from when the session is signed in: as
+/// long as the server gives a request head (D-097).
+const BODY_READ_TIMEOUT: Duration = server::READ_HEADER_TIMEOUT;
 
 /// Gauge of open SSE responses (upstream `metricsClientsNum`).
 pub const METRICS_CLIENTS_NUM: &str = "sse_clients_num";
@@ -620,6 +624,8 @@ pub struct Handler {
     extractor: Option<SharedHeadersExtractor>,
     config: Config,
     allowed_hosts: Vec<String>,
+    /// How long reading a POST body may take ([`BODY_READ_TIMEOUT`]; shorter in tests).
+    body_timeout: Duration,
 }
 
 /// Builds the SSE endpoint (upstream `SSEHandler(n, m, shutdownCtx,
@@ -643,7 +649,15 @@ pub fn sse_handler(
         m.register_gauge(METRICS_CLIENTS_NUM, "The number of active SSE clients");
     }
 
-    Handler { node, metrics, shutdown, extractor, config: config.clone(), allowed_hosts }
+    Handler {
+        node,
+        metrics,
+        shutdown,
+        extractor,
+        config: config.clone(),
+        allowed_hosts,
+        body_timeout: BODY_READ_TIMEOUT,
+    }
 }
 
 /// The SSE endpoint as a server handler: mount it at `config.path` (upstream
@@ -750,8 +764,9 @@ impl Handler {
     }
 
     /// [`Handler::prepare`] on the server: the body of a POST is read once the
-    /// session is signed in, at most [`DEFAULT_MAX_BODY_SIZE`] bytes; other bodies,
-    /// and those of requests answered before, are not read. `Err` when a blocking step panicked.
+    /// session is signed in, at most [`DEFAULT_MAX_BODY_SIZE`] bytes within the
+    /// body timeout (D-097); other bodies, and those of requests answered before,
+    /// are not read. `Err` when a blocking step panicked.
     async fn prepare_async(
         self: Arc<Self>,
         req: Request,
@@ -779,11 +794,14 @@ impl Handler {
         .await
     }
 
-    /// The commands of a POST body, read with the size limit.
+    /// The commands of a POST body, read with the size limit and the body timeout.
     async fn read_commands(&self, body: Incoming) -> Result<Vec<Message>, Error> {
-        match server::read_body(body, Some(DEFAULT_MAX_BODY_SIZE as u64)).await {
-            Ok(body) => subscribe_commands_from_post_body(&body),
-            Err(e) => Err(Error(e.to_string())),
+        let read = server::read_body(body, Some(DEFAULT_MAX_BODY_SIZE as u64));
+        match tokio::time::timeout(self.body_timeout, read).await {
+            Ok(Ok(body)) => subscribe_commands_from_post_body(&body),
+            Ok(Err(e)) => Err(Error(e.to_string())),
+            // Go's text for a read past its deadline.
+            Err(_) => Err(Error("i/o timeout".to_owned())),
         }
     }
 
@@ -972,9 +990,10 @@ impl Handler {
 }
 
 /// [`Handler`] on the HTTP server: the body of a POST (its commands) is read once
-/// the request is signed in, up to [`DEFAULT_MAX_BODY_SIZE`] (a larger or
-/// unreadable body is answered 400, as upstream's `MaxBytesReader` and read
-/// errors are); other bodies are never read. The response streams through a
+/// the request is signed in, up to [`DEFAULT_MAX_BODY_SIZE`] and within the body
+/// timeout (a larger, unreadable or late body is answered 400, as upstream's
+/// `MaxBytesReader` and read errors are); other bodies are never read. The
+/// response streams through a
 /// [`ChannelResponseWriter`](crate::server::ChannelResponseWriter), and the client
 /// going away ends the request.
 struct Endpoint(Arc<Handler>);
@@ -1213,7 +1232,8 @@ mod tests {
         assert_eq!((1, "EPOCH"), (pos.offset, pos.epoch.as_str()));
     }
 
-    /// The endpoint on a server bound to port 0 over a node with an [`App`].
+    /// The endpoint on a server bound to port 0 over a node with an [`App`]; POST
+    /// bodies may take `body_timeout`.
     struct Served {
         node: Arc<Node>,
         app: Arc<App>,
@@ -1222,21 +1242,22 @@ mod tests {
     }
 
     impl Served {
-        fn new(app: App, config: &Config) -> Self {
+        fn new(app: App, config: &Config, body_timeout: Duration) -> Self {
             let app = Arc::new(app);
             let node = Node::new(node::Config::new(), vec![node::NodeOption::Controller(app.clone())]);
             let subscriber = Arc::new(node::LegacySubscriber::new(node.clone()));
             node.set_broker(Arc::new(cabby_core::broker::Legacy::new(subscriber)));
             node.start().unwrap();
             let srv = server::HttpServer::new("127.0.0.1", "0", None, 0).unwrap();
-            let h = sse_handler(node.clone(), None, srv.shutdown_token(), None, config);
+            let mut h = sse_handler(node.clone(), None, srv.shutdown_token(), None, config);
+            h.body_timeout = body_timeout;
             srv.setup_handler("/events", Endpoint(Arc::new(h)));
             let addr = crate::server::tests::support::start(&srv);
             Self { node, app, srv, addr }
         }
 
         fn signing_in(sign_in: bool) -> Self {
-            Self::new(App::new(sign_in), &Config::new())
+            Self::new(App::new(sign_in), &Config::new(), BODY_READ_TIMEOUT)
         }
 
         /// Sends a request head with `Host` and the given lines, and nothing else.
@@ -1262,7 +1283,7 @@ mod tests {
         }
     }
 
-    /// An answer that does not wait for a body.
+    /// Well under [`BODY_READ_TIMEOUT`]: an answer that does not wait for a body.
     const PROMPTLY: Duration = Duration::from_secs(1);
 
     /// Reads the response to a request whose announced body was not sent: it is
@@ -1308,7 +1329,7 @@ mod tests {
     fn deviation_d096_a_preflight_is_answered_without_its_body() {
         let mut config = Config::new();
         config.allowed_origins = "example.com".into();
-        let endpoint = Served::new(App::new(true), &config);
+        let endpoint = Served::new(App::new(true), &config, BODY_READ_TIMEOUT);
         let (mut stream, sent) = endpoint.send(
             "OPTIONS /events HTTP/1.1\r\nOrigin: http://other.example\r\nContent-Length: 10\r\nExpect: 100-continue",
         );
@@ -1371,6 +1392,47 @@ mod tests {
         assert!(status.starts_with("HTTP/1.1 200"), "{status}");
         read_until(&mut r, "event: confirm_subscription");
         assert!(sent.elapsed() < PROMPTLY, "streaming after {:?}", sent.elapsed());
+        endpoint.wait_for_sessions(1);
+    }
+
+    /// A signed-in POST whose body stalls is answered 400 when the body timeout
+    /// passes, and its session leaves the node.
+    #[test]
+    fn deviation_d097_a_stalled_body_is_answered_at_the_deadline() {
+        use std::io::Write;
+        let timeout = Duration::from_millis(300);
+        let endpoint = Served::new(App::new(true), &Config::new(), timeout);
+        let (mut stream, _) = endpoint.send("POST /events HTTP/1.1\r\nContent-Length: 100\r\nExpect: 100-continue");
+        // Signed in: the body is read now.
+        assert_eq!(100, crate::server::tests::support::read_response(&mut stream).status);
+        let reading = Instant::now();
+        stream.write_all(br#"{"command":"#).unwrap();
+        let resp = crate::server::tests::support::read_response(&mut stream);
+        let elapsed = reading.elapsed();
+        assert_eq!(400, resp.status);
+        assert!(elapsed >= timeout && elapsed < timeout + PROMPTLY, "answered after {elapsed:?}");
+        assert_eq!(1, endpoint.app.sign_ins.load(std::sync::atomic::Ordering::SeqCst));
+        endpoint.wait_for_sessions(0);
+    }
+
+    /// A body that arrives in parts, all within the body timeout, is read: the
+    /// response streams.
+    #[test]
+    fn deviation_d097_a_slow_body_within_the_deadline_is_served() {
+        use std::io::Write;
+        let endpoint = Served::new(App::new(true), &Config::new(), Duration::from_millis(900));
+        let body = "{\"command\":\"subscribe\",\"identifier\":\"chat_1\"}\n";
+        let (mut stream, _) = endpoint.send(&format!("POST /events HTTP/1.1\r\nContent-Length: {}", body.len()));
+        for part in [&body[..10], &body[10..30], &body[30..]] {
+            std::thread::sleep(Duration::from_millis(150));
+            stream.write_all(part.as_bytes()).unwrap();
+        }
+        let mut r = std::io::BufReader::new(stream);
+        let mut status = String::new();
+        std::io::BufRead::read_line(&mut r, &mut status).unwrap();
+        assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+        read_until(&mut r, "event: welcome");
+        read_until(&mut r, "event: confirm_subscription");
         endpoint.wait_for_sessions(1);
     }
 }
