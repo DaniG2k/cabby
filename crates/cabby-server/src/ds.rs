@@ -2435,6 +2435,144 @@ data:{"streamCursor":"c","streamNextOffset":"1::e","upToDate":true}"#,
         assert_eq!(Admit::Skip, mark.admit("ep", 5));
     }
 
+    // ------------------------------------------------------------ D-089: the gate
+    //
+    // The tests below write to the connections directly, before `release`, so
+    // the hold does not depend on the hub's delivery thread being slower than
+    // the history read.
+
+    /// The frame `encoder` makes of `{"n":<n>}` at offset `n` of `epoch`.
+    fn reply_frame(encoder: impl NodeEncoder, n: u64, epoch: &str) -> Vec<u8> {
+        use cabby_core::common::{EncodedMessage, Reply};
+        let msg = EncodedMessage::Reply(Reply {
+            message: Some(serde_json::json!({"n": n})),
+            offset: n,
+            epoch: epoch.into(),
+            stream_id: "s".into(),
+            ..Default::default()
+        });
+        encoder.encode(&msg).unwrap().payload.to_vec()
+    }
+
+    fn mark(epoch: &str, offset: u64, strict: bool) -> Watermark {
+        Watermark { position: Some((epoch.to_owned(), offset)), strict }
+    }
+
+    /// A live SSE session with cursor `c` on an established response.
+    fn sse_session() -> (SseStream, Arc<Rec>, Arc<sse::Connection>) {
+        let rec = Arc::new(Rec::default());
+        let conn =
+            Arc::new(sse::Connection::new(Box::new(RecWriter { rec: rec.clone(), headers: Default::default() })));
+        conn.established();
+        (SseStream::new(conn.clone(), "c".to_owned()), rec, conn)
+    }
+
+    fn body_text(rec: &Rec) -> String {
+        String::from_utf8(lock(&rec.state).body.clone()).unwrap()
+    }
+
+    /// The data and control event an SSE session with cursor `c` writes for `n`.
+    fn sse_event(n: u64) -> String {
+        format!(
+            "event: data\ndata:[{{\"n\":{n}}}]\n\nevent: control\ndata:{{\"streamCursor\":\"c\",\"streamNextOffset\":\"{n}::ep\"}}\n\n"
+        )
+    }
+
+    /// D-089: frames written to an SSE session before `release` are held; on
+    /// release, those at or below the mark are dropped, the later one and a
+    /// ping are written once, in the order they came, and later frames are
+    /// compared with the moved mark.
+    #[test]
+    fn deviation_d089_sse_holds_frames_until_release_and_drops_what_the_client_has() {
+        use cabby_core::common::EncodedMessage;
+        let (stream, rec, conn) = sse_session();
+        let ping = SseDataEncoder.encode(&EncodedMessage::Ping(Default::default())).unwrap().payload.to_vec();
+        let now = Instant::now();
+        let held = [
+            reply_frame(SseDataEncoder, 1, "ep"),
+            reply_frame(SseDataEncoder, 2, "ep"),
+            ping,
+            reply_frame(SseDataEncoder, 3, "ep"),
+            reply_frame(SseDataEncoder, 2, "ep"),
+        ];
+        for frame in &held {
+            stream.write(frame, now).unwrap();
+        }
+        assert_eq!("", body_text(&rec), "nothing is written before the history");
+
+        stream.release(mark("ep", 2, false));
+
+        let released = format!("{}\n\n{}", sse::COMMENT_PING, sse_event(3));
+        assert_eq!(released, body_text(&rec));
+        stream.write(&reply_frame(SseDataEncoder, 3, "ep"), now).unwrap();
+        stream.write(&reply_frame(SseDataEncoder, 4, "ep"), now).unwrap();
+        assert_eq!(format!("{released}{}", sse_event(4)), body_text(&rec), "3 once, then 4");
+        assert!(!conn.context().is_cancelled());
+    }
+
+    /// D-089: a held frame of another epoch than a strict mark's ends the SSE
+    /// response on release, without being written.
+    #[test]
+    fn deviation_d089_sse_ends_on_another_epoch_with_a_strict_mark() {
+        let (stream, rec, conn) = sse_session();
+        stream.write(&reply_frame(SseDataEncoder, 5, "old"), Instant::now()).unwrap();
+        assert!(!conn.context().is_cancelled());
+        assert_eq!("", body_text(&rec));
+
+        stream.release(mark("ep", 2, true));
+
+        assert!(conn.context().is_cancelled(), "the response ends");
+        assert_eq!("", body_text(&rec), "the frame is not written");
+    }
+
+    /// A long-poll connection that holds its frames.
+    fn poll_session() -> (PollConnection, Arc<Rec>) {
+        let rec = Arc::new(Rec::default());
+        let poll = PollConnection::new(Box::new(RecWriter { rec: rec.clone(), headers: Default::default() }));
+        poll.hold();
+        (poll, rec)
+    }
+
+    /// D-089: frames written to a held long-poll before `release` (and a
+    /// ping) answer nothing; on release, the response is the first frame
+    /// above the mark, once, and later frames are not written.
+    #[test]
+    fn deviation_d089_long_poll_holds_frames_until_release_and_answers_with_the_first_the_client_lacks() {
+        let (poll, rec) = poll_session();
+        let now = Instant::now();
+        for n in [1, 2] {
+            poll.write(&reply_frame(PollEncoder, n, "ep"), now).unwrap();
+        }
+        poll.write_ping(now).unwrap();
+        for n in [3, 4] {
+            poll.write(&reply_frame(PollEncoder, n, "ep"), now).unwrap();
+        }
+        assert!(!poll.is_done(), "nothing is answered before the history");
+        assert_eq!(None, lock(&rec.state).status);
+
+        poll.release(mark("ep", 2, false));
+
+        assert!(poll.is_done());
+        assert_poll(&lock(&rec.state).clone(), &[3], "3::ep");
+        poll.write(&reply_frame(PollEncoder, 5, "ep"), now).unwrap();
+        assert_poll(&lock(&rec.state).clone(), &[3], "3::ep");
+    }
+
+    /// D-089: a held frame of another epoch than a strict mark's answers the
+    /// long-poll with 204, as an elapsed poll interval does.
+    #[test]
+    fn deviation_d089_long_poll_ends_on_another_epoch_with_a_strict_mark() {
+        let (poll, rec) = poll_session();
+        poll.write(&reply_frame(PollEncoder, 5, "old"), Instant::now()).unwrap();
+        assert!(!poll.is_done());
+
+        poll.release(mark("ep", 2, true));
+
+        assert!(poll.is_done());
+        let st = lock(&rec.state).clone();
+        assert_eq!((Some(204), true), (st.status, st.body.is_empty()), "{st:?}");
+    }
+
     // ------------------------------------------------------------ D-089: SSE
 
     fn sse(offset: &str) -> String {
