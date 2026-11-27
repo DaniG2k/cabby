@@ -239,6 +239,14 @@ impl World {
         matches!(self.variant, Http | Embedded | BrokerHttp | BrokerNats)
     }
 
+    /// Whether an acknowledged HTTP broadcast may still be on its way to the
+    /// other nodes: Cabby answers it once its pub/sub `PUBLISH` is queued
+    /// (D-040), Go once Redis replied. Of the variants with HTTP broadcasts,
+    /// `BrokerHttp` uses Redis pub/sub.
+    pub fn publishes_after_acknowledging(&self) -> bool {
+        cabby_testkit::backend() == cabby_testkit::Backend::Rust && self.variant == Variant::BrokerHttp
+    }
+
     /// Waits until this server's Redis pub/sub connection (its own ACL user)
     /// has subscribed, so pub/sub commands (remote disconnects) reach it.
     /// Variants whose pub/sub is not Redis return at once.

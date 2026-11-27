@@ -194,19 +194,19 @@ anyt_tests! { Variant::BrokerRedis;
     /// upstream: etc/anyt/broker_tests/history_test.rb#History/Fetching by offset
     /// note: run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1
     /// note: on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)
-    /// note: `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters
+    /// note: `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters and, on Cabby with Redis pub/sub, for HTTP broadcasts too (they are answered once their PUBLISH is queued, D-040)
     #[test]
     fn history_by_offset() = ext::history_by_offset;
     /// upstream: etc/anyt/broker_tests/history_test.rb#History/Fetching by timestamp
     /// note: run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1
     /// note: on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)
-    /// note: `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters
+    /// note: `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters and, on Cabby with Redis pub/sub, for HTTP broadcasts too (they are answered once their PUBLISH is queued, D-040)
     #[test]
     fn history_by_timestamp() = ext::history_by_timestamp;
     /// upstream: etc/anyt/broker_tests/history_test.rb#History/Subscribing with history
     /// note: run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1
     /// note: on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)
-    /// note: `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters
+    /// note: `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters and, on Cabby with Redis pub/sub, for HTTP broadcasts too (they are answered once their PUBLISH is queued, D-040)
     #[test]
     fn history_on_subscribe() = ext::history_on_subscribe;
     /// upstream: etc/anyt/broker_tests/restore_test.rb#Session cache/Restore session by session ID

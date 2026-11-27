@@ -81,7 +81,9 @@ fn history_msg(id: &str, user_id: i64, status: &str) -> Value {
 ///   server consumes the adapter's messages in order.
 fn history_before(w: &World) {
     w.await_jetstream();
-    let sentinel = (!w.broadcasts_synchronously()).then(|| {
+    // A sentinel to another stream, published after the history broadcasts
+    // (in order, on one publisher), shows they went through pub/sub.
+    let sentinel = (!w.broadcasts_synchronously() || w.publishes_after_acknowledging()).then(|| {
         let id = identifier(&[("channel", json!(channel("BroadcastDataToStreamChannel")))]);
         let mut witness = w.default_client();
         subscribe_acked(w, &mut witness, &id);

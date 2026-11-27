@@ -7081,7 +7081,7 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters"
+        "[src] `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters and, on Cabby with Redis pub/sub, for HTTP broadcasts too (they are answered once their PUBLISH is queued, D-040)"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::history_by_offset",
@@ -7114,7 +7114,7 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters"
+        "[src] `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters and, on Cabby with Redis pub/sub, for HTTP broadcasts too (they are answered once their PUBLISH is queued, D-040)"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::history_by_timestamp",
@@ -7147,7 +7147,7 @@
       "notes": [
         "[src] run once per Makefile test-conformance* target (anyt_<target>.rs), with upstream CI's job-wide REDIS_URL and ANYCABLE_DEBUG=1",
         "[src] on the shared Redis/NATS services the broadcast channel/stream/subject and the Redis ACL user are per test and the application prefixes stream names (opaque to clients)",
-        "[src] `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters"
+        "[src] `sleep 2` after the before-block broadcasts is replaced by observing that the server handled them without subscribing to the history stream: the returned HTTP broadcast (after JetStream readiness for the NATS broker), or a sentinel broadcast to another stream for queued adapters and, on Cabby with Redis pub/sub, for HTTP broadcasts too (they are answered once their PUBLISH is queued, D-040)"
       ],
       "rust_cases": [
         "conformance::anyt_broker_http::history_on_subscribe",
