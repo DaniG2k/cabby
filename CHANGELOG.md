@@ -8,7 +8,13 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
-## [Unreleased]
+## [0.5.1] - 2026-11-27
+
+Cabby 0.5.1 makes stopping the server dependable: a second Ctrl-C stops it at once, a shutdown
+step that fails can no longer leave the process running, and embedded NATS stops with Cabby. It
+also fixes a client command that could wait for a free thread, and the disconnect queue's backlog
+limit under concurrent disconnects. No setting changes. It stays compatible with AnyCable server
+1.6.21.
 
 ### Fixed
 

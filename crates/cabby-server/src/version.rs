@@ -8,7 +8,7 @@ pub const ANYCABLE_COMPAT: &str = "1.6.21";
 /// Cabby's own version (the workspace `version`).
 pub const CABBY: &str = env!("CARGO_PKG_VERSION");
 
-/// `0.5.0 (AnyCable 1.6.21 compatible)`: the start line (D-035) and, after the
+/// `0.5.1 (AnyCable 1.6.21 compatible)`: the start line (D-035) and, after the
 /// program name, `--version` (D-059).
 pub fn label() -> String {
     format!("{CABBY} (AnyCable {ANYCABLE_COMPAT} compatible)")
