@@ -2185,7 +2185,9 @@
       "direct_assertions": 11,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
+      "notes": [
+        "[src] after each upstream sleep, waits (up to 10 s) until the server has removed the expired messages: JetStream's expiry runs on a timer and can lag the 1 s TTL on a busy machine"
+      ],
       "rust_cases": [
         "broker::nats_test::test_nats_broker_history_since_expiration"
       ],

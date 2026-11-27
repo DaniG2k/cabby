@@ -35,6 +35,21 @@ fn let_server_ttl_elapse(d: Duration) {
     thread::sleep(d);
 }
 
+/// Waits until the server has removed every message of `stream`. JetStream enforces a stream's
+/// age limit on a timer, which can run later than the limit on a busy machine, so after the
+/// upstream sleep the test waits for the removal itself, for at most 10 s.
+fn await_expiry(broker: &NatsBroker, stream: &str, since: i64) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let left = broker.history_since(stream, since).expect("history").unwrap_or_default();
+        if left.is_empty() {
+            return;
+        }
+        assert!(Instant::now() < deadline, "not expired 10 s after the upstream wait: {left:?}");
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
 fn nats_config(server: &NatsServer) -> cabby_core::broker::NatsConfig {
     let mut nconfig = new_nats_config();
     nconfig.servers = server.url();
@@ -60,6 +75,7 @@ fn history_broker(server: &NatsServer, config: &Config) -> NatsBroker {
 }
 
 /// upstream: broker/nats_test.go#TestNATSBroker_HistorySince_expiration
+/// note: after each upstream sleep, waits (up to 10 s) until the server has removed the expired messages: JetStream's expiry runs on a timer and can lag the 1 s TTL on a busy machine
 #[test]
 fn test_nats_broker_history_since_expiration() {
     let _serial = serial();
@@ -77,6 +93,7 @@ fn test_nats_broker_history_since_expiration() {
 
     // Stream must be expired after 1 second
     let_server_ttl_elapse(Duration::from_secs(2));
+    await_expiry(&broker, "test", start);
 
     let _ = broker.handle_broadcast(&msg("test", "c"));
     let _ = broker.handle_broadcast(&msg("test", "d"));
@@ -91,6 +108,7 @@ fn test_nats_broker_history_since_expiration() {
 
     // Stream must be expired after 2 seconds
     let_server_ttl_elapse(Duration::from_secs(3));
+    await_expiry(&broker, "test", start);
 
     let history = broker.history_since("test", start).expect("history");
     assert!(history.unwrap_or_default().is_empty());
