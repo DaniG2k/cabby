@@ -137,6 +137,11 @@ fn test_redis_config_to_toml() {
 /// note: Deviation D-110: claim passes continue where the last one ended. A stopped consumer left 100 entries without a payload (their handling fails, so they stay pending) ahead of a broadcast; the test sets their idle time with `XCLAIM ... IDLE` instead of waiting. The first pass claims the 100, the next one the broadcast (upstream: every pass claims the same 100).
 #[test]
 fn deviation_d110_entries_after_failing_ones_are_claimed() {
+    if backend() == Backend::Go {
+        unimplemented!(
+            "not_observable: AnyCable starts every claim pass at 0-0, so the entry is never claimed (D-110)"
+        );
+    }
     let (scope, config, handler) = setup();
     let stream = &config.stream;
     let group = &config.group;

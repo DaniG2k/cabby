@@ -172,6 +172,9 @@ fn pending(scope: &RedisScope, stream: &str) -> i64 {
 /// note: Deviation D-109: a backlog is read 1000 entries at a time. The handler closes the client on the first entry, so the streamer stops after its first read and the pending list holds what that read took (upstream: the whole backlog).
 #[test]
 fn deviation_d109_a_backlog_is_read_in_batches() {
+    if backend() == Backend::Go {
+        unimplemented!("not_observable: AnyCable reads without COUNT, so one read takes the whole backlog (D-109)");
+    }
     const BACKLOG: usize = 2500;
     let scope = services::redis().scope("streamer");
     let stream = scope.name("__test__");
@@ -217,6 +220,9 @@ fn group_exists(scope: &RedisScope, stream: &str) -> bool {
 /// note: Deviation D-111: a value of another type at the stream key makes every group creation fail on a connection that opens. Each attempt opens a connection, which stays open until the next one: within 1.5 s the streamer opens two, the second 250 ms after the first and the third 2 to 4 s later (upstream: one every 250 ms). Then the key is deleted, and the next attempt creates the group; the test waits for it before the shutdown, as upstream's reader stops only while it reads (and its `Shutdown` holds the client lock that a reconnect waits for).
 #[test]
 fn deviation_d111_failing_commands_are_retried_less_and_less_often() {
+    if backend() == Backend::Go {
+        unimplemented!("not_observable: AnyCable retries a failing command every 250 ms (D-111)");
+    }
     let scope = services::redis().scope("streamer");
     let stream = scope.name("__test__");
     let rconfig = config_for(scope.url());
