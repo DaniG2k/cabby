@@ -17,6 +17,11 @@ Differences from the AnyCable Go server are listed by ID in
   added, so the queue could grow past the limit by one session per concurrent disconnect. The
   check and the insertion are now made together; a session over the limit is discarded and
   counted in `disconnect_queue_discarded_total`, as before (D-118).
+- WebSocket: a close frame requested without waiting (as when a client is refused with
+  `Try again later`) is sent even if the last reference to the connection is dropped before the
+  connection's task writes it. Before, the task could see the dropped reference first and close
+  the socket without the close frame. No current path drops the connection that early (every
+  client is admitted), so no client saw this.
 
 ## [0.5.0] - 2026-11-27
 

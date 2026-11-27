@@ -67,7 +67,9 @@
 //! * **Close.** [`WsConnection::close`] queues the close frame behind the frames
 //!   already queued, then waits (at most 1s, upstream `CloseWithReason`) until it
 //!   is written and the socket is closed, so a shutdown flushes close frames before
-//!   the process exits.
+//!   the process exits. A close requested without waiting is written even when the
+//!   last handle is dropped before the io loop gets to it; without a close
+//!   requested, dropping the last handle drops the socket.
 //!
 //! # Writing past tungstenite
 //!
@@ -717,7 +719,10 @@ where
                 notify_cond: state.cond_waiters > 0,
             }
         };
-        if work.abandoned {
+        // A close requested before the last handle was dropped is still sent,
+        // after the frames queued before it (the handle that asked for it, as a
+        // session that refuses a client does, may be gone by now).
+        if work.abandoned && work.close.is_none() {
             break "connection abandoned".to_owned();
         }
         let wrote = !batch.is_empty();
@@ -1792,6 +1797,40 @@ mod tests {
         let conn = gate.connection().await;
         gate.client_sends(9, b"hi");
         assert_eq!("IO error: broken pipe", ended(&conn).await);
+        assert!(gate.out().is_empty());
+    }
+
+    /// A close requested and then left (the last handle dropped before the io
+    /// loop ran, as when a handler refuses a client with `Try again later` and
+    /// returns) is still written, after the frames queued before it. Before,
+    /// the io loop saw the dropped handle first and closed the socket without
+    /// a close frame.
+    #[tokio::test]
+    async fn a_close_requested_before_the_last_handle_is_dropped_is_sent() {
+        let gate = Gate::default();
+        let (conn, io_loop) = gate.connect().await;
+        queue(&conn, "bye");
+        close_without_waiting(&conn, CLOSE_TRY_AGAIN_LATER, "Try again later");
+        drop(conn);
+        gate.allow(usize::MAX);
+
+        tokio::time::timeout(Duration::from_secs(10), io_loop).await.expect("the io loop ends");
+
+        let close = CloseFrame { code: CloseCode::from(1013), reason: Utf8Bytes::from_static("Try again later") };
+        assert_eq!(tungstenite_bytes([Message::text("bye"), Message::Close(Some(close))]), gate.out());
+    }
+
+    /// Without a close requested, the last handle dropped ends the connection
+    /// without writing anything more.
+    #[tokio::test]
+    async fn an_abandoned_connection_ends_without_a_close_frame() {
+        let gate = Gate::default();
+        let (conn, io_loop) = gate.connect().await;
+        drop(conn);
+        gate.allow(usize::MAX);
+
+        tokio::time::timeout(Duration::from_secs(10), io_loop).await.expect("the io loop ends");
+
         assert!(gate.out().is_empty());
     }
 
