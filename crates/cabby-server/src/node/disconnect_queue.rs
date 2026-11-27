@@ -214,17 +214,26 @@ impl Disconnector for DisconnectQueue {
 
     /// Fails (and counts `disconnect_queue_discarded_total`) when the backlog
     /// limit is reached; silently drops sessions after shutdown.
+    ///
+    /// The stopped flag's lock is held from the checks to the insertion, so
+    /// concurrent calls cannot all pass the size check and exceed the limit
+    /// together, and a shutdown cannot start between the checks and the
+    /// insertion. Workers remove sessions without this lock: the size only
+    /// goes down meanwhile.
     fn enqueue(&self, session: Arc<Session>) -> Result<(), NodeError> {
-        if *self.stopped() {
+        let stopped = self.stopped();
+        if *stopped {
             return Ok(());
         }
 
         if self.limit > 0 && self.size() >= self.limit {
+            drop(stopped);
             self.node.instrumenter().counter_increment(METRICS_DISCONNECT_DISCARDED);
             return Err(NodeError("disconnect queue is full, discarding Disconnect".into()));
         }
+        #[cfg(test)]
+        tests::AFTER_BACKLOG_CHECK.with(|hook| hook.borrow().as_ref().map(|hook| hook()));
 
-        // A closed queue (shutdown raced past the check above) drops the session.
         self.queue.add(Item { size: 1, data: session });
         Ok(())
     }
@@ -237,7 +246,57 @@ impl Disconnector for DisconnectQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::Config;
+    use crate::node::{Config, Connection, ConnectionError};
+    use cabby_core::common::SessionEnv;
+    use std::cell::RefCell;
+    use std::sync::Barrier;
+    use std::sync::mpsc;
+    use std::time::Instant;
+
+    thread_local! {
+        /// Runs in `enqueue` between the backlog check and the insertion, on
+        /// the thread that set it: a test pauses a producer there.
+        pub(super) static AFTER_BACKLOG_CHECK: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
+    }
+
+    struct Idle;
+
+    impl Connection for Idle {
+        fn write(&self, _: &[u8], _: Instant) -> Result<(), ConnectionError> {
+            Ok(())
+        }
+        fn write_binary(&self, _: &[u8], _: Instant) -> Result<(), ConnectionError> {
+            Ok(())
+        }
+        fn write_ping(&self, _: Instant) -> Result<(), ConnectionError> {
+            Ok(())
+        }
+        fn read(&self) -> Result<Vec<u8>, ConnectionError> {
+            Err(ConnectionError("websocket: close 1000 (normal)".into()))
+        }
+        fn close(&self, _: i32, _: &str) {}
+    }
+
+    fn session() -> Arc<Session> {
+        Session::build(Arc::new(Idle), SessionEnv::new("/cable", None))
+    }
+
+    /// A queue with room for one session whose workers do not run (`run` is
+    /// not called), so enqueued sessions stay; and its metrics.
+    fn queue_of_one() -> (Arc<DisconnectQueue>, Arc<crate::metrics::Metrics>) {
+        let metrics = Arc::new(crate::metrics::Metrics::new(Vec::new(), 0));
+        let node = Node::new(
+            Config::new(),
+            vec![crate::node::NodeOption::Instrumenter(metrics.clone() as Arc<dyn crate::metrics::Instrumenter>)],
+        );
+        let mut config = DisconnectQueueConfig::new();
+        config.max_backlog = 1;
+        (Arc::new(DisconnectQueue::new(node, &config)), metrics)
+    }
+
+    fn discarded(metrics: &crate::metrics::Metrics) -> u64 {
+        metrics.counter(METRICS_DISCONNECT_DISCARDED).expect("the counter").value()
+    }
 
     fn queue_with_rate(rate: i64) -> DisconnectQueue {
         let node = Node::new(Config::new(), Vec::new());
@@ -259,5 +318,82 @@ mod tests {
     fn deviation_d015_out_of_range_rates_are_clamped() {
         assert_eq!(Duration::from_millis(1000), queue_with_rate(0).rate);
         assert_eq!(Duration::from_millis(1), queue_with_rate(5000).rate);
+    }
+
+    /// Two sessions enqueued at the same time into a queue with room for one:
+    /// one is queued, the other is discarded (an error and one count of
+    /// `disconnect_queue_discarded_total`). The two producers of a round start
+    /// together at a barrier.
+    #[test]
+    fn concurrent_enqueues_respect_the_backlog_limit() {
+        const ROUNDS: usize = 200;
+        let (queue, metrics) = queue_of_one();
+
+        for round in 0..ROUNDS {
+            let barrier = Arc::new(Barrier::new(2));
+            let producers: Vec<_> = (0..2)
+                .map(|_| {
+                    let (queue, barrier, s) = (queue.clone(), barrier.clone(), session());
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        queue.enqueue(s)
+                    })
+                })
+                .collect();
+            let results: Vec<_> = producers.into_iter().map(|p| p.join().expect("a producer")).collect();
+
+            let errors: Vec<_> = results.iter().filter_map(|r| r.as_ref().err()).collect();
+            assert_eq!(1, errors.len(), "round {round}: exactly one session is discarded: {results:?}");
+            assert_eq!("disconnect queue is full, discarding Disconnect", errors[0].0);
+            assert_eq!(1, queue.size(), "round {round}: the backlog limit holds");
+            assert!(queue.remove().is_some());
+        }
+        assert_eq!(ROUNDS as u64, discarded(&metrics), "one discard counted per round");
+    }
+
+    /// The race of the test above, made deterministic: producer A passes the
+    /// backlog check and is held right after it; producer B enqueues
+    /// meanwhile. B waits for A's insertion, then finds the queue full and is
+    /// discarded. Before, the check and the insertion took the locks
+    /// separately: B passed the check too and both sessions were queued.
+    #[test]
+    fn an_enqueue_between_the_check_and_the_insertion_of_another_is_discarded() {
+        let (queue, metrics) = queue_of_one();
+        let (checked_tx, checked) = mpsc::channel::<()>();
+        let (release, released) = mpsc::channel::<()>();
+
+        let a = {
+            let queue = queue.clone();
+            std::thread::spawn(move || {
+                AFTER_BACKLOG_CHECK.with(|hook| {
+                    *hook.borrow_mut() = Some(Box::new(move || {
+                        let _ = checked_tx.send(());
+                        let _ = released.recv();
+                    }));
+                });
+                queue.enqueue(session())
+            })
+        };
+        checked.recv_timeout(Duration::from_secs(5)).expect("A passed the backlog check");
+
+        let (b_tx, b_result) = mpsc::channel();
+        let b = {
+            let queue = queue.clone();
+            std::thread::spawn(move || {
+                let _ = b_tx.send(queue.enqueue(session()));
+            })
+        };
+        // B cannot finish while A is held: it waits for A's insertion. (Before,
+        // it was queued at once; the wait bounds that case.)
+        let early = b_result.recv_timeout(Duration::from_millis(200)).ok();
+        assert_eq!(None, early, "B finished while A was between its check and its insertion");
+
+        release.send(()).expect("A is held");
+        assert_eq!(Ok(()), a.join().expect("producer A"));
+        let b_result = b_result.recv_timeout(Duration::from_secs(5)).expect("B finished");
+        b.join().expect("producer B");
+        assert_eq!(Err(NodeError("disconnect queue is full, discarding Disconnect".into())), b_result);
+        assert_eq!(1, queue.size());
+        assert_eq!(1, discarded(&metrics));
     }
 }

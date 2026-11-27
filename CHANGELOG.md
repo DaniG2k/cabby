@@ -8,6 +8,16 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
+## [Unreleased]
+
+### Fixed
+
+- Disconnect queue: the backlog limit (`--max_disconnect_backlog_size`) holds when sessions
+  disconnect at the same time. Before, each of them could pass the size check before any was
+  added, so the queue could grow past the limit by one session per concurrent disconnect. The
+  check and the insertion are now made together; a session over the limit is discarded and
+  counted in `disconnect_queue_discarded_total`, as before (D-118).
+
 ## [0.5.0] - 2026-11-27
 
 Cabby 0.5.0 fixes message loss right after a subscription with Redis or Postgres pub/sub, hardens
