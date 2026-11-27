@@ -35,9 +35,6 @@ Differences from the AnyCable Go server are listed by ID in
   `--redis_sentinels`) names that master. Before, Cabby asked the Sentinel nodes for a master with
   an empty name and failed to connect. An empty name now stops startup with `no Redis Sentinel
   master name: give it as the host of --redis_url (redis://<name>)` (D-116).
-
-### Fixed
-
 - Redis Streams broadcasting (`--broadcast_adapter=redisx`): a read takes at most 1000 entries.
   Before, after the servers were stopped while broadcasts were added, the first server to read
   again took the whole backlog in one reply, and the other servers claimed its entries that had
@@ -55,9 +52,6 @@ Differences from the AnyCable Go server are listed by ID in
   records each time, without end. The first retry after a read that worked is still 250 ms, so
   a consumer group deleted by a flush is created again as quickly as before; while Redis can't
   be reached the delays are unchanged (D-111).
-
-### Fixed
-
 - Postgres broadcaster (`--broadcast_adapter=postgres`) with `--broker=postgres`: an outbox row
   holding a message Postgres can never store (a NUL character in `data` or in the stream name, or
   a stream name over 2704 bytes, the limit of an index entry) no longer holds back the rows after
