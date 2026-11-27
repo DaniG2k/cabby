@@ -69,7 +69,7 @@ builds contain neither.
   pass, so entries whose handling keeps failing don't hold back the ones after them (D-110).
   A failure that repeats on every attempt (a value of another type at the stream key) is
   retried after a growing delay, up to 8 to 16 s, instead of every 250 ms (D-111).
-- **A remote disconnect reaches one connection of the user**: the Go server disconnects one
+- **A remote disconnect reaches one connection of the user**: AnyCable 1.6.21 disconnects one
   session registered with the identifiers and leaves the others open and subscribed. Cabby
-  disconnects every one of them, as Rails' `remote_connections.where(...).disconnect` expects
-  (D-085).
+  disconnects every one of them, as Rails' `remote_connections.where(...).disconnect` expects,
+  and as AnyCable does from 1.6.22 (D-085).

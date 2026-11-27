@@ -13,18 +13,23 @@ Differences from the AnyCable Go server are listed by ID in
 ### Fixed
 
 - Only sessions that the application authenticated are written to the session cache or keep
-  their entry alive. A session with a failed authentication is no longer cached (D-083).
+  their entry alive. A session with a failed authentication is no longer cached, as in AnyCable
+  1.6.22 (D-083).
 - After a remote disconnect, a node authenticates the identifiers' earlier sessions through the
   application instead of restoring them from the session cache, for the sessions TTL. Sessions
   authenticated afterwards are restored as usual. Cache entries record when the session was
-  authenticated (D-084).
+  authenticated. AnyCable 1.6.22 removes the cache entry of a session that a remote disconnect
+  closes; Cabby also covers the identifiers' sessions that were not connected at that moment
+  (D-084).
 - A remote disconnect (Rails' `ActionCable.server.remote_connections.where(...).disconnect`)
-  closes every connection of the identifier. Before, as in AnyCable, only one of them was
-  disconnected, and the identifier's other connections stayed open and subscribed (D-085).
+  closes every connection of the identifier, as in AnyCable 1.6.22. Before, as in AnyCable
+  1.6.21, only one of them was disconnected, and the identifier's other connections stayed open
+  and subscribed (D-085).
 - The application secret set to `none` (`--secret=none`, `CABBY_SECRET=none`,
   `ANYCABLE_SECRET=none` or `secret = "none"`, which `cabby --print-config` writes when no secret
   is set) is treated as not set: no other secret is derived from it, and Cabby logs a warning at
-  startup. Before, as in AnyCable, `none` was used as the application secret. `none` still turns
+  startup. Before, as in AnyCable 1.6.21, `none` was used as the application secret; AnyCable
+  1.6.22 no longer derives the HTTP broadcast and RPC secrets from it either. `none` still turns
   off a single secret, such as `--http_rpc_secret=none` (D-086).
 - The node's pub/sub subscription for a stream now follows the sessions that hold it (D-091). A
   channel that starts a stream it already has holds it once, so the node unsubscribes when the
@@ -32,7 +37,7 @@ Differences from the AnyCable Go server are listed by ID in
   for a stream the channel does not hold changes nothing; before, it could unsubscribe the node
   while another session still held the stream, and that session stopped receiving broadcasts
   from other nodes. Streams in a reply for a channel the session does not have (such as a
-  rejected subscription) are not subscribed.
+  rejected subscription) are not subscribed, as in AnyCable 1.6.22.
 
 ## [0.5.2] - 2026-11-27
 

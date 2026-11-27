@@ -112,7 +112,9 @@ WRN the application secret is "none": treated as not set, and no other secret is
 
 Remove the setting to run without an application secret and without the warning. A
 `SecretBase = "none"` key under `[rpc]`, `[http_broadcast]` or `[api]` in a configuration file is
-treated as not set too, with a similar warning. AnyCable accepts `secret = none` (deviation D-086).
+treated as not set too, with a similar warning. AnyCable 1.6.21 uses `none` as the application
+secret; AnyCable 1.6.22 no longer derives the HTTP broadcast and RPC secrets from it, without a
+warning (deviation D-086).
 
 ## Reserved names
 
