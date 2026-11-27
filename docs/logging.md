@@ -67,7 +67,8 @@ client path adds one.
 
 Lines Cabby logs that Go does not, all recorded: the D-003 Redis resubscription warnings,
 D-044's `embedded NATS server exited unexpectedly`, D-052's publishing failures,
-D-056's dropped deep messages.
+D-056's dropped deep messages, D-117's `shutdown step panicked` (error, with `error=` the
+panic message; a Go process ends at the panic).
 
 ## Coverage
 
@@ -181,8 +182,8 @@ call sites are found by the message text (`grep -rn '"<message>"' crates`).
 | `cli/cli.go:553` | INF | `API server is running without authentication` | `crates/cabby-server/src/cli/runner.rs:831` | matched |  |
 | `cli/cli.go:681` | ERR | `mruby failed to initialize: %v` | `crates/cabby-server/src/cli/runner.rs:892` | matched |  |
 | `cli/cli.go:736` | DBG | `Go pools initialized (%s)` | `crates/cabby-server/src/cli/runner.rs:590` | matched |  |
-| `cli/cli.go:743` | WRN | `Immediate termination requested. Stopped` | `crates/cabby-server/src/cli/signals.rs:85` | matched |  |
-| `cli/cli.go:748` | INF | `Shutting down... (hit Ctrl-C to stop immediately or wait for up to %ds for graceful shu...` | `crates/cabby-server/src/cli/signals.rs:54` | matched |  |
+| `cli/cli.go:743` | WRN | `Immediate termination requested. Stopped` | `crates/cabby-server/src/cli/signals.rs:97` | matched |  |
+| `cli/cli.go:748` | INF | `Shutting down... (hit Ctrl-C to stop immediately or wait for up to %ds for graceful shu...` | `crates/cabby-server/src/cli/signals.rs:79` | matched |  |
 | `cli/embed.go:74` | INF | `Starting embedded %s %s%s (open file limit: %s)` | `crates/cabby-server/src/cli/runner.rs:565` | matched |  |
 | `cli/session_options.go:52` | WRN | `invalid ping interval value, must be integer` | `crates/cabby-server/src/cli/session_options.rs:100` | matched |  |
 | `config/presets.go:30` | INF | `load presets` | `crates/cabby-server/src/cli/runner.rs:188` | matched |  |

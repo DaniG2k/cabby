@@ -19,6 +19,13 @@ Differences from the AnyCable Go server are listed by ID in
   context was found, but it is being shutdown` messages on stderr, which were printed for each
   Disconnect call still in progress when a second signal or the shutdown timeout ended the
   shutdown; the exit status was 0 already.
+- Shutdown: a panic in a shutdown step (a component's shutdown, or a session's Disconnect call
+  while the node disconnects its sessions) no longer leaves the process running. Before, the
+  shutdown stopped at the panicking step without reporting it, and the process kept running,
+  ignoring further signals, until it was killed. The panic is now logged (`shutdown step
+  panicked`), the remaining steps run, and the process exits 1 with `shutdown step panicked:
+  <message>`. A session whose Disconnect call panics no longer holds the shutdown until its
+  timeout (D-117).
 - Disconnect queue: the backlog limit (`--max_disconnect_backlog_size`) holds when sessions
   disconnect at the same time. Before, each of them could pass the size check before any was
   added, so the queue could grow past the limit by one session per concurrent disconnect. The

@@ -481,6 +481,18 @@ impl Node {
     /// on a pool of `shutdown_disconnect_pool_size` workers, until all are done or
     /// `ctx` ends (upstream unexported `disconnectAll`).
     fn disconnect_all(&self, ctx: &Context) {
+        /// Counts a session done when dropped, also when its disconnect panics
+        /// (the pool catches the panic): the wait below must not last until
+        /// the deadline for it.
+        struct Done(Arc<(Mutex<usize>, Condvar)>);
+        impl Drop for Done {
+            fn drop(&mut self) {
+                let (count, done) = &*self.0;
+                *lock(count) -= 1;
+                done.notify_all();
+            }
+        }
+
         let sessions = self.hub.sessions();
         let pending = Arc::new((Mutex::new(sessions.len()), Condvar::new()));
         let pool = Arc::new(GoPool::new("disconnect", self.config.shutdown_disconnect_pool_size.max(1) as usize));
@@ -492,15 +504,13 @@ impl Node {
                 for s in sessions {
                     let (pending, ctx) = (pending.clone(), ctx.clone());
                     pool.schedule(Box::new(move || {
+                        let _done = Done(pending);
                         if !context_done(&ctx) && s.is_connected() {
                             s.disconnect_with_message(
                                 &DisconnectMessage::new(SERVER_RESTART_REASON, true),
                                 SERVER_RESTART_REASON,
                             );
                         }
-                        let (count, done) = &*pending;
-                        *lock(count) -= 1;
-                        done.notify_all();
                     }));
                 }
             });
@@ -1617,6 +1627,57 @@ mod tests {
             let (text, info) = kept(depth);
             assert_eq!(json!(text), info);
         }
+    }
+
+    /// Pins D-117: a session whose Disconnect call panics while the node shuts
+    /// down is counted as done, so the shutdown does not wait for its deadline
+    /// (10 s here). Before, the panic (caught by the disconnect pool) skipped
+    /// the count, and `disconnect_all` waited until the deadline.
+    #[test]
+    fn deviation_d117_a_panicking_disconnect_does_not_hold_the_shutdown() {
+        struct PanickingDisconnect;
+        impl Controller for PanickingDisconnect {
+            fn start(&self) -> Result<(), ControllerError> {
+                Ok(())
+            }
+            fn shutdown(&self) -> Result<(), ControllerError> {
+                Ok(())
+            }
+            fn authenticate(&self, _: &str, _: Option<&SessionEnv>) -> Outcome<ConnectResult> {
+                Outcome { result: None, error: Some(ControllerError::new("not used")) }
+            }
+            fn subscribe(&self, _: &str, _: Option<&SessionEnv>, _: &str, _: &str) -> Outcome<CommandResult> {
+                Outcome { result: None, error: Some(ControllerError::new("not used")) }
+            }
+            fn unsubscribe(&self, _: &str, _: Option<&SessionEnv>, _: &str, _: &str) -> Outcome<CommandResult> {
+                Outcome { result: None, error: Some(ControllerError::new("not used")) }
+            }
+            fn perform(&self, _: &str, _: Option<&SessionEnv>, _: &str, _: &str, _: &str) -> Outcome<CommandResult> {
+                Outcome { result: None, error: Some(ControllerError::new("not used")) }
+            }
+            fn disconnect(
+                &self,
+                _: &str,
+                _: Option<&SessionEnv>,
+                _: &str,
+                _: &[String],
+            ) -> Result<(), ControllerError> {
+                panic!("disconnect failed");
+            }
+        }
+
+        let node = Node::new(Config::new(), vec![NodeOption::Controller(Arc::new(PanickingDisconnect))]);
+        let s = Session::new(&node, Arc::new(Discard), "/cable", None, "sid", Vec::new());
+        // As authentication marks it with `--disconnect_mode=always`.
+        s.mark_disconnectable(true);
+        node.authenticated(&s, "ids");
+        assert_eq!(1, node.hub.size());
+
+        let ctx =
+            Context { deadline: Some(tokio::time::Instant::now() + Duration::from_secs(10)), ..Context::default() };
+        let started = std::time::Instant::now();
+        node.shutdown(&ctx).expect("shut down");
+        assert!(started.elapsed() < Duration::from_secs(5), "the shutdown took {:?}", started.elapsed());
     }
 
     /// Deviation D-016: `goroutines_num` and `mem_sys_bytes` report the process's
