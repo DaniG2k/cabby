@@ -26,7 +26,7 @@
 
 use std::collections::VecDeque;
 use std::fs::{File, TryLockError};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -62,7 +62,7 @@ impl Pool {
     fn take(&mut self) -> u16 {
         loop {
             match self.free.pop_front() {
-                Some(port) if TcpListener::bind(("127.0.0.1", port)).is_ok() => return port,
+                Some(port) if nothing_listens(port) => return port,
                 // Something that does not reserve ports listens there: never hand it out.
                 Some(_) => {}
                 None => self.claim_block(),
@@ -116,6 +116,21 @@ impl Pool {
 fn pool() -> MutexGuard<'static, Pool> {
     static POOL: OnceLock<Mutex<Pool>> = OnceLock::new();
     POOL.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Whether nothing listens on `port` on a loopback address: a bind to
+/// `127.0.0.1` fails for a listener on that address, and connects to
+/// `127.0.0.1` and `[::1]` reach the listeners the bind does not see (with
+/// `SO_REUSEADDR`, which `std` sets, macOS lets a bind to a specific address
+/// succeed next to a listener on `0.0.0.0` or `[::]`, and a listener on `[::1]`
+/// only is another address). A refused loopback connect returns at once.
+fn nothing_listens(port: u16) -> bool {
+    if TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_err() {
+        return false;
+    }
+    let reached =
+        |ip: IpAddr| TcpStream::connect_timeout(&SocketAddr::new(ip, port), Duration::from_millis(100)).is_ok();
+    !reached(Ipv4Addr::LOCALHOST.into()) && !reached(Ipv6Addr::LOCALHOST.into())
 }
 
 /// A reserved loopback port, held until dropped. Keep it as long as anything
@@ -254,6 +269,27 @@ mod tests {
         let others: Vec<u16> = (0..2 * BLOCK).map(|_| pool.take()).collect();
         assert!(!others.contains(&port), "{port} handed out while something listens on it");
         drop(listener);
+    }
+
+    /// Listeners the bind to `127.0.0.1` alone let through (macOS): on the
+    /// IPv4 wildcard address, on `[::]` and on `[::1]` (where the machine
+    /// has IPv6 loopback).
+    #[test]
+    fn a_port_held_on_a_wildcard_or_ipv6_address_is_skipped() {
+        let mut addrs: Vec<IpAddr> = vec![Ipv4Addr::UNSPECIFIED.into()];
+        if TcpListener::bind((Ipv6Addr::LOCALHOST, 0)).is_ok() {
+            addrs.extend([IpAddr::from(Ipv6Addr::UNSPECIFIED), Ipv6Addr::LOCALHOST.into()]);
+        }
+        for ip in addrs {
+            let mut pool = Pool::default();
+            let port = pool.take();
+            let listener = TcpListener::bind((ip, port)).unwrap_or_else(|e| panic!("binding [{ip}]:{port}: {e}"));
+            assert!(!nothing_listens(port), "a listener on [{ip}]:{port} is seen");
+            pool.give_back(port);
+            let others: Vec<u16> = (0..2 * BLOCK).map(|_| pool.take()).collect();
+            assert!(!others.contains(&port), "{port} handed out while [{ip}]:{port} listens");
+            drop(listener);
+        }
     }
 
     #[test]
