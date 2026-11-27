@@ -274,7 +274,7 @@ impl Claimer {
     async fn drain(&mut self, client: &mut tokio_postgres::Client, stop: &CancellationToken) -> Result<Round, PgError> {
         while !stop.is_cancelled() {
             let started = std::time::Instant::now();
-            let round = self.batch(client).await;
+            let round = self.batch(client, stop).await;
             self.metrics.took(started.elapsed());
             if let Some(round) = round? {
                 return Ok(round);
@@ -285,8 +285,14 @@ impl Claimer {
 
     /// One batch; `None` when more rows may be waiting (the batch was full,
     /// or the handling budget ran out). Only SQL statements have timeouts:
-    /// a handler call is never abandoned, so one runs at a time.
-    async fn batch(&mut self, client: &mut tokio_postgres::Client) -> Result<Option<Round>, PgError> {
+    /// a handler call is never abandoned, so one runs at a time. Once `stop`
+    /// is cancelled no further row is handed to the node: the rows handled
+    /// are deleted and the others released for the next claim.
+    async fn batch(
+        &mut self,
+        client: &mut tokio_postgres::Client,
+        stop: &CancellationToken,
+    ) -> Result<Option<Round>, PgError> {
         let tx = sql(client.transaction()).await?;
         sql(tx.batch_execute(&format!(
             "SET LOCAL idle_in_transaction_session_timeout = '{}s'",
@@ -325,7 +331,7 @@ impl Claimer {
                 }
             }
         }
-        let node = self.node.clone();
+        let (node, stop) = (self.node.clone(), stop.clone());
         let budget = std::time::Instant::now() + HANDLING_BUDGET;
         // The handler may wait for the broker (another Postgres query). It
         // stops at the first failure, or once the budget is used up; a row
@@ -335,7 +341,7 @@ impl Claimer {
             let total = valid.len();
             for (id, payload) in valid {
                 let progress = out.handled.len() + out.unstorable.len();
-                if progress > 0 && std::time::Instant::now() >= budget {
+                if stop.is_cancelled() || (progress > 0 && std::time::Instant::now() >= budget) {
                     break;
                 }
                 match node.handle_broadcast(payload.as_bytes()) {
@@ -476,10 +482,16 @@ impl Broadcaster for PostgresBroadcaster {
             log_debug!(self.log, "shutting down Postgres broadcaster");
             running.listener.shutdown();
             running.stop.cancel();
-            // Rows already claimed are handled before this returns; no new
-            // claims start.
-            let claimer = running.claimer;
-            let _ = connect::block_on(async move { tokio::time::timeout(SHUTDOWN_WAIT, claimer).await });
+            // The claimer hands no further row to the node and commits the
+            // rows it handled; a claimer still busy after SHUTDOWN_WAIT (a
+            // handler call or a statement that doesn't end) is aborted, which
+            // rolls its transaction back, so those rows are claimed again.
+            let mut claimer = running.claimer;
+            connect::block_on(async move {
+                if tokio::time::timeout(SHUTDOWN_WAIT, &mut claimer).await.is_err() {
+                    claimer.abort();
+                }
+            });
         }
         Ok(())
     }

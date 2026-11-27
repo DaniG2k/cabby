@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 218
+      "cases": 219
     },
     "translation": {
       "reviewed": 923
@@ -26414,6 +26414,15 @@
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "broadcast::postgres_test::deviation_d070_postgres_shutdown_stops_the_claimer_between_rows",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broadcast/redis_test.go#TestRedisBroadcaster/With_multiple_subscribers"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "broadcast::postgres_test::deviation_d070_postgres_slow_batches_are_committed_in_parts",

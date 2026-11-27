@@ -67,6 +67,10 @@ Differences from the AnyCable Go server are listed by ID in
 - Postgres broadcaster: in a `SQL_ASCII` database, a row whose payload is not UTF-8 is deleted and
   logged as a row that is not JSON. Before, the server failed the claim of every batch on it, so
   nothing more was broadcast from the outbox.
+- Postgres broadcaster: shutting down stops handing outbox rows to the broker after the row in
+  progress. Before, a node went on through the batch it had claimed (up to 100 rows, or 10 s),
+  shutdown gave up waiting for it after 5 s, and rows were still handed to the broker after
+  shutdown had returned. The rows not handed over stay in the outbox for the other nodes.
 
 ## [0.4.2] - 2026-11-27
 

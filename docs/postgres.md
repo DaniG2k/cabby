@@ -215,6 +215,9 @@ inserted while a node was reconnecting is not left behind.
   second later.
 - **Transactional.** The row and its notification only exist once the transaction commits. A
   transaction that rolls back broadcasts nothing.
+- **Shutdown.** A node that shuts down hands no further row to the broker once the call in
+  progress returns: it deletes the rows it handled and leaves the others in the outbox for the
+  other nodes, or for its next start.
 
 When Cabby's role owns the tables and the app connects as another role, the app's role needs to
 be allowed to insert into the outbox (the trigger and `pg_notify` need nothing more):

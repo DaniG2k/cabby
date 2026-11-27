@@ -365,3 +365,39 @@ fn deviation_d070_postgres_a_payload_that_is_not_utf8_is_dropped() {
     assert_eq!(1, calls.len(), "{calls:?}");
     assert_eq!(Some("0".to_owned()), db.scalar(&format!("SELECT count(*) FROM {}", scope.table("broadcasts"))));
 }
+
+/// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/With_multiple_subscribers
+/// note: Deviation D-070: shutdown stops the claimer between rows: during a batch of 100 rows the node takes 200 ms each to handle, shutdown returns once the call in progress ends (within 1 s), no row is handed to the node after it returned, and the rows handled are deleted while the others stay in the outbox for the next node.
+#[test]
+fn deviation_d070_postgres_shutdown_stops_the_claimer_between_rows() {
+    let scope = scope();
+    scope.migrate();
+    let handler = MockHandler::new();
+    handler.delay_broadcasts(Duration::from_millis(200));
+    scope.execute(&format!(
+        "INSERT INTO {} (payload) SELECT '{{\"stream\":\"s\",\"data\":\"' || i || '\"}}' FROM generate_series(1, 100) i",
+        scope.table("broadcasts")
+    ));
+    let b = Broadcaster::postgres(&handler, &scope.config(), Metrics::none()).expect("PostgresBroadcaster::new");
+    b.start().expect("start");
+    let b = ShutdownGuard(b);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let mut calls = Vec::new();
+    while calls.is_empty() {
+        assert!(std::time::Instant::now() < deadline, "no row was handed to the node");
+        calls.extend(handler.drain(Duration::from_millis(50)));
+    }
+    let started = std::time::Instant::now();
+    b.0.shutdown().expect("shutdown");
+    let took = started.elapsed();
+    calls.extend(handler.calls());
+    let after = handler.drain(Duration::from_secs(1));
+
+    assert!(took < Duration::from_secs(1), "shutdown took {took:?}");
+    assert_eq!(Vec::<String>::new(), payloads(&after, "HandleBroadcast"), "handed to the node after shutdown");
+    let handled = payloads(&calls, "HandleBroadcast");
+    let expected: Vec<String> = (1..=handled.len()).map(|i| payload("s", &i.to_string())).collect();
+    assert_eq!(expected, handled, "in order, from the first row");
+    assert_eq!(Some((100 - handled.len()).to_string()), outbox_rows(&scope), "the rows not handled stay");
+}
