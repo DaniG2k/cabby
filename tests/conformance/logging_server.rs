@@ -8,7 +8,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::time::{Duration, Instant};
 
 use cabby_testkit::jwt::sign_raw;
-use cabby_testkit::ports::free_port;
+use cabby_testkit::ports;
 use cabby_testkit::raw_http::{self, EventStream};
 use cabby_testkit::sut::{Sut, handshake_status};
 
@@ -84,7 +84,8 @@ fn raw(addr: SocketAddr, request: &str) {
 /// note: Review finding H7: an unreachable HTTP RPC server logs each retried call (`RPC failed`, `context=rpc` with the session id, the gRPC code and Go's dial error) and the failed session (`WebSocket session failed`, the runner's logger with the session id only).
 #[test]
 fn unreachable_http_rpc_logs_failed_calls() {
-    let port = free_port();
+    // Reserved, so nothing listens there during the test.
+    let port = ports::reserve();
     let host = format!("http://127.0.0.1:{port}/_anycable");
     let sut = start(&[&format!("--rpc_host={host}")]);
     let _ = handshake_status(sut.addr(), "/cable", &[]);
@@ -106,7 +107,8 @@ fn unreachable_http_rpc_logs_failed_calls() {
 /// note: Review finding H7: an unreachable gRPC server: `RPC failed` with grpc-go's dial error, then the client helper's `connection is lost, trying to reconnect immediately` (`context=rpc impl=grpc`).
 #[test]
 fn unreachable_grpc_rpc_logs_failed_calls() {
-    let port = free_port();
+    // Reserved, so nothing listens there during the test.
+    let port = ports::reserve();
     let sut = start(&[&format!("--rpc_host=127.0.0.1:{port}")]);
     let _ = handshake_status(sut.addr(), "/cable", &[]);
     assert_logged(

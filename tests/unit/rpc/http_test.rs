@@ -7,7 +7,7 @@
 use cabby_core::common::SessionEnv;
 use cabby_core::protos;
 use cabby_testkit::fake_rpc::{FakeRpc, Method, Reply};
-use cabby_testkit::ports::free_port;
+use cabby_testkit::ports;
 use cabby_testkit::reference::protocol::{new_command_message, new_connect_message, new_disconnect_message};
 use cabby_testkit::reference::rpc::*;
 
@@ -25,9 +25,10 @@ fn status_code(err: &RpcError) -> Code {
     }
 }
 
-/// A URL nothing listens on (upstream: `http://localhost:1234`).
+/// A URL nothing listens on (upstream: `http://localhost:1234`): its port is
+/// reserved until the test process exits, so no other test listens there.
 fn unknown_url() -> String {
-    format!("http://127.0.0.1:{}", free_port())
+    format!("http://127.0.0.1:{}", ports::reserve().keep())
 }
 
 mod test_http_service_rpc {

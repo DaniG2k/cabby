@@ -106,26 +106,24 @@ fn pusher_private() {
 
 /// upstream: features/pusher-presence.testfile#scenario
 /// note: wait_all barriers become sequential steps; channel users polled once per second, at most 6 times (inherent polling)
+/// note: --pusher_api_port gets a reserved port with the server start, which waits until it listens and is retried on new ports if one is taken (upstream: the fixed port 8087)
 /// The two `wait_all` barriers order the clients: the second connects after
 /// the first has joined. The channel users are then polled over the REST API
 /// once per second, at most 6 times (upstream: `sleep 1` per poll until both
 /// users are seen or more than 5 s have passed), while both stay connected.
 #[test]
 fn pusher_presence() {
-    let api_port = cabby_testkit::ports::free_port();
-    let api_flag = format!("--pusher_api_port={api_port}");
-    let mut sut = launch(
+    let (sut, api_port) = launch_with_port(
         &[
             "--pusher_app_id=my-test-id",
             "--pusher_app_key=ballard",
             "--public_streams",
             "--pusher_secret=oaugc1",
-            &api_flag,
             "--broker=memory",
         ],
         &[],
+        "--pusher_api_port={port}",
     );
-    sut.process.wait_tcp(local(api_port), READY_DEADLINE).unwrap_or_else(|e| panic!("{e:#}"));
     let url = ws_url(&sut, "/app/ballard");
     let join = |c: &mut Client, socket_id: &str, user: &str, name: &str, succeeded: &str| -> Result<(), StepError> {
         let channel_data = json!({"user_id": user, "user_info": {"name": name}}).to_string();
@@ -185,3 +183,4 @@ fn pusher_presence() {
     assert_eq!(expected, user_ids, "Channel users fetched over API don't match");
     drop((first, second));
 }
+

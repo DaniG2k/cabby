@@ -2,9 +2,10 @@
 //!
 //! The binary is `SUT_BIN`, or by backend: `target/debug/cabby` (Rust) and
 //! `target/reference-bin/anycable-go` (Go, built by `cargo xtask reference-build`).
-//! Both receive the same AnyCable CLI flags. Every listener gets an isolated port,
-//! and the server inherits no `CABBY_*`, `ANYCABLE_*`, `PORT` or `REDIS_URL`
-//! variable apart from [`KEPT_VARS`] and `CABBY_TEST_*` ([`scrub_env`], D-064).
+//! Both receive the same AnyCable CLI flags. Every listener gets a reserved port
+//! ([`crate::ports`]), held until the server has stopped, and the server
+//! inherits no `CABBY_*`, `ANYCABLE_*`, `PORT` or `REDIS_URL` variable apart
+//! from [`KEPT_VARS`] and `CABBY_TEST_*` ([`scrub_env`], D-064).
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -14,7 +15,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
-use crate::ports::free_port;
+use crate::ports::{self, Port};
 use crate::process::Supervised;
 use crate::{Backend, backend, workspace_root};
 
@@ -40,9 +41,11 @@ pub fn sut_binary() -> PathBuf {
 pub struct Sut {
     pub process: Supervised,
     pub port: u16,
-    /// The HTTP broadcast port: a separate isolated port, or `port` when
+    /// The HTTP broadcast port: a separate reserved port, or `port` when
     /// [`SutOptions::separate_broadcast_port`] is off.
     pub broadcast_port: u16,
+    /// Every port the server was started with, released once it has stopped.
+    ports: Vec<Port>,
 }
 
 /// How [`Sut::try_start_with`] passes the isolated ports.
@@ -74,8 +77,8 @@ impl Sut {
         Self::try_start(args, &[]).unwrap_or_else(|e| panic!("{e:#}"))
     }
 
-    /// Starts the server, retrying with fresh ports if a listener could not bind
-    /// because another process took its port in the meantime.
+    /// Starts the server, retrying with new ports if a listener could not bind
+    /// because something outside [`crate::ports`] listens on its port.
     pub fn try_start(args: &[&str], env: &[(&str, &str)]) -> Result<Self> {
         Self::try_start_with(args, env, SutOptions::default())
     }
@@ -85,33 +88,81 @@ impl Sut {
         Self::try_start_with_ports(args, env, options, |[]| Listeners::default()).map(|(sut, [])| sut)
     }
 
+    /// [`Sut::try_start`] with one more listener of the server's own: `flag`
+    /// with `{port}` replaced by its port, such as `--api_port={port}`.
+    /// Returns the server and that port.
+    pub fn try_start_with_port(args: &[&str], env: &[(&str, &str)], flag: &str) -> Result<(Self, u16)> {
+        Self::try_start_with_ports(args, env, SutOptions::default(), |[p]| Listeners {
+            args: vec![flag.replace("{port}", &p.to_string())],
+            env: Vec::new(),
+        })
+        .map(|(sut, [p])| (sut, p))
+    }
+
     /// [`Sut::try_start_with`] for a server with `N` more listeners of its own,
-    /// such as `--api_port` or `--pusher_api_port`: `listeners` turns `N` free
-    /// ports into arguments and variables. Every attempt gets new ports, so a
-    /// retry after a collision does not reuse a taken port, and waits until the
-    /// server listens on each of them, so a listener that fails after the main
-    /// one is retried too. The ports must be the server process's own listeners
-    /// (not a child's, such as Cabby's embedded `nats-server`). Returns the
-    /// server and the ports it listens on.
+    /// such as `--api_port` or `--pusher_api_port`: `listeners` turns `N`
+    /// reserved ports into arguments and variables. Every attempt gets new
+    /// ports, so a retry after a collision does not reuse a taken port, and
+    /// waits until the server listens on each of them, so a listener that fails
+    /// after the main one is retried too. The ports must be the server
+    /// process's own listeners (not a child's, such as Cabby's embedded
+    /// `nats-server`). Returns the server and the ports it listens on.
     pub fn try_start_with_ports<const N: usize>(
         args: &[&str],
         env: &[(&str, &str)],
         options: SutOptions,
         listeners: impl Fn([u16; N]) -> Listeners,
     ) -> Result<(Self, [u16; N])> {
-        retry_with_fresh_ports(|ports| {
-            let extra = listeners(ports);
-            let mut all_args = args.to_vec();
-            all_args.extend(extra.args.iter().map(String::as_str));
-            let mut all_env = env.to_vec();
-            all_env.extend(extra.env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
-            Self::start_once(&all_args, &all_env, options, &ports)
-        })
+        Self::start_reserving(args, env, options, listeners, true)
     }
 
-    fn start_once(args: &[&str], env: &[(&str, &str)], options: SutOptions, extra_ports: &[u16]) -> Result<Self> {
-        let port = free_port();
-        let broadcast_port = if options.separate_broadcast_port { free_port() } else { port };
+    /// [`Sut::try_start_with_ports`] for ports the server does not listen on
+    /// itself, such as those of Cabby's embedded `nats-server` (a child
+    /// process): they are reserved and renewed on every attempt the same way,
+    /// but the start does not wait for them; the caller waits for what listens
+    /// there. A start that fails because one of them is taken is retried with
+    /// new ones when the server exits before it listens on its main port, as
+    /// both servers do when embedded NATS can't bind.
+    pub fn try_start_with_reserved<const N: usize>(
+        args: &[&str],
+        env: &[(&str, &str)],
+        options: SutOptions,
+        listeners: impl Fn([u16; N]) -> Listeners,
+    ) -> Result<(Self, [u16; N])> {
+        Self::start_reserving(args, env, options, listeners, false)
+    }
+
+    fn start_reserving<const N: usize>(
+        args: &[&str],
+        env: &[(&str, &str)],
+        options: SutOptions,
+        listeners: impl Fn([u16; N]) -> Listeners,
+        wait_for_extra: bool,
+    ) -> Result<(Self, [u16; N])> {
+        let ((mut sut, extra), leases) = retry_with_fresh_ports(N + 2, |ports| {
+            let (main, extra) = ports.split_at(2);
+            let extra: [u16; N] = extra.try_into().expect("N extra ports");
+            let more = listeners(extra);
+            let mut all_args = args.to_vec();
+            all_args.extend(more.args.iter().map(String::as_str));
+            let mut all_env = env.to_vec();
+            all_env.extend(more.env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+            let broadcast_port = if options.separate_broadcast_port { main[1] } else { main[0] };
+            let wait: &[u16] = if wait_for_extra { &extra } else { &[] };
+            Self::start_once(&all_args, &all_env, options, main[0], broadcast_port, wait).map(|sut| (sut, extra))
+        })?;
+        sut.ports = leases;
+        Ok((sut, extra))
+    }
+
+    fn start_once(
+        args: &[&str],
+        env: &[(&str, &str)],
+        options: SutOptions,
+        port: u16,
+        broadcast_port: u16,
+        extra_ports: &[u16],
+    ) -> Result<Self> {
         let mut cmd = Command::new(sut_binary());
         scrub_env(&mut cmd);
         cmd.env("ANYCABLE_DISABLE_TELEMETRY", "true");
@@ -134,7 +185,7 @@ impl Sut {
         for &p in extra_ports {
             process.wait_listening(SocketAddr::from(([127, 0, 0, 1], p)), START_DEADLINE)?;
         }
-        Ok(Self { process, port, broadcast_port })
+        Ok(Self { process, port, broadcast_port, ports: Vec::new() })
     }
 
     pub fn addr(&self) -> SocketAddr {
@@ -160,15 +211,23 @@ pub struct Listeners {
 
 const START_ATTEMPTS: usize = 3;
 
-/// Runs `attempt` with `N` free ports, again with new ones (up to
-/// [`START_ATTEMPTS`] times) while it fails because a port was taken.
-fn retry_with_fresh_ports<const N: usize, T>(mut attempt: impl FnMut([u16; N]) -> Result<T>) -> Result<(T, [u16; N])> {
+/// Runs `attempt` with `count` reserved ports, again with new ones (up to
+/// [`START_ATTEMPTS`] times, each retry logged) while it fails because a port
+/// was taken. Returns the result and the ports, which the caller holds for as
+/// long as anything uses them; the ports of a failed attempt are retired,
+/// since one of them is taken.
+fn retry_with_fresh_ports<T>(count: usize, mut attempt: impl FnMut(&[u16]) -> Result<T>) -> Result<(T, Vec<Port>)> {
     let mut last = None;
-    for _ in 0..START_ATTEMPTS {
-        let ports = std::array::from_fn(|_| free_port());
-        match attempt(ports) {
-            Ok(t) => return Ok((t, ports)),
-            Err(e) if port_taken(&e) => last = Some(e),
+    for n in 1..=START_ATTEMPTS {
+        let leases: Vec<Port> = (0..count).map(|_| ports::reserve()).collect();
+        let numbers: Vec<u16> = leases.iter().map(Port::get).collect();
+        match attempt(&numbers) {
+            Ok(t) => return Ok((t, leases)),
+            Err(e) if port_taken(&e) => {
+                eprintln!("sut: attempt {n} of {START_ATTEMPTS} with ports {numbers:?}: a port is taken; {e:#}");
+                leases.into_iter().for_each(Port::retire);
+                last = Some(e);
+            }
             Err(e) => return Err(e),
         }
     }
@@ -255,25 +314,25 @@ mod tests {
     /// A collision is retried with new ports; another error is not retried.
     #[test]
     fn a_port_collision_is_retried_with_fresh_ports() {
-        let mut seen = Vec::new();
+        let mut seen: Vec<Vec<u16>> = Vec::new();
         let taken = "listen tcp 127.0.0.1:50695: Address already in use (os error 48)";
-        let (n, ports) = retry_with_fresh_ports(|ports: [u16; 2]| {
-            seen.push(ports);
+        let (n, ports) = retry_with_fresh_ports(2, |ports| {
+            seen.push(ports.to_vec());
             if seen.len() == 1 { Err(exited_with(taken)) } else { Ok(seen.len()) }
         })
         .expect("the second attempt starts");
-        assert_eq!((2, seen[1]), (n, ports));
+        assert_eq!((2, seen[1].clone()), (n, ports.iter().map(Port::get).collect()));
         assert!(seen[1].iter().all(|p| !seen[0].contains(p)), "new ports: {seen:?}");
 
         let mut calls = 0;
-        let e = retry_with_fresh_ports(|[]| -> Result<()> {
+        let e = retry_with_fresh_ports(0, |_| -> Result<()> {
             calls += 1;
             Err(exited_with("no such file"))
         })
         .expect_err("not a collision");
         assert_eq!(1, calls, "{e:#}");
 
-        let e = retry_with_fresh_ports(|[]| -> Result<()> { Err(exited_with(taken)) }).expect_err("always taken");
+        let e = retry_with_fresh_ports(0, |_| -> Result<()> { Err(exited_with(taken)) }).expect_err("always taken");
         assert!(format!("{e:#}").starts_with("3 attempts hit port collisions"), "{e:#}");
     }
 }

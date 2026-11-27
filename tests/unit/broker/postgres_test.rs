@@ -396,7 +396,8 @@ fn deviation_d071_postgres_transient_messages_and_presence() {
 #[test]
 fn deviation_d071_postgres_database_errors_are_broker_errors() {
     rust_only();
-    let port = cabby_testkit::ports::free_port();
+    // Reserved, so nothing listens there during the test.
+    let port = cabby_testkit::ports::reserve();
     let mut pg = cabby_server::postgres::PostgresConfig::new();
     pg.url = format!("postgres://cabby:s3cret@127.0.0.1:{port}/cabby?sslmode=disable");
     let rec = Arc::new(Recorder::default());

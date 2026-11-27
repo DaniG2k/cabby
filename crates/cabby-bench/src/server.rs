@@ -34,9 +34,9 @@
 //! Every wait (readiness, shutdown) has a deadline; shutdown sends SIGTERM, then
 //! SIGKILL.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -45,6 +45,7 @@ use std::time::{Duration, Instant};
 
 use crate::BenchError;
 use crate::net::loopback;
+use crate::ports::{self, Port};
 use crate::pusher::PusherApp;
 use crate::resources::ProcessResources;
 
@@ -187,54 +188,8 @@ impl ServerConfig {
     }
 }
 
-/// A loopback port that is free now and was never handed out before by this
-/// process (parallel builds cannot collide in-process; other processes can, and
-/// [`Server::build`] retries then).
-fn free_port() -> u16 {
-    static TAKEN: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
-    let taken = TAKEN.get_or_init(Default::default);
-    loop {
-        let port = TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_or(0, |a| a.port());
-        if port != 0 && taken.lock().unwrap_or_else(|e| e.into_inner()).insert(port) {
-            return port;
-        }
-    }
-}
-
-/// Whether process `pid` holds a TCP socket in LISTEN state on `port` (procfs), so
-/// a foreign process that grabbed the port in the meantime is not mistaken for
-/// the server.
-fn listener_owned_by(pid: u32, port: u16) -> bool {
-    const LISTEN: &str = "0A";
-    let mut inodes = Vec::new();
-    for table in ["/proc/net/tcp", "/proc/net/tcp6"] {
-        let Ok(text) = std::fs::read_to_string(table) else { continue };
-        for line in text.lines().skip(1) {
-            let f: Vec<&str> = line.split_whitespace().collect();
-            let (Some(local), Some(state), Some(inode)) = (f.get(1), f.get(3), f.get(9)) else { continue };
-            let local_port = local.rsplit(':').next().and_then(|p| u16::from_str_radix(p, 16).ok());
-            if *state == LISTEN && local_port == Some(port) {
-                inodes.push(format!("socket:[{inode}]"));
-            }
-        }
-    }
-    if inodes.is_empty() {
-        return false;
-    }
-    let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else { return false };
-    fds.flatten().filter_map(|e| std::fs::read_link(e.path()).ok()).any(|t| {
-        let t = t.to_string_lossy();
-        inodes.iter().any(|i| *i == t)
-    })
-}
-
-fn listening(pid: u32, port: u16) -> bool {
-    if std::path::Path::new("/proc/net/tcp").exists() {
-        listener_owned_by(pid, port)
-    } else {
-        TcpStream::connect_timeout(&loopback(port), PROBE_INTERVAL).is_ok()
-    }
-}
+/// How many times [`Server::build`] starts a server whose port is taken.
+const ATTEMPTS: usize = 3;
 
 /// Whether a start failed because the server's port was taken: Go prints
 /// `listen tcp <addr>: bind: address already in use`, Cabby `listen tcp
@@ -301,6 +256,8 @@ pub struct Server {
     /// Whether the metrics endpoint exists ([`Server::has_metrics`]), probed once.
     metrics_served: OnceLock<bool>,
     pusher: Option<PusherApp>,
+    /// The server's reserved port ([`crate::ports`]), released after it stopped.
+    lease: Option<Port>,
 }
 
 fn capture(mut stream: impl Read + Send + 'static, sink: Arc<Mutex<Captured>>, forward: bool) -> JoinHandle<()> {
@@ -323,15 +280,27 @@ fn capture(mut stream: impl Read + Send + 'static, sink: Arc<Mutex<Captured>>, f
 }
 
 impl Server {
-    /// Launches the server and waits until both the WebSocket and broadcast endpoints
-    /// accept connections.
+    /// Launches the server on a reserved port ([`crate::ports`]) and waits until
+    /// both the WebSocket and broadcast endpoints accept connections. A server
+    /// that finds its port taken all the same (by a process that does not
+    /// reserve ports) is started again on another port, at most [`ATTEMPTS`]
+    /// times, each retry logged to stderr.
     pub fn build(cfg: ServerConfig) -> Result<Server, BenchError> {
-        const ATTEMPTS: usize = 3;
         let mut last = None;
-        for _ in 0..ATTEMPTS {
-            match Self::start_once(&cfg) {
-                Ok(s) => return Ok(s),
-                Err(e) if port_taken(&e.0) => last = Some(e),
+        for n in 1..=ATTEMPTS {
+            let lease = ports::reserve();
+            match Self::start_once(&cfg, lease.get()) {
+                Ok(mut s) => {
+                    s.lease = Some(lease);
+                    return Ok(s);
+                }
+                Err(e) if port_taken(&e.0) => {
+                    eprintln!(
+                        "cabby-bench: attempt {n} of {ATTEMPTS}: port {lease} is taken; starting again on another port"
+                    );
+                    lease.retire();
+                    last = Some(e);
+                }
                 Err(e) => return Err(e),
             }
         }
@@ -349,8 +318,7 @@ impl Server {
         cmd
     }
 
-    fn start_once(cfg: &ServerConfig) -> Result<Server, BenchError> {
-        let port = free_port();
+    fn start_once(cfg: &ServerConfig, port: u16) -> Result<Server, BenchError> {
         let names: Vec<String> = std::env::vars_os().map(|(k, _)| k.to_string_lossy().into_owned()).collect();
         let mut cmd = Self::command(cfg, port, names.iter().map(String::as_str));
         let forward = cfg.log == ServerLog::Stderr;
@@ -386,10 +354,11 @@ impl Server {
             stopped: Mutex::new(false),
             metrics_served: OnceLock::new(),
             pusher: cfg.pusher.clone(),
+            lease: None,
         };
         let deadline = Instant::now() + cfg.start_timeout;
         loop {
-            if listening(server.pid, port) {
+            if ports::listening(server.pid, port) {
                 return Ok(server);
             }
             if let Some(status) = server.try_wait() {

@@ -96,17 +96,15 @@ impl Supervised {
         }
     }
 
-    /// Like [`Supervised::wait_tcp`], but on Linux also requires that the listening
-    /// socket belongs to this process: another process can grab a port between
-    /// allocation and bind, and a plain connect would then reach it while this one
-    /// fails with "address already in use" (which the caller can retry).
+    /// Like [`Supervised::wait_tcp`], but also requires that the listening
+    /// socket belongs to this process ([`cabby_bench::ports::listening`]):
+    /// another process listening on the port would satisfy a plain connect
+    /// while this one fails with "address already in use" (which the caller
+    /// can retry).
     pub fn wait_listening(&mut self, addr: SocketAddr, timeout: Duration) -> Result<()> {
-        if !std::path::Path::new("/proc/net/tcp").exists() {
-            return self.wait_tcp(addr, timeout);
-        }
         let deadline = Instant::now() + timeout;
         loop {
-            if listener_owned_by(self.child.id(), addr.port()) {
+            if cabby_bench::ports::listening(self.child.id(), addr.port()) {
                 return Ok(());
             }
             if let Some(status) = self.poll_exit()? {
@@ -116,6 +114,27 @@ impl Supervised {
             }
             if Instant::now() >= deadline {
                 bail!("{} did not listen on {addr} within {timeout:?}. Output:\n{}", self.name, self.output());
+            }
+            std::thread::sleep(PROBE_INTERVAL);
+        }
+    }
+
+    /// Waits until `parse` finds what it looks for in the process's output (such
+    /// as the port a server reports in its start log) and returns it. Fails
+    /// early if the process exits.
+    pub fn wait_output<T>(&mut self, timeout: Duration, parse: impl Fn(&str) -> Option<T>) -> Result<T> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(found) = parse(&self.output()) {
+                return Ok(found);
+            }
+            if let Some(status) = self.poll_exit()? {
+                self.join_readers();
+                self.propagate_pending();
+                bail!("{} exited ({status}) before reporting it was ready. Output:\n{}", self.name, self.output());
+            }
+            if Instant::now() >= deadline {
+                bail!("{} did not report it was ready within {timeout:?}. Output:\n{}", self.name, self.output());
             }
             std::thread::sleep(PROBE_INTERVAL);
         }
@@ -160,31 +179,6 @@ impl Supervised {
             let _ = r.join();
         }
     }
-}
-
-/// Whether process `pid` holds a TCP socket in LISTEN state on `port` (Linux procfs).
-fn listener_owned_by(pid: u32, port: u16) -> bool {
-    const LISTEN: &str = "0A";
-    let mut inodes = Vec::new();
-    for table in ["/proc/net/tcp", "/proc/net/tcp6"] {
-        let Ok(text) = std::fs::read_to_string(table) else { continue };
-        for line in text.lines().skip(1) {
-            let f: Vec<&str> = line.split_whitespace().collect();
-            let (Some(local), Some(state), Some(inode)) = (f.get(1), f.get(3), f.get(9)) else { continue };
-            let local_port = local.rsplit(':').next().and_then(|p| u16::from_str_radix(p, 16).ok());
-            if *state == LISTEN && local_port == Some(port) {
-                inodes.push(format!("socket:[{inode}]"));
-            }
-        }
-    }
-    if inodes.is_empty() {
-        return false;
-    }
-    let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else { return false };
-    fds.filter_map(|e| e.ok()).filter_map(|e| std::fs::read_link(e.path()).ok()).any(|target| {
-        let t = target.to_string_lossy();
-        inodes.iter().any(|i| *i == t)
-    })
 }
 
 impl Drop for Supervised {

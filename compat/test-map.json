@@ -9123,7 +9123,8 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] sleeps replaced by cluster-port readiness, a NATS relay probe and an epoch-propagation probe (nodes 2 and 3 deliver a broadcast with node 1's epoch), then upstream's 2 attempts with a 2 s delay; JetStream readiness via KV__anycable_epoch_ store files as upstream"
+        "[src] sleeps replaced by cluster-port readiness, a NATS relay probe and an epoch-propagation probe (nodes 2 and 3 deliver a broadcast with node 1's epoch), then upstream's 2 attempts with a 2 s delay; JetStream readiness via KV__anycable_epoch_ store files as upstream",
+        "[src] the embedded NATS ports are reserved with each node's start, which is retried on new ports if one is taken (upstream: fixed ports 4242-4244, 4342-4344 and 4442)"
       ],
       "rust_cases": [
         "features::enats::enats_broker"
@@ -9151,7 +9152,8 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] sleeps replaced by launching after cluster ports listen and a NATS relay probe across the super-cluster, then upstream's 2 attempts with a 2 s delay; the publisher performs after the subscribers subscribed (upstream race absorbed by its retry)"
+        "[src] sleeps replaced by launching after cluster ports listen and a NATS relay probe across the super-cluster, then upstream's 2 attempts with a 2 s delay; the publisher performs after the subscribers subscribed (upstream race absorbed by its retry)",
+        "[src] the embedded NATS ports are reserved with each node's start, which is retried on new ports if one is taken (upstream: fixed ports 4242-4244, 4342-4344, 4442 and 4444)"
       ],
       "rust_cases": [
         "features::enats::enats_clusters"
@@ -9374,7 +9376,8 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] wait_all barriers become sequential steps; channel users polled once per second, at most 6 times (inherent polling)"
+        "[src] wait_all barriers become sequential steps; channel users polled once per second, at most 6 times (inherent polling)",
+        "[src] --pusher_api_port gets a reserved port with the server start, which waits until it listens and is retried on new ports if one is taken (upstream: the fixed port 8087)"
       ],
       "rust_cases": [
         "features::pusher::pusher_presence"
@@ -9486,7 +9489,8 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] inherent window: Net::HTTP read_timeout (2 s) per event"
+        "[src] inherent window: Net::HTTP read_timeout (2 s) per event",
+        "[src] --api_port gets a reserved port with the server start, which waits until it listens and is retried on new ports if one is taken (upstream: the fixed port 8082)"
       ],
       "rust_cases": [
         "features::sse::sse"

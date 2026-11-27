@@ -10,7 +10,9 @@
 //! what upstream CI sets job-wide for every conformance job: `REDIS_URL`
 //! (which turns on the server's Redis pub/sub) and `ANYCABLE_DEBUG=1`.
 //! Adaptations:
-//! * Ports are isolated. Embedded NATS gets a per-test `--enats_store_dir`.
+//! * Ports are reserved (`cabby_testkit::ports`) with the server's start,
+//!   embedded NATS's included, and a start that finds one taken is retried on
+//!   new ports. Embedded NATS gets a per-test `--enats_store_dir`.
 //! * Redis and NATS are the shared services (`cabby_testkit::services`,
 //!   `eval "$(compat/scripts/services.sh start)"`). Each test gets its own Redis
 //!   ACL user (its `REDIS_URL`) and names: the broadcast channel/stream/subject
@@ -36,10 +38,9 @@ use std::time::Duration;
 
 use cabby_testkit::anyt_app::{AnytApp, AppOptions, BARRIER_CHANNEL};
 use cabby_testkit::cable_client::{CableClient, ClientError, Options, QUIET_WINDOW};
-use cabby_testkit::ports::free_port;
 use cabby_testkit::publish::{self, Target};
 use cabby_testkit::services::{self, RedisScope, unique};
-use cabby_testkit::sut::{Sut, SutOptions};
+use cabby_testkit::sut::{Listeners, Sut, SutOptions};
 use cabby_testkit::workspace_root;
 use serde_json::{Value, json};
 
@@ -127,21 +128,18 @@ impl World {
         let mut options = SutOptions::default();
         let mut nats_subject = String::new();
         let mut store = None;
-        let mut enats_port = None;
+        let embeds_nats = matches!(variant, NatsEmbedded | BrokerNats);
         let rpc_host = if http_rpc { format!("{}/_anycable", app.http_url()) } else { app.grpc_target() };
         if variant != Embedded {
             args.push("--headers=cookie,x-api-token".into());
             args.push(format!("--rpc_host={rpc_host}"));
         }
+        // The embedded NATS address comes with the start's reserved ports.
         let mut embed = |env: &mut Vec<(&str, String)>, args: &mut Vec<String>| {
-            let port = free_port();
             env.push(("ANYCABLE_EMBED_NATS", "true".into()));
-            env.push(("ANYCABLE_ENATS_ADDR", format!("nats://127.0.0.1:{port}")));
             let dir = store_dir();
             args.push(format!("--enats_store_dir={}", dir.display()));
             store = Some(dir);
-            enats_port = Some(port);
-            port
         };
         match variant {
             Default => args.push(format!("--redis_channel={redis_name}")),
@@ -179,8 +177,7 @@ impl World {
             }
             NatsEmbedded => {
                 env.push(("ANYCABLE_BROADCAST_ADAPTER", "nats".into()));
-                let port = embed(&mut env, &mut args);
-                env.push(("ANYCABLE_NATS_SERVERS", format!("nats://127.0.0.1:{port}")));
+                embed(&mut env, &mut args);
             }
             BrokerHttp => {
                 env.push(("ANYCABLE_PRESENCE_TTL", "2".into()));
@@ -203,7 +200,20 @@ impl World {
         }
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
         let env_refs: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let mut sut = Sut::try_start_with(&arg_refs, &env_refs, options).unwrap_or_else(|e| panic!("{e:#}"));
+        let enats = |[port]: [u16; 1]| {
+            let url = format!("nats://127.0.0.1:{port}");
+            let mut env = Vec::new();
+            if embeds_nats {
+                env.push(("ANYCABLE_ENATS_ADDR".to_owned(), url.clone()));
+            }
+            if variant == NatsEmbedded {
+                env.push(("ANYCABLE_NATS_SERVERS".to_owned(), url));
+            }
+            Listeners { args: Vec::new(), env }
+        };
+        let (mut sut, [port]) =
+            Sut::try_start_with_reserved(&arg_refs, &env_refs, options, enats).unwrap_or_else(|e| panic!("{e:#}"));
+        let enats_port = embeds_nats.then_some(port);
         let local = |p: u16| std::net::SocketAddr::from(([127, 0, 0, 1], p));
         let target = match variant {
             Default | Ssl => Target::RedisPublish { addr: redis_addr(), channel: redis_name.clone() },

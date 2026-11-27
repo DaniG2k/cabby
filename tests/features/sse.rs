@@ -62,15 +62,14 @@ fn encode_www_form_component(s: &str) -> String {
 
 /// upstream: features/sse.testfile#scenario
 /// note: inherent window: Net::HTTP read_timeout (2 s) per event
+/// note: --api_port gets a reserved port with the server start, which waits until it listens and is retried on new ports if one is taken (upstream: the fixed port 8082)
 #[test]
 fn sse() {
-    let api_port = cabby_testkit::ports::free_port();
-    let api_flag = format!("--api_port={api_port}");
-    let mut sut = launch(
-        &["--sse", "--public_streams", "--secret=qwerty", &api_flag, "--broadcast_adapter=http", "--presets=broker"],
+    let (sut, api_port) = launch_with_port(
+        &["--sse", "--public_streams", "--secret=qwerty", "--broadcast_adapter=http", "--presets=broker"],
         &[],
+        "--api_port={port}",
     );
-    sut.process.wait_tcp(local(api_port), READY_DEADLINE).unwrap_or_else(|e| panic!("{e:#}"));
     assert_eq!(BROADCAST_KEY, hmac_sha256_hex("qwerty", "api-cable"));
 
     let token = jwt::sign_hs256(&json!({"ext": "{}", "exp": jwt::unix_from_now(60)}), "qwerty");

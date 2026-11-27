@@ -25,7 +25,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::Value;
 
-use crate::ports::free_port;
+use crate::ports::{self, Port};
 use crate::process::Supervised;
 
 const IO_DEADLINE: Duration = Duration::from_secs(5);
@@ -548,11 +548,15 @@ pub struct NatsServer {
     pub port: u16,
     pub monitor_port: u16,
     process: Option<Supervised>,
+    /// Reserved for the server's lifetime ([`crate::ports`]), restarts included:
+    /// it starts again on the same ports.
+    _ports: [Port; 2],
 }
 
 impl NatsServer {
     pub fn start() -> Self {
-        let mut s = Self { port: free_port(), monitor_port: free_port(), process: None };
+        let leases = ports::reserve_n::<2>();
+        let mut s = Self { port: leases[0].get(), monitor_port: leases[1].get(), process: None, _ports: leases };
         s.restart_process().unwrap_or_else(|e| panic!("{e:#}"));
         s
     }

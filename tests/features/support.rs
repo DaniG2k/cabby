@@ -5,7 +5,9 @@
 //! `launch :rpc, "bundle exec anyt --only-rpc"` is [`rpc_app`] (the AnyT
 //! application reimplemented in `cabby_testkit::anyt_app`); upstream defaults
 //! (`localhost:50051`, `localhost:8080`, broadcast port 8090) become isolated
-//! ports passed explicitly.
+//! ports passed explicitly: the RPC application binds its own, and the
+//! server's are reserved with its start (`cabby_testkit::ports`), which is
+//! retried on new ports if one is taken.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -47,6 +49,13 @@ pub fn rpc_app_with_prefix(prefix: &str) -> AnytApp {
 /// `launch :anycable, "./dist/anycable-go <args>"` + `wait_tcp`.
 pub fn launch(args: &[&str], env: &[(&str, &str)]) -> Sut {
     Sut::try_start(args, env).unwrap_or_else(|e| panic!("{e:#}"))
+}
+
+/// [`launch`] with one more listener of the server's own, `flag` with `{port}`
+/// for its reserved port (`--api_port={port}`); waits until it listens too.
+/// Returns the server and that port.
+pub fn launch_with_port(args: &[&str], env: &[(&str, &str)], flag: &str) -> (Sut, u16) {
+    Sut::try_start_with_port(args, env, flag).unwrap_or_else(|e| panic!("{e:#}"))
 }
 
 pub fn ws_url(sut: &Sut, path: &str) -> String {

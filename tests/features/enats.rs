@@ -1,8 +1,9 @@
 //! Embedded NATS feature scenarios: a three-node super-cluster (two clusters
 //! joined by a gateway) relaying broadcasts, and a three-node cluster with the
 //! NATS broker (JetStream) sharing one epoch. All embedded NATS listeners get
-//! free ports instead of the fixed 4242/4342/4442 ones; JetStream storage goes
-//! to a per-test directory.
+//! reserved ports (`cabby_testkit::ports`) instead of the fixed 4242/4342/4442
+//! ones, chosen with each node's start (a node whose port is taken starts
+//! again on new ones); JetStream storage goes to a per-test directory.
 //!
 //! Readiness: upstream sleeps (1 s between launches, 2 s for the servers to
 //! find each other / for the epoch to propagate), then runs the wsdirector
@@ -16,9 +17,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use cabby_testkit::anyt_app::BENCHMARK_CHANNEL;
-use cabby_testkit::ports::free_port;
 use cabby_testkit::publish::{self, NatsSubscriber, Target};
-use cabby_testkit::sut::Sut;
+use cabby_testkit::sut::{Listeners, Sut, SutOptions};
 use cabby_testkit::wsdirector::{Client, Connection, Protocol, StepError};
 use serde_json::{Value, json};
 
@@ -50,10 +50,14 @@ fn nats(port: u16) -> String {
     format!("nats://127.0.0.1:{port}")
 }
 
-fn node(rpc: &str, flags: &[String]) -> Sut {
-    let mut args: Vec<&str> = vec![rpc];
-    args.extend(flags.iter().map(String::as_str));
-    launch(&args, &[])
+/// Launches a node with `rpc` and the flags `flags` makes of `N` reserved ports
+/// for its embedded NATS; returns the node and the ports.
+fn node<const N: usize>(rpc: &str, flags: impl Fn([u16; N]) -> Vec<String>) -> (Sut, [u16; N]) {
+    Sut::try_start_with_reserved(&[rpc], &[], SutOptions::default(), |ports| Listeners {
+        args: flags(ports),
+        env: Vec::new(),
+    })
+    .unwrap_or_else(|e| panic!("{e:#}"))
 }
 
 fn ac_client(sut: &Sut) -> Result<Client, StepError> {
@@ -66,6 +70,7 @@ fn hello() -> Value {
 
 /// upstream: features/enats_clusters.testfile#scenario
 /// note: sleeps replaced by launching after cluster ports listen and a NATS relay probe across the super-cluster, then upstream's 2 attempts with a 2 s delay; the publisher performs after the subscribers subscribed (upstream race absorbed by its retry)
+/// note: the embedded NATS ports are reserved with each node's start, which is retried on new ports if one is taken (upstream: fixed ports 4242-4244, 4342-4344, 4442 and 4444)
 /// Adaptation: the publisher performs its broadcast after the subscribers have
 /// subscribed (upstream runs the three clients concurrently without a
 /// barrier, a race its retry absorbs).
@@ -74,45 +79,41 @@ fn enats_clusters() {
     let app = rpc_app();
     let rpc = format!("--rpc_host={}", app.grpc_target());
     let store = TempDir::new("enats-clusters");
-    let [a1, a2, a3, c1, c2, c3, g1, g3] = std::array::from_fn(|_| free_port());
     let dir = |n: &str| format!("--enats_store_dir={}", store.0.join(n).display());
 
-    let mut node1 = node(
-        &rpc,
-        &[
+    let (mut node1, [a1, c1, g1]) = node(&rpc, |[a, c, g]| {
+        vec![
             "--broadcast_adapter=nats".into(),
             "--embed_nats".into(),
-            format!("--enats_addr={}", nats(a1)),
-            format!("--enats_cluster={}", nats(c1)),
-            format!("--enats_gateway={}", nats(g1)),
+            format!("--enats_addr={}", nats(a)),
+            format!("--enats_cluster={}", nats(c)),
+            format!("--enats_gateway={}", nats(g)),
             dir("one"),
-        ],
-    );
+        ]
+    });
     node1.process.wait_tcp(local(c1), READY_DEADLINE).unwrap_or_else(|e| panic!("{e:#}"));
-    let node2 = node(
-        &rpc,
-        &[
+    let (node2, [a2, _]) = node(&rpc, |[a, c]| {
+        vec![
             "--broadcast_adapter=nats".into(),
             "--embed_nats".into(),
-            format!("--enats_addr={}", nats(a2)),
-            format!("--enats_cluster={}", nats(c2)),
+            format!("--enats_addr={}", nats(a)),
+            format!("--enats_cluster={}", nats(c)),
             format!("--enats_cluster_routes={}", nats(c1)),
             dir("two"),
-        ],
-    );
-    let node3 = node(
-        &rpc,
-        &[
+        ]
+    });
+    let (node3, [a3, _, _]) = node(&rpc, |[a, c, g]| {
+        vec![
             "--broadcast_adapter=nats".into(),
             "--embed_nats".into(),
-            format!("--enats_addr={}", nats(a3)),
-            format!("--enats_cluster={}", nats(c3)),
+            format!("--enats_addr={}", nats(a)),
+            format!("--enats_cluster={}", nats(c)),
             "--enats_cluster_name=another-cluster".into(),
-            format!("--enats_gateway={}", nats(g3)),
+            format!("--enats_gateway={}", nats(g)),
             format!("--enats_gateways=anycable-cluster:{}", nats(g1)),
             dir("three"),
-        ],
-    );
+        ]
+    });
     // ANYCABLE_BROADCAST_ADAPTER=nats ANYCABLE_NATS_SERVERS=nats://localhost:4242
     app.set_broadcaster(Target::Nats { addr: local(a1), subject: "__anycable__".into() });
     // "We need to wait a bit for the NATS servers to find each other" (sleep 2)
@@ -157,43 +158,47 @@ fn contains_epoch_kv(dir: &Path) -> bool {
 
 /// upstream: features/enats_broker.testfile#scenario
 /// note: sleeps replaced by cluster-port readiness, a NATS relay probe and an epoch-propagation probe (nodes 2 and 3 deliver a broadcast with node 1's epoch), then upstream's 2 attempts with a 2 s delay; JetStream readiness via KV__anycable_epoch_ store files as upstream
+/// note: the embedded NATS ports are reserved with each node's start, which is retried on new ports if one is taken (upstream: fixed ports 4242-4244, 4342-4344 and 4442)
 #[test]
 fn enats_broker() {
     let app = rpc_app();
     let rpc = format!("--rpc_host={}", app.grpc_target());
     let store = TempDir::new("enats-broker");
-    let [a1, a2, a3, c1, c2, c3, g1] = std::array::from_fn(|_| free_port());
     let dir = |n: &str| format!("--enats_store_dir={}", store.0.join(n).display());
     let common = ["--broker=nats".to_owned(), "--pubsub=nats".to_owned()];
 
-    let mut flags = common.to_vec();
-    flags.extend([
-        "--broadcast_adapter=http".into(),
-        "--embed_nats".into(),
-        format!("--enats_addr={}", nats(a1)),
-        format!("--enats_cluster={}", nats(c1)),
-        format!("--enats_gateway={}", nats(g1)),
-        format!("--enats_cluster_routes={}", nats(c1)),
-        dir("one"),
-    ]);
-    let mut node1 = node(&rpc, &flags);
-    node1.process.wait_tcp(local(c1), READY_DEADLINE).unwrap_or_else(|e| panic!("{e:#}")); // upstream: sleep 1
-    let follower = |addr: u16, cluster: u16, name: &str| {
+    let (mut node1, [a1, c1, _]) = node(&rpc, |[a, c, g]| {
         let mut flags = common.to_vec();
         flags.extend([
-            "--broadcast_adapter=nats".into(),
+            "--broadcast_adapter=http".into(),
             "--embed_nats".into(),
-            format!("--enats_addr={}", nats(addr)),
-            format!("--enats_cluster={}", nats(cluster)),
-            format!("--enats_cluster_routes={}", nats(c1)),
-            dir(name),
+            format!("--enats_addr={}", nats(a)),
+            format!("--enats_cluster={}", nats(c)),
+            format!("--enats_gateway={}", nats(g)),
+            format!("--enats_cluster_routes={}", nats(c)),
+            dir("one"),
         ]);
-        let mut n = node(&rpc, &flags);
+        flags
+    });
+    node1.process.wait_tcp(local(c1), READY_DEADLINE).unwrap_or_else(|e| panic!("{e:#}")); // upstream: sleep 1
+    let follower = |name: &str| {
+        let (mut n, [addr, cluster]) = node(&rpc, |[a, c]| {
+            let mut flags = common.to_vec();
+            flags.extend([
+                "--broadcast_adapter=nats".into(),
+                "--embed_nats".into(),
+                format!("--enats_addr={}", nats(a)),
+                format!("--enats_cluster={}", nats(c)),
+                format!("--enats_cluster_routes={}", nats(c1)),
+                dir(name),
+            ]);
+            flags
+        });
         n.process.wait_tcp(local(cluster), READY_DEADLINE).unwrap_or_else(|e| panic!("{e:#}")); // upstream: sleep 1
-        n
+        (n, addr)
     };
-    let node2 = follower(a2, c2, "two");
-    let node3 = follower(a3, c3, "three");
+    let (node2, a2) = follower("two");
+    let (node3, a3) = follower("three");
     // ANYCABLE_BROADCAST_ADAPTER=http (to the first node's broadcast endpoint)
     app.set_broadcaster(Target::Http { addr: local(node1.broadcast_port), path: "/_broadcast".into(), key: None });
     node1.process.wait_tcp(local(node1.broadcast_port), READY_DEADLINE).unwrap_or_else(|e| panic!("{e:#}"));
@@ -285,7 +290,8 @@ fn enats_broker() {
 /// note: the port is free within 5 s of the SIGKILL (upstream: at once, the server is in-process)
 #[test]
 fn the_embedded_server_ends_with_a_killed_process() {
-    let port = free_port();
+    let lease = cabby_testkit::ports::reserve();
+    let port = lease.get();
     let mut sut = launch(&["--embed_nats", &format!("--enats_addr={}", nats(port))], &[]);
     wait_output(&sut, "the embedded NATS server", READY_DEADLINE, |out| out.contains("Embedded NATS server started"));
     assert!(std::net::TcpStream::connect(local(port)).is_ok(), "the embedded server listens");
@@ -320,7 +326,8 @@ fn the_embedded_server_ends_with_a_killed_process() {
 fn ctrl_c_shuts_the_server_and_its_embedded_nats_down_cleanly() {
     use std::os::unix::process::CommandExt;
 
-    let [port, broadcast_port, nats_port] = std::array::from_fn(|_| free_port());
+    let leases = cabby_testkit::ports::reserve_n::<3>();
+    let [port, broadcast_port, nats_port] = [leases[0].get(), leases[1].get(), leases[2].get()];
     let store = TempDir::new("enats-ctrl-c");
     let mut cmd = std::process::Command::new(cabby_testkit::sut::sut_binary());
     cabby_testkit::sut::scrub_env(&mut cmd);
