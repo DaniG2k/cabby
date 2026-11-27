@@ -5,12 +5,14 @@
 //! An mruby VM is bound to one thread, while interval writers are shared by the
 //! metrics task, so the printer owns a thread that holds the VM (the default
 //! engine of that thread, as upstream uses its process-wide default engine)
-//! and receives snapshots over a channel.
+//! and is woken over a channel. The snapshot waiting to be formatted is kept in
+//! one slot: a snapshot written while the formatter is still busy replaces the
+//! one waiting (D-124), so a slow `call` holds at most one.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 
 use cabby_core::logger::{Attr, Level, LogValue};
 
@@ -18,9 +20,21 @@ use super::{IntervalWriter, Metrics, MetricsError, log};
 use crate::mrb;
 
 enum Msg {
-    Run { interval: u64, reply: mpsc::Sender<Result<(), String>> },
-    Print(HashMap<String, u64>),
+    Run {
+        interval: u64,
+        reply: mpsc::Sender<Result<(), String>>,
+    },
+    /// A snapshot is waiting in the printer's slot.
+    Print,
 }
+
+type Snapshot = HashMap<String, u64>;
+
+/// The newest snapshot not formatted yet.
+type Slot = Arc<Mutex<Option<Snapshot>>>;
+
+/// Where a formatted line goes: the log (tests replace it).
+type Emit = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// Why `--metrics_log_formatter` fails in a build without the `mruby` feature (D-062).
 pub const NO_MRUBY: &str = "--metrics_log_formatter needs mruby, and this cabby was built without it (build with --features mruby; see docs/mruby.md)";
@@ -28,7 +42,10 @@ pub const NO_MRUBY: &str = "--metrics_log_formatter needs mruby, and this cabby 
 /// Upstream `RubyPrinter`.
 pub struct RubyPrinter {
     path: String,
-    tx: Mutex<Option<mpsc::Sender<Msg>>>,
+    /// Holds at most one message: a `Print` waiting means the slot is read.
+    tx: Mutex<Option<mpsc::SyncSender<Msg>>>,
+    pending: Slot,
+    emit: Emit,
 }
 
 impl std::fmt::Debug for RubyPrinter {
@@ -44,18 +61,30 @@ impl RubyPrinter {
         if !mrb::supported() {
             return Err(MetricsError(NO_MRUBY.into()));
         }
-        Ok(RubyPrinter { path: path.to_owned(), tx: Mutex::new(None) })
+        let emit: Emit = Arc::new(|line: &str| log(Level::Info, line, &[]));
+        Ok(RubyPrinter { path: path.to_owned(), tx: Mutex::new(None), pending: Slot::default(), emit })
     }
 
     fn send(&self, msg: Msg) -> bool {
         let tx = self.tx.lock().unwrap_or_else(|e| e.into_inner());
         tx.as_ref().is_some_and(|tx| tx.send(msg).is_ok())
     }
+
+    /// Puts `snapshot` in the slot, replacing one not formatted yet, and wakes
+    /// the VM thread unless a wakeup is already waiting.
+    fn offer(&self, snapshot: Snapshot) {
+        *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = Some(snapshot);
+        let tx = self.tx.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(tx) = tx.as_ref() {
+            // Full: a `Print` is waiting and will take this snapshot.
+            let _ = tx.try_send(Msg::Print);
+        }
+    }
 }
 
-/// The VM side: loads the script, then formats snapshots until the printer
-/// is dropped.
-fn serve(path: String, rx: mpsc::Receiver<Msg>) {
+/// The VM side: loads the script, then formats the snapshot in `pending` on
+/// each wakeup until the printer is dropped.
+fn serve(path: String, rx: mpsc::Receiver<Msg>, pending: Slot, emit: Emit) {
     let mut module: Option<mrb::MrbValue> = None;
     let engine = mrb::default_engine();
     for msg in rx {
@@ -72,9 +101,12 @@ fn serve(path: String, rx: mpsc::Receiver<Msg>) {
                 module = loaded.as_ref().ok().cloned();
                 let _ = reply.send(loaded.map(|_| ()));
             }
-            Msg::Print(snapshot) => {
-                if let Some(module) = &module {
-                    print(&engine, module, snapshot);
+            Msg::Print => {
+                let snapshot = pending.lock().unwrap_or_else(|e| e.into_inner()).take();
+                if let (Some(module), Some(snapshot)) = (&module, snapshot)
+                    && let Some(line) = print(&engine, module, snapshot)
+                {
+                    emit(&line);
                 }
             }
         }
@@ -94,9 +126,10 @@ fn load(engine: &mrb::Engine, path: &str) -> Result<mrb::MrbValue, String> {
 }
 
 /// Upstream `Print`: the snapshot as a Ruby hash of `String => Int`, formatted
-/// by `MetricsFormatter.call`. The arena is restored afterwards so a
-/// long-running printer does not accumulate objects.
-fn print(engine: &mrb::Engine, module: &mrb::MrbValue, snapshot: HashMap<String, u64>) {
+/// by `MetricsFormatter.call`: the line to log, or `None` when the call failed
+/// (logged). The arena is restored afterwards so a long-running printer does
+/// not accumulate objects.
+fn print(engine: &mrb::Engine, module: &mrb::MrbValue, snapshot: Snapshot) -> Option<String> {
     let vm = engine.vm();
     let ai = vm.arena_save();
     let result = (|| {
@@ -108,20 +141,24 @@ fn print(engine: &mrb::Engine, module: &mrb::MrbValue, snapshot: HashMap<String,
         }
         module.call("call", &[mrb::Value::Mrb(rhash)])
     })();
-    match result {
-        Ok(line) => log(Level::Info, &line.to_string(), &[]),
-        Err(e) => log(Level::Error, "mruby call failed", &[Attr::new("error", LogValue::String(e.message))]),
-    }
+    let line = match result {
+        Ok(line) => Some(line.to_string()),
+        Err(e) => {
+            log(Level::Error, "mruby call failed", &[Attr::new("error", LogValue::String(e.message))]);
+            None
+        }
+    };
     vm.arena_restore(ai);
+    line
 }
 
 impl IntervalWriter for RubyPrinter {
     fn run(&self, interval: u64) -> Result<(), MetricsError> {
-        let (tx, rx) = mpsc::channel();
-        let path = self.path.clone();
+        let (tx, rx) = mpsc::sync_channel(1);
+        let (path, pending, emit) = (self.path.clone(), Arc::clone(&self.pending), Arc::clone(&self.emit));
         std::thread::Builder::new()
             .name("mruby-printer".into())
-            .spawn(move || serve(path, rx))
+            .spawn(move || serve(path, rx, pending, emit))
             .map_err(|e| MetricsError(format!("starting the mruby printer: {e}")))?;
         *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
 
@@ -138,8 +175,10 @@ impl IntervalWriter for RubyPrinter {
     /// Upstream `Stop` does nothing; the VM thread ends with the printer.
     fn stop(&self) {}
 
+    /// Hands the interval snapshot to the VM thread; a snapshot it has not
+    /// formatted yet is replaced (D-124).
     fn write(&self, metrics: &Metrics) -> Result<(), MetricsError> {
-        self.send(Msg::Print(metrics.interval_snapshot()));
+        self.offer(metrics.interval_snapshot());
         Ok(())
     }
 }
@@ -265,6 +304,73 @@ mod tests {
             assert!(e.0.contains(error), "{name}: {}", e.0);
             let _ = std::fs::remove_file(&path);
         }
+    }
+
+    /// Metrics with one gauge set to `value`.
+    fn gauge_metrics(value: u64) -> Metrics {
+        use crate::metrics::Instrumenter as _;
+        let m = Metrics::new(Vec::new(), 0);
+        m.register_gauge("n", "");
+        m.gauge("n").expect("gauge").set(value as i64);
+        m
+    }
+
+    /// Pins D-124: while the VM thread is busy (here it never reads), each
+    /// write replaces the snapshot waiting in the slot, and at most one wakeup
+    /// waits: the newest snapshot is the one formatted next. Before, every
+    /// snapshot was queued on an unbounded channel.
+    #[test]
+    fn deviation_d124_writes_to_a_busy_printer_keep_the_newest_snapshot() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let printer = RubyPrinter {
+            path: "formatter.rb".into(),
+            tx: Mutex::new(Some(tx)),
+            pending: Slot::default(),
+            emit: Arc::new(|_: &str| {}),
+        };
+        for value in 0..1000 {
+            printer.write(&gauge_metrics(value)).expect("write");
+        }
+        assert!(matches!(rx.try_recv(), Ok(Msg::Print)), "one wakeup waits");
+        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)), "and only one");
+        let pending = printer.pending.lock().unwrap().take();
+        assert_eq!(Some(999), pending.and_then(|s| s.get("n").copied()), "the newest snapshot waits");
+    }
+
+    /// D-124 with the VM: a formatter whose `call` takes 0.3 s formats the
+    /// snapshot it was given, then the newest of those written meanwhile, and
+    /// none of the others.
+    #[cfg(feature = "mruby")]
+    #[test]
+    fn deviation_d124_a_slow_formatter_formats_the_newest_snapshot() {
+        use std::time::{Duration, Instant};
+
+        let path = script(
+            "slow-formatter",
+            "module MetricsFormatter\n  def self.call(data)\n    t = Time.now\n    while Time.now - t < 0.3\n    end\n    data['n'].to_s\n  end\nend\n",
+        );
+        let (lines, formatted) = mpsc::channel::<String>();
+        let lines = Mutex::new(lines);
+        let mut printer = RubyPrinter::new(&path.to_string_lossy()).expect("printer");
+        printer.emit = Arc::new(move |line: &str| {
+            let _ = lines.lock().unwrap_or_else(|e| e.into_inner()).send(line.to_owned());
+        });
+        printer.run(1).expect("the formatter loads");
+        let _ = std::fs::remove_file(&path);
+
+        printer.write(&gauge_metrics(0)).expect("write");
+        // The VM thread has taken the first snapshot: it is formatting it.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while printer.pending.lock().unwrap().is_some() {
+            assert!(Instant::now() < deadline, "the first snapshot is taken");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        for value in 1..=20 {
+            printer.write(&gauge_metrics(value)).expect("write");
+        }
+        let next = || formatted.recv_timeout(Duration::from_secs(2)).ok();
+        assert_eq!((Some("0".to_owned()), Some("20".to_owned())), (next(), next()));
+        assert_eq!(None, formatted.recv_timeout(Duration::from_millis(500)).ok(), "no other snapshot is formatted");
     }
 
     /// Pins D-062: without the `mruby` feature, the formatter's error names the

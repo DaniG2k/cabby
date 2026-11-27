@@ -33,6 +33,10 @@ Differences from the AnyCable Go server are listed by ID in
   wait for them, so they could be lost when the process ended. The wait is at most 1 s, so a
   StatsD server that stops reading cannot hold the shutdown; a writer that is not connected
   drops them at once, as before (D-123).
+- mruby metrics formatter (`--metrics_log_formatter`, `mruby` builds): a formatter slower than
+  the metrics interval formats the newest snapshot; snapshots written while it is busy replace
+  the one waiting. Before, every snapshot was queued without a limit, so the formatter fell
+  further behind and the queue grew each interval (D-124).
 
 ## [0.5.1] - 2026-11-27
 
