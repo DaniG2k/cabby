@@ -84,6 +84,16 @@ Differences from the AnyCable Go server are listed by ID in
   connection. The sweep now runs on a connection of its own (`cabby pubsub-maintenance
   <channel>`, so a node opens up to 11 connections), deletes 10000 rows per statement for at
   most 10 s per sweep, and skips rows another session holds.
+- Postgres adapters: timeout errors say what timed out, after how long and on which server.
+  `query timed out after 10s` now ends with `: no answer from host:port/db`; a claim statement
+  that timed out names the statement and the outbox (`COMMIT (claiming from
+  public.cabby_broadcasts) timed out after 10s: no answer from ...`) instead of `a claim
+  statement timed out`; a pruning step, a publication, a connect, the `LISTEN` and the heartbeat
+  (with `--postgres_keepalive_interval`, which sets its wait) say how long they waited. When the
+  server ends a statement for one of its limits, the error names the setting and whether Cabby
+  set it (pruning, the overflow sweep, the claim transaction, startup) or the server's
+  configuration did, for example `ERROR: canceling statement due to lock timeout (lock_timeout,
+  set for Cabby's role or database, or in the options of --postgres_url)`.
 
 ## [0.4.2] - 2026-11-27
 

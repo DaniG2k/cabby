@@ -288,7 +288,13 @@ node resumes its session and catches up on what it missed.
   delivered without an offset) and session recovery falls back to a new session, as with the NATS
   broker. An HTTP broadcast then answers `501`, the status the HTTP broadcaster gives for any
   broker failure.
-- **Timeouts.** A query has 10 seconds. A broadcast that timed out has failed for Cabby, but
+- **Timeouts.** A query has 10 seconds; one that gets no answer fails with `query timed out
+  after 10s: no answer from db.internal:5432/app`. Cabby sets no `statement_timeout`,
+  `lock_timeout` or `idle_session_timeout` on these connections, so when the server ends a
+  statement for one of them, the limit comes from the server's configuration, and the error
+  says which: `ERROR: canceling statement due to statement timeout (statement_timeout, set for
+  Cabby's role or database, or in the options of --postgres_url)`. Raise or reset it for
+  Cabby's role (`ALTER ROLE cabby RESET statement_timeout`). A broadcast that timed out has failed for Cabby, but
   Postgres may still run its statement afterwards (when the lock it waited for is released, for
   example): the message then has an offset and is in history, but isn't delivered live; clients
   get it when they catch up. If that broadcast is retried (an outbox row, a `redisx` entry, an

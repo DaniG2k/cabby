@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 221
+      "cases": 222
     },
     "translation": {
       "reviewed": 923
@@ -26504,6 +26504,15 @@
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "broker::postgres_test::deviation_d071_postgres_errors_name_the_server_limit_that_ended_a_statement",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/nats_test.go#TestNATSBroker_Sessions"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "broker::postgres_test::deviation_d071_postgres_history_from_reports_gaps_and_expiry",

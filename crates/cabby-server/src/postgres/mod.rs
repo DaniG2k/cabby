@@ -195,6 +195,56 @@ pub(crate) fn unstorable(code: &tokio_postgres::error::SqlState) -> bool {
         .contains(code)
 }
 
+/// The server setting whose limit ended a statement or session, when one did:
+/// `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`,
+/// `idle_session_timeout` or `transaction_timeout`.
+fn limit_setting(e: &tokio_postgres::Error) -> Option<&'static str> {
+    use tokio_postgres::error::SqlState;
+    let db = e.as_db_error()?;
+    let code = db.code();
+    if *code == SqlState::QUERY_CANCELED && db.message().contains("statement timeout") {
+        Some("statement_timeout")
+    } else if *code == SqlState::LOCK_NOT_AVAILABLE && db.message().contains("lock timeout") {
+        Some("lock_timeout")
+    } else if *code == SqlState::IDLE_IN_TRANSACTION_SESSION_TIMEOUT {
+        Some("idle_in_transaction_session_timeout")
+    } else if *code == SqlState::IDLE_SESSION_TIMEOUT {
+        Some("idle_session_timeout")
+    } else if code.code() == "25P04" {
+        Some("transaction_timeout")
+    } else {
+        None
+    }
+}
+
+/// [`error_text`], naming the server setting when one of its limits ended
+/// the statement (see [`limit_setting`]). `own` lists the limits Cabby sets
+/// on that connection, with what they are for; any other comes from the
+/// server's configuration.
+pub(crate) fn limit_text(e: &tokio_postgres::Error, own: &[(&str, &str)]) -> String {
+    let text = error_text(e);
+    match limit_setting(e) {
+        Some(setting) => match own.iter().find(|(s, _)| *s == setting) {
+            Some((_, why)) => format!("{text} ({setting}: {why})"),
+            None => {
+                format!("{text} ({setting}, set for Cabby's role or database, or in the options of --postgres_url)")
+            }
+        },
+        None => text,
+    }
+}
+
+/// How a client-side timeout reads: what ran, for how long, and which server
+/// gave no answer.
+pub(crate) fn no_answer(what: &str, after: Duration, server: &str) -> PgError {
+    PgError(format!("{what} timed out after {}: no answer from {server}", seconds(after)))
+}
+
+/// `10s`, or `1.5s` for a duration that isn't whole seconds.
+pub(crate) fn seconds(d: Duration) -> String {
+    if d.subsec_millis() == 0 { format!("{}s", d.as_secs()) } else { format!("{}s", d.as_secs_f64()) }
+}
+
 /// Whether `value` is a valid identifier: `^[A-Za-z_][A-Za-z0-9_]*$`, at most
 /// `max` bytes.
 pub fn is_identifier(value: &str, max: usize) -> bool {

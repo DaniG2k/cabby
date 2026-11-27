@@ -43,7 +43,7 @@ use tokio::sync::{Notify, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use super::connect::{self, ConnectSpec, ListenSink, Listener};
-use super::{BROADCASTS, Metrics, Names, PgError, PostgresConfig, UNSTORABLE, schema};
+use super::{BROADCASTS, Metrics, Names, PgError, PostgresConfig, UNSTORABLE, limit_text, no_answer, schema};
 
 /// How often the outbox is polled without a notification.
 pub const POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -60,13 +60,9 @@ const IDLE_IN_TRANSACTION: Duration = Duration::from_secs(60);
 /// timeouts).
 const HANDLING_BUDGET: Duration = Duration::from_secs(10);
 
-/// A claim statement with [`connect::QUERY_TIMEOUT`].
-async fn sql<T>(fut: impl std::future::Future<Output = Result<T, tokio_postgres::Error>>) -> Result<T, PgError> {
-    match tokio::time::timeout(connect::QUERY_TIMEOUT, fut).await {
-        Ok(r) => r.map_err(PgError::from),
-        Err(_) => Err(PgError("a claim statement timed out".into())),
-    }
-}
+/// The server limit Cabby sets on claim transactions, for errors.
+const CLAIM_LIMITS: &[(&str, &str)] =
+    &[("idle_in_transaction_session_timeout", "Cabby ends a claim transaction left idle for 60s")];
 /// How long `start` waits for the `LISTEN` connection.
 const START_WAIT: Duration = Duration::from_secs(10);
 
@@ -162,6 +158,8 @@ struct Claimer {
     app: String,
     /// The outbox table (quoted).
     table: String,
+    /// The outbox table as messages name it.
+    outbox: String,
     /// The claim statement for the current connection's server encoding
     /// ([`select_sql`]).
     select_sql: String,
@@ -256,11 +254,28 @@ impl Claimer {
         }
     }
 
+    /// A claim statement with [`connect::QUERY_TIMEOUT`]; errors name the
+    /// statement, the outbox and the server.
+    async fn sql<T>(
+        &self,
+        statement: &str,
+        fut: impl std::future::Future<Output = Result<T, tokio_postgres::Error>>,
+    ) -> Result<T, PgError> {
+        match tokio::time::timeout(connect::QUERY_TIMEOUT, fut).await {
+            Ok(r) => r.map_err(|e| PgError(limit_text(&e, CLAIM_LIMITS))),
+            Err(_) => Err(no_answer(
+                &format!("{statement} (claiming from {})", self.outbox),
+                connect::QUERY_TIMEOUT,
+                &self.spec.description,
+            )),
+        }
+    }
+
     /// Opens the claim connection and picks the claim statement for its
     /// server encoding.
     async fn connect(&mut self) -> Result<tokio_postgres::Client, PgError> {
         let client = self.spec.connect(&self.app).await?;
-        let row = sql(client.query_one("SHOW server_encoding", &[])).await?;
+        let row = self.sql("SHOW server_encoding", client.query_one("SHOW server_encoding", &[])).await?;
         let encoding: String = row.try_get(0).map_err(PgError::from)?;
         self.select_sql = select_sql(&self.table, &encoding);
         Ok(client)
@@ -293,24 +308,25 @@ impl Claimer {
         client: &mut tokio_postgres::Client,
         stop: &CancellationToken,
     ) -> Result<Option<Round>, PgError> {
-        let tx = sql(client.transaction()).await?;
-        sql(tx.batch_execute(&format!(
-            "SET LOCAL idle_in_transaction_session_timeout = '{}s'",
-            IDLE_IN_TRANSACTION.as_secs()
-        )))
-        .await?;
-        let locked: bool = sql(tx.query_one("SELECT pg_try_advisory_xact_lock($1)", &[&self.lock_key])).await?.get(0);
+        let tx = self.sql("BEGIN", client.transaction()).await?;
+        let settings = format!("SET LOCAL idle_in_transaction_session_timeout = '{}s'", IDLE_IN_TRANSACTION.as_secs());
+        self.sql("SET LOCAL", tx.batch_execute(&settings)).await?;
+        let locked: bool = self
+            .sql("the claim lock", tx.query_one("SELECT pg_try_advisory_xact_lock($1)", &[&self.lock_key]))
+            .await?
+            .get(0);
         if !locked {
-            sql(tx.rollback()).await?;
+            self.sql("ROLLBACK", tx.rollback()).await?;
             return Ok(Some(Round::Busy));
         }
-        let rows = sql(tx.query(self.select_sql.as_str(), &[&CLAIM_BATCH])).await?;
+        let rows =
+            self.sql("SELECT ... FOR UPDATE SKIP LOCKED", tx.query(self.select_sql.as_str(), &[&CLAIM_BATCH])).await?;
         let claimed = rows
             .iter()
             .map(|r| Ok((r.try_get::<_, i64>(0)?, r.try_get::<_, Vec<u8>>(1)?)))
             .collect::<Result<Vec<_>, tokio_postgres::Error>>()?;
         if claimed.is_empty() {
-            sql(tx.commit()).await?;
+            self.sql("COMMIT", tx.commit()).await?;
             return Ok(Some(Round::Drained));
         }
         let full = claimed.len() as i64 >= CLAIM_BATCH;
@@ -385,9 +401,9 @@ impl Claimer {
             }
         };
         if !done.is_empty() {
-            sql(tx.execute(self.delete_sql.as_str(), &[&done])).await?;
+            self.sql("DELETE", tx.execute(self.delete_sql.as_str(), &[&done])).await?;
         }
-        sql(tx.commit()).await?;
+        self.sql("COMMIT", tx.commit()).await?;
         Ok(match round {
             Some(r) => Some(r),
             None if full || left_over => None,
@@ -452,6 +468,7 @@ impl Broadcaster for PostgresBroadcaster {
             select_sql: select_sql(&table, "UTF8"),
             delete_sql: format!("DELETE FROM {table} WHERE id = ANY($1)"),
             table,
+            outbox: self.names.table_display(BROADCASTS),
             metrics: self.metrics.clone(),
             log: self.log.clone(),
             failures: 0,

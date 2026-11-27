@@ -51,8 +51,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::connect::{self, ConnectSpec, Params, Pool};
 use super::{
-    HISTORY, META, Metrics, Names, PgError, PostgresConfig, SESSIONS, STREAMS, UNSTORABLE, error_text, schema,
-    unstorable,
+    HISTORY, META, Metrics, Names, PgError, PostgresConfig, SESSIONS, STREAMS, UNSTORABLE, limit_text, no_answer,
+    schema, seconds, unstorable,
 };
 
 /// Command connections shared by the broker's callers.
@@ -433,16 +433,41 @@ impl Inner {
             let deleted = match batch {
                 Ok(Ok(Some(n))) => n,
                 Ok(Ok(None)) => return Ok(false),
-                Ok(Err(e)) => return Err(PgError(format!("{}: {}", what(), error_text(&e)))),
+                Ok(Err(e)) => {
+                    let limits = self.prune_limits();
+                    let limits = limits.each_ref().map(|(setting, why)| (*setting, why.as_str()));
+                    return Err(PgError(format!("{}: {}", what(), limit_text(&e, &limits))));
+                }
                 Err(_) => {
                     *slot = None;
-                    return Err(PgError(format!("{}: pruning timed out", what())));
+                    let after = connect::QUERY_TIMEOUT + PRUNE_STATEMENT_TIMEOUT;
+                    return Err(no_answer(&what(), after, &self.spec.description));
                 }
             };
             if deleted < PRUNE_BATCH as u64 || started.elapsed() >= budget || self.stop.is_cancelled() {
                 return Ok(true);
             }
         }
+    }
+
+    /// The server limits Cabby sets on pruning statements, for errors.
+    fn prune_limits(&self) -> [(&'static str, String); 2] {
+        [
+            (
+                "statement_timeout",
+                format!(
+                    "Cabby's limit for one pruning statement, {}; the next pass goes on",
+                    seconds(PRUNE_STATEMENT_TIMEOUT)
+                ),
+            ),
+            (
+                "lock_timeout",
+                format!(
+                    "Cabby waits at most {} for a lock another session holds; the next pass tries again",
+                    seconds(self.prune_lock_timeout)
+                ),
+            ),
+        ]
     }
 
     /// One batch of `step`: rows deleted, or `None` without the lock.

@@ -29,7 +29,9 @@ use cabby_core::logger::Logger;
 use tokio_postgres::error::SqlState;
 
 use super::connect::ConnectSpec;
-use super::{BROADCASTS, HISTORY, META, Names, OVERFLOW, PgError, SESSIONS, STREAMS, error_text, quote};
+use super::{
+    BROADCASTS, HISTORY, META, Names, OVERFLOW, PgError, SESSIONS, STREAMS, error_text, limit_text, quote, seconds,
+};
 
 /// The schema version this Cabby creates and reads.
 pub(crate) const SCHEMA_VERSION: i64 = 1;
@@ -154,7 +156,10 @@ fn step<'a>(what: &'a str, lock: Duration) -> impl FnOnce(tokio_postgres::Error)
             "timed out after {}s waiting for a lock to {what}: another session holds a conflicting lock (see pg_locks and pg_stat_activity)",
             lock.as_secs()
         )),
-        Some(c) if *c == SqlState::QUERY_CANCELED => PgError(format!("failed to {what}, cause: {}", error_text(&e))),
+        Some(c) if *c == SqlState::QUERY_CANCELED => {
+            let why = format!("Cabby's limit for one statement at startup, {}", seconds(LIMITS.statement));
+            PgError(format!("failed to {what}, cause: {}", limit_text(&e, &[("statement_timeout", &why)])))
+        }
         _ => db(e),
     }
 }
@@ -436,7 +441,8 @@ mod tests {
             _ => Vec::new(),
         });
         let expected = "failed to run the migration (one node at a time), cause: \
-                        ERROR: canceling statement due to statement timeout";
+                        ERROR: canceling statement due to statement timeout \
+                        (statement_timeout: Cabby's limit for one statement at startup, 30s)";
         assert_eq!(Err(expected.to_owned()), prepare_on(addr, true, LIMITS));
     }
 

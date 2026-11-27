@@ -37,7 +37,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::connect::{self, ConnectSpec, ListenSink, Listener, Params, Pool};
-use super::{Metrics, Names, OVERFLOW, PgError, PostgresConfig, SHARDS, schema, shard};
+use super::{Metrics, Names, OVERFLOW, PgError, PostgresConfig, SHARDS, limit_text, no_answer, schema, shard};
 
 /// The largest envelope sent inline (bytes); larger ones spill over.
 pub const INLINE_LIMIT: usize = 7500;
@@ -58,6 +58,11 @@ const SWEEP_BUDGET: Duration = Duration::from_secs(10);
 /// lock on the table (rows locked by others are skipped).
 const SWEEP_STATEMENT_TIMEOUT: Duration = Duration::from_secs(5);
 const SWEEP_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
+/// The server limits Cabby sets on the sweep connection, for errors.
+const SWEEP_LIMITS: &[(&str, &str)] = &[
+    ("statement_timeout", "Cabby's limit for one sweep statement, 5s; the next sweep goes on"),
+    ("lock_timeout", "Cabby waits at most 2s for a lock another session holds; the next sweep tries again"),
+];
 /// How long `start` waits for the `LISTEN` connection.
 const START_WAIT: Duration = Duration::from_secs(10);
 /// Command connections for publishing and reading spilled payloads.
@@ -354,8 +359,8 @@ async fn publish_loop(
         if !matches!(prepared, Ok(Ok(_))) {
             metrics.error();
             let error = match prepared {
-                Ok(Err(e)) => super::error_text(&e),
-                _ => "timed out".to_owned(),
+                Ok(Err(e)) => limit_text(&e, &[]),
+                _ => no_answer("preparing the publish statements", connect::QUERY_TIMEOUT, &pool.description()).0,
             };
             log_error!(log, "failed to publish messages", "count" => batch.len(), "error" => error);
             pool.discard(&conn);
@@ -376,7 +381,7 @@ async fn publish_loop(
         match results {
             Ok(results) => {
                 let failed: Vec<String> =
-                    results.into_iter().filter_map(Result::err).map(|e| super::error_text(&e)).collect();
+                    results.into_iter().filter_map(Result::err).map(|e| limit_text(&e, &[])).collect();
                 if let Some(first) = failed.first() {
                     for _ in &failed {
                         metrics.error();
@@ -389,7 +394,8 @@ async fn publish_loop(
             }
             Err(_) => {
                 metrics.error();
-                log_error!(log, "failed to publish messages", "count" => batch.len(), "error" => "timed out");
+                let error = no_answer("publishing", connect::QUERY_TIMEOUT, &pool.description()).0;
+                log_error!(log, "failed to publish messages", "count" => batch.len(), "error" => error);
                 pool.discard(&conn);
             }
         }
@@ -442,18 +448,18 @@ async fn sweep(
                 SWEEP_STATEMENT_TIMEOUT.as_secs(),
                 SWEEP_LOCK_TIMEOUT.as_secs()
             );
-            tokio::time::timeout(connect::QUERY_TIMEOUT, c.batch_execute(&settings))
-                .await
-                .map_err(|_| PgError("timed out preparing the sweep connection".into()))??;
+            tokio::time::timeout(connect::QUERY_TIMEOUT, c.batch_execute(&settings)).await.map_err(|_| {
+                no_answer("preparing the sweep connection", connect::QUERY_TIMEOUT, &spec.description)
+            })??;
             *client = Some(c);
         }
         let Some(c) = client.as_ref() else { unreachable!("connected above") };
         let deleted = match tokio::time::timeout(connect::QUERY_TIMEOUT, c.execute(sql, &[&SWEEP_BATCH])).await {
             Ok(Ok(n)) => n,
-            Ok(Err(e)) => return Err(e.into()),
+            Ok(Err(e)) => return Err(PgError(limit_text(&e, SWEEP_LIMITS))),
             Err(_) => {
                 *client = None;
-                return Err(PgError(format!("query timed out after {}s", connect::QUERY_TIMEOUT.as_secs())));
+                return Err(no_answer("deleting expired rows", connect::QUERY_TIMEOUT, &spec.description));
             }
         };
         total += deleted;
@@ -517,8 +523,8 @@ impl Subscriber for PostgresSubscriber {
                 .await;
                 match prepared {
                     Ok(Ok(_)) => Ok(()),
-                    Ok(Err(e)) => Err(PgError::from(e)),
-                    Err(_) => Err(PgError("timed out".into())),
+                    Ok(Err(e)) => Err(PgError(limit_text(&e, &[]))),
+                    Err(_) => Err(no_answer("preparing the publish statements", START_WAIT, &pool.description())),
                 }
             })
         };

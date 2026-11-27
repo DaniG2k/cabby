@@ -805,3 +805,39 @@ fn deviation_d071_postgres_a_failing_pruning_step_does_not_stop_the_others() {
     assert_eq!(Some("1".to_owned()), count(&history), "history beyond the limit, on the next pass");
     assert_eq!(Some("1".to_owned()), count(&streams), "and the expired streams");
 }
+
+/// regression-for: broker/nats_test.go#TestNATSBroker_Sessions
+/// note: Deviation D-071: a broker statement that a limit of the server's configuration ended names the setting and where it is set: with lock_timeout = 200ms for Cabby's role and another session holding the stream's row, a broadcast fails with "... canceling statement due to lock timeout (lock_timeout, set for Cabby's role or database, or in the options of --postgres_url)"; with statement_timeout = 200ms instead, with "(statement_timeout, ...)".
+#[test]
+fn deviation_d071_postgres_errors_name_the_server_limit_that_ended_a_statement() {
+    let scope = scope();
+    scope.migrate();
+    let mut pg = scope.config();
+    pg.url = scope.role_url(&[("lock_timeout", "200ms")]);
+    pg.auto_migrate = false;
+    let role = format!("r_{}", scope.channel);
+    let start = |pg: &PostgresConfig| {
+        let broker = PostgresBroker::new(None, &new_config(), pg, Metrics::none()).expect("new");
+        broker.start().expect("start");
+        broker
+    };
+    let first = start(&pg);
+    first.handle_broadcast(&msg("s", "1")).expect("the stream's first message");
+    let holder = scope.other_session();
+    holder.execute(&format!("BEGIN; SELECT * FROM {} WHERE stream = 's' FOR UPDATE;", scope.table("streams")));
+
+    let where_set = "set for Cabby's role or database, or in the options of --postgres_url)";
+    let err = first.handle_broadcast(&msg("s", "2")).unwrap_err().message;
+    assert!(err.ends_with(&format!("canceling statement due to lock timeout (lock_timeout, {where_set}")), "{err}");
+
+    scope.execute(&format!(
+        "ALTER ROLE \"{role}\" RESET lock_timeout; ALTER ROLE \"{role}\" SET statement_timeout = '200ms';"
+    ));
+    let second = start(&pg);
+    let err = second.handle_broadcast(&msg("s", "3")).unwrap_err().message;
+    assert!(
+        err.ends_with(&format!("canceling statement due to statement timeout (statement_timeout, {where_set}")),
+        "{err}"
+    );
+    holder.execute("ROLLBACK;");
+}

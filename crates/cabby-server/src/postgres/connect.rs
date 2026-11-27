@@ -30,7 +30,7 @@ use tokio_postgres::{AsyncMessage, Client, Row, Statement};
 use tokio_postgres_rustls::MakeRustlsConnect;
 use tokio_util::sync::CancellationToken;
 
-use super::{Metrics, PgError, PostgresConfig, error_text};
+use super::{Metrics, PgError, PostgresConfig, error_text, limit_text, no_answer, seconds};
 
 /// How long opening a connection may take.
 pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -616,7 +616,9 @@ impl ConnectSpec {
         config.keepalives_retries(3);
         let (client, mut conn) = tokio::time::timeout(CONNECT_TIMEOUT, config.connect(self.tls.clone()))
             .await
-            .map_err(|_| PgError(format!("timed out connecting to {}", self.description)))?
+            .map_err(|_| {
+                PgError(format!("timed out after {} connecting to {}", seconds(CONNECT_TIMEOUT), self.description))
+            })?
             .map_err(|e| PgError(format!("failed to connect to {}: {}", self.description, error_text(&e))))?;
         let closed = CancellationToken::new();
         let ended = closed.clone();
@@ -812,6 +814,11 @@ impl Pool {
         })
     }
 
+    /// The server, as messages name it.
+    pub fn description(&self) -> String {
+        self.spec.description.clone()
+    }
+
     fn open(slot: &Slot) -> Option<Arc<Conn>> {
         slot.conn.as_ref().filter(|c| !c.client.is_closed()).cloned()
     }
@@ -867,13 +874,21 @@ impl Pool {
             let Some(guard) = order.into_iter().find_map(|i| self.claim(i, false)) else {
                 // Every slot is connecting: wait for one.
                 if tokio::time::timeout_at(deadline, notified).await.is_err() {
-                    return Err(PgError(format!("timed out connecting to {}", self.spec.description)));
+                    return Err(PgError(format!(
+                        "timed out after {} waiting for a connection to {}",
+                        seconds(QUERY_TIMEOUT),
+                        self.spec.description
+                    )));
                 }
                 continue;
             };
             let result = match tokio::time::timeout_at(deadline, self.spec.connect(&self.app)).await {
                 Ok(r) => r,
-                Err(_) => Err(PgError(format!("timed out connecting to {}", self.spec.description))),
+                Err(_) => Err(PgError(format!(
+                    "timed out after {} connecting to {}",
+                    seconds(QUERY_TIMEOUT),
+                    self.spec.description
+                ))),
             };
             return guard.finish(result, false);
         }
@@ -915,15 +930,12 @@ impl Pool {
                 if conn.client.is_closed() {
                     self.discard(&conn);
                 }
-                Err(QueryError { code: e.code().cloned(), error: e.into() })
+                Err(QueryError { code: e.code().cloned(), error: PgError(limit_text(&e, &[])) })
             }
             Err(_) => {
                 self.metrics.error();
                 self.discard(&conn);
-                Err(QueryError {
-                    error: PgError(format!("query timed out after {}s", QUERY_TIMEOUT.as_secs())),
-                    code: None,
-                })
+                Err(QueryError { error: no_answer("query", QUERY_TIMEOUT, &self.spec.description), code: None })
             }
         }
     }
@@ -1151,6 +1163,12 @@ async fn listen_loop(
     }
 }
 
+/// The heartbeat waits for its answer up to the keepalive interval (at most
+/// [`QUERY_TIMEOUT`]).
+fn heartbeat_timed_out(wait: Duration) -> String {
+    format!("heartbeat (SELECT 1) timed out after {} (at most --postgres_keepalive_interval)", seconds(wait))
+}
+
 /// Runs one connection: keeps `LISTEN` in sync with the desired channels and
 /// sends heartbeats (the connection task forwards notifications). Returns why it ended (`None`:
 /// stopped).
@@ -1170,8 +1188,8 @@ async fn serve(
         if !sql.is_empty() {
             match tokio::time::timeout(QUERY_TIMEOUT, client.batch_execute(&sql)).await {
                 Ok(Ok(())) => {}
-                Ok(Err(e)) => return Some(error_text(&e)),
-                Err(_) => return Some("LISTEN timed out".to_owned()),
+                Ok(Err(e)) => return Some(limit_text(&e, &[])),
+                Err(_) => return Some(format!("LISTEN timed out after {}", seconds(QUERY_TIMEOUT))),
             }
         }
         {
@@ -1196,11 +1214,11 @@ async fn serve(
             () = closed.cancelled() => return Some("connection closed".to_owned()),
             () = shared.wake.notified() => {}
             () = ping => {
-                let period = keepalive.unwrap_or(QUERY_TIMEOUT);
-                match tokio::time::timeout(period.min(QUERY_TIMEOUT), client.simple_query("SELECT 1")).await {
+                let wait = keepalive.unwrap_or(QUERY_TIMEOUT).min(QUERY_TIMEOUT);
+                match tokio::time::timeout(wait, client.simple_query("SELECT 1")).await {
                     Ok(Ok(_)) => {}
-                    Ok(Err(e)) => return Some(error_text(&e)),
-                    Err(_) => return Some("heartbeat timed out".to_owned()),
+                    Ok(Err(e)) => return Some(limit_text(&e, &[])),
+                    Err(_) => return Some(heartbeat_timed_out(wait)),
                 }
                 next_ping = keepalive.map(|k| tokio::time::Instant::now() + k);
             }
@@ -1508,6 +1526,19 @@ mod tests {
             lock(&p.slots[0]).connecting
         });
         assert!(!connecting, "a dropped connect must free its slot");
+    }
+
+    #[test]
+    fn timeouts_say_what_how_long_and_where() {
+        assert_eq!(
+            "query timed out after 10s: no answer from db:5432/app",
+            no_answer("query", QUERY_TIMEOUT, "db:5432/app").0
+        );
+        assert_eq!(
+            "heartbeat (SELECT 1) timed out after 1s (at most --postgres_keepalive_interval)",
+            heartbeat_timed_out(Duration::from_secs(1))
+        );
+        assert_eq!("1.5s", seconds(Duration::from_millis(1500)));
     }
 
     #[test]
