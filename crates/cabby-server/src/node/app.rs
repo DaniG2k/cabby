@@ -839,6 +839,9 @@ impl Node {
             _ => {}
         }
 
+        // D-106: live messages wait until the requested history is sent.
+        let _hold = (confirmed && (msg.history.since > 0 || !msg.history.streams.is_empty())).then(|| s.hold_live(id));
+
         if let Some(res) = &result {
             self.handle_command_reply(s, msg, res);
             self.mark_disconnectable(s, res.disconnect_interest);
@@ -1026,6 +1029,7 @@ impl Node {
         }
 
         s.send(&Reply { kind: HISTORY_CONFIRMED_TYPE.to_owned(), identifier: id.clone(), ..Default::default() });
+        s.release_live(id, &backlog);
 
         Ok(())
     }

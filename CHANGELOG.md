@@ -100,6 +100,11 @@ Differences from the AnyCable Go server are listed by ID in
   is at most 1 s: past that the subscription is confirmed as before, with a warning
   (`pub/sub subscription is not active yet`). It holds back neither other subscriptions nor
   streams the node already receives. SSE and Durable Streams live reads are covered too (D-105).
+- Action Cable subscriptions with `history`: a message published while the subscription starts
+  reaches the client once, after the history. Before, it could arrive live ahead of the
+  history (even ahead of `confirm_subscription`) and again inside it. Live messages of the
+  subscription are now held until `confirm_history` is sent, and those the history already
+  contained are left out, as Durable Streams do (D-106).
 
 ## [0.4.2] - 2026-11-27
 

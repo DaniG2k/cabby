@@ -62,6 +62,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+use super::live_hold::{HoldGuard, LiveHolds};
 use super::{
     CLOSE_ABNORMAL_CLOSURE, CLOSE_GOING_AWAY, CLOSE_NORMAL_CLOSURE, Clock, METRICS_DATA_RECEIVED, METRICS_DATA_SENT,
     METRICS_DISCONNECTED_SLOW_CLIENTS, METRICS_FAILED_COMMAND_RECEIVED, METRICS_FAILED_SENT, METRICS_RECEIVED_MSG,
@@ -397,6 +398,8 @@ pub struct Session {
     refused: Mutex<Option<Arc<SentFrame>>>,
     /// The transport signalled that it is writable again (see `drain_nonblocking`).
     writable: AtomicBool,
+    /// Live messages held while a subscription's history is sent (D-106).
+    holds: LiveHolds,
 }
 
 impl std::fmt::Debug for Session {
@@ -526,6 +529,7 @@ impl Session {
             max_pending_size: AtomicU64::new(0),
             timers: Mutex::new(Timers::default()),
             pusher: AtomicBool::new(false),
+            holds: LiveHolds::default(),
         });
         if nonblocking {
             let me = Arc::downgrade(&session);
@@ -1851,6 +1855,29 @@ fn new_ping_message(format: &str) -> PingMessage {
 /// [`CachedEncodedMessage`](cabby_core::hub::CachedEncodedMessage): fetch the
 /// frame for the session's encoder with `fetch_with` (encoded once per broadcast
 /// and encoder, shared as `Arc<SentFrame>`) and queue it without blocking.
+/// Holding live messages during a subscription's history (D-106).
+impl Session {
+    /// Holds the live messages of the subscription `identifier` until
+    /// [`Session::release_live`] (or until the guard is dropped).
+    pub(crate) fn hold_live(self: &Arc<Self>, identifier: &str) -> HoldGuard {
+        self.holds.start(identifier);
+        HoldGuard::new(self, identifier)
+    }
+
+    /// Ends the hold of `identifier`, delivering the held messages that
+    /// `history` (sent before) does not contain; nothing without a hold.
+    pub(crate) fn release_live(&self, identifier: &str, history: &[cabby_core::common::StreamMessage]) {
+        let hot = self.hot.load();
+        self.holds.release(identifier, history, |frame| self.push_frame_hot(frame, &hot));
+    }
+
+    /// How many live messages are held (tests).
+    #[cfg(test)]
+    pub(crate) fn held_live(&self) -> usize {
+        self.holds.held()
+    }
+}
+
 impl cabby_core::hub::HubSession for Session {
     fn get_id(&self) -> String {
         Session::get_id(self)
@@ -1862,6 +1889,9 @@ impl cabby_core::hub::HubSession for Session {
 
     fn send(&self, msg: &cabby_core::hub::EncodedMessage) {
         let hot = self.hot.load();
+        if self.holds.is_active() && self.holds.keep(msg, || msg.fetch_with(hot.encoder.as_ref()).ok()) {
+            return;
+        }
         if let Ok(frame) = msg.fetch_with(hot.encoder.as_ref()) {
             self.push_frame_hot(frame, &hot);
         }

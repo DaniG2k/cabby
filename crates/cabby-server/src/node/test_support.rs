@@ -155,10 +155,17 @@ pub(super) struct PubSub {
 impl PubSub {
     /// Makes `stream`'s subscription active.
     pub fn activate(&self, stream: &str) {
-        lock(&self.state).active.insert(stream.to_owned());
+        self.deliver(stream);
         if let Some(a) = &self.activations {
             a.settled(stream);
         }
+    }
+
+    /// Delivers `stream`'s messages, but does not report the subscription
+    /// active yet: holds the command that subscribed between installing the
+    /// subscription and going on.
+    pub fn deliver(&self, stream: &str) {
+        lock(&self.state).active.insert(stream.to_owned());
     }
 
     pub fn subscribe_calls(&self, stream: &str) -> usize {
@@ -227,6 +234,11 @@ impl Fixture {
     /// A node without history (legacy broker) over the pub/sub double.
     pub fn new() -> Self {
         Self::build(false)
+    }
+
+    /// A node with the memory broker (history) over the pub/sub double.
+    pub fn with_history() -> Self {
+        Self::build(true)
     }
 
     fn build(history: bool) -> Self {

@@ -30,6 +30,7 @@ mod clock;
 mod config;
 mod deps;
 mod disconnect_queue;
+mod live_hold;
 mod session;
 mod subscription_state;
 mod tasks;
