@@ -52,7 +52,7 @@ streams, Cabby can skip step 2.
 ## Quick start
 
 ```sh
-docker run --rm -p 127.0.0.1:8080:8080 -p 127.0.0.1:8090:8090 ghcr.io/danig2k/cabby:0.4.2 --norpc --public
+docker run --rm -p 127.0.0.1:8080:8080 -p 127.0.0.1:8090:8090 ghcr.io/danig2k/cabby:0.5.0 --norpc --public
 
 curl -X POST localhost:8090/_broadcast -H 'Content-Type: application/json' \
   -d '{"stream":"demo","data":"{\"text\":\"hello\"}"}'

@@ -8,7 +8,12 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
-## [Unreleased]
+## [0.5.0] - 2026-11-27
+
+Cabby 0.5.0 fixes message loss right after a subscription with Redis or Postgres pub/sub, hardens
+the Redis Streams broadcaster and the Postgres adapters, and makes Redis Sentinel TLS work as in
+AnyCable. That last change is breaking for Sentinel nodes that accept TLS only (see "Changed").
+It stays compatible with AnyCable server 1.6.21.
 
 ### Added
 
@@ -31,10 +36,20 @@ Differences from the AnyCable Go server are listed by ID in
 
 ### Fixed
 
-- Redis Sentinel: a master name written without a scheme (`--redis_url=mymaster` with
-  `--redis_sentinels`) names that master. Before, Cabby asked the Sentinel nodes for a master with
-  an empty name and failed to connect. An empty name now stops startup with `no Redis Sentinel
-  master name: give it as the host of --redis_url (redis://<name>)` (D-116).
+- Redis and Postgres pub/sub (`--pubsub=redis`, `--pubsub=postgres`): a client now gets every
+  message published after its subscription was confirmed. A node's first subscription to a
+  stream became active a few milliseconds after the confirmation was sent, and a message
+  another node published meanwhile was lost (a broker still stored it). The confirmation (and a
+  history requested with the subscription) is now sent once Redis confirmed the `SUBSCRIBE`, or
+  the `LISTEN` for the stream's Postgres channel is done, as AnyCable does with Redis. The wait
+  is at most 1 s: past that the subscription is confirmed as before, with a warning
+  (`pub/sub subscription is not active yet`). It holds back neither other subscriptions nor
+  streams the node already receives. SSE and Durable Streams live reads are covered too (D-105).
+- Action Cable subscriptions with `history`: a message published while the subscription starts
+  reaches the client once, after the history. Before, it could arrive live ahead of the
+  history (even ahead of `confirm_subscription`) and again inside it. Live messages of the
+  subscription are now held until `confirm_history` is sent, and those the history already
+  contained are left out, as Durable Streams do (D-106).
 - Redis Streams broadcasting (`--broadcast_adapter=redisx`): a read takes at most 1000 entries.
   Before, after the servers were stopped while broadcasts were added, the first server to read
   again took the whole backlog in one reply, and the other servers claimed its entries that had
@@ -52,6 +67,10 @@ Differences from the AnyCable Go server are listed by ID in
   records each time, without end. The first retry after a read that worked is still 250 ms, so
   a consumer group deleted by a flush is created again as quickly as before; while Redis can't
   be reached the delays are unchanged (D-111).
+- Redis Sentinel: a master name written without a scheme (`--redis_url=mymaster` with
+  `--redis_sentinels`) names that master. Before, Cabby asked the Sentinel nodes for a master with
+  an empty name and failed to connect. An empty name now stops startup with `no Redis Sentinel
+  master name: give it as the host of --redis_url (redis://<name>)` (D-116).
 - Postgres broadcaster (`--broadcast_adapter=postgres`) with `--broker=postgres`: an outbox row
   holding a message Postgres can never store (a NUL character in `data` or in the stream name, or
   a stream name over 2704 bytes, the limit of an index entry) no longer holds back the rows after
@@ -88,20 +107,6 @@ Differences from the AnyCable Go server are listed by ID in
   set it (pruning, the overflow sweep, the claim transaction, startup) or the server's
   configuration did, for example `ERROR: canceling statement due to lock timeout (lock_timeout,
   set for Cabby's role or database, or in the options of --postgres_url)`.
-- Redis and Postgres pub/sub (`--pubsub=redis`, `--pubsub=postgres`): a client now gets every
-  message published after its subscription was confirmed. A node's first subscription to a
-  stream became active a few milliseconds after the confirmation was sent, and a message
-  another node published meanwhile was lost (a broker still stored it). The confirmation (and a
-  history requested with the subscription) is now sent once Redis confirmed the `SUBSCRIBE`, or
-  the `LISTEN` for the stream's Postgres channel is done, as AnyCable does with Redis. The wait
-  is at most 1 s: past that the subscription is confirmed as before, with a warning
-  (`pub/sub subscription is not active yet`). It holds back neither other subscriptions nor
-  streams the node already receives. SSE and Durable Streams live reads are covered too (D-105).
-- Action Cable subscriptions with `history`: a message published while the subscription starts
-  reaches the client once, after the history. Before, it could arrive live ahead of the
-  history (even ahead of `confirm_subscription`) and again inside it. Live messages of the
-  subscription are now held until `confirm_history` is sent, and those the history already
-  contained are left out, as Durable Streams do (D-106).
 
 ## [0.4.2] - 2026-11-27
 
