@@ -236,6 +236,13 @@ fn listening(pid: u32, port: u16) -> bool {
     }
 }
 
+/// Whether a start failed because the server's port was taken: Go prints
+/// `listen tcp <addr>: bind: address already in use`, Cabby `listen tcp
+/// <addr>: Address already in use (os error 48)` (98 on Linux).
+fn port_taken(error: &str) -> bool {
+    error.to_ascii_lowercase().contains("address already in use")
+}
+
 /// The tail of the server's output, for error reports.
 #[derive(Default)]
 struct Captured {
@@ -324,7 +331,7 @@ impl Server {
         for _ in 0..ATTEMPTS {
             match Self::start_once(&cfg) {
                 Ok(s) => return Ok(s),
-                Err(e) if e.0.contains("address already in use") => last = Some(e),
+                Err(e) if port_taken(&e.0) => last = Some(e),
                 Err(e) => return Err(e),
             }
         }
@@ -630,6 +637,27 @@ mod tests {
         }
         // The harness's own settings still apply.
         assert!(envs.contains(&("PORT".into(), Some("1".into()))), "{envs:?}");
+    }
+
+    /// Both servers' texts for a taken port are retried (Cabby's starts with a
+    /// capital letter); other start errors are not.
+    #[test]
+    fn a_taken_port_is_recognized_in_both_servers_texts() {
+        for line in [
+            "WebSocket server at http://127.0.0.1:50695 stopped: listen tcp 127.0.0.1:50695: Address already in use (os error 48)",
+            "WebSocket server at http://127.0.0.1:50695 stopped: listen tcp 127.0.0.1:50695: Address already in use (os error 98)",
+            "listen tcp 127.0.0.1:50695: bind: address already in use",
+        ] {
+            assert!(
+                port_taken(&format!(
+                    "server cabby exited (exit status: 1) before listening on port 50695. Output:\n{line}"
+                )),
+                "{line}"
+            );
+        }
+        assert!(!port_taken(
+            "server cabby exited (exit status: 1) before listening on port 50695. Output:\nunknown flag"
+        ));
     }
 
     #[test]

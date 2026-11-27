@@ -56,6 +56,8 @@ Differences from the AnyCable Go server are listed by ID in
   thread coming back from an RPC call takes its seat back) no longer waits for a busy thread or for
   an idle thread's 30 s timeout. The idle thread woken for it retired without passing the wakeup
   on; it now hands it to another idle thread.
+- `cabby-bench`: a server under test that finds its port taken is started again on another port
+  also when it is Cabby, whose error text says "Address already in use" with a capital letter.
 
 ## [0.5.0] - 2026-11-27
 
