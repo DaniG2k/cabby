@@ -22,6 +22,10 @@ Differences from the AnyCable Go server are listed by ID in
   connection's task writes it. Before, the task could see the dropped reference first and close
   the socket without the close frame. No current path drops the connection that early (every
   client is admitted), so no client saw this.
+- Client commands: a command queued while the command pool was briefly over its thread limit (a
+  thread coming back from an RPC call takes its seat back) no longer waits for a busy thread or for
+  an idle thread's 30 s timeout. The idle thread woken for it retired without passing the wakeup
+  on; it now hands it to another idle thread.
 
 ## [0.5.0] - 2026-11-27
 

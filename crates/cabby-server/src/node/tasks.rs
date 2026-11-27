@@ -235,6 +235,13 @@ fn worker(pool: &'static Pool) {
             loop {
                 if state.workers > pool.max.load(Ordering::Relaxed) {
                     state.workers -= 1;
+                    // This worker may have been woken for a queued task: hand
+                    // the wakeup on to another idle worker, or the task waits
+                    // for a busy one (or for an idle timeout).
+                    if !state.tasks.is_empty() && state.idle > 0 {
+                        drop(state);
+                        pool.work.notify_one();
+                    }
                     return;
                 }
                 if let Some(task) = state.tasks.pop_front() {
@@ -390,6 +397,66 @@ mod tests {
         release_tx.send(()).unwrap();
         release_tx.send(()).unwrap();
         assert!(done_rx.recv_timeout(Duration::from_secs(5)).is_ok());
+    }
+
+    /// A worker woken for a task while the pool is over its seat limit (a
+    /// thread came back from a blocking call) retires; the task goes to another
+    /// idle worker. Before, the retiring worker took the wakeup with it: the
+    /// task waited for a busy worker to finish, or for an idle worker's
+    /// 30 s timeout.
+    #[test]
+    fn a_task_is_run_when_the_worker_woken_for_it_retires() {
+        let pool = bounded_pool("test-retire", 2);
+        let (back_tx, back) = mpsc::channel::<()>();
+        let (unblock, unblocked) = mpsc::channel::<()>();
+        let (finish, finished) = mpsc::channel::<()>();
+
+        // A command blocked in a call (its seat given up), which then keeps
+        // working on its seat after the call returned.
+        submit(
+            pool,
+            Box::new(move || {
+                blocking(|| {
+                    let _ = unblocked.recv();
+                });
+                back_tx.send(()).unwrap();
+                let _ = finished.recv();
+            }),
+        );
+        // Two commands that run at the same time start two more workers, which
+        // then wait idle.
+        let both = std::sync::Arc::new(std::sync::Barrier::new(2));
+        for _ in 0..2 {
+            let both = both.clone();
+            submit(
+                pool,
+                Box::new(move || {
+                    both.wait();
+                }),
+            );
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let (idle, workers) = {
+                let s = lock(pool);
+                (s.idle, s.workers)
+            };
+            if (idle, workers) == (2, 2) {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "two idle workers: {idle} idle, {workers} workers");
+            std::thread::yield_now();
+        }
+
+        // The call returns: three threads hold seats for two.
+        unblock.send(()).unwrap();
+        back.recv_timeout(Duration::from_secs(5)).expect("the call returned");
+        assert_eq!(3, lock(pool).workers);
+
+        let (done_tx, done) = mpsc::channel();
+        submit(pool, Box::new(move || done_tx.send(()).unwrap()));
+        assert_eq!(Ok(()), done.recv_timeout(Duration::from_secs(5)), "the task ran while the command still works");
+        finish.send(()).unwrap();
     }
 
     #[test]
