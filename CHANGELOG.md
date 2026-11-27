@@ -71,6 +71,11 @@ Differences from the AnyCable Go server are listed by ID in
   progress. Before, a node went on through the batch it had claimed (up to 100 rows, or 10 s),
   shutdown gave up waiting for it after 5 s, and rows were still handed to the broker after
   shutdown had returned. The rows not handed over stay in the outbox for the other nodes.
+- Postgres broker (`--broker=postgres`): a pruning step that fails no longer stops the steps
+  after it. Before, a step that failed every pass (history that another session's lock kept
+  from being deleted, for example) ended the pass, so expired sessions and streams were never
+  deleted. Each step now runs in turn, waits at most 2 s for a lock, and gets its share of the
+  20 s pass, and the error names the steps that failed and their tables.
 
 ## [0.4.2] - 2026-11-27
 

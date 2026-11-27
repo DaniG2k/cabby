@@ -276,7 +276,10 @@ node resumes its session and catches up on what it missed.
 - **Epoch.** The first node to start stores a random epoch in `cabby_meta`; every node uses it.
 - **Pruning.** Every 30 seconds one node (holding an advisory lock) deletes expired history,
   streams and sessions and trims history beyond `--history_limit`, 10000 rows per transaction,
-  so a large backlog is cleared over a few passes.
+  so a large backlog is cleared over a few passes. The four steps share 20 seconds per pass.
+  A step that fails, or waits more than 2 seconds for a lock another session holds, is logged
+  (`failed to prune expired history and sessions`, naming the step and its table) and the next
+  step runs; the next pass tries it again.
 - **Errors.** When Postgres is unreachable, broadcasts fail (logged and counted; they are not
   delivered without an offset) and session recovery falls back to a new session, as with the NATS
   broker. An HTTP broadcast then answers `501`, the status the HTTP broadcaster gives for any

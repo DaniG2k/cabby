@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 219
+      "cases": 220
     },
     "translation": {
       "reviewed": 923
@@ -26450,6 +26450,15 @@
       ],
       "reference_status": "pass",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "broker::postgres_test::deviation_d071_postgres_a_failing_pruning_step_does_not_stop_the_others",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broker/memory_test.go#TestMemory_Expire"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "broker::postgres_test::deviation_d071_postgres_a_slot_that_cannot_connect_does_not_fail_the_pool",

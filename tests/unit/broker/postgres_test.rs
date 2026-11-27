@@ -768,3 +768,40 @@ fn deviation_d071_postgres_start_does_not_wait_forever_for_a_migration_or_a_tabl
     let (result, _) = Starting::broker(config).wait(Duration::from_secs(40));
     assert_eq!(Err(expected("timed out after 5s waiting for a lock to read the schema version")), result);
 }
+
+/// regression-for: broker/memory_test.go#TestMemory_Expire
+/// note: Deviation D-071: a pruning step that fails (here: the three steps deleting history, while another session holds a SHARE lock on the table) doesn't stop the others: each gives up after its lock wait, the expired sessions are deleted all the same, and the failed steps are reported by name; the next pass, once the lock is gone, deletes the history and the expired streams. The lock wait is 2 s; here 200 ms (PostgresBroker::with_prune_lock_timeout), against the 10 s statement timeout a step waited for before.
+#[test]
+fn deviation_d071_postgres_a_failing_pruning_step_does_not_stop_the_others() {
+    let scope = scope();
+    let mut config = new_config();
+    config.history_limit = 1;
+    let broker = PostgresBroker::new(None, &config, &scope.config(), Metrics::none())
+        .expect("PostgresBroker::new")
+        .with_prune_lock_timeout(Duration::from_millis(200));
+    broker.start().expect("start");
+    let (streams, history, sessions) = (scope.table("streams"), scope.table("history"), scope.table("sessions"));
+    scope.execute(&format!(
+        "INSERT INTO {streams} (stream, max_seq, deadline_sec, last_ts_sec) VALUES ('kept', 100, EXTRACT(EPOCH FROM now())::bigint + 3000, EXTRACT(EPOCH FROM now())::bigint); \
+         INSERT INTO {streams} (stream, max_seq, deadline_sec, last_ts_sec) SELECT 'old' || i, 1, 0, 0 FROM generate_series(1, 10) i; \
+         INSERT INTO {history} (stream, seq, ts_sec, data) SELECT 'kept', i, EXTRACT(EPOCH FROM now())::bigint, 'x' FROM generate_series(1, 100) i; \
+         INSERT INTO {sessions} (sid, data, expires_at_ms) SELECT 's' || i, '\\x00', 0 FROM generate_series(1, 10) i;"
+    ));
+    let count = |table: &str| scope.scalar(&format!("SELECT count(*) FROM {table}"));
+    let holder = scope.other_session();
+    holder.execute(&format!("BEGIN; LOCK TABLE {history} IN SHARE MODE;"));
+
+    let started = std::time::Instant::now();
+    let err = broker.prune().expect_err("the history steps fail");
+    let took = started.elapsed();
+    assert!(err.message.contains("history beyond history_limit"), "{}", err.message);
+    assert_eq!(Some("0".to_owned()), count(&sessions), "expired sessions are deleted all the same");
+    assert_eq!(Some("11".to_owned()), count(&streams), "expired streams go with their history: kept");
+    assert_eq!(Some("100".to_owned()), count(&history));
+    assert!(took < Duration::from_secs(3), "pruning took {took:?}");
+
+    holder.execute("ROLLBACK;");
+    assert!(broker.prune().expect("prune"), "this node held the pruning lock");
+    assert_eq!(Some("1".to_owned()), count(&history), "history beyond the limit, on the next pass");
+    assert_eq!(Some("1".to_owned()), count(&streams), "and the expired streams");
+}

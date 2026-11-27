@@ -26,8 +26,10 @@
 //! - **Pruning.** Every 30 s, one node (the one holding a transaction-level
 //!   advisory lock) deletes expired history, streams and sessions and trims
 //!   history beyond `history_limit`, 10000 rows per transaction (each with a
-//!   server-side statement timeout) for at most 20 s per pass; reads filter
-//!   by the same rules, so pruning only reclaims space.
+//!   server-side statement timeout and a 2 s lock timeout) for at most 20 s
+//!   per pass, shared by the four steps; a step that fails is reported and
+//!   the next one runs. Reads filter by the same rules, so pruning only
+//!   reclaims space.
 //! - **Errors.** Database failures are returned as broker errors (and counted
 //!   and logged); a failed `handle_broadcast` doesn't fan the message out. A
 //!   message Postgres can never store ([`super::unstorable`]) fails with a
@@ -104,12 +106,32 @@ enum Prune {
     Plain(String),
 }
 
+impl Prune {
+    /// What the step deletes, for errors.
+    fn what(&self, n: &Names) -> String {
+        match self {
+            Prune::Limit(_) => format!("deleting history beyond history_limit from {}", n.table_display(HISTORY)),
+            Prune::Ttl(_) => format!("deleting history older than history_ttl from {}", n.table_display(HISTORY)),
+            Prune::Streams { .. } => format!(
+                "deleting expired streams from {} and their history from {}",
+                n.table_display(STREAMS),
+                n.table_display(HISTORY)
+            ),
+            Prune::Plain(_) => format!("deleting expired sessions from {}", n.table_display(SESSIONS)),
+        }
+    }
+}
+
 /// Rows deleted per pruning statement (each in its own transaction).
 const PRUNE_BATCH: i64 = 10_000;
-/// How long one pruning pass may take; the next pass goes on from there.
+/// How long one pruning pass may take, shared by its steps (each runs at
+/// least one batch); the next pass goes on from there.
 const PRUNE_BUDGET: Duration = Duration::from_secs(20);
 /// The server-side limit for one pruning statement.
 const PRUNE_STATEMENT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a pruning statement waits for a lock before its step is given
+/// up for this pass.
+const PRUNE_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 
 impl Sql {
     fn new(n: &Names) -> Self {
@@ -213,6 +235,8 @@ struct Inner {
     stop: CancellationToken,
     /// The maintenance task's own connection (pruning runs in a transaction).
     maintenance: tokio::sync::Mutex<Option<tokio_postgres::Client>>,
+    /// How long a pruning statement waits for a lock ([`PRUNE_LOCK_TIMEOUT`]).
+    prune_lock_timeout: Duration,
 }
 
 /// The shared Postgres broker.
@@ -250,8 +274,19 @@ impl PostgresBroker {
                 started: AtomicBool::new(false),
                 stop: CancellationToken::new(),
                 maintenance: tokio::sync::Mutex::new(None),
+                prune_lock_timeout: PRUNE_LOCK_TIMEOUT,
             }),
         })
+    }
+
+    /// Lets a pruning statement wait `timeout` for a lock instead of
+    /// [`PRUNE_LOCK_TIMEOUT`] (tests). Only before `start`: it panics once
+    /// the broker is shared with its background task.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_prune_lock_timeout(mut self, timeout: Duration) -> Self {
+        Arc::get_mut(&mut self.inner).expect("with_prune_lock_timeout before start").prune_lock_timeout = timeout;
+        self
     }
 
     /// The shared epoch as this node last saw it.
@@ -352,44 +387,62 @@ impl Inner {
     }
 
     /// Deletes expired rows in batches, each batch one transaction holding
-    /// the pruning lock (another node pruning makes this return false), until
-    /// done or [`PRUNE_BUDGET`] is used up.
+    /// the pruning lock (another node pruning makes this return false). Each
+    /// step runs until done or its share of [`PRUNE_BUDGET`] is used up; a
+    /// step that fails doesn't keep the others from running, and the failed
+    /// steps are reported once all have run.
     async fn prune(&self) -> Result<bool, PgError> {
         let mut slot = self.maintenance.lock().await;
-        if slot.as_ref().is_none_or(tokio_postgres::Client::is_closed) {
-            *slot = Some(self.spec.connect(&format!("cabby broker-maintenance {}", self.names.channel())).await?);
-        }
-        let Some(client) = slot.as_mut() else { unreachable!("connected above") };
-        let started = Instant::now();
+        let share = PRUNE_BUDGET / u32::try_from(self.sql.prune.len()).unwrap_or(1).max(1);
+        let mut failed = Vec::new();
         for step in &self.sql.prune {
-            loop {
-                let batch = tokio::time::timeout(
-                    connect::QUERY_TIMEOUT + PRUNE_STATEMENT_TIMEOUT,
-                    self.prune_batch(client, step),
-                )
-                .await;
-                let deleted = match batch {
-                    Ok(Ok(Some(n))) => n,
-                    Ok(Ok(None)) => return Ok(false),
-                    Ok(Err(e)) => {
-                        self.metrics.error();
-                        return Err(PgError(error_text(&e)));
-                    }
-                    Err(_) => {
-                        self.metrics.error();
-                        *slot = None;
-                        return Err(PgError("pruning timed out".into()));
-                    }
-                };
-                if deleted < PRUNE_BATCH as u64 {
-                    break;
-                }
-                if started.elapsed() >= PRUNE_BUDGET {
-                    return Ok(true);
+            if self.stop.is_cancelled() {
+                break;
+            }
+            match self.prune_step(&mut slot, step, share).await {
+                Ok(true) => {}
+                Ok(false) => return Ok(false),
+                Err(e) => {
+                    self.metrics.error();
+                    failed.push(e.0);
                 }
             }
         }
-        Ok(true)
+        if failed.is_empty() { Ok(true) } else { Err(PgError(failed.join("; "))) }
+    }
+
+    /// Runs `step` in batches for up to `budget` (at least one batch); false
+    /// when another node holds the pruning lock.
+    async fn prune_step(
+        &self,
+        slot: &mut Option<tokio_postgres::Client>,
+        step: &Prune,
+        budget: Duration,
+    ) -> Result<bool, PgError> {
+        let started = Instant::now();
+        let what = || step.what(&self.names);
+        loop {
+            if slot.as_ref().is_none_or(tokio_postgres::Client::is_closed) {
+                let app = format!("cabby broker-maintenance {}", self.names.channel());
+                *slot = Some(self.spec.connect(&app).await.map_err(|e| PgError(format!("{}: {}", what(), e.0)))?);
+            }
+            let Some(client) = slot.as_mut() else { unreachable!("connected above") };
+            let batch =
+                tokio::time::timeout(connect::QUERY_TIMEOUT + PRUNE_STATEMENT_TIMEOUT, self.prune_batch(client, step))
+                    .await;
+            let deleted = match batch {
+                Ok(Ok(Some(n))) => n,
+                Ok(Ok(None)) => return Ok(false),
+                Ok(Err(e)) => return Err(PgError(format!("{}: {}", what(), error_text(&e)))),
+                Err(_) => {
+                    *slot = None;
+                    return Err(PgError(format!("{}: pruning timed out", what())));
+                }
+            };
+            if deleted < PRUNE_BATCH as u64 || started.elapsed() >= budget || self.stop.is_cancelled() {
+                return Ok(true);
+            }
+        }
     }
 
     /// One batch of `step`: rows deleted, or `None` without the lock.
@@ -399,7 +452,12 @@ impl Inner {
         step: &Prune,
     ) -> Result<Option<u64>, tokio_postgres::Error> {
         let tx = client.transaction().await?;
-        tx.batch_execute(&format!("SET LOCAL statement_timeout = '{}s'", PRUNE_STATEMENT_TIMEOUT.as_secs())).await?;
+        tx.batch_execute(&format!(
+            "SET LOCAL statement_timeout = '{}s'; SET LOCAL lock_timeout = '{}ms'",
+            PRUNE_STATEMENT_TIMEOUT.as_secs(),
+            self.prune_lock_timeout.as_millis()
+        ))
+        .await?;
         let locked: bool =
             tx.query_one("SELECT pg_try_advisory_xact_lock($1)", &[&prune_lock_key(&self.names)]).await?.get(0);
         if !locked {
