@@ -58,6 +58,8 @@ impl<T> Queue<T> {
 struct RustHandler {
     messages: Queue<StreamMessage>,
     commands: Queue<RemoteCommandMessage>,
+    /// What the subscriber reports as not active yet (D-105), as the node has.
+    activations: Arc<rs::Activations>,
 }
 
 impl rs::Handler for RustHandler {
@@ -67,6 +69,10 @@ impl rs::Handler for RustHandler {
 
     fn execute_remote_command(&self, cmd: &RemoteCommandMessage) {
         self.commands.push(cmd.clone());
+    }
+
+    fn activations(&self) -> Option<Arc<rs::Activations>> {
+        Some(self.activations.clone())
     }
 }
 
@@ -145,9 +151,24 @@ impl TestHandler {
     pub fn new() -> Self {
         match backend() {
             Backend::Rust => Self {
-                inner: HandlerImpl::Rust(Arc::new(RustHandler { messages: Queue::new(), commands: Queue::new() })),
+                inner: HandlerImpl::Rust(Arc::new(RustHandler {
+                    messages: Queue::new(),
+                    commands: Queue::new(),
+                    activations: Arc::new(rs::Activations::new()),
+                })),
             },
             Backend::Go => Self { inner: HandlerImpl::Go(bridge::call("pubsub.NewTestHandler", json!({}))) },
+        }
+    }
+
+    /// Whether the subscriber reported `stream`'s subscription as not active
+    /// yet (D-105, a Cabby addition: Go's subscribers report nothing).
+    pub fn pending(&self, stream: &str) -> bool {
+        match &self.inner {
+            HandlerImpl::Rust(h) => h.activations.any_pending(&[stream.to_owned()]),
+            HandlerImpl::Go(_) => {
+                unimplemented!("not_observable: Go's pub/sub subscribers report no pending subscriptions")
+            }
         }
     }
 

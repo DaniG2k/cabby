@@ -3,8 +3,11 @@
 //! They run against both backends; a failure on Go is the upstream defect.
 //!
 //! The subscriber connects through `cabby_testkit::fault_proxy`, which can drop
-//! a subscription behind the subscriber's back (an injected `UNSUBSCRIBE`) or
-//! leave its connection half-open.
+//! a subscription behind the subscriber's back (an injected `UNSUBSCRIBE`),
+//! leave its connection half-open, or hold its traffic.
+//!
+//! Also here: what the subscriber reports to the node while a subscription is
+//! being set up (D-105; not observable on Go).
 
 use std::time::{Duration, Instant};
 
@@ -128,4 +131,27 @@ fn releases_channels_of_unsubscribed_streams() {
     let pattern = format!("{}:s*", s.scope.prefix);
     let left = s.scope.command(&["PUBSUB", "CHANNELS", &pattern]).expect("PUBSUB CHANNELS");
     assert!(left.items().is_empty(), "leaked Redis subscriptions: {left:?}");
+}
+
+/// regression-for: pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast
+/// note: Deviation D-105: while the connection to Redis is held (fault proxy frozen), a new stream's subscription is reported as not active; once Redis confirms it, it is active, Redis lists the subscriber, and a message published then is delivered.
+/// note: not_observable on Go: its subscribers report nothing (Go's Subscribe returns once Redis confirms).
+#[test]
+fn deviation_d105_a_stream_is_pending_until_redis_confirms_it() {
+    let s = setup("d105");
+    let stream = s.scope.name("fresh");
+    assert!(!s.handler.pending(&stream));
+
+    s.proxy.freeze();
+    s.subscriber.0.subscribe(&stream);
+    let pending = s.handler.pending(&stream);
+    s.proxy.thaw();
+    assert!(pending, "the subscription was not reported while Redis had not confirmed it");
+
+    services::wait_until("Redis confirms the subscription", WAIT, || (!s.handler.pending(&stream)).then_some(()))
+        .expect("active");
+    assert_eq!(1, s.scope.numsub(&stream));
+    let payload = json!({"stream": stream, "data": "live"}).to_string();
+    s.scope.publish(&stream, &payload).expect("PUBLISH");
+    assert_eq!("live", s.handler.receive().expect("message").data);
 }

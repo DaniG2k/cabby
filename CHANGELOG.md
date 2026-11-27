@@ -89,6 +89,18 @@ Differences from the AnyCable Go server are listed by ID in
   configuration did, for example `ERROR: canceling statement due to lock timeout (lock_timeout,
   set for Cabby's role or database, or in the options of --postgres_url)`.
 
+### Fixed
+
+- Redis and Postgres pub/sub (`--pubsub=redis`, `--pubsub=postgres`): a client now gets every
+  message published after its subscription was confirmed. A node's first subscription to a
+  stream became active a few milliseconds after the confirmation was sent, and a message
+  another node published meanwhile was lost (a broker still stored it). The confirmation (and a
+  history requested with the subscription) is now sent once Redis confirmed the `SUBSCRIBE`, or
+  the `LISTEN` for the stream's Postgres channel is done, as AnyCable does with Redis. The wait
+  is at most 1 s: past that the subscription is confirmed as before, with a warning
+  (`pub/sub subscription is not active yet`). It holds back neither other subscriptions nor
+  streams the node already receives. SSE and Durable Streams live reads are covered too (D-105).
+
 ## [0.4.2] - 2026-11-27
 
 Cabby 0.4.2 fixes request handling in the SSE and Durable Streams endpoints, keeps metrics

@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 222
+      "cases": 226
     },
     "translation": {
       "reviewed": 923
@@ -27347,6 +27347,24 @@
       "rust_status": "pending"
     },
     {
+      "rust_case": "conformance::pubsub_subscribe::deviation_d105_postgres_messages_published_right_after_a_confirmation_are_delivered",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pubsub/subscriber_test.go#TestLegacySubscriber/Broadcast"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "conformance::pubsub_subscribe::redis_messages_published_right_after_a_confirmation_are_delivered",
+      "relation": "external",
+      "links": [
+        "26a1a703:pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
       "rust_case": "conformance::pusher::presence_subscription",
       "relation": "external",
       "links": [
@@ -27973,6 +27991,15 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "pubsub::postgres_test::deviation_d105_postgres_reports_a_stream_until_its_shard_is_listened_to",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
       "rust_case": "pubsub::postgres_test::test_postgres_common::broadcast",
       "relation": "regression",
       "links": [
@@ -28016,6 +28043,15 @@
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "pubsub::redis_issues_test::deviation_d105_a_stream_is_pending_until_redis_confirms_it",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "pubsub::redis_issues_test::recovers_after_the_subscriber_connection_goes_half_open",

@@ -158,6 +158,7 @@ impl RedisSubscriber {
             exhausted_error: "failed to reconnect to Redis: attempts exceeded",
             subscribe_failed: "failed to resubscribe",
             lost: &[(cabby_core::logger::Level::Error, "Redis pub/sub disconnected")],
+            activations: node.activations(),
         });
         Ok(Self {
             node,

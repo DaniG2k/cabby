@@ -954,6 +954,11 @@ pub(crate) trait ListenSink: Send + Sync + 'static {
     /// The connection is up and every channel is listened to (again);
     /// `reconnected` is false for the first connection.
     fn connected(&self, _reconnected: bool) {}
+    /// `channels` are listened to on the current connection (after each
+    /// `LISTEN`/`UNLISTEN` round).
+    fn listening(&self, _channels: &BTreeSet<String>) {}
+    /// The connection is gone: nothing is listened to until it is back.
+    fn lost(&self) {}
 }
 
 #[derive(Default)]
@@ -1003,8 +1008,17 @@ impl Listener {
         Self { shared, stop }
     }
 
-    pub fn listen(&self, channel: &str) {
-        if self.shared.lock().desired.insert(channel.to_owned()) {
+    /// Listens to `channel` when `listen` is set; `pending` runs (with the
+    /// state locked) when a connection is up and `channel` is not listened to
+    /// on it yet, so a confirmation cannot come in between (D-105).
+    pub fn listen_tracked(&self, channel: &str, listen: bool, pending: impl FnOnce()) {
+        let mut st = self.shared.lock();
+        let added = listen && st.desired.insert(channel.to_owned());
+        if st.connected && !st.confirmed.contains(channel) {
+            pending();
+        }
+        drop(st);
+        if added {
             self.shared.wake.notify_one();
         }
     }
@@ -1145,6 +1159,7 @@ async fn listen_loop(
             st.confirmed.clear();
         }
         shared.changed.notify_all();
+        sink.lost();
         let Some(reason) = lost else { return };
         metrics.error();
         // Only a connection that stayed up resets the backoff, so a server
@@ -1194,10 +1209,11 @@ async fn serve(
         }
         {
             let mut st = shared.lock();
-            st.confirmed = desired;
+            st.confirmed.clone_from(&desired);
             st.connected = true;
         }
         shared.changed.notify_all();
+        sink.listening(&desired);
         if !announced {
             announced = true;
             sink.connected(reconnected);

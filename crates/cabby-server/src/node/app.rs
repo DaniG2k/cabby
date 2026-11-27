@@ -16,6 +16,7 @@ use cabby_core::common::{
 };
 use cabby_core::encoders::{EncodedMessage, EncodedMessageJson};
 use cabby_core::logger::{LogValue, LogValuer, Logger, compact_value_bytes, error_value, filtered_map, filtered_url};
+use cabby_core::pubsub::Activations;
 use cabby_core::utils::GoPool;
 use cabby_core::{log_debug, log_error, log_info, log_warn};
 
@@ -284,6 +285,8 @@ pub struct Node {
     /// `$pusher` is routed to the Pusher controller: subscriptions to it are
     /// refused for sessions outside the Pusher endpoint.
     pusher_channel_reserved: AtomicBool,
+    /// Pub/sub subscriptions not active yet (D-105).
+    activations: Arc<Activations>,
 }
 
 impl std::fmt::Debug for Node {
@@ -325,6 +328,7 @@ impl Node {
             lifecycle: Mutex::new(Lifecycle::default()),
             lifecycle_changed: Condvar::new(),
             pusher_channel_reserved: AtomicBool::new(false),
+            activations: Arc::new(Activations::new()),
         });
 
         if registered {
@@ -1293,6 +1297,11 @@ impl Node {
             }
         };
 
+        // D-105: the transmissions (the confirmation) go once the streams' pub/sub subscriptions are active.
+        if !closed {
+            super::activation::wait_for_streams(&self.activations, s, &reply.streams);
+        }
+
         if !closed {
             if let Some(istate) = &reply.istate {
                 dirty = true;
@@ -1457,6 +1466,10 @@ impl SubscriberHandler for Node {
 
     fn execute_remote_command(&self, msg: &RemoteCommandMessage) {
         Node::execute_remote_command(self, msg);
+    }
+
+    fn activations(&self) -> Option<Arc<Activations>> {
+        Some(self.activations.clone())
     }
 }
 

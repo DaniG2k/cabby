@@ -22,13 +22,20 @@
 //! Commands on the connection are sent one at a time, and replies are never
 //! used for state (pushes are): an unsolicited push can be taken by the client
 //! library as the reply of the command in flight, which is harmless here.
+//!
+//! While a connection is up, a channel that becomes desired is reported to the
+//! owner's [`Activations`] until Redis confirms it (or the `SUBSCRIBE` fails,
+//! the channel is no longer desired, or the connection is lost), so the node
+//! can wait for it before confirming a subscription (D-105).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use cabby_core::log_at;
 use cabby_core::logger::{Attr, Level, Logger};
+use cabby_core::pubsub::Activations;
 use redis::aio::MultiplexedConnection;
 use redis::{PushInfo, PushKind, Value};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -71,12 +78,17 @@ pub(crate) struct Settings {
     pub lost: &'static [(Level, &'static str)],
     /// The owner's logger (upstream `l.With("context", ...)...`).
     pub log: Logger,
+    /// Where channels not confirmed yet are reported (D-105); `None`: not tracked.
+    pub activations: Option<Arc<Activations>>,
 }
 
 /// A handle to a subscription engine.
 pub(crate) struct Subscriptions {
     settings: Settings,
     desired: Mutex<HashSet<String>>,
+    /// A connection is up and subscribes new desired channels; written with
+    /// the `desired` lock held.
+    live: AtomicBool,
     tx: UnboundedSender<String>,
     rx: Mutex<Option<UnboundedReceiver<String>>>,
     stop: CancellationToken,
@@ -91,6 +103,7 @@ impl Subscriptions {
         Arc::new(Self {
             settings,
             desired: Mutex::new(HashSet::new()),
+            live: AtomicBool::new(false),
             tx,
             rx: Mutex::new(Some(rx)),
             stop: CancellationToken::new(),
@@ -108,8 +121,14 @@ impl Subscriptions {
 
     /// Wants `channel` subscribed (idempotent); false if it already was.
     pub(crate) fn subscribe(&self, channel: &str) -> bool {
-        let added = self.desired().insert(channel.to_owned());
+        let mut desired = self.desired();
+        let added = desired.insert(channel.to_owned());
         if added {
+            // Without a connection nothing is coming soon: the channel is
+            // subscribed with every other one once connected.
+            if self.live.load(Ordering::Acquire) {
+                self.requested(channel);
+            }
             let _ = self.tx.send(channel.to_owned());
         }
         added
@@ -119,9 +138,42 @@ impl Subscriptions {
     pub(crate) fn unsubscribe(&self, channel: &str) -> bool {
         let removed = self.desired().remove(channel);
         if removed {
+            self.settled(channel);
             let _ = self.tx.send(channel.to_owned());
         }
         removed
+    }
+
+    fn requested(&self, channel: &str) {
+        if let Some(a) = &self.settings.activations {
+            a.requested(channel);
+        }
+    }
+
+    fn settled(&self, channel: &str) {
+        if let Some(a) = &self.settings.activations {
+            a.settled(channel);
+        }
+    }
+
+    /// A connection is up: every desired channel, to subscribe now, is
+    /// pending until Redis confirms it.
+    fn go_live(&self) -> Vec<String> {
+        let desired = self.desired();
+        self.live.store(true, Ordering::Release);
+        if let Some(a) = &self.settings.activations {
+            desired.iter().for_each(|c| a.requested(c));
+        }
+        desired.iter().cloned().collect()
+    }
+
+    /// The connection is gone: nothing pending will be confirmed on it.
+    fn go_offline(&self) {
+        let _desired = self.desired();
+        self.live.store(false, Ordering::Release);
+        if let Some(a) = &self.settings.activations {
+            a.settle_all();
+        }
     }
 
     /// Starts the engine (once); `on_fatal` gets the error that stops it.
@@ -194,7 +246,9 @@ impl Engine {
                 Ok(conn) => {
                     self.shared.log(Level::Debug, "initialized pub/sub client", None);
                     let mut session = Session::new(conn, push_rx);
-                    match session.run(&mut self).await {
+                    let end = session.run(&mut self).await;
+                    self.shared.go_offline();
+                    match end {
                         End::Stop => {
                             self.shared.log(Level::Debug, "close pub/sub channel", None);
                             break;
@@ -286,7 +340,7 @@ impl Session {
     async fn run(&mut self, engine: &mut Engine) -> End {
         let shared = Arc::clone(&engine.shared);
         // Upstream `resubscribe`: everything desired, in batches.
-        let all: Vec<String> = shared.desired().iter().cloned().collect();
+        let all = shared.go_live();
         if let Err(end) = self.subscribe(engine, all).await {
             return end;
         }
@@ -367,6 +421,10 @@ impl Session {
                 // are not logged: upstream subscribes a channel once.
                 if self.confirmed.insert(channel.clone()) {
                     shared.log(Level::Debug, "subscribe", Some(&channel));
+                }
+                // Active, unless an UNSUBSCRIBE of ours is still to be applied.
+                if !self.expected_unsub.contains_key(&channel) {
+                    shared.settled(&channel);
                 }
                 self.check_count(&push.data);
                 touched.insert(channel);
@@ -467,6 +525,8 @@ impl Session {
                     return Err(End::Lost(e.to_string()));
                 }
                 engine.shared.log_error(Level::Error, engine.shared.settings.subscribe_failed, e);
+                // No confirmation is coming: nobody waits for these.
+                batch.iter().for_each(|c| engine.shared.settled(c));
             }
         }
         Ok(())

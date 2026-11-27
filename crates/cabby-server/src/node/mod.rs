@@ -23,6 +23,7 @@
 //! ([`blocking`]), so it never delays other sessions' commands; session writes
 //! drain on a shared task pool; timers share one timer thread.
 
+mod activation;
 mod app;
 pub mod call_context;
 mod clock;
@@ -32,6 +33,8 @@ mod disconnect_queue;
 mod session;
 mod subscription_state;
 mod tasks;
+#[cfg(test)]
+mod test_support;
 
 /// The canonical `node.Controller` (defined in `cabby_core::common` because
 /// identity and streams, which live in `cabby-core`, implement or wrap it).
@@ -49,6 +52,7 @@ pub use tasks::{
     DEFAULT_COMMAND_CONCURRENCY, MAX_BLOCKED, blocking, command_concurrency, execute, set_command_concurrency,
 };
 
+pub use activation::ACTIVATION_TIMEOUT;
 pub use app::{AuthOption, Clock, Node, NodeOption, NullController, SystemClock, Ticker, Timer};
 
 /// A node operation failed (Go `error`), compared by message.

@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 
 /// The fake application: authenticate everyone, stream from the identifier's
 /// `stream` parameter on subscribe, stop streams on unsubscribe.
-fn fake_app() -> FakeRpc {
+pub(crate) fn fake_app() -> FakeRpc {
     let fake = FakeRpc::start();
     fake.on(Method::Connect).reply(protos::ConnectionResponse {
         status: protos::Status::Success as i32,
@@ -53,7 +53,7 @@ fn fake_app() -> FakeRpc {
     fake
 }
 
-fn start_server(fake: &FakeRpc, redis_url: &str) -> Sut {
+pub(crate) fn start_server(fake: &FakeRpc, redis_url: &str) -> Sut {
     Sut::start(&[
         &format!("--rpc_host={}", fake.grpc_target()),
         "--pubsub=redis",
@@ -62,7 +62,7 @@ fn start_server(fake: &FakeRpc, redis_url: &str) -> Sut {
     ])
 }
 
-fn identifier(stream: &str) -> String {
+pub(crate) fn identifier(stream: &str) -> String {
     json!({"channel": "IssueChannel", "stream": stream}).to_string()
 }
 
@@ -72,7 +72,7 @@ fn connect(sut: &Sut) -> CableClient {
     c
 }
 
-fn subscribe(c: &mut CableClient, stream: &str) {
+pub(crate) fn subscribe(c: &mut CableClient, stream: &str) {
     c.send(&json!({"command": "subscribe", "identifier": identifier(stream)}));
     let ack = c.receive().expect("confirmation");
     assert_eq!(Some("confirm_subscription"), ack["type"].as_str(), "unexpected reply {ack}");

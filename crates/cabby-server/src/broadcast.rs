@@ -499,6 +499,8 @@ impl LegacyRedisBroadcaster {
                 (cabby_core::logger::Level::Error, "Redis subscription error"),
                 (cabby_core::logger::Level::Warn, "Redis connection failed"),
             ],
+            // Broadcasts arrive on one fixed channel: nobody waits for it.
+            activations: None,
         });
         subscriptions.subscribe(&config.channel);
         Self { node, redis, subscriptions, started: std::sync::atomic::AtomicBool::new(false), log }

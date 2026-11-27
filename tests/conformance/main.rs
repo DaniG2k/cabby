@@ -30,6 +30,7 @@ mod logging_transport;
 mod origin;
 mod ping_intervals;
 mod postgres;
+mod pubsub_subscribe;
 mod pusher;
 mod redis_broker;
 mod rpc_sessions;

@@ -308,6 +308,39 @@ fn deviation_d070_postgres_subscribe_does_not_wait_for_the_server() {
     assert_eq!("live", handler.receive().expect("message").data);
 }
 
+/// regression-for: pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast
+/// note: Deviations D-070, D-105: while the LISTEN connection is held (fault proxy frozen), a stream whose shard is not listened to is reported as not active, until the LISTEN is done; a stream of a shard already listened to is active at once.
+#[test]
+fn deviation_d105_postgres_reports_a_stream_until_its_shard_is_listened_to() {
+    let h = Postgres::new();
+    let proxy = FaultProxy::start(h.scope.addr());
+    let handler = TestHandler::new();
+    let s = proxied(&h, &proxy, &handler, Metrics::none());
+    h.wait_subscriptions(&h.internal(), 1).expect("LISTEN connection ready");
+    // Two streams of one shard.
+    let first = "d105-0".to_owned();
+    let same_shard = (1..).map(|i| format!("d105-{i}")).find(|n| shard(n) == shard(&first)).expect("a stream");
+
+    proxy.freeze();
+    s.0.subscribe(&first);
+    s.0.subscribe(&same_shard);
+    let pending = (handler.pending(&first), handler.pending(&same_shard));
+    proxy.thaw();
+    assert_eq!((true, true), pending, "streams reported while their shard's LISTEN was held");
+
+    h.wait(&first);
+    let deadline = std::time::Instant::now() + WAIT;
+    while handler.pending(&first) || handler.pending(&same_shard) {
+        assert!(std::time::Instant::now() < deadline, "still reported after the LISTEN");
+        std::thread::yield_now();
+    }
+    let third = (1..).map(|i| format!("d105-x{i}")).find(|n| shard(n) == shard(&first)).expect("a stream");
+    s.0.subscribe(&third);
+    assert!(!handler.pending(&third), "a stream of a listened shard is reported");
+    s.0.broadcast(&msg(&third, "live"));
+    assert_eq!("live", handler.receive().expect("message").data);
+}
+
 /// regression-for: pubsub/redis_test.go#TestRedisReconnect
 /// note: Deviation D-070: a LISTEN connection that stops answering (a black-holed TCP connection) fails its SELECT 1 heartbeat within the keepalive interval and is replaced; messages flow again once the network is back.
 #[test]

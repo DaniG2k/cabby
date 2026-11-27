@@ -8,6 +8,10 @@ use crate::broker::Broadcaster;
 use crate::common::{RemoteCommandMessage, StreamMessage};
 use crate::logger::{LogValue, LogValuer};
 
+mod activations;
+
+pub use activations::Activations;
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
 pub struct PubSubError(pub String);
@@ -38,6 +42,13 @@ impl Published<'_> {
 pub trait Handler: Send + Sync {
     fn broadcast(&self, msg: &StreamMessage);
     fn execute_remote_command(&self, cmd: &RemoteCommandMessage);
+
+    /// Where a subscriber reports the stream subscriptions that are not
+    /// active yet, so the node waits for them before confirming a
+    /// subscription (D-105). `None` (the default): nothing waits.
+    fn activations(&self) -> Option<Arc<Activations>> {
+        None
+    }
 }
 
 /// Subscribes to individual streams and publishes messages to streams

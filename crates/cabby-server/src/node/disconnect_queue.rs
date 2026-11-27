@@ -69,7 +69,7 @@ impl Disconnector for InlineDisconnector {
 }
 
 /// Go's `time.Duration.String()` for the whole-millisecond periods of the queue.
-fn go_duration(d: Duration) -> String {
+pub(super) fn go_duration(d: Duration) -> String {
     let millis = d.as_millis();
     if millis >= 1000 && millis.is_multiple_of(1000) {
         format!("{}s", millis / 1000)

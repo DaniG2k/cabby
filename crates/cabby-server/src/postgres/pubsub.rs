@@ -21,15 +21,19 @@
 //! the message to its clients when it comes back. Publications wait in a
 //! bounded queue ([`QUEUE_CAPACITY`]); a caller that finds it full blocks
 //! until there is room.
+//!
+//! A stream subscribed while its shard is not listened to yet on the live
+//! connection is reported to the node's activations until the `LISTEN` is
+//! done, so the node waits for it before confirming a subscription (D-105).
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use cabby_core::common::{PubSubMessage, RemoteCommandMessage, StreamMessage, pub_sub_message_from_json};
 use cabby_core::logger::{LogValuer, Logger, compact_value_bytes};
-use cabby_core::pubsub::{Handler, PubSubError, Published, Subscriber};
+use cabby_core::pubsub::{Activations, Handler, PubSubError, Published, Subscriber};
 use cabby_core::utils::backpressure;
 use cabby_core::{log_debug, log_error, log_info, log_warn};
 use serde_json::value::RawValue;
@@ -146,6 +150,8 @@ pub struct PostgresSubscriber {
     running: Arc<Mutex<Option<Running>>>,
     /// How often expired overflow rows are deleted ([`SWEEP_INTERVAL`]).
     sweep_interval: Duration,
+    /// Streams waiting for their shard's `LISTEN` (D-105).
+    activations: Option<Arc<Activations>>,
 }
 
 /// Waits until a subscriber listens to a stream's shard, without holding any
@@ -191,7 +197,6 @@ impl PostgresSubscriber {
         let names = Names::from_config(config).map_err(PubSubError)?;
         let spec = ConnectSpec::from_config(config, "--pubsub=postgres").map_err(PubSubError)?;
         Ok(Self {
-            node,
             names,
             spec: Arc::new(spec),
             auto_migrate: config.auto_migrate,
@@ -200,6 +205,8 @@ impl PostgresSubscriber {
             subscriptions: Arc::new(Mutex::new(Subscriptions::default())),
             running: Arc::new(Mutex::new(None)),
             sweep_interval: SWEEP_INTERVAL,
+            activations: node.activations(),
+            node,
         })
     }
 
@@ -237,12 +244,32 @@ impl PostgresSubscriber {
     }
 }
 
-/// Hands notifications to the dispatcher task, in order.
-struct Forward(connect::Inbox<(String, String)>);
+/// Hands notifications to the dispatcher task, in order, and settles the
+/// streams whose shard is listened to (D-105).
+struct Forward {
+    inbox: connect::Inbox<(String, String)>,
+    names: Names,
+    subscriptions: Arc<Mutex<Subscriptions>>,
+    activations: Option<Arc<Activations>>,
+}
 
 impl ListenSink for Forward {
     fn notification(&self, channel: &str, payload: &str) {
-        self.0.push((channel.to_owned(), payload.to_owned()));
+        self.inbox.push((channel.to_owned(), payload.to_owned()));
+    }
+
+    fn listening(&self, channels: &BTreeSet<String>) {
+        let Some(a) = self.activations.as_ref().filter(|a| !a.is_empty()) else { return };
+        let subs = self.subscriptions.lock().unwrap_or_else(PoisonError::into_inner);
+        for stream in subs.streams.iter().filter(|s| channels.contains(&self.names.stream_channel(s))) {
+            a.settled(stream);
+        }
+    }
+
+    fn lost(&self) {
+        if let Some(a) = &self.activations {
+            a.settle_all();
+        }
     }
 }
 
@@ -566,7 +593,12 @@ impl Subscriber for PostgresSubscriber {
             self.spec.clone(),
             &format!("cabby pubsub-listen {}", self.names.channel),
             self.channels(&subs),
-            Arc::new(Forward(ntx)),
+            Arc::new(Forward {
+                inbox: ntx,
+                names: self.names.clone(),
+                subscriptions: self.subscriptions.clone(),
+                activations: self.activations.clone(),
+            }),
             self.metrics.clone(),
             self.log.clone(),
         );
@@ -609,7 +641,9 @@ impl Subscriber for PostgresSubscriber {
 
     /// Registers the stream and, for a shard's first stream, asks the
     /// `LISTEN` connection to listen to it; does not wait for the server
-    /// (see [`PostgresSubscriber::probe`]), so no lock is held for long.
+    /// (see [`PostgresSubscriber::probe`]), so no lock is held for long. A
+    /// stream whose shard is not listened to yet is pending until it is
+    /// (D-105).
     fn subscribe(&self, stream: &str) {
         let mut subs = self.subs();
         if !subs.streams.insert(stream.to_owned()) {
@@ -618,10 +652,12 @@ impl Subscriber for PostgresSubscriber {
         log_debug!(self.log, "subscribing", "channel" => stream);
         let i = shard(stream);
         subs.shards[i] += 1;
-        if subs.shards[i] == 1
-            && let Some(r) = self.running().as_ref()
-        {
-            r.listener.listen(&self.names.shard_channel(i));
+        if let Some(r) = self.running().as_ref() {
+            r.listener.listen_tracked(&self.names.shard_channel(i), subs.shards[i] == 1, || {
+                if let Some(a) = &self.activations {
+                    a.requested(stream);
+                }
+            });
         }
     }
 
@@ -629,6 +665,9 @@ impl Subscriber for PostgresSubscriber {
         let mut subs = self.subs();
         if !subs.streams.remove(stream) {
             return;
+        }
+        if let Some(a) = &self.activations {
+            a.settled(stream);
         }
         log_debug!(self.log, "unsubscribing", "channel" => stream);
         let i = shard(stream);
