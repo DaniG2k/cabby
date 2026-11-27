@@ -141,6 +141,9 @@ struct HttpInner {
     node: Arc<dyn Handler>,
     conf: Mutex<HttpConfig>,
     prepared: RwLock<Prepared>,
+    /// How long reading a request body may take
+    /// ([`http_server::BODY_READ_TIMEOUT`]; shorter in tests).
+    body_timeout: std::time::Duration,
 }
 
 /// HTTP broadcast endpoint (upstream `broadcast.HTTPBroadcaster`): accepts
@@ -158,6 +161,7 @@ impl HttpBroadcaster {
                 node,
                 conf: Mutex::new(config.clone()),
                 prepared: RwLock::new(Prepared::default()),
+                body_timeout: http_server::BODY_READ_TIMEOUT,
             }),
             server: Mutex::new(None),
         }
@@ -204,7 +208,9 @@ impl HttpBroadcaster {
     }
 
     /// The endpoint as a server handler (reads the body only after the method
-    /// and authorization checks, at most `max_body_size` bytes, as upstream).
+    /// and authorization checks, at most `max_body_size` bytes, as upstream, and
+    /// within [`http_server::BODY_READ_TIMEOUT`]: a later body is answered as a
+    /// failed read, D-119).
     pub fn http_handler(&self) -> impl http_server::Handler + use<> {
         let inner = Arc::clone(&self.inner);
         move |req: http_server::Request| {
@@ -215,24 +221,26 @@ impl HttpBroadcaster {
                 let header = |name: &str| parts.headers.get(name).map_or(&b""[..], http::HeaderValue::as_bytes);
                 let resp = match inner.check(parts.method.as_str(), header) {
                     Err(resp) => resp,
-                    Ok(headers) => match http_server::read_body(body, inner.max_body_size()).await {
-                        Ok(body) => HttpResponse::status(inner.deliver(&body), headers),
-                        Err(http_server::BodyError::TooLarge(limit)) => {
-                            log(
-                                Level::Debug,
-                                "request body is too large",
-                                &[Attr::new("limit", LogValue::Uint(limit))],
-                            );
-                            HttpResponse::status(413, headers)
+                    Ok(headers) => {
+                        match http_server::read_body_within(body, inner.max_body_size(), inner.body_timeout).await {
+                            Ok(body) => HttpResponse::status(inner.deliver(&body), headers),
+                            Err(http_server::BodyError::TooLarge(limit)) => {
+                                log(
+                                    Level::Debug,
+                                    "request body is too large",
+                                    &[Attr::new("limit", LogValue::Uint(limit))],
+                                );
+                                HttpResponse::status(413, headers)
+                            }
+                            Err(http_server::BodyError::Read(_)) => {
+                                log(Level::Error, "failed to read request body", &[]);
+                                // Go closes a connection whose request body failed.
+                                let mut headers = headers;
+                                headers.insert(http::header::CONNECTION, http::HeaderValue::from_static("close"));
+                                HttpResponse::status(422, headers)
+                            }
                         }
-                        Err(http_server::BodyError::Read(_)) => {
-                            log(Level::Error, "failed to read request body", &[]);
-                            // Go closes a connection whose request body failed.
-                            let mut headers = headers;
-                            headers.insert(http::header::CONNECTION, http::HeaderValue::from_static("close"));
-                            HttpResponse::status(422, headers)
-                        }
-                    },
+                    }
                 };
                 let mut out = http_server::status_response(resp.status);
                 *out.headers_mut() = resp.headers;
@@ -698,6 +706,50 @@ mod tests {
         assert_eq!(201, post("Bearer pässwörd").status);
         assert_eq!(401, post("Bearer pässwörX").status);
         assert_eq!(1, recorder.0.lock().unwrap().len());
+        server.shutdown();
+    }
+
+    /// A broadcaster on a server bound to port 0 whose body reads may take
+    /// `body_timeout`.
+    fn served(body_timeout: std::time::Duration) -> (Arc<HttpServer>, std::net::SocketAddr, Arc<Recorder>) {
+        let recorder = Arc::new(Recorder::default());
+        let mut config = HttpConfig::new();
+        config.secret = "s3cr3t".into();
+        let mut broadcaster = HttpBroadcaster::new(Arc::clone(&recorder) as Arc<dyn Handler>, &config);
+        Arc::get_mut(&mut broadcaster.inner).expect("not shared yet").body_timeout = body_timeout;
+        broadcaster.prepare().unwrap();
+        let server = HttpServer::new("127.0.0.1", "0", None, 0).unwrap();
+        server.setup_handler(DEFAULT_HTTP_PATH, broadcaster.http_handler());
+        let addr = start(&server);
+        (server, addr, recorder)
+    }
+
+    /// Pins D-119 for HTTP broadcasts: a body that stops arriving is answered
+    /// 422 when the body timeout passes, as Go answers a failed body read (and
+    /// the connection closes); nothing is broadcast.
+    #[test]
+    fn deviation_d119_a_stalled_body_is_answered_at_the_deadline() {
+        use crate::server::tests::support::{SHORT_BODY_TIMEOUT, assert_answered_at_the_deadline, stalled_body};
+        let (server, addr, recorder) = served(SHORT_BODY_TIMEOUT);
+        let head = format!("POST /_broadcast HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer s3cr3t");
+        let (resp, elapsed) = stalled_body(addr, &head, 100, b"{\"str");
+        assert_answered_at_the_deadline(&resp, elapsed, 422);
+        assert!(recorder.0.lock().unwrap().is_empty());
+        server.shutdown();
+    }
+
+    /// D-119: a body that arrives in parts, all within the body timeout, is
+    /// broadcast as before.
+    #[test]
+    fn deviation_d119_a_slow_body_within_the_deadline_is_broadcast() {
+        use crate::server::tests::support::slow_body;
+        let (server, addr, recorder) = served(std::time::Duration::from_millis(900));
+        let head = format!("POST /_broadcast HTTP/1.1\r\nHost: {addr}\r\nAuthorization: Bearer s3cr3t");
+        let body = b"{\"stream\":\"a\",\"data\":\"1\"}";
+        let resp = slow_body(addr, &head, body, std::time::Duration::from_millis(150));
+        assert_eq!(201, resp.status);
+        assert!(resp.body.is_empty());
+        assert_eq!(vec![body.to_vec()], *recorder.0.lock().unwrap());
         server.shutdown();
     }
 

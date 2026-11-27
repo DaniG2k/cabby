@@ -1161,6 +1161,9 @@ pub struct RestApi {
     verifier: Verifier,
     /// `Some(hosts)` when CORS headers are enabled; no hosts allow any origin.
     cors_hosts: Option<Vec<String>>,
+    /// How long reading a request body may take ([`server::BODY_READ_TIMEOUT`];
+    /// shorter in tests).
+    body_timeout: std::time::Duration,
 }
 
 impl RestApi {
@@ -1174,7 +1177,7 @@ impl RestApi {
                 conf.cors_hosts.split(',').map(str::to_owned).collect()
             }
         });
-        Self { handler, broker, conf, verifier, cors_hosts }
+        Self { handler, broker, conf, verifier, cors_hosts, body_timeout: server::BODY_READ_TIMEOUT }
     }
 
     /// The request body limit (Go `http.MaxBytesReader` with `max_body_size`).
@@ -1454,7 +1457,8 @@ impl RestApi {
     }
 
     /// Serves one request read from the HTTP server: the body is read (with the
-    /// limit) only after the signature checks.
+    /// limit, within [`server::BODY_READ_TIMEOUT`], D-119) only after the
+    /// signature checks.
     pub async fn serve(&self, req: server::Request) -> server::Response {
         let (parts, body) = req.into_parts();
         let mut headers = http::HeaderMap::new();
@@ -1462,15 +1466,17 @@ impl RestApi {
             Err(status) => ApiResponse::status(status),
             Ok(auth) => {
                 let read = match auth {
-                    Authorized::Post { .. } => Some(match server::read_body(body, Some(self.body_limit())).await {
-                        Ok(bytes) => Ok(bytes.to_vec()),
-                        Err(server::BodyError::TooLarge(_)) => Err(413),
-                        Err(server::BodyError::Read(_)) => {
-                            // Go closes a connection whose request body failed.
-                            headers.insert(http::header::CONNECTION, http::HeaderValue::from_static("close"));
-                            Err(422)
-                        }
-                    }),
+                    Authorized::Post { .. } => {
+                        Some(match server::read_body_within(body, Some(self.body_limit()), self.body_timeout).await {
+                            Ok(bytes) => Ok(bytes.to_vec()),
+                            Err(server::BodyError::TooLarge(_)) => Err(413),
+                            Err(server::BodyError::Read(_)) => {
+                                // Go closes a connection whose request body failed.
+                                headers.insert(http::header::CONNECTION, http::HeaderValue::from_static("close"));
+                                Err(422)
+                            }
+                        })
+                    }
                     Authorized::Get => None,
                 };
                 self.complete(auth, &parts.uri, move |_| read.unwrap_or_else(|| Ok(Vec::new())))

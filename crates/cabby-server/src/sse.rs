@@ -57,9 +57,9 @@ pub const RETRY_NO_RECONNECT: i64 = 31_536_000_000;
 /// Maximum POST body size (upstream `defaultMaxBodySize`, 64 kB).
 pub const DEFAULT_MAX_BODY_SIZE: usize = 65_536;
 
-/// How long reading a POST body may take, from when the session is signed in: as
-/// long as the server gives a request head (D-097).
-const BODY_READ_TIMEOUT: Duration = server::READ_HEADER_TIMEOUT;
+/// How long reading a POST body may take, from when the session is signed in
+/// (the server's [`server::BODY_READ_TIMEOUT`], D-097).
+const BODY_READ_TIMEOUT: Duration = server::BODY_READ_TIMEOUT;
 
 /// Gauge of open SSE responses (upstream `metricsClientsNum`).
 pub const METRICS_CLIENTS_NUM: &str = "sse_clients_num";
@@ -812,12 +812,9 @@ impl Handler {
 
     /// The commands of a POST body, read with the size limit and the body timeout.
     async fn read_commands(&self, body: Incoming) -> Result<Vec<Message>, Error> {
-        let read = server::read_body(body, Some(DEFAULT_MAX_BODY_SIZE as u64));
-        match tokio::time::timeout(self.body_timeout, read).await {
-            Ok(Ok(body)) => subscribe_commands_from_post_body(&body),
-            Ok(Err(e)) => Err(Error(e.to_string())),
-            // Go's text for a read past its deadline.
-            Err(_) => Err(Error("i/o timeout".to_owned())),
+        match server::read_body_within(body, Some(DEFAULT_MAX_BODY_SIZE as u64), self.body_timeout).await {
+            Ok(body) => subscribe_commands_from_post_body(&body),
+            Err(e) => Err(Error(e.to_string())),
         }
     }
 

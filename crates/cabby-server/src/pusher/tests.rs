@@ -81,6 +81,65 @@ fn deviation_d030_null_event_body_is_unprocessable() {
     assert_eq!(422, api.handle(req).status().as_u16());
 }
 
+/// The REST API on a server bound to port 0, with a handler recording
+/// broadcasts, whose body reads may take `body_timeout`.
+fn served_api(body_timeout: std::time::Duration) -> (Config, Arc<HttpServer>, SocketAddr, Arc<RecordedBroadcasts>) {
+    let mut conf = Config::new();
+    conf.app_id = "app".into();
+    conf.app_key = "key".into();
+    conf.secret = "secret".into();
+    let broker =
+        Arc::new(core_broker::Memory::new(None, None, &core_broker::Config::new(), Arc::new(core_broker::SystemClock)));
+    let recorded = Arc::new(RecordedBroadcasts::default());
+    let mut api = RestApi::new(recorded.clone(), broker, conf.clone());
+    api.body_timeout = body_timeout;
+    let server = HttpServer::new("127.0.0.1", "0", None, 0).unwrap();
+    server.setup_handler(&conf.api_path(), Arc::new(api).into_handler());
+    let addr = start(&server);
+    (conf, server, addr, recorded)
+}
+
+#[derive(Default)]
+struct RecordedBroadcasts(std::sync::Mutex<Vec<Vec<u8>>>);
+
+impl BroadcastHandler for RecordedBroadcasts {
+    fn handle_broadcast(&self, json: &[u8]) -> Result<(), BroadcastError> {
+        self.0.lock().unwrap().push(json.to_vec());
+        Ok(())
+    }
+    fn handle_pubsub(&self, _: &[u8]) {}
+}
+
+/// Pins D-119 for the Pusher REST API: a signed `POST .../events` whose body
+/// stops arriving is answered 422 when the body timeout passes, as Go answers
+/// a failed body read (and the connection closes); nothing is broadcast.
+#[test]
+fn deviation_d119_a_stalled_events_body_is_answered_at_the_deadline() {
+    use crate::server::tests::support::{SHORT_BODY_TIMEOUT, assert_answered_at_the_deadline, stalled_body};
+    let (conf, server, addr, recorded) = served_api(SHORT_BODY_TIMEOUT);
+    let body = br#"{"name":"e","channels":["chat"],"data":"{}"}"#;
+    let target = signed_target(&conf, "POST", "/apps/app/events", Some(body));
+    let (resp, elapsed) = stalled_body(addr, &format!("POST {target} HTTP/1.1\r\nHost: x"), body.len(), &body[..8]);
+    assert_answered_at_the_deadline(&resp, elapsed, 422);
+    assert!(recorded.0.lock().unwrap().is_empty());
+    server.shutdown();
+}
+
+/// D-119: a signed `POST .../events` whose body arrives in parts, all within
+/// the body timeout, is broadcast as before.
+#[test]
+fn deviation_d119_a_slow_events_body_within_the_deadline_is_broadcast() {
+    use crate::server::tests::support::slow_body;
+    let (conf, server, addr, recorded) = served_api(std::time::Duration::from_millis(900));
+    let body = br#"{"name":"e","channels":["chat"],"data":"{}"}"#;
+    let target = signed_target(&conf, "POST", "/apps/app/events", Some(body));
+    let resp =
+        slow_body(addr, &format!("POST {target} HTTP/1.1\r\nHost: x"), body, std::time::Duration::from_millis(150));
+    assert_eq!((200, &b"{}"[..]), (resp.status, &resp.body[..]));
+    assert_eq!(1, recorded.0.lock().unwrap().len());
+    server.shutdown();
+}
+
 // --- Socket IDs ---
 
 #[test]

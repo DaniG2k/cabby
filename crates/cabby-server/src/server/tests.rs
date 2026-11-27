@@ -77,6 +77,44 @@ pub(crate) mod support {
     pub(crate) fn get(addr: SocketAddr, path: &str) -> RawResponse {
         request(addr, &format!("GET {path} HTTP/1.1\r\nHost: {addr}"), b"")
     }
+
+    /// Sends a request head (`head` without the final blank line) announcing a
+    /// body of `len` bytes, then only `part` of it, and reads the response: with
+    /// the time from the part to the response.
+    pub(crate) fn stalled_body(addr: SocketAddr, head: &str, len: usize, part: &[u8]) -> (RawResponse, Duration) {
+        let mut stream = connect(addr);
+        write!(stream, "{head}\r\nContent-Length: {len}\r\n\r\n").unwrap();
+        stream.write_all(part).unwrap();
+        let sent = std::time::Instant::now();
+        let resp = read_response(&mut stream);
+        (resp, sent.elapsed())
+    }
+
+    /// Sends a request head, then `body` in three parts `pause` apart, and reads
+    /// the response.
+    pub(crate) fn slow_body(addr: SocketAddr, head: &str, body: &[u8], pause: Duration) -> RawResponse {
+        let mut stream = connect(addr);
+        write!(stream, "{head}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+        let third = body.len() / 3;
+        for part in [&body[..third], &body[third..2 * third], &body[2 * third..]] {
+            std::thread::sleep(pause);
+            stream.write_all(part).unwrap();
+        }
+        read_response(&mut stream)
+    }
+
+    /// The body timeout of the D-119 tests, and how long after it the response
+    /// may come.
+    pub(crate) const SHORT_BODY_TIMEOUT: Duration = Duration::from_millis(300);
+    pub(crate) const PROMPTLY: Duration = Duration::from_secs(1);
+
+    /// A response to a body that stopped arriving: Go's answer to a failed body
+    /// read (`status`, the connection closed), sent when the body timeout passes.
+    pub(crate) fn assert_answered_at_the_deadline(resp: &RawResponse, elapsed: Duration, status: u16) {
+        assert_eq!(status, resp.status);
+        assert_eq!(Some("close"), resp.header("connection"));
+        assert!(elapsed >= SHORT_BODY_TIMEOUT && elapsed < SHORT_BODY_TIMEOUT + PROMPTLY, "answered after {elapsed:?}");
+    }
 }
 
 use support::*;
@@ -495,6 +533,15 @@ mod api_support {
 
     /// A server with the API mounted as the CLI mounts it.
     pub(super) fn api_server(secret: &str, max_body_size: i64) -> (Arc<HttpServer>, SocketAddr, Arc<Recorder>) {
+        api_server_within(secret, max_body_size, BODY_READ_TIMEOUT)
+    }
+
+    /// [`api_server`] whose body reads may take `body_timeout`.
+    pub(super) fn api_server_within(
+        secret: &str,
+        max_body_size: i64,
+        body_timeout: Duration,
+    ) -> (Arc<HttpServer>, SocketAddr, Arc<Recorder>) {
         let recorder = Arc::new(Recorder::default());
         let mut conf = crate::api::Config::new();
         conf.secret = secret.to_owned();
@@ -502,10 +549,46 @@ mod api_support {
         let api = crate::api::Server::new(&mut conf, Arc::new(Legacy::new(Arc::new(Noop))), recorder.clone()).unwrap();
         api.start().unwrap();
         let server = HttpServer::new("127.0.0.1", "0", None, 0).unwrap();
-        server.setup_handler(&format!("{}/*", conf.path), api_handler(Arc::new(api), conf.max_body_size));
+        server.setup_handler(
+            &format!("{}/*", conf.path),
+            super::mounts::api_handler_within(Arc::new(api), conf.max_body_size, body_timeout),
+        );
         let addr = start(&server);
         (server, addr, recorder)
     }
+}
+
+/// Pins D-119 for the API: a publish body that stops arriving is answered 422
+/// when the body timeout passes, as Go answers a failed body read (and the
+/// connection closes), with or without a body limit; nothing is published.
+#[test]
+fn deviation_d119_a_stalled_api_body_is_answered_at_the_deadline() {
+    for limit in [crate::api::DEFAULT_MAX_BODY_SIZE, 0] {
+        let (server, addr, recorder) = api_support::api_server_within("sekret", limit, SHORT_BODY_TIMEOUT);
+        let (resp, elapsed) =
+            stalled_body(addr, "POST /api/publish HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer sekret", 100, b"{\"st");
+        assert_answered_at_the_deadline(&resp, elapsed, 422);
+        assert!(recorder.0.lock().unwrap().is_empty(), "limit {limit}");
+        server.shutdown();
+    }
+}
+
+/// D-119: a publish body that arrives in parts, all within the body timeout,
+/// is published as before.
+#[test]
+fn deviation_d119_a_slow_api_body_within_the_deadline_is_published() {
+    let (server, addr, recorder) = api_support::api_server_within("sekret", 0, Duration::from_millis(900));
+    let body = b"{\"stream\":\"a\",\"data\":\"1\"}";
+    let resp = slow_body(
+        addr,
+        "POST /api/publish HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer sekret",
+        body,
+        Duration::from_millis(150),
+    );
+    assert_eq!(201, resp.status);
+    assert!(resp.body.is_empty());
+    assert_eq!(vec![body.to_vec()], *recorder.0.lock().unwrap());
+    server.shutdown();
 }
 
 /// M3: as upstream, the method and authorization are checked before the

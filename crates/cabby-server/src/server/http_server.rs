@@ -66,9 +66,16 @@ use cabby_core::logger::{Attr, Level, LogValue};
 
 use super::SslConfig;
 
-/// Upstream `ReadHeaderTimeout`; also bounds TLS handshakes and, in the SSE
-/// endpoint, reading a POST body.
+/// Upstream `ReadHeaderTimeout`; also bounds TLS handshakes and, through
+/// [`BODY_READ_TIMEOUT`], reading a request body.
 pub(crate) const READ_HEADER_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a handler's read of a request body may take, from when the read
+/// starts: as long as the server gives a request head (D-097, D-119).
+pub const BODY_READ_TIMEOUT: Duration = READ_HEADER_TIMEOUT;
+
+/// Go's text for a read past its deadline (`os.ErrDeadlineExceeded`).
+const DEADLINE_EXCEEDED: &str = "i/o timeout";
 
 /// net/http reads at most `DefaultMaxHeaderBytes` (1 MiB) plus 4096 bytes of
 /// slack for a request line and its headers.
@@ -173,6 +180,15 @@ pub async fn read_body(body: Incoming, limit: Option<u64>) -> Result<Bytes, Body
             }
         }
     }
+}
+
+/// [`read_body`] within `timeout`: a body that has not arrived when it passes
+/// fails as a read past its deadline fails in Go,
+/// `BodyError::Read("i/o timeout")` (D-097, D-119).
+pub async fn read_body_within(body: Incoming, limit: Option<u64>, timeout: Duration) -> Result<Bytes, BodyError> {
+    tokio::time::timeout(timeout, read_body(body, limit))
+        .await
+        .unwrap_or_else(|_| Err(BodyError::Read(DEADLINE_EXCEEDED.to_owned())))
 }
 
 /// A server failure (bind, TLS configuration).

@@ -2,8 +2,9 @@
 //! (API, Prometheus metrics) on an [`HttpServer`](super::HttpServer).
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use super::{BodyError, Handler, Request, full, read_body, status_response};
+use super::{BODY_READ_TIMEOUT, BodyError, Handler, Request, full, read_body_within, status_response};
 use crate::{api, metrics};
 
 /// The Prometheus endpoint (mount it at `metrics.http_path` when the metrics
@@ -24,7 +25,14 @@ pub fn metrics_handler(metrics: Arc<metrics::Metrics>) -> impl Handler {
 /// routing, method and authorization checks come first, and only a publish
 /// request that passes them has its body read: at most `max_body_size` bytes
 /// (0: unlimited), counted while reading, and a larger body is answered 413.
+/// The read must end within [`BODY_READ_TIMEOUT`]; a later body is answered as
+/// a failed read (D-119).
 pub fn api_handler(server: Arc<api::Server>, max_body_size: i64) -> impl Handler {
+    api_handler_within(server, max_body_size, BODY_READ_TIMEOUT)
+}
+
+/// [`api_handler`] with the time a body read may take (shorter in tests).
+pub(crate) fn api_handler_within(server: Arc<api::Server>, max_body_size: i64, body_timeout: Duration) -> impl Handler {
     let limit = u64::try_from(max_body_size).ok().filter(|m| *m > 0);
     move |req: Request| {
         let server = Arc::clone(&server);
@@ -46,7 +54,7 @@ pub fn api_handler(server: Arc<api::Server>, max_body_size: i64) -> impl Handler
             let mut failed_read = false;
             let resp = match server.check(&request) {
                 api::Check::Done(resp) => resp,
-                api::Check::ReadBody(resp) => match read_body(body, limit).await {
+                api::Check::ReadBody(resp) => match read_body_within(body, limit, body_timeout).await {
                     Ok(body) => server.finish_publish(resp, api::PublishBody::Read(&body)),
                     Err(BodyError::TooLarge(_)) => server.finish_publish(resp, api::PublishBody::TooLarge),
                     Err(BodyError::Read(e)) => {

@@ -8,6 +8,17 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
+## [Unreleased]
+
+### Fixed
+
+- HTTP broadcasts (`--broadcast_adapter=http`), the API (`POST <api>/publish`) and the Pusher
+  REST API (`POST .../events`, `.../batch_events`): a request body must arrive within 5 s of
+  the request's checks, as an SSE POST body must since 0.4.2; a later or stalled body is
+  answered `422` (`failed to read request body`, the API with `error="i/o timeout"`) and the
+  connection closes. Before, reading it had no deadline, so a body that stopped arriving held
+  the request until the client closed the connection (D-119).
+
 ## [0.5.1] - 2026-11-27
 
 Cabby 0.5.1 makes stopping the server dependable: a second Ctrl-C stops it at once, a shutdown
