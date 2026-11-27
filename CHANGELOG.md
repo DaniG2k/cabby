@@ -28,6 +28,11 @@ Differences from the AnyCable Go server are listed by ID in
   is answered `400`. Before, every such stream read the presence of the stream named U+FFFD
   (D-121). Other query parameters (`pi`, `ptp`, `sid`, `history_since`, `offset`, `cursor`, …)
   are read as before; D-122 records how they differ from AnyCable.
+- StatsD (`--statsd_host`): metrics queued just before shutdown are sent before the process
+  exits, as AnyCable's StatsD client flushes them on close. Before, stopping the writer did not
+  wait for them, so they could be lost when the process ended. The wait is at most 1 s, so a
+  StatsD server that stops reading cannot hold the shutdown; a writer that is not connected
+  drops them at once, as before (D-123).
 
 ## [0.5.1] - 2026-11-27
 
