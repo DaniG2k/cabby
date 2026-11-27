@@ -151,3 +151,45 @@ fn test_streamer_acks_claims() {
     // so the second one must have picked it up
     assert_eq!("2", payload(2));
 }
+
+/// Entries added to `stream` for `GROUP` before any streamer runs (the group
+/// is created at `$` first), with payloads `"0"`, `"1"`, ...
+fn backlog(scope: &RedisScope, stream: &str, entries: usize) {
+    scope.command(&["XGROUP", "CREATE", stream, GROUP, "$", "MKSTREAM"]).expect("XGROUP CREATE");
+    for i in 0..entries {
+        scope.xadd(stream, "payload", &i.to_string()).expect("XADD");
+    }
+}
+
+/// `XPENDING stream GROUP`: the number of entries delivered and not acknowledged.
+fn pending(scope: &RedisScope, stream: &str) -> i64 {
+    let summary = scope.command(&["XPENDING", stream, GROUP]).expect("XPENDING");
+    summary.items().first().and_then(|n| n.as_int()).unwrap_or(-1)
+}
+
+/// regression-for: redis/streamer_test.go#TestStreamerAcksClaims
+/// note: Deviation D-109: a backlog is read 1000 entries at a time. The handler closes the client on the first entry, so the streamer stops after its first read and the pending list holds what that read took (upstream: the whole backlog).
+#[test]
+fn deviation_d109_a_backlog_is_read_in_batches() {
+    const BACKLOG: usize = 2500;
+    let scope = services::redis().scope("streamer");
+    let stream = scope.name("__test__");
+    let mut rconfig = config_for(scope.url());
+    rconfig.max_reconnect_attempts = 0;
+    backlog(&scope, &stream, BACKLOG);
+
+    let received = StreamCollector::new();
+    let streamer = Streamer::new(&stream, GROUP, &rconfig, &received, 100);
+    received.close_client_on_payload(&streamer, "0");
+    streamer.start().expect("Start");
+    let _guard = ShutdownGuard(&streamer);
+
+    let first = received.drain(1, DRAIN);
+    assert_eq!(1, first.len(), "the backlog was not read");
+    let taken = pending(&scope, &stream);
+    // The rest of what the first read took (Go's handler keeps 10 at a time).
+    let rest = received.drain(BACKLOG, Duration::from_millis(500));
+
+    assert_eq!(1000, taken, "entries the first read took");
+    assert_eq!(999, rest.len(), "entries handled after the first");
+}

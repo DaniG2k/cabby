@@ -36,6 +36,15 @@ Differences from the AnyCable Go server are listed by ID in
   an empty name and failed to connect. An empty name now stops startup with `no Redis Sentinel
   master name: give it as the host of --redis_url (redis://<name>)` (D-116).
 
+### Fixed
+
+- Redis Streams broadcasting (`--broadcast_adapter=redisx`): a read takes at most 1000 entries.
+  Before, after the servers were stopped while broadcasts were added, the first server to read
+  again took the whole backlog in one reply, and the other servers claimed its entries that had
+  waited longer than the read block time and broadcast them too, so some broadcasts reached
+  clients twice. A backlog is now shared by the servers that read it, 1000 entries at a time,
+  so entries are no longer claimed while their server works through a large reply (D-109).
+
 ## [0.4.2] - 2026-11-27
 
 Cabby 0.4.2 fixes request handling in the SSE and Durable Streams endpoints, keeps metrics

@@ -58,3 +58,7 @@ builds contain neither.
 - **Redis silently drops a subscription** ([AnyCable issue 275](https://github.com/anycable/anycable/issues/275)):
   the Go server stops delivering broadcasts until it is restarted. Cabby resubscribes within about
   1 s, or notices a half-open connection within about 10 s through a heartbeat.
+- **Redis Streams broadcasting** (`--broadcast_adapter=redisx`): a read takes at most 1000
+  entries, so after an outage the backlog is shared by the servers that read it, and entries are
+  not broadcast a second time by servers that claim them while the first works through a large
+  reply (D-109).

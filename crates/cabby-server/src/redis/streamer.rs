@@ -32,6 +32,13 @@ const CLIENT_CLOSED: &str = "rueidis client is closing or unable to connect redi
 /// How long `shutdown` waits for the reader beyond one blocking read.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
+/// Most entries one `XREADGROUP` takes (`COUNT`). Upstream passes no `COUNT`,
+/// so after an outage one reply carries the whole backlog, which waits in this
+/// consumer's pending list, where other consumers claim entries idle longer
+/// than `block_ms` and handle them too (D-109). 1000 entries take about 0.2 s
+/// on a local Redis; a read per 1000 adds 0.1% to the per-entry round trips.
+const READ_COUNT: usize = 1000;
+
 /// The streamer's current Redis client (upstream `Streamer.client`).
 struct Client {
     conn: Commands,
@@ -294,18 +301,23 @@ impl Inner {
     }
 
     async fn read(&self, client: &Client) -> RedisResult<Vec<Entry>> {
-        let cmd = redis::cmd("XREADGROUP")
+        let reply = client.query(&self.read_command()).await?;
+        Ok(stream_entries(&reply, &self.stream))
+    }
+
+    fn read_command(&self) -> Cmd {
+        redis::cmd("XREADGROUP")
             .arg("GROUP")
             .arg(&self.group)
             .arg(&self.consumer)
+            .arg("COUNT")
+            .arg(READ_COUNT)
             .arg("BLOCK")
             .arg(self.block_ms)
             .arg("STREAMS")
             .arg(&self.stream)
             .arg(">")
-            .to_owned();
-        let reply = client.query(&cmd).await?;
-        Ok(stream_entries(&reply, &self.stream))
+            .to_owned()
     }
 
     async fn autoclaim(&self, client: &Client) -> RedisResult<Vec<Entry>> {
@@ -485,6 +497,29 @@ mod tests {
     fn skips_deleted_entries() {
         let list = Value::Array(vec![Value::Nil, Value::Array(vec![bulk("2-0"), Value::Nil])]);
         assert!(entries(&list).is_empty());
+    }
+
+    fn args(cmd: &Cmd) -> Vec<String> {
+        cmd.args_iter()
+            .map(|a| match a {
+                redis::Arg::Simple(b) => String::from_utf8_lossy(b).into_owned(),
+                _ => "<cursor>".to_owned(),
+            })
+            .collect()
+    }
+
+    fn streamer() -> Streamer {
+        let options = StreamerOptions { block_ms: Some(500), consumer_name: Some("c1".to_owned()), handler: None };
+        Streamer::new("s", "g", &RedisConfig::new(), options)
+    }
+
+    /// Pins D-109: a read takes at most 1000 entries.
+    #[test]
+    fn deviation_d109_reads_are_bounded() {
+        assert_eq!(
+            ["XREADGROUP", "GROUP", "g", "c1", "COUNT", "1000", "BLOCK", "500", "STREAMS", "s", ">"],
+            args(&streamer().inner.read_command()).as_slice()
+        );
     }
 
     #[test]

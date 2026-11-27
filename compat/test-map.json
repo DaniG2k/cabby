@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 212
+      "cases": 213
     },
     "translation": {
       "reviewed": 923
@@ -28142,6 +28142,15 @@
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "redis::streamer_test::deviation_d109_a_backlog_is_read_in_batches",
+      "relation": "regression",
+      "links": [
+        "26a1a703:redis/streamer_test.go#TestStreamerAcksClaims"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "rpc::grpc_test::test_grpc_integration::timeout_is_deadline_exceeded",
