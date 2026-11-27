@@ -8,24 +8,14 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
-## [Unreleased]
+## [0.4.2] - 2026-11-27
+
+Cabby 0.4.2 fixes request handling in the SSE and Durable Streams endpoints, keeps metrics
+writers off the server's runtime threads, and makes `--print-config` output load back. It stays
+compatible with AnyCable server 1.6.21.
 
 ### Fixed
 
-- `--print-config`: the `[rpc]` section loads back to the settings it was printed from. A CA set
-  with `--rpc_tls_root_ca` (a path or PEM contents) is written as `tls_root_ca_path = "…"`
-  instead of a commented-out placeholder, so loading the printed file keeps the CA and TLS on
-  RPC connections. `--rpc_tls_verify=false`, a `--rpc_command_timeout` of 0 (no limit) and an
-  empty `proxy_headers` are written as set too, instead of the commented-out defaults (D-092).
-- Error texts and logs no longer show part of a password in URLs where a `/`, `?` or `#` in
-  the password follows a part that reads as a port (`redis://user:4821#rest@host`), or where a
-  comma in the password splits a URL list (`--redis_url`, `--redis_sentinels`, `--nats_servers`,
-  `--rpc_host`). Such URLs are shown as invalid URLs are (D-080), by their scheme only, or as
-  `***` in the Redis start records; a NATS server written without a scheme and with credentials
-  is logged without them. Connections are unchanged (D-093).
-- Postgres: a password with a `/` and an `@` (`postgres://user:pa/ss@word@db/app`) is read up
-  to the `@` before the host. Before, part of it was read as the host, and the startup records
-  and connection errors showed it.
 - SSE (`--sse`): a request is answered from its request line and headers without waiting for
   its body: a preflight, a method that is not served, a failed sign-in (`401`), a POST body
   announced over 64 KiB (`400`), and a GET, whose body is never read. Before, the endpoint read
@@ -66,6 +56,11 @@ Differences from the AnyCable Go server are listed by ID in
   server: when its path is also another route's (health, WebSocket, SSE, Durable Streams, API),
   that route answers there, as in Go. Before, the metrics endpoint replaced it, because it was
   mounted after the other routes; it is now mounted first.
+- `--print-config`: the `[rpc]` section loads back to the settings it was printed from. A CA set
+  with `--rpc_tls_root_ca` (a path or PEM contents) is written as `tls_root_ca_path = "…"`
+  instead of a commented-out placeholder, so loading the printed file keeps the CA and TLS on
+  RPC connections. `--rpc_tls_verify=false`, a `--rpc_command_timeout` of 0 (no limit) and an
+  empty `proxy_headers` are written as set too, instead of the commented-out defaults (D-092).
 - `--print-config`: string values that contain `"`, `\`, a newline or another control character
   are escaped in every section, `[rpc]` included, so the printed file loads back to the same
   settings. Before, such a value made the file fail to load, or load as another value. The same
@@ -73,6 +68,15 @@ Differences from the AnyCable Go server are listed by ID in
   loaded as a nested table before). Characters TOML has no short escape for are written `\u00XX`
   (Go writes `\a`, `\v` and `\x7f`, which TOML does not define). Values with nothing to escape
   print as before, as AnyCable prints them (D-102).
+- Error texts and logs no longer show part of a password in URLs where a `/`, `?` or `#` in
+  the password follows a part that reads as a port (`redis://user:4821#rest@host`), or where a
+  comma in the password splits a URL list (`--redis_url`, `--redis_sentinels`, `--nats_servers`,
+  `--rpc_host`). Such URLs are shown as invalid URLs are (D-080), by their scheme only, or as
+  `***` in the Redis start records; a NATS server written without a scheme and with credentials
+  is logged without them. Connections are unchanged (D-093).
+- Postgres: a password with a `/` and an `@` (`postgres://user:pa/ss@word@db/app`) is read up
+  to the `@` before the host. Before, part of it was read as the host, and the startup records
+  and connection errors showed it.
 - Error texts that quote a value (for example invalid flag and environment variable values)
   escape the characters Go escapes: separators such as U+00A0, format characters such as
   U+200B, private-use characters and noncharacters. Before, only control characters were
