@@ -207,3 +207,31 @@ The broker uses the same connection code as Redis pub/sub and broadcasting:
 Each stream lives on one cluster node, and its epoch follows that node's instance, so a
 restart or failover of one node gives new epochs to the streams it holds and leaves the others
 alone.
+
+### Sentinel and TLS
+
+The scheme of the first `--redis_sentinels` URL decides TLS for the master the Sentinels name:
+`rediss://` (or `valkeys://`) means TLS, `redis://` or no scheme means plain. The connections to
+the Sentinel nodes are plain, as in AnyCable. The scheme of `--redis_url` is not read.
+
+For Sentinel nodes that accept TLS only, set `--redis_sentinel_tls` (`CABBY_REDIS_SENTINEL_TLS`,
+`sentinel_tls` in `[redis]`; Cabby only, deviation D-115). The Sentinel connections then use the
+master's `--redis_tls_*` settings: verification, CA and client certificate.
+
+| First Sentinel URL | `--redis_sentinel_tls` | Master | Sentinel nodes |
+|---|---|---|---|
+| `redis://` | off (default) | plain | plain |
+| `redis://` | on | plain | TLS |
+| `rediss://` | off (default) | TLS | plain |
+| `rediss://` | on | TLS | TLS |
+
+Setting a CA (`--redis_tls_ca_cert_path`) does not turn certificate verification on: until
+`--redis_tls_verify` is set, server certificates are not checked, as in AnyCable.
+
+**Upgrading from Cabby 0.4.2 or earlier:** with `rediss://` in `--redis_sentinels`, those versions
+used TLS for the Sentinel nodes too. If yours accept TLS only, set `--redis_sentinel_tls`;
+without it, connecting to them fails. Cabby says so at startup, at info level:
+
+```text
+INF Redis Sentinel connections do not use TLS; rediss:// in --redis_sentinels applies to the master only (set --redis_sentinel_tls=true to use TLS with the Sentinel nodes)
+```

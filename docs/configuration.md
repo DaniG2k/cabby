@@ -57,6 +57,7 @@ means `false`.
 | `--strict-config` | `CABBY_STRICT_CONFIG`, `ANYCABLE_STRICT_CONFIG` |
 | `--sqlite_path` | `CABBY_SQLITE_PATH` only |
 | `--redis_broker_key_prefix`, `--redis_broker_timeout` | `CABBY_REDIS_BROKER_KEY_PREFIX`, `CABBY_REDIS_BROKER_TIMEOUT` only |
+| `--redis_sentinel_tls` | `CABBY_REDIS_SENTINEL_TLS` only |
 | `--postgres_url`, `--postgres_*` | `CABBY_POSTGRES_URL`, `CABBY_POSTGRES_*` only |
 
 Two settings aren't flags and follow the same order: `CABBY_FILTER_LOGS` / `ANYCABLE_FILTER_LOGS`
@@ -69,7 +70,9 @@ Settings the AnyCable server doesn't have read only their `CABBY_*` name. Today 
 `--sqlite_path` (`CABBY_SQLITE_PATH`, the SQLite broker, deviation D-065): `ANYCABLE_SQLITE_PATH`
 does nothing. The same goes for the Redis broker's `--redis_broker_key_prefix` and
 `--redis_broker_timeout` (`CABBY_REDIS_BROKER_KEY_PREFIX`, `CABBY_REDIS_BROKER_TIMEOUT`,
-`[redis_broker]`, deviation D-069; see [`redis-broker.md`](redis-broker.md)).
+`[redis_broker]`, deviation D-069; see [`redis-broker.md`](redis-broker.md)), and for
+`--redis_sentinel_tls` (`CABBY_REDIS_SENTINEL_TLS`, `sentinel_tls` in `[redis]`, deviation D-115;
+see [Sentinel and TLS](redis-broker.md#sentinel-and-tls)).
 So do the `--postgres_*` settings of the PostgreSQL adapters (`CABBY_POSTGRES_URL` and
 the others, the `[postgres]` section, deviations D-070 and D-071; see
 [`postgres.md`](postgres.md)). In a configuration file, their keys work under any of the four file names.

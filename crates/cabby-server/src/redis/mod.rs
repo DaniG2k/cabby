@@ -13,6 +13,8 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 pub(crate) mod connect;
 pub(crate) mod publisher;
+#[cfg(test)]
+mod sentinel_tests;
 mod streamer;
 pub(crate) mod subscription;
 pub(crate) mod url;
@@ -52,6 +54,10 @@ pub struct RedisConfig {
     pub tls_ca_cert_path: String,
     pub tls_client_cert_path: String,
     pub tls_client_key_path: String,
+    /// Use TLS for the connections to the Sentinel nodes too, with the
+    /// `tls_*` settings (Cabby only, D-115). The Sentinels' URL scheme
+    /// decides TLS for the master only, as upstream.
+    pub sentinel_tls: bool,
     pub max_reconnect_attempts: i64,
     pub disable_cache: bool,
     hosts: Vec<String>,
@@ -102,6 +108,7 @@ cabby_core::toml_section!(RedisConfig, "redis.RedisConfig" {
     "tls_ca_cert_path" => tls_ca_cert_path,
     "tls_client_cert_path" => tls_client_cert_path,
     "tls_client_key_path" => tls_client_key_path,
+    "sentinel_tls" => sentinel_tls,
     "max_reconnect_attempts" => max_reconnect_attempts,
     "disable_cache" => disable_cache,
 });
@@ -128,9 +135,13 @@ impl RedisConfig {
         !self.sentinels.is_empty() || !self.sentinel_master.is_empty()
     }
 
-    /// Whether connections use TLS without verifying the server's certificate.
+    /// Whether connections (to Redis, or to the Sentinel nodes with
+    /// [`Self::sentinel_tls`]) use TLS without verifying the server's certificate.
     pub fn tls_verification_skipped(&self) -> bool {
-        !self.tls_verify && self.tls_used().unwrap_or_else(|| self.tls_requested())
+        let used = self.connect_spec().ok().map(|spec| {
+            spec.tls.is_some() || matches!(spec.topology, connect::Topology::Sentinel { tls: Some(_), .. })
+        });
+        !self.tls_verify && used.unwrap_or_else(|| self.tls_requested())
     }
 
     /// Whether some URL asks for TLS but connections to Redis do not use it: the
@@ -139,7 +150,17 @@ impl RedisConfig {
         self.tls_requested() && self.tls_used() == Some(false)
     }
 
-    /// Whether connections to Redis use TLS; `None` when the settings are invalid.
+    /// Whether connections to Redis (the master, with sentinels) use TLS while
+    /// the connections to the Sentinel nodes do not, because
+    /// [`Self::sentinel_tls`] is off (D-115). False when the settings are invalid.
+    pub fn sentinel_tls_off_for_tls_master(&self) -> bool {
+        self.connect_spec().is_ok_and(|spec| {
+            spec.tls.is_some() && matches!(spec.topology, connect::Topology::Sentinel { tls: None, .. })
+        })
+    }
+
+    /// Whether connections to Redis (the master, with sentinels) use TLS;
+    /// `None` when the settings are invalid.
     fn tls_used(&self) -> Option<bool> {
         self.connect_spec().ok().map(|spec| spec.tls.is_some())
     }
@@ -206,35 +227,19 @@ impl RedisConfig {
         options.keep_alive = Duration::from_secs(self.keepalive_ping_interval.max(0) as u64);
         options.shuffle_init = self.is_cluster();
 
-        let mut tls_spec = None;
-        if let Some(tls) = options.tls.as_mut() {
-            tls.insecure_skip_verify = !self.tls_verify;
-            let mut spec = connect::TlsSpec { insecure: !self.tls_verify, ..Default::default() };
-
-            // Load CA certificate for server verification if configured
-            if !self.tls_ca_cert_path.is_empty() {
-                let pem = std::fs::read(&self.tls_ca_cert_path).map_err(|e| {
-                    RedisError(format!(
-                        "failed to read Redis CA certificate: {}",
-                        go_path_error("open", &self.tls_ca_cert_path, &e)
-                    ))
-                })?;
-                if !CertificateDer::pem_slice_iter(&pem).any(|c| c.is_ok()) {
-                    return Err(RedisError("failed to parse Redis CA certificate".to_owned()));
-                }
-                tls.root_cas = true;
-                spec.root_pem = Some(pem);
-            }
-
-            // Load client certificate for mutual TLS if configured
-            if self.tls_client_cert_available() {
-                let pair = load_key_pair(&self.tls_client_cert_path, &self.tls_client_key_path)
-                    .map_err(|e| RedisError(format!("failed to load Redis client certificate: {e}")))?;
-                tls.certificates = 1;
-                spec.client = Some(pair);
-            }
-            tls_spec = Some(spec);
+        // TLS to Redis (the master, with sentinels) follows the first URL's
+        // scheme, as upstream; TLS to the Sentinel nodes is Cabby's
+        // `sentinel_tls` (D-115: upstream's Sentinel connections are plain).
+        let sentinel = self.is_sentinel();
+        let sentinel_tls = sentinel && self.sentinel_tls;
+        let tls_spec = if options.tls.is_some() || sentinel_tls { Some(self.tls_spec()?) } else { None };
+        if let (Some(tls), Some(spec)) = (options.tls.as_mut(), tls_spec.as_ref()) {
+            tls.insecure_skip_verify = spec.insecure;
+            tls.root_cas = spec.root_pem.is_some();
+            tls.certificates = usize::from(spec.client.is_some());
         }
+        let master_tls = if options.tls.is_some() { tls_spec.clone() } else { None };
+        let sentinel_tls = if sentinel_tls { tls_spec } else { None };
 
         let addrs = options
             .init_address
@@ -243,12 +248,13 @@ impl RedisConfig {
             .map(|(i, a)| connect::Addr::parse_shown(a, parsed.unix, !self.host_hidden(i)))
             .collect::<Result<Vec<_>, _>>()
             .map_err(RedisError)?;
-        let topology = if self.is_sentinel() {
+        let topology = if sentinel {
             connect::Topology::Sentinel {
                 sentinels: addrs,
                 master: options.sentinel.master_set.clone(),
                 username: options.sentinel.username.clone(),
                 password: options.sentinel.password.clone(),
+                tls: sentinel_tls,
             }
         } else if addrs.len() > 1 {
             connect::Topology::Cluster(addrs)
@@ -276,11 +282,39 @@ impl RedisConfig {
             username: options.username.clone(),
             password: options.password.clone(),
             db: options.select_db,
-            tls: tls_spec,
+            tls: master_tls,
             dial_timeout: (!options.dial_timeout.is_zero()).then_some(options.dial_timeout),
             client_name: parsed.client_name,
         };
         Ok((options, spec))
+    }
+
+    /// The TLS settings of connections that use TLS: verification, the CA and
+    /// the client certificate (upstream fills `TLSConfig` with them).
+    fn tls_spec(&self) -> Result<connect::TlsSpec, RedisError> {
+        let mut spec = connect::TlsSpec { insecure: !self.tls_verify, ..Default::default() };
+
+        // Load CA certificate for server verification if configured
+        if !self.tls_ca_cert_path.is_empty() {
+            let pem = std::fs::read(&self.tls_ca_cert_path).map_err(|e| {
+                RedisError(format!(
+                    "failed to read Redis CA certificate: {}",
+                    go_path_error("open", &self.tls_ca_cert_path, &e)
+                ))
+            })?;
+            if !CertificateDer::pem_slice_iter(&pem).any(|c| c.is_ok()) {
+                return Err(RedisError("failed to parse Redis CA certificate".to_owned()));
+            }
+            spec.root_pem = Some(pem);
+        }
+
+        // Load client certificate for mutual TLS if configured
+        if self.tls_client_cert_available() {
+            let pair = load_key_pair(&self.tls_client_cert_path, &self.tls_client_key_path)
+                .map_err(|e| RedisError(format!("failed to load Redis client certificate: {e}")))?;
+            spec.client = Some(pair);
+        }
+        Ok(spec)
     }
 
     /// Upstream `parseSentinels`.
@@ -334,6 +368,8 @@ impl RedisConfig {
         optional(&mut out, "tls_client_cert_path", &self.tls_client_cert_path, "/path/to/cert.pem");
         out.push_str("# Path to client TLS private key file for mutual TLS\n");
         optional(&mut out, "tls_client_key_path", &self.tls_client_key_path, "/path/to/key.pem");
+        out.push_str("# Use TLS for the Sentinel connections too, with the TLS settings above (Cabby only)\n");
+        out.push_str(if self.sentinel_tls { "sentinel_tls = true\n" } else { "# sentinel_tls = true\n" });
         out.push_str("# Max number of reconnect attempts\n");
         out.push_str(&format!("max_reconnect_attempts = {}\n", self.max_reconnect_attempts));
         out.push_str("# Disable client-side caching\n");

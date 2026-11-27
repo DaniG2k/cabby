@@ -65,7 +65,7 @@ const NON_FLAG_ENV: &[&str] = &["FILTER_LOGS", "FLY_RPC_APP_NAME"];
 
 /// The last line of `--help` (D-061). Cabby-only settings (D-065) have no
 /// `ANYCABLE_*` name; a test checks that each one is named here.
-const ENV_FOOTER: &str = "Every CABBY_* variable can also be set as ANYCABLE_* (CABBY_* takes precedence), except the Cabby-only CABBY_SQLITE_PATH, CABBY_REDIS_BROKER_KEY_PREFIX, CABBY_REDIS_BROKER_TIMEOUT and CABBY_POSTGRES_*.";
+const ENV_FOOTER: &str = "Every CABBY_* variable can also be set as ANYCABLE_* (CABBY_* takes precedence), except the Cabby-only CABBY_SQLITE_PATH, CABBY_REDIS_BROKER_KEY_PREFIX, CABBY_REDIS_BROKER_TIMEOUT, CABBY_REDIS_SENTINEL_TLS and CABBY_POSTGRES_*.";
 
 const SERVER: &str = "SERVER:";
 const SSL: &str = "SSL:";
@@ -984,6 +984,16 @@ fn redis_flags(c: &Config) -> Vec<Flag> {
                 "Path to the client TLS private key file for mutual TLS with Redis",
                 |s, v| s.c.redis.tls_client_key_path = v,
             ),
+            // Cabby only (D-115): no `ANYCABLE_*` alias.
+            with_env(
+                bool_flag(
+                    "redis_sentinel_tls",
+                    c.redis.sentinel_tls,
+                    "Use TLS for the connections to the Redis Sentinel nodes too (Cabby only)",
+                    |s, v| s.c.redis.sentinel_tls = v,
+                ),
+                &["CABBY_REDIS_SENTINEL_TLS"],
+            ),
             hidden(bool_flag("redis_disable_cache", c.redis.disable_cache, "Disable client-side caching", |s, v| {
                 s.c.redis.disable_cache = v
             })),
@@ -1859,6 +1869,42 @@ mod tests {
         assert_eq!("__cabby__", res.unwrap().0.redis_broker.key_prefix, "no ANYCABLE_* alias");
     }
 
+    /// Pins D-115: `--redis_sentinel_tls` is Cabby-only (`CABBY_REDIS_SENTINEL_TLS`,
+    /// no `ANYCABLE_*` alias), off by default, and reaches every adapter's copy
+    /// of the Redis settings.
+    #[test]
+    fn deviation_d115_redis_sentinel_tls_flag_and_cabby_env() {
+        let sentinel_tls = |c: &Config| {
+            [
+                Some(&c.redis),
+                c.redis_pubsub.redis.as_ref(),
+                c.redis_broadcast.redis.as_ref(),
+                c.legacy_redis_broadcast.redis.as_ref(),
+            ]
+            .map(|r| r.expect("Redis settings").sentinel_tls)
+        };
+        let (res, _) = run(&[], &[]);
+        assert_eq!([false; 4], sentinel_tls(&res.unwrap().0));
+
+        let (res, _) = run(&["--redis_sentinels=rediss://s1:26379", "--redis_sentinel_tls"], &[]);
+        let c = res.unwrap().0;
+        assert_eq!([true; 4], sentinel_tls(&c));
+        let spec = c.redis_pubsub.redis.as_ref().unwrap().connect_spec().unwrap();
+        assert!(matches!(spec.topology, crate::redis::connect::Topology::Sentinel { tls: Some(_), .. }));
+
+        let (res, _) = run(&[], &[("CABBY_REDIS_SENTINEL_TLS", "true")]);
+        assert_eq!([true; 4], sentinel_tls(&res.unwrap().0));
+
+        let (res, _) = run(&["--redis_sentinel_tls=false"], &[("CABBY_REDIS_SENTINEL_TLS", "true")]);
+        assert_eq!([false; 4], sentinel_tls(&res.unwrap().0), "the command line wins");
+
+        let (res, _) = run(&[], &[("ANYCABLE_REDIS_SENTINEL_TLS", "true")]);
+        assert_eq!([false; 4], sentinel_tls(&res.unwrap().0), "no ANYCABLE_* alias");
+
+        let (_, out) = run(&["--help"], &[]);
+        assert!(out.contains("--redis_sentinel_tls") && out.contains("[$CABBY_REDIS_SENTINEL_TLS]"), "{out}");
+    }
+
     #[test]
     fn redis_broker_flags_show_in_help() {
         let (_, out) = run(&["--help"], &[]);
@@ -1896,7 +1942,7 @@ mod tests {
     }
 
     /// Pins D-061: the help footer names every Cabby-only variable, the flags
-    /// that have no `ANYCABLE_*` name (D-065, D-069).
+    /// that have no `ANYCABLE_*` name (D-065, D-069, D-115).
     #[test]
     fn deviation_d061_cabby_only_variables_are_named_in_help() {
         let cabby_only: Vec<String> = definitions(&Config::new())
@@ -1918,6 +1964,7 @@ mod tests {
         let expected: Vec<&str> = ["CABBY_SQLITE_PATH", "CABBY_REDIS_BROKER_KEY_PREFIX", "CABBY_REDIS_BROKER_TIMEOUT"]
             .into_iter()
             .chain(postgres)
+            .chain(["CABBY_REDIS_SENTINEL_TLS"])
             .collect();
         assert_eq!(cabby_only, expected);
         for v in &cabby_only {

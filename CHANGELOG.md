@@ -8,6 +8,27 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
+## [Unreleased]
+
+### Added
+
+- `--redis_sentinel_tls` (`CABBY_REDIS_SENTINEL_TLS`, `sentinel_tls` in `[redis]`; Cabby only):
+  TLS for the connections to the Redis Sentinel nodes, with the `--redis_tls_*` verification, CA
+  and client certificate of the master. Off by default (D-115).
+
+### Changed
+
+- **Breaking for Sentinel nodes that accept TLS only:** with `--redis_sentinels`, the scheme of
+  the first Sentinel URL (`rediss://`) turns TLS on for the master only, and the connections to
+  the Sentinel nodes are plain, as in AnyCable. Before, Cabby used TLS for both, so a
+  configuration with plain Sentinel nodes and a TLS master failed to connect. If you use
+  `rediss://` in `--redis_sentinels` and your Sentinel nodes accept TLS only, set
+  `--redis_sentinel_tls`. While the master uses TLS and the Sentinel nodes do not, Cabby logs
+  `Redis Sentinel connections do not use TLS; rediss:// in --redis_sentinels applies to the
+  master only (set --redis_sentinel_tls=true to use TLS with the Sentinel nodes)` at startup, at
+  info level. The implicit form (`--redis_url=rediss://sentinel:26379?master_set=mymaster`) follows the same rule
+  (D-115).
+
 ## [0.4.2] - 2026-11-27
 
 Cabby 0.4.2 fixes request handling in the SSE and Durable Streams endpoints, keeps metrics

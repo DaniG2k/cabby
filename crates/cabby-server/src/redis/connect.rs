@@ -156,6 +156,8 @@ pub(crate) enum Topology {
         master: String,
         username: String,
         password: String,
+        /// TLS to the Sentinel nodes (`None`: plain, as upstream; D-115).
+        tls: Option<TlsSpec>,
     },
 }
 
@@ -175,6 +177,37 @@ pub(crate) struct ConnectSpec {
     pub tls: Option<TlsSpec>,
     pub dial_timeout: Option<Duration>,
     pub client_name: String,
+}
+
+impl TlsSpec {
+    fn mode(&self) -> TlsMode {
+        if self.insecure { TlsMode::Insecure } else { TlsMode::Secure }
+    }
+
+    fn certificates(&self) -> Option<TlsCertificates> {
+        if self.root_pem.is_none() && self.client.is_none() {
+            return None;
+        }
+        Some(TlsCertificates {
+            client_tls: self
+                .client
+                .as_ref()
+                .map(|(cert, key)| ClientTlsConfig { client_cert: cert.clone(), client_key: key.clone() }),
+            root_cert: self.root_pem.clone(),
+        })
+    }
+}
+
+fn connection_addr(addr: &Addr, tls: Option<&TlsSpec>) -> ConnectionAddr {
+    match addr {
+        Addr::Unix(p) => ConnectionAddr::Unix(p.clone()),
+        Addr::Tcp(host, port) => match tls {
+            None => ConnectionAddr::Tcp(host.clone(), *port),
+            Some(t) => {
+                ConnectionAddr::TcpTls { host: host.clone(), port: *port, insecure: t.insecure, tls_params: None }
+            }
+        },
+    }
 }
 
 /// Commands connection: one node (single instance or sentinel master) or a cluster.
@@ -223,21 +256,11 @@ fn install_crypto_provider() {
 
 impl ConnectSpec {
     fn tls_mode(&self) -> Option<TlsMode> {
-        self.tls.as_ref().map(|t| if t.insecure { TlsMode::Insecure } else { TlsMode::Secure })
+        self.tls.as_ref().map(TlsSpec::mode)
     }
 
     fn certificates(&self) -> Option<TlsCertificates> {
-        let tls = self.tls.as_ref()?;
-        if tls.root_pem.is_none() && tls.client.is_none() {
-            return None;
-        }
-        Some(TlsCertificates {
-            client_tls: tls
-                .client
-                .as_ref()
-                .map(|(cert, key)| ClientTlsConfig { client_cert: cert.clone(), client_key: key.clone() }),
-            root_cert: tls.root_pem.clone(),
-        })
+        self.tls.as_ref()?.certificates()
     }
 
     fn redis_info(&self, protocol: ProtocolVersion) -> RedisConnectionInfo {
@@ -252,15 +275,7 @@ impl ConnectSpec {
     }
 
     fn connection_addr(&self, addr: &Addr) -> ConnectionAddr {
-        match addr {
-            Addr::Unix(p) => ConnectionAddr::Unix(p.clone()),
-            Addr::Tcp(host, port) => match &self.tls {
-                None => ConnectionAddr::Tcp(host.clone(), *port),
-                Some(t) => {
-                    ConnectionAddr::TcpTls { host: host.clone(), port: *port, insecure: t.insecure, tls_params: None }
-                }
-            },
-        }
+        connection_addr(addr, self.tls.as_ref())
     }
 
     /// A client for one node.
@@ -295,9 +310,9 @@ impl ConnectSpec {
                 }
                 Ok(clients)
             }
-            Topology::Sentinel { sentinels, master, username, password } => {
+            Topology::Sentinel { sentinels, master, username, password, tls } => {
                 install_crypto_provider();
-                let addrs: Vec<ConnectionAddr> = sentinels.iter().map(|a| self.connection_addr(a)).collect();
+                let addrs: Vec<ConnectionAddr> = sentinels.iter().map(|a| connection_addr(a, tls.as_ref())).collect();
                 let mut builder = SentinelClientBuilder::new(addrs, master, SentinelServerType::Master)?
                     .set_client_to_redis_db(self.db)
                     .set_client_to_redis_protocol(protocol);
@@ -314,12 +329,16 @@ impl ConnectSpec {
                     builder = builder.set_client_to_sentinel_password(password);
                 }
                 if let Some(mode) = self.tls_mode() {
-                    builder = builder.set_client_to_redis_tls_mode(mode).set_client_to_sentinel_tls_mode(mode);
+                    builder = builder.set_client_to_redis_tls_mode(mode);
                 }
                 if let Some(certs) = self.certificates() {
-                    builder = builder
-                        .set_client_to_redis_certificates(certs.clone())
-                        .set_client_to_sentinel_certificates(certs);
+                    builder = builder.set_client_to_redis_certificates(certs);
+                }
+                if let Some(tls) = tls {
+                    builder = builder.set_client_to_sentinel_tls_mode(tls.mode());
+                    if let Some(certs) = tls.certificates() {
+                        builder = builder.set_client_to_sentinel_certificates(certs);
+                    }
                 }
                 let mut sentinel = builder.build()?;
                 Ok(vec![sentinel.async_get_client().await?])

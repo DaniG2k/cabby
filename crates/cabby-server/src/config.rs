@@ -745,20 +745,51 @@ mod tests {
             std::fs::read_to_string(format!("{FIXTURES}/{name}")).unwrap_or_else(|e| panic!("{name}: {e}"))
         }
 
-        /// The default configuration prints what Cabby 0.4.1 printed.
+        /// The default configuration prints what Cabby 0.4.1 printed, plus the
+        /// `[redis]` `sentinel_tls` setting (D-115).
         #[test]
         fn the_default_configuration_prints_as_before() {
             assert_eq!(Config::new().to_toml(), fixture("default.expected.toml"));
         }
 
         /// A configuration with plain values in every string setting prints what
-        /// Cabby 0.4.1 printed.
+        /// Cabby 0.4.1 printed, plus the `[redis]` `sentinel_tls` setting (D-115).
         #[test]
         fn plain_values_print_as_before() {
             let mut c = Config::new();
             c.load_from_str(&fixture("plain_values.toml")).unwrap();
             assert!(c.unknown_config_keys.is_empty(), "{:?}", c.unknown_config_keys);
             assert_eq!(c.to_toml(), fixture("plain_values.expected.toml"));
+        }
+
+        /// Pins D-115: `[redis]` `sentinel_tls` prints commented out when off and
+        /// as set when on, and loads back over a default configuration; the
+        /// adapters' own Redis sections read it too.
+        #[test]
+        fn deviation_d115_sentinel_tls_loads_back() {
+            for value in [false, true] {
+                let mut c = Config::new();
+                c.redis.sentinel_tls = value;
+                let printed = c.to_toml();
+                let line = if value { "\nsentinel_tls = true\n" } else { "\n# sentinel_tls = true\n" };
+                assert!(printed.contains(line), "{printed}");
+                let mut back = Config::new();
+                back.load_from_str(&printed).unwrap();
+                assert!(back.unknown_config_keys.is_empty(), "{:?}", back.unknown_config_keys);
+                assert_eq!(c.redis, back.redis);
+            }
+
+            let mut c = Config::new();
+            c.load_from_str(
+                "[redis_pubsub.Redis]\nsentinel_tls = true\n\
+                 [redis_stream_broadcast.redis]\nsentinel_tls = true\n\
+                 [redis_pubsub_broadcast.redis]\nsentinel_tls = true\n",
+            )
+            .unwrap();
+            assert!(c.unknown_config_keys.is_empty(), "{:?}", c.unknown_config_keys);
+            let adapters = [&c.redis_pubsub.redis, &c.redis_broadcast.redis, &c.legacy_redis_broadcast.redis];
+            assert!(adapters.iter().all(|r| r.as_ref().is_some_and(|r| r.sentinel_tls)), "{adapters:?}");
+            assert!(!c.redis.sentinel_tls);
         }
 
         /// The sections of the configuration file and their fields (the loader's

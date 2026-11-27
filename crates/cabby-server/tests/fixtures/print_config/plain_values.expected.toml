@@ -251,6 +251,8 @@ tls_ca_cert_path = "/etc/ssl/redis-ca.pem"
 tls_client_cert_path = "/etc/ssl/redis-cert.pem"
 # Path to client TLS private key file for mutual TLS
 tls_client_key_path = "/etc/ssl/redis-key.pem"
+# Use TLS for the Sentinel connections too, with the TLS settings above (Cabby only)
+# sentinel_tls = true
 # Max number of reconnect attempts
 max_reconnect_attempts = 5
 # Disable client-side caching

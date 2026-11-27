@@ -342,6 +342,9 @@ impl Runner {
         if let Some(warning) = redis_tls_warning(&self.config) {
             crate::metrics::log(Level::Warn, warning, &[]);
         }
+        if let Some((level, note)) = redis_sentinel_tls_note(&self.config) {
+            crate::metrics::log(level, note, &[]);
+        }
 
         let node = self.build_node()?;
 
@@ -965,6 +968,22 @@ fn redis_tls_warning(c: &Config) -> Option<&'static str> {
     }
 }
 
+/// An info record when the master is reached over TLS (the Sentinels' scheme
+/// asks for it) and the Sentinel nodes are not, because `--redis_sentinel_tls`
+/// is off (D-115). Cabby 0.4.2 and earlier used TLS for both; AnyCable, for the
+/// master only. That is a valid configuration, so the record is not a warning.
+fn redis_sentinel_tls_note(c: &Config) -> Option<(Level, &'static str)> {
+    if !c.redis.sentinel_tls_off_for_tls_master() {
+        return None;
+    }
+    let note = if c.redis.sentinels.is_empty() {
+        "Redis Sentinel connections do not use TLS; rediss:// in --redis_url applies to the master only (set --redis_sentinel_tls=true to use TLS with the Sentinel nodes)"
+    } else {
+        "Redis Sentinel connections do not use TLS; rediss:// in --redis_sentinels applies to the master only (set --redis_sentinel_tls=true to use TLS with the Sentinel nodes)"
+    };
+    Some((Level::Info, note))
+}
+
 /// A warning when a Redis URL is configured (after presets) but no broadcast
 /// adapter reads from Redis: the release image defaults to HTTP-only
 /// broadcasts, so an AnyCable set-up that broadcasts through Redis would
@@ -1239,6 +1258,36 @@ mod tests {
         assert!(warning("REDISS://redis", "").contains("set --redis_tls_verify=true"));
         assert!(warning("rediss://master", "redis://sentinel").contains("first of --redis_sentinels"));
         assert!(warning("redis://a,rediss://b", "").contains("first URL of --redis_url"));
+    }
+
+    /// Pins D-115: a master over TLS with plain Sentinel connections is
+    /// reported once at startup, at info level, naming `--redis_sentinel_tls`.
+    #[test]
+    fn deviation_d115_master_only_tls_is_reported() {
+        let note = |url: &str, sentinels: &str, sentinel_tls: bool, verify: bool| {
+            let mut c = Config::new();
+            c.redis.url = url.to_owned();
+            c.redis.sentinels = sentinels.to_owned();
+            c.redis.sentinel_tls = sentinel_tls;
+            c.redis.tls_verify = verify;
+            redis_sentinel_tls_note(&c)
+        };
+        let listed = "Redis Sentinel connections do not use TLS; rediss:// in --redis_sentinels applies to the master only (set --redis_sentinel_tls=true to use TLS with the Sentinel nodes)";
+        let implicit = "Redis Sentinel connections do not use TLS; rediss:// in --redis_url applies to the master only (set --redis_sentinel_tls=true to use TLS with the Sentinel nodes)";
+        for verify in [false, true] {
+            assert_eq!(
+                Some((Level::Info, listed)),
+                note("redis://mymaster", "rediss://s1:26379,rediss://s2:26379", false, verify)
+            );
+            assert_eq!(Some((Level::Info, listed)), note("redis://mymaster", "valkeys://s1:26379", false, verify));
+            assert_eq!(Some((Level::Info, implicit)), note("rediss://s1:26379?master_set=mymaster", "", false, verify));
+            assert_eq!(None, note("redis://mymaster", "rediss://s1:26379", true, verify));
+            assert_eq!(None, note("rediss://s1:26379?master_set=mymaster", "", true, verify));
+            assert_eq!(None, note("redis://mymaster", "redis://s1:26379", false, verify));
+            assert_eq!(None, note("redis://mymaster", "redis://s1:26379", true, verify));
+            assert_eq!(None, note("rediss://mymaster", "redis://s1:26379", false, verify));
+            assert_eq!(None, note("rediss://redis:6379", "", false, verify));
+        }
     }
 
     /// A Redis URL without a Redis broadcast adapter is reported once: the
