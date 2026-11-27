@@ -47,7 +47,7 @@ use crate::node::{
 };
 use crate::server::{
     self, HeadersExtractor, HttpRequest, RequestInfo, ResponseFuture, ResponseWriter, SharedResponseWriter,
-    lock_writer, query_param, shared_writer, write_cors_headers,
+    lock_writer, query_param, query_param_utf8, shared_writer, write_cors_headers,
 };
 use crate::sse;
 
@@ -374,7 +374,8 @@ pub fn stream_params_from_req(req: &HttpRequest, c: &Config) -> Result<StreamPar
 
     let (offset, epoch) = decode_offset(&offset_str)?;
 
-    let mut signed_name = query_param(&req.target, SIGNED_STREAM_PARAM);
+    // A signed stream name must be valid UTF-8 once decoded, as the path (D-120).
+    let mut signed_name = query_param_utf8(&req.target, SIGNED_STREAM_PARAM).map_err(|e| DsError(e.to_string()))?;
     if signed_name.is_empty() {
         signed_name = req.header(SIGNED_STREAM_HEADER).to_owned();
     }
@@ -1792,6 +1793,31 @@ data:{"streamCursor":"c","streamNextOffset":"1::e","upToDate":true}"#,
         assert_eq!("café", stream_params_from_req(&req("/ds/caf%C3%A9"), &c).unwrap().name);
     }
 
+    /// Pins D-120: a signed stream name (`?signed=`) that is not valid UTF-8
+    /// once decoded is refused, as a path that is not (D-104); Go keeps the bytes.
+    /// The encoded U+FFFD is a name.
+    #[test]
+    fn deviation_d120_a_signed_stream_name_must_be_valid_utf8() {
+        let req = |target: &str| HttpRequest { method: "GET".into(), target: target.into(), ..Default::default() };
+        let c = Config::new();
+        for target in ["/ds/s?signed=%ff", "/ds/s?offset=-1&signed=a%C3"] {
+            let err = stream_params_from_req(&req(target), &c).unwrap_err();
+            assert_eq!("query parameter \"signed\" is not valid UTF-8", err.0, "{target}");
+        }
+        assert_eq!("\u{FFFD}", stream_params_from_req(&req("/ds/s?signed=%EF%BF%BD"), &c).unwrap().signed_name);
+    }
+
+    /// Pins D-122: the other parameters keep their lossy decoding (Go keeps the
+    /// bytes, which are no offset, live mode or cursor either).
+    #[test]
+    fn deviation_d122_other_parameters_that_are_not_utf8_are_decoded_lossily() {
+        let req = |target: &str| HttpRequest { method: "GET".into(), target: target.into(), ..Default::default() };
+        let c = Config::new();
+        let sp = stream_params_from_req(&req("/ds/s?offset=1::%ff&cursor=%fe"), &c).unwrap();
+        assert_eq!((1, "\u{FFFD}", "\u{FFFD}"), (sp.offset, sp.epoch.as_str(), sp.cursor.as_str()));
+        assert_eq!("invalid live mode", stream_params_from_req(&req("/ds/s?offset=-1&live=%ff"), &c).unwrap_err().0);
+    }
+
     fn message(data: &str) -> StreamMessage {
         StreamMessage { stream: "s".into(), data: data.into(), ..Default::default() }
     }
@@ -2046,6 +2072,18 @@ data:{"streamCursor":"c","streamNextOffset":"1::e","upToDate":true}"#,
         }
         let resp = request(endpoint.addr, "GET", "/ds/%EF%BF%BD?offset=-1");
         assert!(resp.starts_with("http/1.1 200") && resp.ends_with(r#"[{"n":9}]"#), "{resp}");
+    }
+
+    /// Pins D-120 over a socket: a signed stream name that is not valid UTF-8 is
+    /// answered 400 with no body; a cursor that is not (D-122) is read lossily
+    /// and the request is served.
+    #[test]
+    fn deviation_d120_a_signed_name_that_is_not_utf8_is_answered_400() {
+        let endpoint = Served::new(None);
+        let resp = request(endpoint.addr, "GET", "/ds/s?offset=-1&signed=%ff");
+        assert!(resp.starts_with("http/1.1 400") && resp.ends_with("\r\n\r\n"), "{resp}");
+        let resp = request(endpoint.addr, "GET", "/ds/s?offset=-1&cursor=%ff");
+        assert!(resp.starts_with("http/1.1 200") && resp.ends_with(r#"[{"n":1}]"#), "{resp}");
     }
 
     #[test]

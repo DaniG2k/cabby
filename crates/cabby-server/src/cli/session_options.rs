@@ -222,6 +222,27 @@ mod tests {
         assert_eq!(vec![Duration::ZERO], ping_interval_from("pi=-1"));
     }
 
+    /// Pins D-122 for the client parameters of a connection (`pi`, `ptp`,
+    /// `sid`): a value that is not valid UTF-8 once decoded is converted lossily
+    /// and the connection goes on, as in Go, where the bytes are no integer, no
+    /// precision and no session id either.
+    #[test]
+    fn deviation_d122_connection_parameters_that_are_not_utf8_are_decoded_lossily() {
+        assert!(ping_interval_from("pi=%ff").is_empty(), "not an integer");
+        let req = crate::server::HttpRequest { target: "/cable?ptp=%ff&sid=%fe".into(), ..Default::default() };
+        let info = RequestInfo::new(&req, None).expect("request info");
+        let opts = SessionSettings::params_options(&info);
+        let values: Vec<&str> = opts
+            .iter()
+            .map(|o| match o {
+                SessionOption::PingPrecision(p) => p.as_str(),
+                SessionOption::PrevSid(sid) => sid.as_str(),
+                _ => "another option",
+            })
+            .collect();
+        assert_eq!(vec!["\u{FFFD}", "\u{FFFD}"], values);
+    }
+
     #[test]
     fn extended_protocol_sets_keepalive_and_pong_timeout() {
         let mut c = Config::new();

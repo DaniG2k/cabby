@@ -41,7 +41,7 @@ use crate::metrics::Instrumenter;
 use crate::node::{self, CLOSE_NORMAL_CLOSURE, ConnectionError, Node, Session, SessionOption};
 use crate::server::{
     self, ConnInfo, HeadersExtractor, HttpRequest, RequestInfo, ResponseFuture, ResponseWriter, SharedResponseWriter,
-    lock_writer, query_param, shared_writer, write_cors_headers,
+    lock_writer, query_param, query_param_utf8, shared_writer, write_cors_headers,
 };
 
 /// Default ping interval in seconds (upstream `DefaultPingInterval`).
@@ -448,10 +448,21 @@ fn http_request(req: &Request) -> HttpRequest {
     HttpRequest::from_parts(&parts, &conn)
 }
 
-/// Go `r.URL.Query().Get(key)`.
+/// The request target: path and query.
+fn target(req: &Request) -> &str {
+    req.uri().path_and_query().map_or("", |pq| pq.as_str())
+}
+
+/// Go `r.URL.Query().Get(key)`; a value that is not valid UTF-8 once decoded is
+/// converted lossily (D-122).
 fn param(req: &Request, key: &str) -> String {
-    let target = req.uri().path_and_query().map_or("", |pq| pq.as_str());
-    query_param(target, key)
+    query_param(target(req), key)
+}
+
+/// [`param`] for a parameter that names the subscription (its identifier, channel
+/// or stream): a value that is not valid UTF-8 once decoded is an error (D-120).
+fn name_param(req: &Request, key: &str) -> Result<String, Error> {
+    query_param_utf8(target(req), key).map_err(|e| Error(e.to_string()))
 }
 
 /// Go `r.Header.Get(name)`: the value's bytes as they arrived. Values that are
@@ -468,12 +479,13 @@ fn identifier_json(pairs: &[(&str, &str)]) -> String {
 }
 
 /// The subscribe command a GET request names, if any (upstream
-/// `subscribeCommandFromGetRequest`).
+/// `subscribeCommandFromGetRequest`). The parameter that names the subscription
+/// must be valid UTF-8 once decoded (D-120).
 fn subscribe_command_from_get_request(req: &Request) -> Result<Option<Message>, Error> {
-    let mut identifier = param(req, "identifier");
+    let mut identifier = name_param(req, "identifier")?;
 
     if identifier.is_empty() {
-        let channel = param(req, "channel");
+        let channel = name_param(req, "channel")?;
         if !channel.is_empty() {
             identifier = identifier_json(&[("channel", &channel)]);
         }
@@ -481,7 +493,7 @@ fn subscribe_command_from_get_request(req: &Request) -> Result<Option<Message>, 
 
     // A public stream name.
     if identifier.is_empty() {
-        let stream = param(req, PUBLIC_STREAM_PARAM);
+        let stream = name_param(req, PUBLIC_STREAM_PARAM)?;
         if !stream.is_empty() {
             identifier = identifier_json(&[("channel", SIGNED_STREAM_CHANNEL), ("stream_name", &stream)]);
         }
@@ -489,7 +501,7 @@ fn subscribe_command_from_get_request(req: &Request) -> Result<Option<Message>, 
 
     // A signed stream name.
     if identifier.is_empty() {
-        let stream = param(req, SIGNED_STREAM_PARAM);
+        let stream = name_param(req, SIGNED_STREAM_PARAM)?;
         if !stream.is_empty() {
             identifier = identifier_json(&[("channel", SIGNED_STREAM_CHANNEL), ("signed_stream_name", &stream)]);
         }
@@ -497,7 +509,7 @@ fn subscribe_command_from_get_request(req: &Request) -> Result<Option<Message>, 
 
     // A Turbo Streams name.
     if identifier.is_empty() {
-        let stream = param(req, TURBO_STREAMS_PARAM);
+        let stream = name_param(req, TURBO_STREAMS_PARAM)?;
         if !stream.is_empty() {
             identifier = identifier_json(&[("channel", TURBO_STREAMS_CHANNEL), ("signed_stream_name", &stream)]);
         }
@@ -1245,6 +1257,43 @@ mod tests {
         assert_eq!((1, "EPOCH"), (pos.offset, pos.epoch.as_str()));
     }
 
+    /// Pins D-120: the parameter that names the subscription (identifier,
+    /// channel, public, signed or Turbo stream) must be valid UTF-8 once decoded
+    /// (Go keeps the bytes; it writes each invalid byte of a JSON-encoded name as
+    /// `\ufffd`). Parameters that are not consulted are not checked; the encoded
+    /// U+FFFD is a name.
+    #[test]
+    fn deviation_d120_a_subscription_name_must_be_valid_utf8() {
+        for (param, value) in [
+            ("identifier", "%ff"),
+            ("channel", "%fe"),
+            ("stream", "%ff"),
+            ("signed_stream", "a%C3"),
+            ("turbo_signed_stream_name", "%ff"),
+        ] {
+            let err = subscribe_command_from_get_request(&get(&format!("/?{param}={value}"), &[])).unwrap_err();
+            assert_eq!(format!("query parameter \"{param}\" is not valid UTF-8"), err.0);
+        }
+        let cmd = subscribe_command_from_get_request(&get("/?channel=room&stream=%ff", &[])).unwrap().unwrap();
+        assert_eq!(r#"{"channel":"room"}"#, cmd.identifier);
+        let cmd = subscribe_command_from_get_request(&get("/?stream=%EF%BF%BD", &[])).unwrap().unwrap();
+        assert_eq!("{\"channel\":\"$pubsub\",\"stream_name\":\"\u{FFFD}\"}", cmd.identifier);
+    }
+
+    /// Pins D-122 for the SSE parameters that are parsed: a `history_since` that
+    /// is not valid UTF-8 is converted lossily and fails to parse, as Go's bytes
+    /// do (the error quotes U+FFFD where Go quotes the bytes); `raw` is not a
+    /// true value either way.
+    #[test]
+    fn deviation_d122_parsed_parameters_that_are_not_utf8_are_decoded_lossily() {
+        let err = subscribe_command_from_get_request(&get("/?stream=s&history_since=%ff", &[])).unwrap_err();
+        assert_eq!(
+            "failed to parse history since value: \u{FFFD}, cause: strconv.ParseInt: parsing \"\u{FFFD}\": invalid syntax",
+            err.0
+        );
+        assert_eq!("\u{FFFD}", param(&get("/?raw=%ff", &[]), "raw"));
+    }
+
     /// A type, stream or epoch with a line terminator cannot be written as one
     /// field: the event has no `event:` or no `id:` field, and its data (where
     /// the JSON escapes the terminator) stays one `data:` field.
@@ -1483,6 +1532,23 @@ mod tests {
         std::io::BufRead::read_line(&mut r, &mut status).unwrap();
         assert!(status.starts_with("HTTP/1.1 200"), "{status}");
         read_until(&mut r, "event: welcome");
+        read_until(&mut r, "event: confirm_subscription");
+        endpoint.wait_for_sessions(1);
+    }
+
+    /// Pins D-120 over a socket: a GET whose stream is not valid UTF-8 once
+    /// decoded is answered 400 before sign-in, as the other GETs whose command
+    /// cannot be built are; the encoded U+FFFD subscribes.
+    #[test]
+    fn deviation_d120_a_get_naming_a_stream_that_is_not_utf8_is_answered_400() {
+        let endpoint = Served::signing_in(true);
+        for target in ["/events?stream=%ff", "/events?stream=%fe"] {
+            let (mut stream, _) = endpoint.send(&format!("GET {target} HTTP/1.1"));
+            assert_eq!(400, crate::server::tests::support::read_response(&mut stream).status, "{target}");
+        }
+        assert_eq!(0, endpoint.app.sign_ins.load(std::sync::atomic::Ordering::SeqCst));
+        let (stream, _) = endpoint.send("GET /events?stream=%EF%BF%BD HTTP/1.1");
+        let mut r = std::io::BufReader::new(stream);
         read_until(&mut r, "event: confirm_subscription");
         endpoint.wait_for_sessions(1);
     }

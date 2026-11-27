@@ -18,6 +18,16 @@ Differences from the AnyCable Go server are listed by ID in
   answered `422` (`failed to read request body`, the API with `error="i/o timeout"`) and the
   connection closes. Before, reading it had no deadline, so a body that stopped arriving held
   the request until the client closed the connection (D-119).
+- SSE (`--sse`): a GET whose `identifier`, `channel`, `stream`, `signed_stream` or
+  `turbo_signed_stream_name` parameter is not valid UTF-8 once decoded (`?stream=%ff`) is
+  answered `400` (`failed to build subscribe command error="query parameter \"stream\" is
+  not valid UTF-8"`). Durable Streams (`--ds`) answers `400` for such a `signed` parameter, as
+  for such a stream path since 0.4.2. Before, the value was decoded with U+FFFD, so `%ff`,
+  `%fe` and `%EF%BF%BD` named the same stream (D-120).
+- API: `GET <api>/presence/<stream>/users` with a stream that is not valid UTF-8 once decoded
+  is answered `400`. Before, every such stream read the presence of the stream named U+FFFD
+  (D-121). Other query parameters (`pi`, `ptp`, `sid`, `history_since`, `offset`, `cursor`, …)
+  are read as before; D-122 records how they differ from AnyCable.
 
 ## [0.5.1] - 2026-11-27
 

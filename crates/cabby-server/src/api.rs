@@ -357,13 +357,19 @@ impl Server {
         }
         let decoded = percent_decode(path);
         let Some(stream) = presence_users_stream(&decoded) else {
-            log_debug!(self.log, "invalid path for get users", "path" => decoded);
+            // Go logs the decoded bytes; invalid UTF-8 is converted lossily (D-121).
+            log_debug!(self.log, "invalid path for get users", "path" => String::from_utf8_lossy(&decoded).into_owned());
             return HttpResponse::with_status(404);
         };
         if !self.broker.supports_presence() {
             return HttpResponse::with_status(501);
         }
-        match self.broker.presence_info(&stream, Some(&PresenceInfoOptions::new())) {
+        // Stream names are UTF-8: a name that is not names no stream (D-121).
+        let Ok(stream) = std::str::from_utf8(stream) else {
+            log_debug!(self.log, "failed to get presence info", "strean" => String::from_utf8_lossy(stream).into_owned(), "err" => "stream name is not valid UTF-8");
+            return HttpResponse::with_status(400);
+        };
+        match self.broker.presence_info(stream, Some(&PresenceInfoOptions::new())) {
             Err(e) => {
                 // Upstream's key is misspelled.
                 log_debug!(self.log, "failed to get presence info", "strean" => stream, "err" => e.message);
@@ -438,21 +444,19 @@ fn write_cors_headers(resp: &mut HttpResponse, req: &HttpRequest, hosts: &[Strin
 }
 
 /// The stream of a `.../presence/<stream>/users` path (upstream regexp
-/// `/presence/([^/]+)/users$`, leftmost match).
-fn presence_users_stream(path: &str) -> Option<String> {
-    const PREFIX: &str = "/presence/";
-    path.match_indices(PREFIX).find_map(|(i, _)| {
-        let stream = path[i + PREFIX.len()..].strip_suffix("/users")?;
-        (!stream.is_empty() && !stream.contains('/')).then(|| stream.to_owned())
+/// `/presence/([^/]+)/users$`, leftmost match), as bytes: Go matches the
+/// decoded path, whose bytes need not be UTF-8.
+fn presence_users_stream(path: &[u8]) -> Option<&[u8]> {
+    const PREFIX: &[u8] = b"/presence/";
+    (0..path.len()).filter(|&i| path[i..].starts_with(PREFIX)).find_map(|i| {
+        let stream = path[i + PREFIX.len()..].strip_suffix(b"/users")?;
+        (!stream.is_empty() && !stream.contains(&b'/')).then_some(stream)
     })
 }
 
-/// Decodes `%XX` escapes (Go matches on the decoded `URL.Path`). Invalid
-/// escapes are kept as written.
-fn percent_decode(path: &str) -> String {
-    if !path.contains('%') {
-        return path.to_owned();
-    }
+/// Decodes `%XX` escapes into bytes (Go matches on the decoded `URL.Path`).
+/// Invalid escapes are kept as written.
+fn percent_decode(path: &str) -> Vec<u8> {
     let hex = |b: Option<&u8>| b.and_then(|&b| (b as char).to_digit(16));
     let bytes = path.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -468,7 +472,7 @@ fn percent_decode(path: &str) -> String {
             i += 1;
         }
     }
-    String::from_utf8_lossy(&out).into_owned()
+    out
 }
 
 #[cfg(test)]
@@ -477,13 +481,62 @@ mod tests {
 
     #[test]
     fn presence_path_matches_the_upstream_pattern() {
-        assert_eq!(Some("a".into()), presence_users_stream("/api/presence/a/users"));
-        assert_eq!(Some("b".into()), presence_users_stream("/api/presence/x/presence/b/users"));
-        assert_eq!(None, presence_users_stream("/api/presence//users"));
-        assert_eq!(None, presence_users_stream("/api/presence/a/b/users"));
-        assert_eq!(None, presence_users_stream("/api/presence/a/users/"));
+        let stream = |path: &str| presence_users_stream(&percent_decode(path)).map(<[u8]>::to_vec);
+        assert_eq!(Some(b"a".to_vec()), stream("/api/presence/a/users"));
+        assert_eq!(Some(b"b".to_vec()), stream("/api/presence/x/presence/b/users"));
+        assert_eq!(None, stream("/api/presence//users"));
+        assert_eq!(None, stream("/api/presence/a/b/users"));
+        assert_eq!(None, stream("/api/presence/a/users/"));
         // Go matches the decoded path: an escaped slash splits the stream name.
-        assert_eq!(None, presence_users_stream(&percent_decode("/api/presence/a%2Fb/users")));
-        assert_eq!(Some("a b".into()), presence_users_stream(&percent_decode("/api/presence/a%20b/users")));
+        assert_eq!(None, stream("/api/presence/a%2Fb/users"));
+        assert_eq!(Some(b"a b".to_vec()), stream("/api/presence/a%20b/users"));
+        // The decoded bytes, also when they are not UTF-8 (D-121).
+        assert_eq!(Some(vec![0xff]), stream("/api/presence/%ff/users"));
+    }
+
+    /// Pins D-121: a presence stream that is not valid UTF-8 once decoded is
+    /// answered 400 (Go reads the presence of the stream the bytes name), and
+    /// after the presence support check (a broker without presence still gives
+    /// 501); the encoded U+FFFD reads its stream.
+    #[test]
+    fn deviation_d121_a_presence_stream_that_is_not_utf8_is_answered_400() {
+        use cabby_core::broker::{self as core_broker, Legacy};
+
+        struct Noop;
+        impl BroadcastHandler for Noop {
+            fn handle_broadcast(&self, _: &[u8]) -> Result<(), ApiError> {
+                Ok(())
+            }
+            fn handle_pubsub(&self, _: &[u8]) {}
+        }
+        struct NoSubscriber;
+        impl core_broker::Broadcaster for NoSubscriber {
+            fn broadcast(&self, _: &cabby_core::common::StreamMessage) {}
+            fn broadcast_command(&self, _: &cabby_core::common::RemoteCommandMessage) {}
+            fn subscribe(&self, _: &str) {}
+            fn unsubscribe(&self, _: &str) {}
+        }
+        let get = |api: &Server, path: &str| {
+            api.serve(&HttpRequest { method: "GET".into(), path: path.into(), ..Default::default() }).status
+        };
+
+        let memory = Arc::new(core_broker::Memory::new(
+            None,
+            None,
+            &core_broker::Config::new(),
+            Arc::new(core_broker::SystemClock),
+        ));
+        memory.presence_add("\u{FFFD}", "s1", "p1", serde_json::json!("x")).unwrap();
+        let api = Server::new(&mut Config::new(), memory, Arc::new(Noop)).unwrap();
+        api.start().unwrap();
+        assert_eq!(400, get(&api, "/api/presence/%ff/users"));
+        assert_eq!(400, get(&api, "/api/presence/a%C3/users"));
+        assert_eq!(200, get(&api, "/api/presence/%EF%BF%BD/users"));
+        assert_eq!(200, get(&api, "/api/presence/caf%C3%A9/users"));
+
+        let legacy = Server::new(&mut Config::new(), Arc::new(Legacy::new(Arc::new(NoSubscriber))), Arc::new(Noop));
+        let legacy = legacy.unwrap();
+        legacy.start().unwrap();
+        assert_eq!(501, get(&legacy, "/api/presence/%ff/users"));
     }
 }

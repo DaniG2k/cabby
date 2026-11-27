@@ -225,50 +225,60 @@ fn url_scheme(raw: &str) -> Option<&str> {
 
 /// Go `url.URL.Query()` keeping the last value of each key: pairs separated by
 /// `&`, `+` decodes as a space, percent-decoding; pairs with `;` or a bad escape
-/// are skipped.
+/// are skipped. Keys and values that are not valid UTF-8 once decoded are
+/// converted lossily (D-122; Go keeps the bytes).
 fn parse_query(target: &str) -> HashMap<String, String> {
-    let mut params = HashMap::new();
-    // A request target has no fragment: Go (`url.ParseRequestURI`) keeps a `#`
-    // in the query.
-    let Some((_, query)) = target.split_once('?') else {
-        return params;
-    };
-    for pair in query.split('&') {
-        if pair.is_empty() || pair.contains(';') {
-            continue;
-        }
-        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        if let (Some(key), Some(value)) = (query_unescape(key), query_unescape(value)) {
-            params.insert(key, value);
-        }
-    }
-    params
+    query_pairs(target).map(|(key, value)| (lossy(key), lossy(value))).collect()
 }
 
 /// The first value of a query parameter of a request target, `""` when missing
-/// (Go `r.URL.Query().Get(key)`; decoding as in [`RequestInfo::param`]).
+/// (Go `r.URL.Query().Get(key)`; decoding as in [`RequestInfo::param`]). A value
+/// that is not valid UTF-8 once decoded is converted lossily (D-122); for a
+/// parameter that names something, use [`query_param_utf8`].
 pub fn query_param(target: &str, key: &str) -> String {
-    let Some((_, query)) = target.split_once('?') else {
-        return String::new();
-    };
-    for pair in query.split('&') {
-        if pair.is_empty() || pair.contains(';') {
-            continue;
-        }
-        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
-        if let (Some(k), Some(v)) = (query_unescape(k), query_unescape(v))
-            && k == key
-        {
-            return v;
-        }
-    }
-    String::new()
+    query_value(target, key).map(lossy).unwrap_or_default()
 }
 
-/// Go `url.QueryUnescape` (`None` on an invalid escape).
-fn query_unescape(s: &str) -> Option<String> {
+/// A query parameter whose decoded value is not valid UTF-8 (D-120).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("query parameter \"{0}\" is not valid UTF-8")]
+pub struct NotUtf8(pub String);
+
+/// [`query_param`] for a parameter that names a stream or an identifier: a
+/// value that is not valid UTF-8 once decoded names nothing, and is an error
+/// (D-120), so two values that differ in such bytes never read as one name.
+pub fn query_param_utf8(target: &str, key: &str) -> Result<String, NotUtf8> {
+    match query_value(target, key) {
+        None => Ok(String::new()),
+        Some(value) => String::from_utf8(value).map_err(|_| NotUtf8(key.to_owned())),
+    }
+}
+
+/// The decoded first value of `key` (Go `Values.Get`).
+fn query_value(target: &str, key: &str) -> Option<Vec<u8>> {
+    query_pairs(target).find(|(k, _)| k == key.as_bytes()).map(|(_, v)| v)
+}
+
+/// The decoded pairs of a request target's query in order, skipping those Go's
+/// `url.ParseQuery` rejects (a `;`, an invalid escape).
+fn query_pairs(target: &str) -> impl Iterator<Item = (Vec<u8>, Vec<u8>)> + '_ {
+    // A request target has no fragment: Go (`url.ParseRequestURI`) keeps a `#`
+    // in the query.
+    let query = target.split_once('?').map_or("", |(_, q)| q);
+    query.split('&').filter(|pair| !pair.is_empty() && !pair.contains(';')).filter_map(|pair| {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        Some((query_unescape(key)?, query_unescape(value)?))
+    })
+}
+
+fn lossy(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
+}
+
+/// Go `url.QueryUnescape`: the decoded bytes (`None` on an invalid escape).
+fn query_unescape(s: &str) -> Option<Vec<u8>> {
     if !s.contains(['%', '+']) {
-        return Some(s.to_owned());
+        return Some(s.as_bytes().to_vec());
     }
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -293,7 +303,7 @@ fn query_unescape(s: &str) -> Option<String> {
             }
         }
     }
-    Some(String::from_utf8_lossy(&out).into_owned())
+    Some(out)
 }
 
 /// Upstream `maxRequestIDLength`.
@@ -392,6 +402,33 @@ mod tests {
         assert_eq!("x y#a=3", query_param("/x?b=x+y#a=3", "b"));
         assert_eq!("", query_param("/x?bad=%zz", "bad"));
         assert_eq!("", query_param("/x", "a"));
+    }
+
+    /// Pins D-120's helper: a value that is not valid UTF-8 once decoded is an
+    /// error for a parameter that names something; the encoded U+FFFD and other
+    /// UTF-8 values are names. A missing parameter is empty, as before.
+    #[test]
+    fn deviation_d120_names_must_be_valid_utf8() {
+        let not_utf8 = |target: &str| query_param_utf8(target, "stream").unwrap_err().to_string();
+        for target in ["/e?stream=%ff", "/e?stream=%fe", "/e?stream=a%C3", "/e?stream=%ff&stream=b"] {
+            assert_eq!("query parameter \"stream\" is not valid UTF-8", not_utf8(target), "{target}");
+        }
+        assert_eq!(Ok("\u{FFFD}".to_owned()), query_param_utf8("/e?stream=%EF%BF%BD", "stream"));
+        assert_eq!(Ok("café b".to_owned()), query_param_utf8("/e?stream=caf%C3%A9+b", "stream"));
+        assert_eq!(Ok("b".to_owned()), query_param_utf8("/e?stream=%zz&stream=b", "stream"));
+        assert_eq!(Ok(String::new()), query_param_utf8("/e?other=%ff", "stream"));
+    }
+
+    /// Pins D-122: other parameters keep their lossy decoding (Go keeps the
+    /// bytes), in `query_param` and in a request's `RequestInfo`.
+    #[test]
+    fn deviation_d122_other_values_that_are_not_utf8_are_decoded_lossily() {
+        assert_eq!("\u{FFFD}", query_param("/e?offset=%ff", "offset"));
+        assert_eq!("a\u{FFFD}", query_param("/e?offset=a%C3", "offset"));
+        let req = HttpRequest { target: "/cable?sid=%ff&pi=%fe&%ff=1".into(), ..Default::default() };
+        let info = RequestInfo::new(&req, None).unwrap();
+        assert_eq!(("\u{FFFD}".to_owned(), "\u{FFFD}".to_owned()), (info.param("sid"), info.param("pi")));
+        assert_eq!("1", info.param("\u{FFFD}"));
     }
 
     #[test]

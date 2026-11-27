@@ -21,8 +21,8 @@ pub use http_server::{
     not_found, read_body, read_body_within, runtime_handle, set_defaults, status_response,
 };
 pub use request::{
-    DefaultHeadersExtractor, HEALTH_MESSAGE, HeadersExtractor, HttpRequest, HttpResponse, REMOTE_ADDR_HEADER,
-    RequestError, RequestInfo, fetch_uid, health_handler, query_param, write_cors_headers,
+    DefaultHeadersExtractor, HEALTH_MESSAGE, HeadersExtractor, HttpRequest, HttpResponse, NotUtf8, REMOTE_ADDR_HEADER,
+    RequestError, RequestInfo, fetch_uid, health_handler, query_param, query_param_utf8, write_cors_headers,
 };
 pub use response_writer::{
     ChannelResponseWriter, MAX_BUFFERED, ResponseWriter, SharedResponseWriter, WRITE_TIMEOUT, channel_response,
