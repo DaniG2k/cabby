@@ -7,7 +7,8 @@
 //! Redis connection, and consumers are counted per ACL user (upstream counts
 //! `cmd=xreadgroup` across all clients of the server).
 
-use std::time::Duration;
+use std::collections::BTreeSet;
+use std::time::{Duration, Instant};
 
 use cabby_testkit::reference::redis::{Config, StreamCollector, Streamer};
 use cabby_testkit::services::{self, RedisScope};
@@ -192,4 +193,78 @@ fn deviation_d109_a_backlog_is_read_in_batches() {
 
     assert_eq!(1000, taken, "entries the first read took");
     assert_eq!(999, rest.len(), "entries handled after the first");
+}
+
+/// IDs of `user`'s connections (`CLIENT LIST`).
+fn client_ids(scope: &RedisScope, user: &str) -> Vec<String> {
+    let list = scope.command(&["CLIENT", "LIST"]).expect("CLIENT LIST").as_text().unwrap_or_default();
+    list.lines()
+        .filter(|l| l.split(' ').any(|kv| kv.strip_prefix("user=") == Some(user)))
+        .filter_map(|l| l.split(' ').find_map(|kv| kv.strip_prefix("id=")).map(str::to_owned))
+        .collect()
+}
+
+fn group_exists(scope: &RedisScope, stream: &str) -> bool {
+    let Ok(groups) = scope.command(&["XINFO", "GROUPS", stream]) else { return false };
+    groups.items().iter().any(|g| {
+        g.items().chunks(2).any(|kv| {
+            kv[0].as_text().as_deref() == Some("name") && kv.get(1).and_then(|v| v.as_text()).as_deref() == Some(GROUP)
+        })
+    })
+}
+
+/// regression-for: redis/streamer_test.go#TestStreamer/Handles_incoming_messages
+/// note: Deviation D-111: a value of another type at the stream key makes every group creation fail on a connection that opens. Each attempt opens a connection, which stays open until the next one: within 1.5 s the streamer opens two, the second 250 ms after the first and the third 2 to 4 s later (upstream: one every 250 ms). Then the key is deleted, and the next attempt creates the group; the test waits for it before the shutdown, as upstream's reader stops only while it reads (and its `Shutdown` holds the client lock that a reconnect waits for).
+#[test]
+fn deviation_d111_failing_commands_are_retried_less_and_less_often() {
+    let scope = services::redis().scope("streamer");
+    let stream = scope.name("__test__");
+    let rconfig = config_for(scope.url());
+    scope.command(&["SET", &stream, "not a stream"]).expect("SET");
+
+    let received = StreamCollector::new();
+    let streamer = Streamer::new(&stream, GROUP, &rconfig, &received, 100);
+    streamer.start().expect("Start");
+    let _guard = ShutdownGuard(&streamer);
+
+    let mut connections = BTreeSet::new();
+    let until = Instant::now() + Duration::from_millis(1500);
+    while Instant::now() < until {
+        connections.extend(client_ids(&scope, scope.user()));
+        // Sampling: a connection is open for at least 250 ms.
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    scope.command(&["DEL", &stream]).expect("DEL");
+    // The next attempt, 2 to 4 s after the second, creates the group.
+    let recovered = services::wait_until("group created after the key was deleted", Duration::from_secs(5), || {
+        group_exists(&scope, &stream).then_some(())
+    });
+
+    assert_eq!(2, connections.len(), "connections opened within 1.5 s: {connections:?}");
+    recovered.unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// regression-for: redis/streamer_test.go#TestStreamer/Handles_incoming_messages
+/// note: D-111 keeps upstream's first retry: a read that fails after reads worked is retried after 250 ms. The group is deleted twice (as by a flush); each time the streamer creates it again within 1.5 s and reads what is added next.
+#[test]
+fn a_deleted_group_is_created_again_at_the_first_retry() {
+    let (scope, stream, rconfig) = setup();
+    let received = StreamCollector::new();
+    let streamer = Streamer::new(&stream, GROUP, &rconfig, &received, 500);
+    streamer.start().expect("Start");
+    let _guard = ShutdownGuard(&streamer);
+    assert!(streamer.wait_ready(READY), "streamer not ready within {READY:?}");
+
+    for round in ["first", "second"] {
+        scope.command(&["XGROUP", "DESTROY", &stream, GROUP]).expect("XGROUP DESTROY");
+        services::wait_until(&format!("{round}: group created again"), Duration::from_millis(1500), || {
+            group_exists(&scope, &stream).then_some(())
+        })
+        .unwrap_or_else(|e| panic!("{e}"));
+
+        scope.xadd(&stream, "payload", round).expect("XADD");
+        let messages = received.drain(1, DRAIN);
+        assert_eq!(1, messages.len(), "{round}: haven't received 1 message on time");
+        assert_eq!(Some(round), messages[0].get("payload").map(String::as_str));
+    }
 }

@@ -210,7 +210,7 @@ impl Inner {
     }
 
     async fn run(self: Arc<Self>) {
-        let mut attempt: i64 = 0;
+        let mut retries = Retries::default();
         'connect: loop {
             if self.shutdown.is_cancelled() {
                 self.finished.set();
@@ -220,17 +220,17 @@ impl Inner {
                 Ok(c) => c,
                 Err(e) => {
                     log_error!(self.log, "failed to connect to Redis", "error" => e.to_string());
-                    if self.maybe_reconnect(&mut attempt).await {
+                    if self.maybe_reconnect(&mut retries).await {
                         continue 'connect;
                     }
                     return;
                 }
             };
 
-            if attempt > 0 {
+            if retries.attempt > 0 {
                 log_info!(self.log, "reconnected to Redis");
             }
-            attempt = 0;
+            retries.attempt = 0;
 
             // First, create a consumer group for the stream
             let create = redis::cmd("XGROUP")
@@ -247,7 +247,7 @@ impl Inner {
                         log_debug!(self.log, "Redis consumer group already exists");
                     } else {
                         log_error!(self.log, "failed to create consumer group", "error" => e.to_string());
-                        if self.maybe_reconnect(&mut attempt).await {
+                        if self.maybe_reconnect(&mut retries).await {
                             continue 'connect;
                         }
                         return;
@@ -273,7 +273,7 @@ impl Inner {
                     match self.autoclaim(&client, &claim_from).await {
                         Err(e) => {
                             log_error!(self.log, "failed to claim from Redis stream", "error" => e.to_string());
-                            if self.maybe_reconnect(&mut attempt).await {
+                            if self.maybe_reconnect(&mut retries).await {
                                 continue 'connect;
                             }
                             return;
@@ -292,12 +292,15 @@ impl Inner {
                 match self.read(&client).await {
                     Err(e) => {
                         log_error!(self.log, "failed to read from Redis stream", "error" => e.to_string());
-                        if self.maybe_reconnect(&mut attempt).await {
+                        if self.maybe_reconnect(&mut retries).await {
                             continue 'connect;
                         }
                         return;
                     }
-                    Ok(messages) => self.handle_range(&client, messages).await,
+                    Ok(messages) => {
+                        retries.failures = 0;
+                        self.handle_range(&client, messages).await;
+                    }
                 }
             }
         }
@@ -360,16 +363,17 @@ impl Inner {
 
     /// Upstream `maybeReconnect`: false when the reader must stop (attempts
     /// exceeded or shutdown).
-    async fn maybe_reconnect(&self, attempt: &mut i64) -> bool {
-        if *attempt >= self.max_reconnect_attempts {
+    async fn maybe_reconnect(&self, retries: &mut Retries) -> bool {
+        if retries.attempt >= self.max_reconnect_attempts {
             self.finished.set();
             log_error!(self.log, "failed to reconnect to Redis: attempts exceeded");
             return false;
         }
 
-        *attempt += 1;
+        retries.attempt += 1;
+        retries.failures = retries.failures.saturating_add(1);
 
-        let delay = connect::next_retry((*attempt - 1) as u32);
+        let delay = connect::next_retry(retries.step());
 
         log_info!(self.log, &format!("next Redis reconnect attempt in {}", go_duration(delay)));
         tokio::select! {
@@ -386,6 +390,40 @@ impl Inner {
             old.closed.store(true, Ordering::SeqCst);
         }
         true
+    }
+}
+
+/// The most [`connect::next_retry`] step for failures on a connection that
+/// opens (8 to 16 s).
+const MAX_FAILURE_STEP: u32 = 3;
+
+/// The reader's reconnect counters.
+#[derive(Debug, Default)]
+struct Retries {
+    /// Reconnect attempts since a connection last opened (upstream
+    /// `reconnectAttempt`), limited by `max_reconnect_attempts`.
+    attempt: i64,
+    /// Failures in a row since a read last succeeded: failed connections,
+    /// group creations, claims and reads. A read returns within the block
+    /// time when the consumer works, so it is the one that resets them.
+    failures: u32,
+}
+
+impl Retries {
+    /// The [`connect::next_retry`] step before the next attempt: upstream's
+    /// (`attempt - 1`), or more after failures on connections that open, up
+    /// to [`MAX_FAILURE_STEP`].
+    ///
+    /// Upstream counts attempts from the last connection that opened, so when
+    /// the connection opens and a command fails every time (a value of
+    /// another type at the stream key, a command the Redis user may not
+    /// run), it reconnects every 250 ms and logs four records each time,
+    /// without end. Here the delay grows as it does while Redis can't be
+    /// reached; the first retry after a read that worked is still 250 ms
+    /// (D-111).
+    fn step(&self) -> u32 {
+        let since_connect = u32::try_from(self.attempt - 1).unwrap_or(0);
+        since_connect.max(self.failures.saturating_sub(1).min(MAX_FAILURE_STEP))
     }
 }
 
@@ -564,6 +602,22 @@ mod tests {
         let (next, got) = claimed(Value::Nil).unwrap();
         assert_eq!(("0-0", 0), (next.as_str(), got.len()));
         assert!(claimed(Value::Array(vec![bulk("0-0")])).is_err());
+    }
+
+    /// Pins D-111: the retry step after `failures` in a row, when each
+    /// reconnect opens a connection (`attempt` 1) and when none opens.
+    #[test]
+    fn deviation_d111_retry_steps() {
+        let step = |attempt, failures| Retries { attempt, failures }.step();
+        // A failure after a read that worked: 250 ms, as upstream.
+        assert_eq!(0, step(1, 1));
+        // Commands keep failing on connections that open: the delay grows up to 8-16 s.
+        assert_eq!([0, 1, 2, 3, 3, 3], [1, 2, 3, 4, 5, 6].map(|f| step(1, f)));
+        // Redis can't be reached: upstream's steps (both counters grow).
+        assert_eq!([0, 1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 6].map(|n| step(n, n as u32)));
+        // Connections fail after commands failed on one that opened.
+        assert_eq!(3, step(2, 6));
+        assert_eq!(4, step(5, 9));
     }
 
     #[test]

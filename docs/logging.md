@@ -125,7 +125,7 @@ call sites are found by the message text (`grep -rn '"<message>"' crates`).
 | `broadcast/legacy_redis.go:79` | INF | `Starting Redis pub/sub (cluster): %v` | `cabby-server/src/broadcast.rs` via `redis/mod.rs` | matched |  |
 | `broadcast/legacy_redis.go:81` | DBG | `Starting Redis pub/sub: %s` | `cabby-server/src/broadcast.rs` via `redis/mod.rs` | matched | debug for a single instance, as Go |
 | `broadcast/legacy_redis.go:98` | DBG | `shutting down Redis pub/sub` | `crates/cabby-server/src/pubsub.rs:211`, `crates/cabby-server/src/broadcast.rs:538` | matched |  |
-| `broadcast/legacy_redis.go:129` | ERR | `failed to connect to Redis` | `crates/cabby-server/src/redis/subscription.rs:192`, `crates/cabby-server/src/redis/streamer.rs:215`, `crates/cabby-server/src/redis/publisher.rs:153` | matched |  |
+| `broadcast/legacy_redis.go:129` | ERR | `failed to connect to Redis` | `crates/cabby-server/src/redis/subscription.rs:192`, `crates/cabby-server/src/redis/streamer.rs:222`, `crates/cabby-server/src/redis/publisher.rs:153` | matched |  |
 | `broadcast/legacy_redis.go:137` | DBG | `initialized pub/sub client` | `crates/cabby-server/src/redis/subscription.rs:195` | matched |  |
 | `broadcast/legacy_redis.go:143` | INF | `reconnected to Redis channel` | `crates/cabby-server/src/broadcast.rs:495` | matched |  |
 | `broadcast/legacy_redis.go:145` | INF | `subscribed to Redis channel` | `crates/cabby-server/src/broadcast.rs:494` | matched |  |
@@ -135,8 +135,8 @@ call sites are found by the message text (`grep -rn '"<message>"' crates`).
 | `broadcast/legacy_redis.go:170` | ERR | `Redis subscription error` | `crates/cabby-server/src/broadcast.rs:499` | matched |  |
 | `broadcast/legacy_redis.go:173` | WRN | `Redis connection failed` | `crates/cabby-server/src/broadcast.rs:500` | matched |  |
 | `broadcast/legacy_redis.go:178` | DBG | `close pub/sub channel` | `crates/cabby-server/src/redis/subscription.rs:199` | matched |  |
-| `broadcast/legacy_redis.go:201` | INF | `next Redis reconnect attempt in %s` | `crates/cabby-server/src/redis/subscription.rs:225`, `crates/cabby-server/src/redis/streamer.rs:374` | matched |  |
-| `broadcast/legacy_redis.go:204` | INF | `reconnecting to Redis...` | `crates/cabby-server/src/redis/subscription.rs:230`, `crates/cabby-server/src/redis/streamer.rs:383` | matched |  |
+| `broadcast/legacy_redis.go:201` | INF | `next Redis reconnect attempt in %s` | `crates/cabby-server/src/redis/subscription.rs:225`, `crates/cabby-server/src/redis/streamer.rs:378` | matched |  |
+| `broadcast/legacy_redis.go:204` | INF | `reconnecting to Redis...` | `crates/cabby-server/src/redis/subscription.rs:230`, `crates/cabby-server/src/redis/streamer.rs:387` | matched |  |
 | `broadcast/redis.go:95` | INF | `Starting Redis broadcaster at %v (sentinels)` | `crates/cabby-server/src/broadcast.rs:416`, `crates/cabby-server/src/broadcast.rs:418`, `crates/cabby-server/src/broadcast.rs:420` | matched |  |
 | `broadcast/redis.go:97` | INF | `Starting Redis broadcaster at %v (cluster)` | `crates/cabby-server/src/broadcast.rs:416`, `crates/cabby-server/src/broadcast.rs:418`, `crates/cabby-server/src/broadcast.rs:420` | matched |  |
 | `broadcast/redis.go:99` | INF | `Starting Redis broadcaster at %s` | `crates/cabby-server/src/broadcast.rs:416`, `crates/cabby-server/src/broadcast.rs:418`, `crates/cabby-server/src/broadcast.rs:420` | matched |  |
@@ -331,7 +331,7 @@ call sites are found by the message text (`grep -rn '"<message>"' crates`).
 | `pubsub/redis.go:151` | DBG | `subscribing` | `crates/cabby-server/src/pubsub.rs:226` | matched |  |
 | `pubsub/redis.go:171` | DBG | `unsubscribing` | `crates/cabby-server/src/pubsub.rs:232` | matched |  |
 | `pubsub/redis.go:196` | DBG | `publish message` | `crates/cabby-server/src/pubsub.rs:143` | matched |  |
-| `pubsub/redis.go:231` | ERR | `failed to connect to Redis` | `crates/cabby-server/src/redis/subscription.rs:192`, `crates/cabby-server/src/redis/streamer.rs:215`, `crates/cabby-server/src/redis/publisher.rs:153` | matched |  |
+| `pubsub/redis.go:231` | ERR | `failed to connect to Redis` | `crates/cabby-server/src/redis/subscription.rs:192`, `crates/cabby-server/src/redis/streamer.rs:222`, `crates/cabby-server/src/redis/publisher.rs:153` | matched |  |
 | `pubsub/redis.go:239` | DBG | `initialized pub/sub client` | `crates/cabby-server/src/redis/subscription.rs:195` | matched |  |
 | `pubsub/redis.go:245` | INF | `reconnected` | `crates/cabby-server/src/pubsub.rs:157` | matched |  |
 | `pubsub/redis.go:247` | INF | `connected` | `crates/cabby-server/src/redis/subscription.rs:60`, `crates/cabby-server/src/rpc/grpc.rs:306`, `crates/cabby-server/src/pubsub.rs:156` | matched |  |
@@ -341,8 +341,8 @@ call sites are found by the message text (`grep -rn '"<message>"' crates`).
 | `pubsub/redis.go:268` | DBG | `received remote command` | `crates/cabby-server/src/pubsub.rs:127` | matched |  |
 | `pubsub/redis.go:284` | ERR | `Redis pub/sub disconnected` | `crates/cabby-server/src/pubsub.rs:160` | matched |  |
 | `pubsub/redis.go:291` | DBG | `close pub/sub channel` | `crates/cabby-server/src/redis/subscription.rs:199` | matched |  |
-| `pubsub/redis.go:319` | INF | `next Redis reconnect attempt in %s` | `crates/cabby-server/src/redis/subscription.rs:225`, `crates/cabby-server/src/redis/streamer.rs:374` | matched |  |
-| `pubsub/redis.go:322` | INF | `reconnecting to Redis...` | `crates/cabby-server/src/redis/subscription.rs:230`, `crates/cabby-server/src/redis/streamer.rs:383` | matched |  |
+| `pubsub/redis.go:319` | INF | `next Redis reconnect attempt in %s` | `crates/cabby-server/src/redis/subscription.rs:225`, `crates/cabby-server/src/redis/streamer.rs:378` | matched |  |
+| `pubsub/redis.go:322` | INF | `reconnecting to Redis...` | `crates/cabby-server/src/redis/subscription.rs:230`, `crates/cabby-server/src/redis/streamer.rs:387` | matched |  |
 | `pubsub/redis.go:341` | ERR | `failed to resubscribe` | `crates/cabby-server/src/pubsub.rs:159` | matched |  |
 | `pubsub/redis.go:353` | ERR | `failed to resubscribe` | `crates/cabby-server/src/pubsub.rs:159` | matched |  |
 | `pusher/executor.go:33` | DBG | `pusher authorization failed` | `crates/cabby-server/src/pusher.rs:907` | matched |  |
@@ -358,22 +358,22 @@ call sites are found by the message text (`grep -rn '"<message>"' crates`).
 | `pusher/http.go:299` | DBG | `invalid path for get users` | `crates/cabby-server/src/api.rs:330`, `crates/cabby-server/src/pusher.rs:1326` | matched |  |
 | `pusher/http.go:307` | DBG | `get users is only supported for presence channels` | `crates/cabby-server/src/pusher.rs:1333` | matched |  |
 | `pusher/http.go:320` | DBG | `failed to get presence info` | `crates/cabby-server/src/api.rs:339`, `crates/cabby-server/src/pusher.rs:1348` | matched |  |
-| `redis/streamer.go:112` | DBG | `shutting down Redis streamer` | `crates/cabby-server/src/redis/streamer.rs:140` | matched |  |
-| `redis/streamer.go:126` | ERR | `failed to remove Redis stream consumer` | `crates/cabby-server/src/redis/streamer.rs:154`, `crates/cabby-server/src/redis/streamer.rs:155` | matched |  |
-| `redis/streamer.go:172` | ERR | `failed to connect to Redis` | `crates/cabby-server/src/redis/subscription.rs:192`, `crates/cabby-server/src/redis/streamer.rs:215`, `crates/cabby-server/src/redis/publisher.rs:153` | matched |  |
-| `redis/streamer.go:178` | INF | `reconnected to Redis` | `crates/cabby-server/src/redis/streamer.rs:224` | matched |  |
-| `redis/streamer.go:191` | DBG | `Redis consumer group already exists` | `crates/cabby-server/src/redis/streamer.rs:240` | matched |  |
-| `redis/streamer.go:193` | ERR | `failed to create consumer group` | `crates/cabby-server/src/redis/streamer.rs:242` | matched |  |
-| `redis/streamer.go:208` | DBG | `stop consuming stream` | `crates/cabby-server/src/redis/streamer.rs:258` | matched |  |
-| `redis/streamer.go:216` | ERR | `failed to claim from Redis stream` | `crates/cabby-server/src/redis/streamer.rs:266` | matched |  |
-| `redis/streamer.go:224` | DBG | `reclaimed messages` | `crates/cabby-server/src/redis/streamer.rs:275` | matched |  |
-| `redis/streamer.go:233` | ERR | `failed to read from Redis stream` | `crates/cabby-server/src/redis/streamer.rs:284` | matched |  |
-| `redis/streamer.go:298` | DBG | `received message` | `crates/cabby-server/src/redis/streamer.rs:341` | matched |  |
-| `redis/streamer.go:309` | ERR | `failed to ack message` | `crates/cabby-server/src/redis/streamer.rs:350`, `crates/cabby-server/src/redis/streamer.rs:353` | matched |  |
-| `redis/streamer.go:312` | ERR | `Redis stream handler failed` | `crates/cabby-server/src/redis/streamer.rs:356` | matched |  |
-| `redis/streamer.go:320` | ERR | `failed to reconnect to Redis: attempts exceeded` | `crates/cabby-server/src/redis/streamer.rs:366`, `crates/cabby-server/src/pubsub.rs:158` | matched |  |
-| `redis/streamer.go:328` | INF | `next Redis reconnect attempt in %s` | `crates/cabby-server/src/redis/subscription.rs:225`, `crates/cabby-server/src/redis/streamer.rs:374` | matched |  |
-| `redis/streamer.go:331` | INF | `reconnecting to Redis...` | `crates/cabby-server/src/redis/subscription.rs:230`, `crates/cabby-server/src/redis/streamer.rs:383` | matched |  |
+| `redis/streamer.go:112` | DBG | `shutting down Redis streamer` | `crates/cabby-server/src/redis/streamer.rs:147` | matched |  |
+| `redis/streamer.go:126` | ERR | `failed to remove Redis stream consumer` | `crates/cabby-server/src/redis/streamer.rs:161`, `crates/cabby-server/src/redis/streamer.rs:162` | matched |  |
+| `redis/streamer.go:172` | ERR | `failed to connect to Redis` | `crates/cabby-server/src/redis/subscription.rs:192`, `crates/cabby-server/src/redis/streamer.rs:222`, `crates/cabby-server/src/redis/publisher.rs:153` | matched |  |
+| `redis/streamer.go:178` | INF | `reconnected to Redis` | `crates/cabby-server/src/redis/streamer.rs:231` | matched |  |
+| `redis/streamer.go:191` | DBG | `Redis consumer group already exists` | `crates/cabby-server/src/redis/streamer.rs:247` | matched |  |
+| `redis/streamer.go:193` | ERR | `failed to create consumer group` | `crates/cabby-server/src/redis/streamer.rs:249` | matched |  |
+| `redis/streamer.go:208` | DBG | `stop consuming stream` | `crates/cabby-server/src/redis/streamer.rs:267` | matched |  |
+| `redis/streamer.go:216` | ERR | `failed to claim from Redis stream` | `crates/cabby-server/src/redis/streamer.rs:275` | matched |  |
+| `redis/streamer.go:224` | DBG | `reclaimed messages` | `crates/cabby-server/src/redis/streamer.rs:285` | matched |  |
+| `redis/streamer.go:233` | ERR | `failed to read from Redis stream` | `crates/cabby-server/src/redis/streamer.rs:294` | matched |  |
+| `redis/streamer.go:298` | DBG | `received message` | `crates/cabby-server/src/redis/streamer.rs:344` | matched |  |
+| `redis/streamer.go:309` | ERR | `failed to ack message` | `crates/cabby-server/src/redis/streamer.rs:353`, `crates/cabby-server/src/redis/streamer.rs:356` | matched |  |
+| `redis/streamer.go:312` | ERR | `Redis stream handler failed` | `crates/cabby-server/src/redis/streamer.rs:359` | matched |  |
+| `redis/streamer.go:320` | ERR | `failed to reconnect to Redis: attempts exceeded` | `crates/cabby-server/src/redis/streamer.rs:369`, `crates/cabby-server/src/pubsub.rs:158` | matched |  |
+| `redis/streamer.go:328` | INF | `next Redis reconnect attempt in %s` | `crates/cabby-server/src/redis/subscription.rs:225`, `crates/cabby-server/src/redis/streamer.rs:378` | matched |  |
+| `redis/streamer.go:331` | INF | `reconnecting to Redis...` | `crates/cabby-server/src/redis/subscription.rs:230`, `crates/cabby-server/src/redis/streamer.rs:387` | matched |  |
 | `rpc/http.go:118` | WRN | `circuit breaker is open` | `crates/cabby-server/src/rpc/http.rs:90`, `crates/cabby-server/src/rpc/http.rs:109` | matched |  |
 | `rpc/http.go:120` | INF | `circuit breaker is closed` | `crates/cabby-server/src/rpc/http.rs:91` | matched |  |
 | `rpc/rpc.go:113` | DBG | `connected` | `crates/cabby-server/src/redis/subscription.rs:60`, `crates/cabby-server/src/rpc/grpc.rs:306`, `crates/cabby-server/src/pubsub.rs:156` | matched |  |

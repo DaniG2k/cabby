@@ -64,3 +64,5 @@ builds contain neither.
   reply (D-109).
   Claiming the entries of a stopped server goes through its whole pending list, 100 entries a
   pass, so entries whose handling keeps failing don't hold back the ones after them (D-110).
+  A failure that repeats on every attempt (a value of another type at the stream key) is
+  retried after a growing delay, up to 8 to 16 s, instead of every 250 ms (D-111).

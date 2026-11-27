@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 214
+      "cases": 216
     },
     "translation": {
       "reviewed": 923
@@ -28153,10 +28153,28 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "redis::streamer_test::a_deleted_group_is_created_again_at_the_first_retry",
+      "relation": "regression",
+      "links": [
+        "26a1a703:redis/streamer_test.go#TestStreamer/Handles_incoming_messages"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
       "rust_case": "redis::streamer_test::deviation_d109_a_backlog_is_read_in_batches",
       "relation": "regression",
       "links": [
         "26a1a703:redis/streamer_test.go#TestStreamerAcksClaims"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "redis::streamer_test::deviation_d111_failing_commands_are_retried_less_and_less_often",
+      "relation": "regression",
+      "links": [
+        "26a1a703:redis/streamer_test.go#TestStreamer/Handles_incoming_messages"
       ],
       "reference_status": "unverified",
       "rust_status": "pending"

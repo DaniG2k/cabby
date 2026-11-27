@@ -49,6 +49,12 @@ Differences from the AnyCable Go server are listed by ID in
   100 entries there whose handling kept failing (an entry without a `payload` field, for
   example) were claimed again every time, and the entries after them were never broadcast
   (D-110).
+- Redis Streams broadcasting: when every attempt connects and a command then fails (a value of
+  another type at the stream key, a command the Redis user may not run), the delay before the
+  next attempt grows to 8 to 16 s. Before, the reader reconnected every 250 ms and wrote four log
+  records each time, without end. The first retry after a read that worked is still 250 ms, so
+  a consumer group deleted by a flush is created again as quickly as before; while Redis can't
+  be reached the delays are unchanged (D-111).
 
 ## [0.4.2] - 2026-11-27
 
