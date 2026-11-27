@@ -200,7 +200,8 @@ Failed operations are logged at error level with `context=broker provider=redis`
 
 The broker uses the same connection code as Redis pub/sub and broadcasting:
 
-- for Sentinel, set `--redis_sentinels` and give the master name in `--redis_url`;
+- for Sentinel, set `--redis_sentinels` and give the master name in `--redis_url`
+  (`redis://mymaster`, or `mymaster`; deviation D-116);
 - for Cluster, list the nodes in `--redis_url`, or give one node: Cabby detects a cluster
   node.
 

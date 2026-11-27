@@ -1,6 +1,6 @@
-//! Sentinel configurations: which connections use TLS (D-115), on the
-//! resolved configuration and against a fake Sentinel and a fake master behind
-//! TLS terminators.
+//! Sentinel configurations: which connections use TLS (D-115) and how the
+//! master name is read (D-116), on the resolved configuration and against a
+//! fake Sentinel and a fake master behind TLS terminators.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -169,6 +169,48 @@ fn deviation_d115_tls_checks_follow_the_connections() {
         assert!(!c.tls_verification_skipped(), "{what}");
         assert_eq!(master_only, c.sentinel_tls_off_for_tls_master(), "{what}");
     }
+}
+
+/// Pins D-116: the master name is the host of `--redis_url`; a name written
+/// without a scheme is read as `redis://<name>`, and an empty name is refused.
+#[test]
+fn deviation_d116_sentinel_master_names() {
+    let master = |url: &str| {
+        let mut c = config(url, "s1:26379");
+        c.to_client_options().map(|o| (o.sentinel.master_set, c.hostname())).map_err(|e| e.0)
+    };
+    let named = |name: &str| Ok((name.to_owned(), name.to_owned()));
+    // As upstream: the URL's host, port included.
+    assert_eq!(named("mymaster"), master("redis://mymaster"));
+    assert_eq!(named("mymaster"), master("redis://:pw@mymaster/2"));
+    assert_eq!(named("mymaster:6380"), master("redis://mymaster:6380"));
+    assert_eq!(named("mymaster"), master("//mymaster"));
+    assert_eq!(named("localhost:6379"), master("redis://localhost:6379"));
+    // Upstream's URL parser gives these no host (upstream then does not use
+    // Sentinel); Cabby reads them with `redis://` added.
+    assert_eq!(named("mymaster"), master("mymaster"));
+    assert_eq!(named("mymaster:6380"), master("mymaster:6380"));
+    assert_eq!(named("mymaster"), master("mymaster/"));
+    // No name at all.
+    let refused = Err("no Redis Sentinel master name: give it as the host of --redis_url (redis://<name>)".to_owned());
+    for url in ["", "redis://", "redis://:pw@/2", "redis:///0", "mymaster:abc"] {
+        assert_eq!(refused, master(url), "{url:?}");
+    }
+    // Invalid URLs keep upstream's error.
+    assert_eq!(
+        Err("parse \"my_master:6380\": first path segment in URL cannot contain colon".to_owned()),
+        master("my_master:6380")
+    );
+
+    // The master's credentials and database come from the same URL.
+    let mut c = config("user:pw@mymaster/3", "s1:26379");
+    let options = c.to_client_options().unwrap();
+    assert_eq!(
+        ("mymaster", "user", "pw", 3),
+        (options.sentinel.master_set.as_str(), options.username.as_str(), options.password.as_str(), options.select_db)
+    );
+    let spec = c.connect_spec().unwrap();
+    assert!(matches!(&spec.topology, Topology::Sentinel { master, .. } if master == "mymaster"));
 }
 
 // --- End to end: a fake Sentinel and a fake master, behind TLS terminators ---

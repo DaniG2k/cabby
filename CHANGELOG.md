@@ -29,6 +29,13 @@ Differences from the AnyCable Go server are listed by ID in
   info level. The implicit form (`--redis_url=rediss://sentinel:26379?master_set=mymaster`) follows the same rule
   (D-115).
 
+### Fixed
+
+- Redis Sentinel: a master name written without a scheme (`--redis_url=mymaster` with
+  `--redis_sentinels`) names that master. Before, Cabby asked the Sentinel nodes for a master with
+  an empty name and failed to connect. An empty name now stops startup with `no Redis Sentinel
+  master name: give it as the host of --redis_url (redis://<name>)` (D-116).
+
 ## [0.4.2] - 2026-11-27
 
 Cabby 0.4.2 fixes request handling in the SSE and Durable Streams endpoints, keeps metrics

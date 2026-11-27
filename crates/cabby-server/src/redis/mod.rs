@@ -324,6 +324,21 @@ impl RedisConfig {
         let (mut options, parsed) = parse_redis_url(&self.sentinels)?;
 
         options.sentinel.master_set = sentinel_master.host;
+        // A master name without a scheme (`mymaster`, `mymaster:6380`) has no
+        // host for Go's URL parser, and upstream then does not use Sentinel;
+        // Cabby reads the host with `redis://` added, as for the master's
+        // credentials and database below (D-116).
+        if options.sentinel.master_set.is_empty()
+            && !self.url.contains("://")
+            && let Ok(u) = url::parse(&ensure_redis_scheme(&self.url))
+        {
+            options.sentinel.master_set = u.host;
+        }
+        if options.sentinel.master_set.is_empty() {
+            return Err(RedisError(
+                "no Redis Sentinel master name: give it as the host of --redis_url (redis://<name>)".to_owned(),
+            ));
+        }
 
         // Move sentinel creds to sentinel-specific fields
         options.sentinel.username = std::mem::take(&mut options.username);
