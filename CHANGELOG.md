@@ -88,9 +88,6 @@ Differences from the AnyCable Go server are listed by ID in
   set it (pruning, the overflow sweep, the claim transaction, startup) or the server's
   configuration did, for example `ERROR: canceling statement due to lock timeout (lock_timeout,
   set for Cabby's role or database, or in the options of --postgres_url)`.
-
-### Fixed
-
 - Redis and Postgres pub/sub (`--pubsub=redis`, `--pubsub=postgres`): a client now gets every
   message published after its subscription was confirmed. A node's first subscription to a
   stream became active a few milliseconds after the confirmation was sent, and a message
