@@ -1,7 +1,7 @@
 # Independent review: Fable 5.2, November 2026
 
 An independent review of the whole project at `7fc880e`..`1fba6cb`, done by a reviewer not
-involved in building Cabby, as the owner requested (SPEC §11). The reviewer compared Cabby with
+involved in building Cabby, as the owner requested. The reviewer compared Cabby with
 the Go reference by reading both and by running both binaries side by side.
 
 Status of each finding is tracked in the table at the end.

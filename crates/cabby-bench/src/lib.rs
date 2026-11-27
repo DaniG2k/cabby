@@ -5,7 +5,7 @@
 //!
 //! Upstream Benchi embeds the Go server (`cli.Embedded`) in the scenario process, so
 //! clients, publisher and server share one Go scheduler and heap. That is not a fair
-//! basis for comparing two servers (SPEC.md §10). This port keeps Benchi's workloads
+//! basis for comparing two servers (`docs/benchmarks.md`, "Method"). This port keeps Benchi's workloads
 //! and correctness checks but moves the server out of the measured process:
 //!
 //! * [`server::Server`] launches **any** server binary (Cabby or the pinned
@@ -18,7 +18,7 @@
 //!   process. RPC latency is injected harness-side, identically for every server.
 //! * Correctness checks are network-observable: per-client message counts reconciled
 //!   against what the publisher issued ([`counter`], [`ledger`]), plus the stronger
-//!   checks SPEC.md §10 asks for (sequence-numbered payloads for ordering and
+//!   checks `docs/benchmarks.md` ("Method") asks for (sequence-numbered payloads for ordering and
 //!   duplicates), reconnect success ([`scenarios::reconnect_floods`]) and residual
 //!   resources after a run ([`resources`]).
 //! * Go runtime measurements (goroutines, Go heap) become process measurements of the

@@ -371,7 +371,7 @@ fn build_message_string_through_hub() {
     assert_eq!(Ok("{\"identifier\":\"chat\",\"message\":\"plain string\"}".to_owned()), session.read());
 }
 
-/// Upstream `BenchmarkBroadcast` as a correctness test (SPEC.md §10): the same
+/// Upstream `BenchmarkBroadcast` as a correctness test: the same
 /// configurations, asserting that every session receives exactly the expected
 /// frames. Throughput is measured by the external benchmark harness, not here.
 ///

@@ -1,6 +1,6 @@
 //! Typed marker for behavior that has not been implemented yet.
 //!
-//! Stubs never return plausible values (SPEC.md §5). They panic with a payload
+//! Stubs never return plausible values (`docs/translating-tests.md`, "Hard rules"). They panic with a payload
 //! starting with [`MARKER`], which the compatibility runner classifies as
 //! *pending* rather than *pass* or an ordinary *fail*.
 

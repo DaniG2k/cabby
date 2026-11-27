@@ -2,7 +2,7 @@
 //!
 //! Upstream reconciles counts only: a client is complete when it received at least
 //! the number of broadcasts issued to its streams ([`reconcile_counts`], the logic of
-//! stress_publications' `buildSummary`). SPEC.md §10 also asks for message-id
+//! stress_publications' `buildSummary`). `docs/benchmarks.md` ("Method") also asks for message-id
 //! reconciliation, so the external harness publishes sequence-numbered payloads
 //! (`<stream>:<seq>`, see [`DeliveryLedger::payload`]) and checks them per client
 //! and stream ([`DeliveryLedger`]):

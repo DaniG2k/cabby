@@ -2,7 +2,7 @@
 //!
 //! Time is an explicit dependency ([`Clock`]): the memory broker reads
 //! timestamps, deadlines and TTL expiry from it, so tests drive expiry by
-//! advancing a controlled clock instead of sleeping (SPEC.md §6).
+//! advancing a controlled clock instead of sleeping (`docs/translating-tests.md`, "Hard rules").
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};

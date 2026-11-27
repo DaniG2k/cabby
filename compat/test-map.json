@@ -15741,7 +15741,7 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
-        "[src] private nats-server process instead of the embedded enats.Service (SPEC §3); readiness after the restart is the re-established subscription instead of conn.Status()."
+        "[src] private nats-server process instead of the embedded enats.Service; readiness after the restart is the re-established subscription instead of conn.Status()."
       ],
       "rust_cases": [
         "pubsub::nats_test::test_nats_reconnect"

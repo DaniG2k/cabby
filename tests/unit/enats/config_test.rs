@@ -1,7 +1,7 @@
 //! upstream file: enats/config_test.go
 //!
-//! Configuration only; the embedded NATS server is a separate milestone
-//! (SPEC.md §3).
+//! Configuration only; the embedded NATS server itself is tested in `cabby-server`
+//! (`enats::tests`).
 
 use cabby_server::enats::Config;
 use cabby_testkit::reference::enats::{decode_toml, to_toml};

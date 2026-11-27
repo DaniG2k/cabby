@@ -1,4 +1,4 @@
-//! Compatibility runner (SPEC.md §5 "Pending tests and CI").
+//! Compatibility runner.
 //!
 //! Runs every translated test binary against one backend, classifies each Rust
 //! case as pass / pending (panicked with the pending marker) / fail / ignored,
@@ -46,7 +46,7 @@ enum Outcome {
     Fail,
     Ignored,
     /// The Go facade reported `unimplemented!("not_observable: <reason>")`: the
-    /// behavior cannot be reached through the reference (SPEC.md §5).
+    /// behavior cannot be reached through the reference (`docs/translating-tests.md`).
     NotObservable,
     /// An `/// issue:` test failed on Go: the upstream defect it pins.
     UpstreamFailure,

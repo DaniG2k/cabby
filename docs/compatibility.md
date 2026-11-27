@@ -46,6 +46,13 @@ last column.
 | StatsD metrics (`--statsd_host`) | Sends metrics to a StatsD server | Prometheus (`--metrics_http`) |
 | mruby metrics formatters (`--metrics_log_formatter`) | Formats metrics log lines with a Ruby script ([`docs/mruby.md`](mruby.md)). A build feature, off by default and not in release builds | Prometheus, or the default log format |
 
+## Runtime dependencies
+
+Two features run third-party code that Cabby doesn't rewrite in Rust: embedded NATS starts the
+official `nats-server`, a Go binary, as a child process ([`docs/enats.md`](enats.md), D-026), and
+the `mruby` build feature links mruby 1.2.0, a C library ([`docs/mruby.md`](mruby.md)). Release
+builds contain neither.
+
 ## Fixes over the reference server
 
 - **Redis silently drops a subscription** ([AnyCable issue 275](https://github.com/anycable/anycable/issues/275)):

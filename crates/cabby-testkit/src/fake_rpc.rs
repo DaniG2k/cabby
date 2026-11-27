@@ -1,4 +1,4 @@
-//! A scriptable fake AnyCable RPC application (SPEC.md §5, §9).
+//! A scriptable fake AnyCable RPC application.
 //!
 //! One [`FakeRpc`] serves the `anycable.RPC` gRPC service and AnyCable's HTTP
 //! RPC protocol at the same time, on separate loopback ports. It

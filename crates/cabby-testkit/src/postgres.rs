@@ -1,7 +1,7 @@
 //! PostgreSQL for the Postgres adapter tests (Cabby additions, D-070 and
 //! D-071).
 //!
-//! SPEC.md §9: there is no silent skip. A test needs a server at
+//! `docs/translating-tests.md` ("Hard rules"): there is no silent skip. A test needs a server at
 //! `CABBY_TEST_POSTGRES_URL` (`compat/scripts/services.sh start` runs one) and
 //! panics with a message naming the variable when it is not set. Every test
 //! works in its own scope: a unique schema (dropped afterwards) and a unique
@@ -36,7 +36,7 @@ pub fn url() -> String {
     match std::env::var("CABBY_TEST_POSTGRES_URL") {
         Ok(v) if !v.trim().is_empty() => v.trim().to_owned(),
         _ => panic!(
-            "CABBY_TEST_POSTGRES_URL is not set: this test needs a real PostgreSQL server (SPEC.md §9: no silent \
+            "CABBY_TEST_POSTGRES_URL is not set: this test needs a real PostgreSQL server (no silent \
              skips). Start one with `eval \"$(compat/scripts/services.sh start)\"`, see crates/cabby-testkit/src/postgres.rs"
         ),
     }

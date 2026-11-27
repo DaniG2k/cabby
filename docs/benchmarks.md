@@ -134,5 +134,18 @@ DURATION=2h compat/scripts/soak-compare.sh
 compat/scripts/bench-summary.py RESULTS && compat/scripts/bench-charts.py RESULTS docs/benchmarks
 ```
 
-Action Cable needs its gems ([`bench/actioncable`](../bench/actioncable)). The method is in
-[`SPEC.md` section 10](../SPEC.md#10-performance-evaluation).
+Action Cable needs its gems ([`bench/actioncable`](../bench/actioncable)).
+
+## Method
+
+- Both servers run as release builds (never Go race builds) on the same hardware, with the same
+  protocol, payloads, authentication, RPC latency, subscriptions, TLS and compression settings,
+  queue limits and broker topology.
+- The load generator runs outside the measured server process. Upstream Benchi embeds the Go
+  server, so its in-process numbers are not used (D-034).
+- Results come from repeated runs after a warm-up, with fixed seeds, at a load the generator
+  sustains.
+- Deliveries are reconciled by message ID and count, not by accepted publications, so drops,
+  duplicates and ordering violations show.
+- The harness measures delivery latency and the server process itself: memory, CPU, threads and
+  the resources left after clients disconnect.

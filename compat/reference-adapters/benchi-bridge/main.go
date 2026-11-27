@@ -1,4 +1,4 @@
-// Command benchi-bridge is a test-only reference adapter (SPEC.md §5 "Internal units")
+// Command benchi-bridge is a test-only reference adapter
 // for Benchi (etc/benchi), a separate Go module that the shared bridge cannot import.
 // It exposes exported Benchi functions and methods over the JSON-lines protocol in
 // protocol.go. Each Rust test starts its own bridge process, so Benchi's

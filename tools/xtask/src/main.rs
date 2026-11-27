@@ -1,4 +1,4 @@
-//! `cargo xtask`: maintenance tasks for the Cabby migration (SPEC.md §4, §5, §9).
+//! `cargo xtask`: maintenance tasks for the Cabby migration.
 
 mod asan;
 mod inventory;

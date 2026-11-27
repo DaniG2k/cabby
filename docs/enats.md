@@ -11,8 +11,8 @@ Upstream links the NATS server into the AnyCable binary as a Go library
 waits up to 5 s for it to accept connections, and probes JetStream over an in-process
 connection. `--embed_nats` turns it on, and the NATS broker and pub/sub then connect to it.
 
-SPEC.md §3 requires an explicit packaging strategy and asks final claims to disclose any
-remaining Go runtime dependency. It does not require rewriting NATS.
+This document is the packaging strategy. The Go runtime dependency it keeps is disclosed in
+[`docs/compatibility.md`](compatibility.md#runtime-dependencies); Cabby does not rewrite NATS.
 
 ## Options considered
 

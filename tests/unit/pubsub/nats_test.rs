@@ -1,7 +1,7 @@
 //! upstream file: pubsub/nats_test.go
 //!
 //! Upstream starts an embedded NATS server (`enats.NewService`) on the default
-//! port. Embedded NATS is a separate milestone (SPEC.md §3), so these tests use
+//! port. These tests use
 //! an external server: the shared one at `CABBY_TEST_NATS_URL` (with unique subjects
 //! per test) and, for the restart test, a private `nats-server` process.
 //! Subscription readiness is read from the server's monitoring endpoint
@@ -117,7 +117,7 @@ mod test_nats_common {
 }
 
 /// upstream: pubsub/nats_test.go#TestNATSReconnect
-/// note: private nats-server process instead of the embedded enats.Service (SPEC §3); readiness after the restart is the re-established subscription instead of conn.Status().
+/// note: private nats-server process instead of the embedded enats.Service; readiness after the restart is the re-established subscription instead of conn.Status().
 ///
 /// The server is private to this test (it is restarted), so upstream's subject
 /// names are kept. Upstream waits for `conn.Status() == CONNECTED` after the

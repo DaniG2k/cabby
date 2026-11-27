@@ -1,4 +1,4 @@
-// Command mruby-bridge is a test-only reference adapter (SPEC.md §5 "Internal units")
+// Command mruby-bridge is a test-only reference adapter
 // for the vendored go-mruby binding (compat/reference/vendorlib/go-mruby) and the
 // upstream `mrb` package. It links libmruby.a through cgo, so it lives in its own
 // module instead of the main bridge (compat/reference-adapters/bridge).

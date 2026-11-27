@@ -18,7 +18,7 @@ Counts are `go test -json` test events (top-level tests plus subtests), not upst
 counts. Case-level mapping lives in `../test-map.json`.
 
 The single skip in both main-module runs is `node TestDisconnectQueue_Shutdown/Stops_after_timeout`,
-skipped in source. SPEC §6 requires a deterministic active equivalent in the Rust port.
+skipped in source. `docs/translating-tests.md` ("Hard rules") requires a deterministic active equivalent in the Rust port.
 
 ## Environment adaptations (each one is needed to reproduce, none changes source)
 

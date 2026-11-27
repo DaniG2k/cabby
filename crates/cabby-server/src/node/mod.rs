@@ -3,7 +3,7 @@
 //!
 //! Time is an explicit dependency ([`Clock`]): session timers (pings, cache and
 //! presence keepalives) and the disconnect queue throttle read it, so tests drive
-//! them with a controlled clock instead of sleeping (SPEC.md §6).
+//! them with a controlled clock instead of sleeping (`docs/translating-tests.md`, "Hard rules").
 //!
 //! # Concurrency
 //!

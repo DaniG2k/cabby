@@ -8,8 +8,8 @@
 Upstream AnyCable embeds mruby so operators can script extensions in Ruby. Today the only
 consumer is the custom metrics printer (`--metrics_log_formatter=<file.rb>`,
 `metrics/custom_printer.go`, scenario `features/mruby_printers.testfile`). It is built only
-with the `mrb` Go build tag on Linux and macOS. This document records the embedding strategy
-(SPEC §3), how the translated tests map Go mechanics to Rust invariants, and how those
+with the `mrb` Go build tag on Linux and macOS. This document records the embedding strategy,
+how the translated tests map Go mechanics to Rust invariants, and how those
 tests run against the Go reference.
 
 Status: implemented, behind the cargo feature `mruby`, which is off by default and not in
@@ -203,8 +203,9 @@ mruby 1.2.0 is the version that keeps upstream behavior. mruby 2.x and 3.x renum
 rename value types (e.g. `MRB_TT_FIXNUM` → `MRB_TT_INTEGER`), change integer/float semantics,
 backtrace and `mrb_context_run` stack handling, and drop or rename C APIs go-mruby uses.
 mruby 1.2.0 (2015) also has known memory-safety bugs that later releases fixed. They matter
-less here, because the scripts are operator-provided files, not client input. Still, SPEC §6
-says not to keep a security defect only to match Go. So moving to a maintained mruby 3.x is the
+less here, because the scripts are operator-provided files, not client input. Still,
+[`docs/implementing.md`](implementing.md#rules) says not to keep a known defect only to match
+Go. So moving to a maintained mruby 3.x is the
 first candidate deviation once the suite passes on 1.2.0. Record it in `compat/deviations.md`
 with pinning tests for each observable change (value types, float precision, error texts).
 

@@ -1,4 +1,4 @@
-//! A controlled clock for unit tests (SPEC.md §6): time only moves when the test
+//! A controlled clock for unit tests (`docs/translating-tests.md`, "Hard rules"): time only moves when the test
 //! advances it. It starts at the current wall-clock time so timestamps computed
 //! by tests (e.g. `now - 10s`) also make sense to a Go reference using real time.
 

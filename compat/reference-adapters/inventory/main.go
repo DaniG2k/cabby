@@ -1,7 +1,7 @@
 // Command inventory statically enumerates Go test cases (tests, nested t.Run
 // subtests, benchmarks, examples, fuzz targets) with source spans, skips,
 // assertion counts and build constraints. It is a test-only reference adapter
-// for Cabby (SPEC.md §4); runtime enumeration from `go test -json` complements it
+// for Cabby; runtime enumeration from `go test -json` complements it
 // for subtest names that are only known at run time (table-driven cases).
 //
 // Usage: inventory -root <checkout> <relative dir or file>... > ast.json

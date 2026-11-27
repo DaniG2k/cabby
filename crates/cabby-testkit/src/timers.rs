@@ -1,4 +1,4 @@
-//! A controlled time source for node tests (SPEC.md §6): session timers, the
+//! A controlled time source for node tests (`docs/translating-tests.md`, "Hard rules"): session timers, the
 //! disconnect queue throttle ticker and broker TTLs only move when the test
 //! advances time.
 //!

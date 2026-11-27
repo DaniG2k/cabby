@@ -1,8 +1,8 @@
-# Implementing Cabby (M2 onwards)
+# Implementing Cabby
 
-Implementation turns `pending!` stubs into working code, one subsystem at a time, until the
-translated tests pass against Cabby (SPEC.md §8, M2–M6). Read SPEC.md §7 (improvements
-policy) first.
+Production code changes one subsystem at a time, and the translated tests keep passing against
+Cabby and against Go. The rules below include the improvements policy: what may change freely
+and what needs a deviation first.
 
 ## Definition of done for a subsystem
 
@@ -25,6 +25,8 @@ policy) first.
 - **Observable changes need a deviation first.** Wire format, defaults, limits, ordering, error
   texts, log lines that tests or users depend on, CLI output, timing contracts: record an entry
   in `compat/deviations.md` with a pinning test before you implement it.
+- **No defect kept only to match Go.** A known defect is fixed, not reproduced, through a
+  deviation as above.
 - **Keep the public API stable.** The tests and facades call it. Rename or reshape an API only
   together with its facade's Rust arm.
 - **Byte-exact where it matters.** JSON produced for clients and RPC must match Go's

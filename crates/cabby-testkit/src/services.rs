@@ -1,6 +1,6 @@
 //! Required external services (Redis, NATS) for translated integration tests.
 //!
-//! SPEC.md §6/§9: real Redis/NATS cases stay real and there is no silent skip.
+//! `docs/translating-tests.md` ("Hard rules"): real Redis/NATS cases stay real and there is no silent skip.
 //! Upstream Go tests skip when Redis is absent; here a missing or unreachable
 //! service panics with a message naming the variable to set:
 //!
@@ -45,7 +45,7 @@ fn required_env(name: &str, what: &str) -> String {
     match std::env::var(name) {
         Ok(v) if !v.trim().is_empty() => v.trim().to_owned(),
         _ => panic!(
-            "{name} is not set: this test needs a real {what} (SPEC.md §9: no silent skips). \
+            "{name} is not set: this test needs a real {what} (no silent skips). \
              Start one and export {name}, see crates/cabby-testkit/src/services.rs"
         ),
     }
@@ -543,7 +543,7 @@ fn nats_server_binary() -> PathBuf {
 
 /// A private `nats-server` process for tests that stop and restart the server
 /// (upstream restarts an embedded `enats.Service`). Embedded NATS itself is a
-/// separate milestone (SPEC.md §3).
+/// separate module, `cabby_server::enats`.
 pub struct NatsServer {
     pub port: u16,
     pub monitor_port: u16,

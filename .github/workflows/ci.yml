@@ -40,7 +40,7 @@ jobs:
         run: compat/scripts/services.sh start | sed 's/^export //; s/ /\n/g' >> "$GITHUB_ENV"
       # Green while cases are pending; fails on any regression, crash or
       # abnormal exit of a test binary, missing or unmapped test, ignore, or
-      # unreviewed pass (SPEC.md §5).
+      # unreviewed pass (docs/implementing.md, "Workflow").
       - run: cargo xtask test --backend rust
 
   mruby-asan:

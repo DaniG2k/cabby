@@ -1,4 +1,4 @@
-// Test-only shim for scenarios/reconnect_floods (SPEC.md §5: a minimal test-only
+// Test-only shim for scenarios/reconnect_floods (a minimal test-only
 // adapter for private package state). It is never written into the reference
 // checkout: `go test -c -overlay` adds it, with ../protocol.go, to the scenario's
 // package main as extra _test.go files, so the unexported run, parseFlags,

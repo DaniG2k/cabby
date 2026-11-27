@@ -1,4 +1,4 @@
-// Command bridge is a test-only reference adapter (SPEC.md §5 "Internal units").
+// Command bridge is a test-only reference adapter.
 // It exposes exported functions of the pinned Go implementation over a versioned
 // JSON-lines protocol on stdin/stdout so translated Rust tests can run against Go.
 // It must only marshal arguments and results: no behavior is reimplemented here.

@@ -2,7 +2,7 @@
 //!
 //! Each function runs the Rust implementation or calls the Go reference through
 //! the bridge, converting Go's JSON shapes into Cabby types. Facades only marshal;
-//! they must not contain behavior of their own (SPEC.md §5).
+//! they must not contain behavior of their own (`docs/translating-tests.md`).
 
 pub mod api;
 pub mod benchi;

@@ -1,4 +1,4 @@
-# Pinned comparison target and environment for the Cabby migration (SPEC.md §2, §8 M0).
+# Pinned comparison target and environment for the Cabby migration.
 # Do not move the reference silently: bump it in a dedicated change with a test/behavior diff.
 
 [reference]

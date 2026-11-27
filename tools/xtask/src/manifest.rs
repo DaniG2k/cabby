@@ -1,4 +1,4 @@
-//! `compat/test-map.json`: the case-level traceability manifest (SPEC.md §4).
+//! `compat/test-map.json`: the case-level traceability manifest.
 
 use std::collections::BTreeMap;
 

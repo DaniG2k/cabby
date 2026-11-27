@@ -1,7 +1,7 @@
 # Translating upstream tests
 
-How to port one upstream Go test file (or Ruby scenario) to Rust. Read `SPEC.md` §5–§6
-first. This guide covers the mechanics. Examples to copy from:
+How to port one upstream Go test file (or Ruby scenario) to Rust: the rules first, then the
+mechanics. Examples to copy from:
 `tests/unit/protocol/protocol_test.rs`, `tests/unit/ws/handler_test.rs`,
 `tests/conformance/origin.rs`.
 
@@ -15,8 +15,14 @@ first. This guide covers the mechanics. Examples to copy from:
   asserts the intended behavior.
 - **No `#[ignore]`.** Upstream skips: translate the body; for a skip with a reason, add a deterministic
   active equivalent and note it in the manifest (`notes`).
-- **No sleeps for synchronization.** Use channels, barriers or explicit readiness. Every wait has a
-  deadline. Real-socket tests use bounded timeouts.
+- **No sleeps for synchronization.** Use channels, barriers, explicit readiness or a controlled
+  clock (`cabby_testkit::clock`, `cabby_testkit::timers`), where time moves only when the test
+  advances it. Every wait has a deadline. Real-socket tests use bounded timeouts.
+- **Real services, no silent skips.** Redis, NATS and PostgreSQL cases run against real servers
+  (`compat/scripts/services.sh start` exports `CABBY_TEST_*`); a mock does not replace them. A
+  test whose service is not configured panics with a message naming the variable to set; it
+  never skips. Give each test its own keys, subjects, schemas, storage paths and process
+  environment, and do not change the global environment in parallel tests.
 - **Preserve opaque strings exactly** (identifiers, JSON-in-strings). Compare JSON semantically
   only where key order is irrelevant.
 - **Upstream files are read-only.** Never edit `compat/reference/`.
@@ -50,7 +56,7 @@ The path after `#` is the **Go runtime name** as printed by `go test -json`: spa
 prefix). Table-driven rows have their own runtime IDs there too. `cargo xtask inventory` fails on
 unknown IDs and on tests without annotations.
 
-Adaptations and `not_observable` reasons must be recorded (SPEC §4). Write them as
+Adaptations and `not_observable` reasons must be recorded. Write them as
 `/// note: …` lines on the test; `cargo xtask inventory` copies them into the case's
 `notes` in `compat/test-map.json` (prefixed `[src]`), e.g.
 

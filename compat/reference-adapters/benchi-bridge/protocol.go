@@ -1,4 +1,4 @@
-// Protocol of the Benchi reference adapters (SPEC.md §5 "Internal units").
+// Protocol of the Benchi reference adapters.
 //
 // This file is shared: benchi-bridge's main() serves it, and the scenario shims
 // (scenario-shims/*_test.go) get it overlaid into the scenarios' package main

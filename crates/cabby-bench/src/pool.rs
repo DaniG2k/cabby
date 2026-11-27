@@ -29,7 +29,7 @@ pub struct PoolConfig {
     /// Receives `bump(client_id)` for every message a pool client receives.
     pub accumulator: Option<Arc<Accumulator>>,
     /// Receives every message a pool client receives, for sequence reconciliation
-    /// (Cabby addition, SPEC.md §10).
+    /// (Cabby addition, see `docs/benchmarks.md`, "Method").
     pub ledger: Option<Arc<DeliveryLedger>>,
     /// Overrides subset generation; its length must equal `c`.
     pub streams: Option<Vec<Vec<String>>>,

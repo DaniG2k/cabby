@@ -124,7 +124,7 @@ pub struct Summary {
     pub observed_publish_rate_p50: f64,
     pub observed_publish_rate_p95: f64,
     pub publish_window_wall_seconds: f64,
-    // Cabby additions, printed after the upstream keys (SPEC.md §10): sequence
+    // Cabby additions, printed after the upstream keys (`docs/benchmarks.md`, "Method"): sequence
     // reconciliation, latency, server-process resources and generator health.
     /// Issued sequence numbers never received (by id, per client and stream).
     pub messages_missing_ids: u64,
