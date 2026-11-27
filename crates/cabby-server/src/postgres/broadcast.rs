@@ -90,6 +90,35 @@ struct Running {
 /// How long `shutdown` waits for a batch being handled.
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
 
+/// The claimer's waits and limits: the constants above, which tests shorten
+/// ([`PostgresBroadcaster::with_timing`]).
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClaimTiming {
+    /// [`POLL_INTERVAL`].
+    pub poll_interval: Duration,
+    /// [`BUSY_RETRY`].
+    pub busy_retry: Duration,
+    /// [`IDLE_IN_TRANSACTION`], in whole seconds or milliseconds.
+    pub idle_in_transaction: Duration,
+    /// [`HANDLING_BUDGET`].
+    pub handling_budget: Duration,
+    /// [`connect::QUERY_TIMEOUT`] of a claim statement.
+    pub query_timeout: Duration,
+}
+
+impl Default for ClaimTiming {
+    fn default() -> Self {
+        Self {
+            poll_interval: POLL_INTERVAL,
+            busy_retry: BUSY_RETRY,
+            idle_in_transaction: IDLE_IN_TRANSACTION,
+            handling_budget: HANDLING_BUDGET,
+            query_timeout: connect::QUERY_TIMEOUT,
+        }
+    }
+}
+
 /// Broadcast ingestion from a PostgreSQL outbox table and `NOTIFY`.
 pub struct PostgresBroadcaster {
     node: Arc<dyn Handler>,
@@ -99,6 +128,7 @@ pub struct PostgresBroadcaster {
     metrics: Metrics,
     log: Logger,
     running: Mutex<Option<Running>>,
+    timing: ClaimTiming,
 }
 
 impl PostgresBroadcaster {
@@ -113,7 +143,23 @@ impl PostgresBroadcaster {
             metrics,
             log: super::logger("broadcast"),
             running: Mutex::new(None),
+            timing: ClaimTiming::default(),
         })
+    }
+
+    /// Replaces the claimer's waits and limits ([`ClaimTiming`]; tests). Takes
+    /// effect at `start`.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_timing(mut self, timing: ClaimTiming) -> Self {
+        self.timing = timing;
+        self
+    }
+
+    /// The claimer's waits and limits.
+    #[doc(hidden)]
+    pub fn timing(&self) -> ClaimTiming {
+        self.timing
     }
 
     fn running(&self) -> std::sync::MutexGuard<'_, Option<Running>> {
@@ -169,6 +215,7 @@ struct Claimer {
     log: Logger,
     /// Failed handler calls in a row (for the log).
     failures: u64,
+    timing: ClaimTiming,
 }
 
 /// The claim statement. Payloads are read as bytes in UTF-8: the server
@@ -194,6 +241,12 @@ struct Handled {
     left_over: bool,
 }
 
+/// A duration as a Postgres interval: whole seconds as `<n>s` (the
+/// production settings), anything else as `<n>ms`.
+fn pg_interval(d: Duration) -> String {
+    if d.subsec_millis() == 0 { format!("{}s", d.as_secs()) } else { format!("{}ms", d.as_millis()) }
+}
+
 /// The delay before retrying after the `n`th handler failure in a row
 /// (100 ms doubling, at most 5 s).
 fn retry_delay(n: u32) -> Duration {
@@ -204,7 +257,7 @@ impl Claimer {
     async fn run(mut self, wake: Arc<Notify>, stop: CancellationToken) {
         let mut client: Option<tokio_postgres::Client> = None;
         // When to try again without a notification.
-        let mut next = POLL_INTERVAL;
+        let mut next = self.timing.poll_interval;
         let mut retries: u32 = 0;
         loop {
             tokio::select! {
@@ -222,7 +275,7 @@ impl Claimer {
                     Err(e) => {
                         self.metrics.error();
                         log_error!(self.log, "failed to claim broadcasts", "error" => e.0);
-                        next = POLL_INTERVAL;
+                        next = self.timing.poll_interval;
                         continue;
                     }
                 }
@@ -231,12 +284,12 @@ impl Claimer {
             next = match self.drain(c, &stop).await {
                 Ok(Round::Drained) => {
                     retries = 0;
-                    POLL_INTERVAL
+                    self.timing.poll_interval
                 }
                 // The holder drains to empty; notifications and the poll cover the rest.
                 Ok(Round::Busy) => {
                     retries = 0;
-                    BUSY_RETRY
+                    self.timing.busy_retry
                 }
                 Ok(Round::HandlerFailed) => {
                     retries += 1;
@@ -248,26 +301,25 @@ impl Claimer {
                     // A broken transaction or connection: reconnect next time.
                     client = None;
                     retries = 0;
-                    POLL_INTERVAL
+                    self.timing.poll_interval
                 }
             };
         }
     }
 
-    /// A claim statement with [`connect::QUERY_TIMEOUT`]; errors name the
-    /// statement, the outbox and the server.
+    /// A claim statement with [`connect::QUERY_TIMEOUT`] ([`ClaimTiming`]);
+    /// errors name the statement, the outbox and the server.
     async fn sql<T>(
         &self,
         statement: &str,
         fut: impl std::future::Future<Output = Result<T, tokio_postgres::Error>>,
     ) -> Result<T, PgError> {
-        match tokio::time::timeout(connect::QUERY_TIMEOUT, fut).await {
+        let timeout = self.timing.query_timeout;
+        match tokio::time::timeout(timeout, fut).await {
             Ok(r) => r.map_err(|e| PgError(limit_text(&e, CLAIM_LIMITS))),
-            Err(_) => Err(no_answer(
-                &format!("{statement} (claiming from {})", self.outbox),
-                connect::QUERY_TIMEOUT,
-                &self.spec.description,
-            )),
+            Err(_) => {
+                Err(no_answer(&format!("{statement} (claiming from {})", self.outbox), timeout, &self.spec.description))
+            }
         }
     }
 
@@ -309,7 +361,10 @@ impl Claimer {
         stop: &CancellationToken,
     ) -> Result<Option<Round>, PgError> {
         let tx = self.sql("BEGIN", client.transaction()).await?;
-        let settings = format!("SET LOCAL idle_in_transaction_session_timeout = '{}s'", IDLE_IN_TRANSACTION.as_secs());
+        let settings = format!(
+            "SET LOCAL idle_in_transaction_session_timeout = '{}'",
+            pg_interval(self.timing.idle_in_transaction)
+        );
         self.sql("SET LOCAL", tx.batch_execute(&settings)).await?;
         let locked: bool = self
             .sql("the claim lock", tx.query_one("SELECT pg_try_advisory_xact_lock($1)", &[&self.lock_key]))
@@ -348,7 +403,7 @@ impl Claimer {
             }
         }
         let (node, stop) = (self.node.clone(), stop.clone());
-        let budget = std::time::Instant::now() + HANDLING_BUDGET;
+        let budget = std::time::Instant::now() + self.timing.handling_budget;
         // The handler may wait for the broker (another Postgres query). It
         // stops at the first failure, or once the budget is used up; a row
         // Postgres can't store is set aside and the next one handed over.
@@ -472,6 +527,7 @@ impl Broadcaster for PostgresBroadcaster {
             metrics: self.metrics.clone(),
             log: self.log.clone(),
             failures: 0,
+            timing: self.timing,
         };
         let claimer = connect::runtime().spawn(claimer.run(wake.clone(), stop.clone()));
         let (dtx, drx) = connect::Inbox::new(connect::INBOX_CAPACITY, self.metrics.clone(), self.log.clone());
@@ -527,6 +583,19 @@ impl Drop for PostgresBroadcaster {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The production waits and limits; the tests that shorten them pass their
+    /// own [`ClaimTiming`].
+    #[test]
+    fn the_default_timing_is_the_documented_one() {
+        let t = ClaimTiming::default();
+        assert_eq!(
+            [5, 1, 60, 10, 10].map(Duration::from_secs),
+            [t.poll_interval, t.busy_retry, t.idle_in_transaction, t.handling_budget, t.query_timeout]
+        );
+        assert_eq!("60s", pg_interval(t.idle_in_transaction), "the claim transaction's setting is unchanged");
+        assert_eq!("1500ms", pg_interval(Duration::from_millis(1500)));
+    }
 
     #[test]
     fn payloads_are_read_as_stored_only_from_sql_ascii() {

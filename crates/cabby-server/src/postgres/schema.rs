@@ -145,6 +145,17 @@ const LIMITS: Limits = Limits {
     total: Duration::from_secs(60),
 };
 
+/// How long a start waits for another node's migration and for any other
+/// lock (`LIMITS.migration`, `LIMITS.lock`); an adapter passes them to
+/// [`prepare_waiting`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LockWaits {
+    pub migration: Duration,
+    pub lock: Duration,
+}
+
+pub(crate) const LOCK_WAITS: LockWaits = LockWaits { migration: LIMITS.migration, lock: LIMITS.lock };
+
 fn db(e: tokio_postgres::Error) -> PgError {
     PgError(error_text(&e))
 }
@@ -184,7 +195,20 @@ pub(crate) async fn prepare(
     needed: &[&str],
     log: &Logger,
 ) -> Result<(), PgError> {
-    prepare_within(spec, names, auto_migrate, needed, log, &LIMITS).await
+    prepare_waiting(spec, names, auto_migrate, needed, log, LOCK_WAITS).await
+}
+
+/// [`prepare`] with other lock waits (tests shorten them).
+pub(crate) async fn prepare_waiting(
+    spec: &ConnectSpec,
+    names: &Names,
+    auto_migrate: bool,
+    needed: &[&str],
+    log: &Logger,
+    waits: LockWaits,
+) -> Result<(), PgError> {
+    let limits = Limits { migration: waits.migration, lock: waits.lock, ..LIMITS };
+    prepare_within(spec, names, auto_migrate, needed, log, &limits).await
 }
 
 async fn prepare_within(
@@ -444,6 +468,13 @@ mod tests {
                         ERROR: canceling statement due to statement timeout \
                         (statement_timeout: Cabby's limit for one statement at startup, 30s)";
         assert_eq!(Err(expected.to_owned()), prepare_on(addr, true, LIMITS));
+    }
+
+    /// The documented waits (D-071): 15 s for another node's migration, 5 s
+    /// for any other lock.
+    #[test]
+    fn a_start_waits_15s_for_a_migration_and_5s_for_a_lock() {
+        assert_eq!(LockWaits { migration: Duration::from_secs(15), lock: Duration::from_secs(5) }, LOCK_WAITS);
     }
 
     #[test]

@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cabby_server::postgres::Metrics;
+use cabby_server::postgres::broadcast::ClaimTiming;
 use cabby_testkit::fault_proxy::FaultProxy;
 use cabby_testkit::postgres::{PgScope, rust_only, without_tls};
 use cabby_testkit::reference::broadcast::{Broadcaster, HandlerCall, MockHandler};
@@ -33,7 +34,13 @@ fn scope() -> PgScope {
 }
 
 fn start(scope: &PgScope, handler: &MockHandler, metrics: Metrics) -> ShutdownGuard {
-    let b = Broadcaster::postgres(handler, &scope.config(), metrics).expect("PostgresBroadcaster::new");
+    start_with(scope, handler, metrics, ClaimTiming::default())
+}
+
+/// [`start`] with the claimer's waits and limits replaced.
+fn start_with(scope: &PgScope, handler: &MockHandler, metrics: Metrics, timing: ClaimTiming) -> ShutdownGuard {
+    let b =
+        Broadcaster::postgres_with_timing(handler, &scope.config(), metrics, timing).expect("PostgresBroadcaster::new");
     b.start().expect("start");
     ShutdownGuard(b)
 }
@@ -186,7 +193,7 @@ fn outbox_rows(scope: &PgScope) -> Option<String> {
 }
 
 /// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts
-/// note: Deviation D-070: while another session holds the claim lock, a node skips its round instead of waiting on the server (no stalled claim, no extra backends); once the lock is released, the rows are delivered.
+/// note: Deviation D-070: while another session holds the claim lock, a node skips its round instead of waiting on the server (no stalled claim, no extra backends); once the lock is released, the rows are delivered. A node retries 1 s after finding the lock taken; here every 100 ms (ClaimTiming::busy_retry), so the 1 s with the lock held covers about ten rounds.
 #[test]
 fn deviation_d070_postgres_a_held_claim_lock_does_not_stall_the_claimer() {
     let scope = scope();
@@ -197,9 +204,10 @@ fn deviation_d070_postgres_a_held_claim_lock_does_not_stall_the_claimer() {
     holder.execute(&format!("BEGIN; SELECT pg_advisory_xact_lock({key});"));
 
     let handler = MockHandler::new();
-    let _b = start(&scope, &handler, Metrics::none());
+    let timing = ClaimTiming { busy_retry: Duration::from_millis(100), ..ClaimTiming::default() };
+    let _b = start_with(&scope, &handler, Metrics::none(), timing);
     scope.insert_broadcast(&payload("s", "held"));
-    assert!(handler.drain(Duration::from_secs(2)).is_empty(), "nothing is claimed while the lock is held");
+    assert!(handler.drain(Duration::from_secs(1)).is_empty(), "nothing is claimed while the lock is held");
     let app = format!("cabby broadcast {}", scope.channel);
     assert!(scope.pids(&app).len() <= 1, "one claim connection at most: {:?}", scope.pids(&app));
     let waiting = scope.scalar(&format!(
@@ -208,7 +216,7 @@ fn deviation_d070_postgres_a_held_claim_lock_does_not_stall_the_claimer() {
     assert_eq!(Some("0".to_owned()), waiting, "the claimer does not wait on the lock");
 
     holder.execute("ROLLBACK;");
-    let calls = handler.drain(Duration::from_secs(3));
+    let calls = handler.drain(Duration::from_secs(2));
     assert_eq!(vec![payload("s", "held")], payloads(&calls, "HandleBroadcast"));
     assert!(scope.pids(&app).len() <= 1, "no backend pile-up: {:?}", scope.pids(&app));
 }
@@ -257,14 +265,14 @@ fn deviation_d070_postgres_handler_errors_keep_the_remaining_rows() {
 }
 
 /// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts
-/// note: Deviation D-070: while the node fails to handle broadcasts (a broker outage of 4 s here), the first row is retried with a backoff of at most 5 s and no row is dropped; afterwards every row is delivered once, in order. Retries are counted.
+/// note: Deviation D-070: while the node fails to handle broadcasts (a broker outage of 1 s here), the first row is retried with a backoff of at most 5 s and no row is dropped; afterwards every row is delivered once, in order. Retries are counted.
 #[test]
 fn deviation_d070_postgres_broker_errors_never_drop_rows() {
     let scope = scope();
     scope.migrate();
     let registry = Arc::new(cabby_server::metrics::Metrics::new(Vec::new(), 0));
     let handler = MockHandler::new();
-    handler.fail_broadcasts_for(Duration::from_secs(4));
+    handler.fail_broadcasts_for(Duration::from_secs(1));
     for i in 1..=3 {
         scope.insert_broadcast(&payload("s", &i.to_string()));
     }
@@ -284,20 +292,25 @@ fn deviation_d070_postgres_broker_errors_never_drop_rows() {
 }
 
 /// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/With_multiple_subscribers
-/// note: Deviation D-070: a batch the node is slow to handle (100 rows at 650 ms each, 65 s) is committed in parts within a 10 s handling budget, so every row is delivered exactly once, in order, and only one handler call runs at a time; a handler call is never abandoned.
+/// note: Deviation D-070: a batch the node is slow to handle, longer than the server lets a claim transaction sit idle, is committed in parts within the handling budget, so every row is delivered exactly once, in order, and only one handler call runs at a time; a handler call is never abandoned. In production the budget is 10 s and the idle limit 60 s; here (ClaimTiming) 150 ms and 500 ms, with 100 rows at 10 ms each (1 s).
 #[test]
 fn deviation_d070_postgres_slow_batches_are_committed_in_parts() {
     let scope = scope();
     scope.migrate();
     let handler = MockHandler::new();
-    handler.delay_broadcasts(Duration::from_millis(650));
+    handler.delay_broadcasts(Duration::from_millis(10));
     scope.execute(&format!(
         "INSERT INTO {} (payload) SELECT '{{\"stream\":\"s\",\"data\":\"' || i || '\"}}' FROM generate_series(1, 100) i",
         scope.table("broadcasts")
     ));
-    let _b = start(&scope, &handler, Metrics::none());
+    let timing = ClaimTiming {
+        handling_budget: Duration::from_millis(150),
+        idle_in_transaction: Duration::from_millis(500),
+        ..ClaimTiming::default()
+    };
+    let _b = start_with(&scope, &handler, Metrics::none(), timing);
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(120);
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
     let mut calls = Vec::new();
     while payloads(&calls, "HandleBroadcast").len() < 100 {
         assert!(std::time::Instant::now() < deadline, "{} of 100 delivered", payloads(&calls, "HandleBroadcast").len());
@@ -311,7 +324,7 @@ fn deviation_d070_postgres_slow_batches_are_committed_in_parts() {
 }
 
 /// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts
-/// note: Deviation D-070: a claim connection that goes silent at the commit of an empty batch is given up after the statement timeout (10 s), as at any other claim statement; the next row is claimed on a new connection.
+/// note: Deviation D-070: a claim connection that goes silent at the commit of an empty batch is given up after the statement timeout, as at any other claim statement; the next row is claimed on a new connection. The timeout is 10 s and the poll after it 5 s; here 1 s and 500 ms (ClaimTiming).
 #[test]
 fn deviation_d070_postgres_a_silent_commit_of_an_empty_batch_is_given_up() {
     let scope = scope();
@@ -319,18 +332,24 @@ fn deviation_d070_postgres_a_silent_commit_of_an_empty_batch_is_given_up() {
     let mut config = scope.config();
     config.url = without_tls(scope.url_via(proxy.addr()));
     let handler = MockHandler::new();
-    let b = Broadcaster::postgres(&handler, &config, Metrics::none()).expect("PostgresBroadcaster::new");
+    let timing = ClaimTiming {
+        query_timeout: Duration::from_secs(1),
+        poll_interval: Duration::from_millis(500),
+        ..ClaimTiming::default()
+    };
+    let b = Broadcaster::postgres_with_timing(&handler, &config, Metrics::none(), timing)
+        .expect("PostgresBroadcaster::new");
     b.start().expect("start");
     let _b = ShutdownGuard(b);
 
     proxy.sever_on(b"COMMIT");
-    // Wakes the claimer (it also polls every 5 s): the outbox is empty.
+    // Wakes the claimer (it also polls): the outbox is empty.
     scope.notify(&format!("{}_in", scope.channel), "");
     assert!(proxy.await_severed(Duration::from_secs(15)), "no empty batch was committed");
     scope.insert_broadcast(&payload("s", "after"));
 
-    // The statement timeout (10 s), then the next poll (5 s), and a margin.
-    let deadline = std::time::Instant::now() + Duration::from_secs(40);
+    // The statement timeout, then the next poll, and a margin.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
     let mut calls = Vec::new();
     while payloads(&calls, "HandleBroadcast").is_empty() {
         assert!(std::time::Instant::now() < deadline, "the claimer is stuck");

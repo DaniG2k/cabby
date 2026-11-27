@@ -614,8 +614,18 @@ impl Starting {
     }
 
     fn broker(config: PostgresConfig) -> Self {
+        Self::broker_waiting(config, None)
+    }
+
+    /// [`Starting::broker`] whose start waits `migration` for another node's
+    /// migration and `lock` for any other lock (`with_start_lock_waits`).
+    fn broker_waiting(config: PostgresConfig, waits: Option<(Duration, Duration)>) -> Self {
         Self::new(move || {
             PostgresBroker::new(None, &new_config(), &config, Metrics::none())
+                .map(|b| match waits {
+                    Some((migration, lock)) => b.with_start_lock_waits(migration, lock),
+                    None => b,
+                })
                 .and_then(|b| b.start())
                 .map_err(|e| e.message)
         })
@@ -706,7 +716,7 @@ fn deviation_d071_postgres_starts_do_not_wait_for_locks_on_existing_tables() {
 }
 
 /// regression-for: broker/nats_test.go#TestNATSBroker_Epoch
-/// note: Deviation D-071: a start that needs a lock another session holds (here: a missing index) fails after 5 s, naming the statement; the broadcasts of running nodes that queue behind it are delayed, not failed. Once the lock is gone the next start creates the index.
+/// note: Deviation D-071: a start that needs a lock another session holds (here: a missing index) fails after its lock wait, naming the statement; the broadcasts of running nodes that queue behind it are delayed, not failed. Once the lock is gone the next start creates the index. The wait is 5 s; here 1 s (PostgresBroker::with_start_lock_waits).
 #[test]
 fn deviation_d071_postgres_start_fails_when_a_lock_it_needs_is_held() {
     let scope = scope();
@@ -716,21 +726,22 @@ fn deviation_d071_postgres_start_fails_when_a_lock_it_needs_is_held() {
     let holder = scope.other_session();
     holder.execute(&format!("BEGIN; LOCK TABLE {} IN ROW EXCLUSIVE MODE;", scope.table("history")));
 
-    let starting = Starting::broker(scope.plain_config());
+    let starting =
+        Starting::broker_waiting(scope.plain_config(), Some((Duration::from_secs(15), Duration::from_secs(1))));
     wait_migration_blocked(&scope);
     running.handle_broadcast(&msg("s", "delayed")).expect("a running node's broadcast is only delayed");
     let (result, took) = starting.wait(Duration::from_secs(30));
     let error = result.expect_err("the start needs the lock");
     assert_eq!(
         format!(
-            "failed to start Postgres broker, cause: timed out after 5s waiting for a lock to run CREATE INDEX IF NOT \
+            "failed to start Postgres broker, cause: timed out after 1s waiting for a lock to run CREATE INDEX IF NOT \
              EXISTS \"cabby_history_ts_sec\" ON \"{}\".\"cabby_history\": another session holds a conflicting lock \
              (see pg_locks and pg_stat_activity)",
             scope.schema
         ),
         error
     );
-    assert!(took >= Duration::from_secs(5), "{took:?}");
+    assert!(took >= Duration::from_secs(1), "{took:?}");
 
     holder.execute("ROLLBACK");
     plain_broker(&scope);
@@ -739,7 +750,7 @@ fn deviation_d071_postgres_start_fails_when_a_lock_it_needs_is_held() {
 }
 
 /// regression-for: broker/nats_test.go#TestNATSBroker_Epoch
-/// note: Deviation D-071: a start waits at most 15 s for another node's migration, and one that only checks the tables (--postgres_auto_migrate=false) at most 5 s for a table another session has locked exclusively; both then fail with an error.
+/// note: Deviation D-071: a start waits at most 15 s for another node's migration, and one that only checks the tables (--postgres_auto_migrate=false) at most 5 s for a table another session has locked exclusively; both then fail with an error. Here the waits are 2 s and 1 s (PostgresBroker::with_start_lock_waits); the 15 s and 5 s are pinned by a unit test of the schema module.
 #[test]
 fn deviation_d071_postgres_start_does_not_wait_forever_for_a_migration_or_a_table() {
     let scope = scope();
@@ -755,19 +766,21 @@ fn deviation_d071_postgres_start_does_not_wait_forever_for_a_migration_or_a_tabl
              pg_stat_activity)"
         )
     };
-    let (result, took) = Starting::broker(scope.plain_config()).wait(Duration::from_secs(40));
+    let waits = Some((Duration::from_secs(2), Duration::from_secs(1)));
+    let (result, took) = Starting::broker_waiting(scope.plain_config(), waits).wait(Duration::from_secs(40));
     assert_eq!(
-        Err(expected("timed out after 15s waiting for a lock to run the migration (one node at a time)")),
+        Err(expected("timed out after 2s waiting for a lock to run the migration (one node at a time)")),
         result
     );
-    assert!(took >= Duration::from_secs(15), "{took:?}");
+    assert!(took >= Duration::from_secs(2), "{took:?}");
     holder.execute("ROLLBACK");
 
     holder.execute(&format!("BEGIN; LOCK TABLE {} IN ACCESS EXCLUSIVE MODE;", scope.table("meta")));
     let mut config = scope.plain_config();
     config.auto_migrate = false;
-    let (result, _) = Starting::broker(config).wait(Duration::from_secs(40));
-    assert_eq!(Err(expected("timed out after 5s waiting for a lock to read the schema version")), result);
+    let (result, took) = Starting::broker_waiting(config, waits).wait(Duration::from_secs(40));
+    assert_eq!(Err(expected("timed out after 1s waiting for a lock to read the schema version")), result);
+    assert!(took >= Duration::from_secs(1), "{took:?}");
 }
 
 /// regression-for: broker/memory_test.go#TestMemory_Expire

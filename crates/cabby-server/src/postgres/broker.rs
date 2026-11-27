@@ -237,6 +237,8 @@ struct Inner {
     maintenance: tokio::sync::Mutex<Option<tokio_postgres::Client>>,
     /// How long a pruning statement waits for a lock ([`PRUNE_LOCK_TIMEOUT`]).
     prune_lock_timeout: Duration,
+    /// How long `start` waits for another node's migration and for a lock.
+    start_waits: schema::LockWaits,
 }
 
 /// The shared Postgres broker.
@@ -275,6 +277,7 @@ impl PostgresBroker {
                 stop: CancellationToken::new(),
                 maintenance: tokio::sync::Mutex::new(None),
                 prune_lock_timeout: PRUNE_LOCK_TIMEOUT,
+                start_waits: schema::LOCK_WAITS,
             }),
         })
     }
@@ -286,6 +289,17 @@ impl PostgresBroker {
     #[must_use]
     pub fn with_prune_lock_timeout(mut self, timeout: Duration) -> Self {
         Arc::get_mut(&mut self.inner).expect("with_prune_lock_timeout before start").prune_lock_timeout = timeout;
+        self
+    }
+
+    /// Lets `start` wait `migration` for another node's migration and `lock`
+    /// for any other lock, instead of 15 s and 5 s (tests). Only before
+    /// `start`, like [`PostgresBroker::with_prune_lock_timeout`].
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_start_lock_waits(mut self, migration: Duration, lock: Duration) -> Self {
+        Arc::get_mut(&mut self.inner).expect("with_start_lock_waits before start").start_waits =
+            schema::LockWaits { migration, lock };
         self
     }
 
@@ -556,7 +570,9 @@ impl Broker for PostgresBroker {
     fn start(&self) -> Result<(), BrokerError> {
         let inner = self.inner.clone();
         let epoch = connect::block_on(async move {
-            schema::prepare(&inner.spec, &inner.names, inner.auto_migrate, schema::BROKER_TABLES, &inner.log).await?;
+            let (spec, names, log) = (&inner.spec, &inner.names, &inner.log);
+            schema::prepare_waiting(spec, names, inner.auto_migrate, schema::BROKER_TABLES, log, inner.start_waits)
+                .await?;
             inner.ensure_epoch().await
         })
         .map_err(|e| decorate("failed to start Postgres broker", &e))?;

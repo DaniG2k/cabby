@@ -289,8 +289,20 @@ impl Broadcaster {
         metrics: cabby_server::postgres::Metrics,
     ) -> Result<Self, String> {
         crate::postgres::rust_only();
+        Self::postgres_with_timing(handler, config, metrics, Default::default())
+    }
+
+    /// [`Broadcaster::postgres`] with the claimer's waits and limits replaced
+    /// (`PostgresBroadcaster::with_timing`).
+    pub fn postgres_with_timing(
+        handler: &MockHandler,
+        config: &cabby_server::postgres::PostgresConfig,
+        metrics: cabby_server::postgres::Metrics,
+        timing: cabby_server::postgres::broadcast::ClaimTiming,
+    ) -> Result<Self, String> {
+        crate::postgres::rust_only();
         cabby_server::postgres::PostgresBroadcaster::new(handler.rust(), config, metrics)
-            .map(|b| Self { inner: BroadcasterImpl::Rust(Box::new(b)) })
+            .map(|b| Self { inner: BroadcasterImpl::Rust(Box::new(b.with_timing(timing))) })
             .map_err(|e| e.0)
     }
 
