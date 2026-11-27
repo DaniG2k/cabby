@@ -27658,8 +27658,8 @@
       "links": [
         "26a1a703:features/enats_broker.testfile#scenario"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "pass",
+      "rust_status": "pass"
     },
     {
       "rust_case": "features::enats::enats_clusters_frames_are_exact",
@@ -27667,7 +27667,7 @@
       "links": [
         "26a1a703:features/enats_clusters.testfile#scenario"
       ],
-      "reference_status": "unverified",
+      "reference_status": "pass",
       "rust_status": "pass"
     },
     {
@@ -27676,8 +27676,8 @@
       "links": [
         "26a1a703:features/enats_broker.testfile#scenario"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "pass",
+      "rust_status": "pass"
     },
     {
       "rust_case": "features::file_config::deviation_d060_cabby_toml_beats_anycable_toml",
@@ -27694,7 +27694,7 @@
       "links": [
         "26a1a703:features/pusher-private.testfile#scenario"
       ],
-      "reference_status": "unverified",
+      "reference_status": "pass",
       "rust_status": "pass"
     },
     {
@@ -27793,8 +27793,8 @@
       "links": [
         "26a1a703:features/shutdown.testfile#scenario"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "pass",
+      "rust_status": "pass"
     },
     {
       "rust_case": "features::with_rpc::a_second_signal_stops_a_server_waiting_for_a_request",
@@ -27802,8 +27802,8 @@
       "links": [
         "26a1a703:features/shutdown.testfile#scenario"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "pass",
+      "rust_status": "pass"
     },
     {
       "rust_case": "features::with_rpc::ping_pong_frames_are_exact",
@@ -27811,7 +27811,7 @@
       "links": [
         "26a1a703:features/ping_pong.testfile#scenario"
       ],
-      "reference_status": "unverified",
+      "reference_status": "pass",
       "rust_status": "pass"
     },
     {
