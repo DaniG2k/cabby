@@ -19,7 +19,7 @@ use std::time::Duration;
 use cabby_testkit::anyt_app::BENCHMARK_CHANNEL;
 use cabby_testkit::publish::{self, NatsSubscriber, Target};
 use cabby_testkit::sut::{Listeners, Sut, SutOptions};
-use cabby_testkit::wsdirector::{Client, Connection, Protocol, StepError};
+use cabby_testkit::wsdirector::{Client, Connection, Expect, Protocol, StepError, identifier};
 use serde_json::{Value, json};
 
 use crate::support::*;
@@ -349,4 +349,76 @@ fn ctrl_c_shuts_the_server_and_its_embedded_nats_down_cleanly() {
     assert!(status.success(), "{status}. Output:\n{out}");
     assert!(!out.contains("exited unexpectedly"), "Output:\n{out}");
     assert!(std::net::TcpStream::connect(local(nats_port)).is_err(), "the embedded server stopped");
+}
+
+/// regression-for: features/enats_clusters.testfile#scenario
+/// note: Cabby-only: across the super-cluster, the subscription confirmations, the relayed broadcasts and the publisher's broadcastResult must have exactly the expected keys (wsdirector's exact match, kept in the translation, accepts `{}` or a frame with keys missing); readiness and retries as in enats_clusters
+#[test]
+fn enats_clusters_frames_are_exact() {
+    let app = rpc_app();
+    let rpc = format!("--rpc_host={}", app.grpc_target());
+    let store = TempDir::new("enats-clusters-exact");
+    let dir = |n: &str| format!("--enats_store_dir={}", store.0.join(n).display());
+    let (mut node1, [a1, c1, g1]) = node(&rpc, |[a, c, g]| {
+        vec![
+            "--broadcast_adapter=nats".into(),
+            "--embed_nats".into(),
+            format!("--enats_addr={}", nats(a)),
+            format!("--enats_cluster={}", nats(c)),
+            format!("--enats_gateway={}", nats(g)),
+            dir("one"),
+        ]
+    });
+    node1.process.wait_tcp(local(c1), READY_DEADLINE).unwrap_or_else(|e| panic!("{e:#}"));
+    let (node2, [a2, _]) = node(&rpc, |[a, c]| {
+        vec![
+            "--broadcast_adapter=nats".into(),
+            "--embed_nats".into(),
+            format!("--enats_addr={}", nats(a)),
+            format!("--enats_cluster={}", nats(c)),
+            format!("--enats_cluster_routes={}", nats(c1)),
+            dir("two"),
+        ]
+    });
+    let (node3, [a3, _, _]) = node(&rpc, |[a, c, g]| {
+        vec![
+            "--broadcast_adapter=nats".into(),
+            "--embed_nats".into(),
+            format!("--enats_addr={}", nats(a)),
+            format!("--enats_cluster={}", nats(c)),
+            "--enats_cluster_name=another-cluster".into(),
+            format!("--enats_gateway={}", nats(g)),
+            format!("--enats_gateways=anycable-cluster:{}", nats(g1)),
+            dir("three"),
+        ]
+    });
+    app.set_broadcaster(Target::Nats { addr: local(a1), subject: "__anycable__".into() });
+    await_nats_relay(a1, &[a2, a3]);
+
+    let id = identifier(BENCHMARK_CHANNEL, &[]);
+    retrying(RETRY_DELAY, ATTEMPTS, || {
+        let subscribed = |sut: &Sut| -> Result<Client, String> {
+            let mut c = step(ac_client(sut))?;
+            c.send(&json!({"command": "subscribe", "identifier": id}));
+            step(c.receive(&Expect::Strict(json!({"type": "confirm_subscription", "identifier": id}))))?;
+            Ok(c)
+        };
+        let strict = |c: &mut Client, action: &str| -> Result<(), String> {
+            let frame = json!({"identifier": id, "message": {"message": "hello", "action": action}});
+            step(c.receive(&Expect::Strict(frame)).map(drop))
+        };
+        let mut publisher = subscribed(&node1).map_err(|e| format!("Group publisher: {e}"))?;
+        let mut subscriber = subscribed(&node2).map_err(|e| format!("Group subscriber: {e}"))?;
+        let mut another = subscribed(&node3).map_err(|e| format!("Group another_subscriber: {e}"))?;
+        publisher.perform(BENCHMARK_CHANNEL, &[], "broadcast", &hello());
+        let results = [
+            ("publisher", strict(&mut publisher, "broadcast").and_then(|()| strict(&mut publisher, "broadcastResult"))),
+            ("subscriber", strict(&mut subscriber, "broadcast")),
+            ("another_subscriber", strict(&mut another, "broadcast")),
+        ];
+        match results.iter().find(|(_, r)| r.is_err()) {
+            Some((g, Err(e))) => Err(format!("Unexpected scenario result: Group {g}: {e}")),
+            _ => Ok(()),
+        }
+    });
 }

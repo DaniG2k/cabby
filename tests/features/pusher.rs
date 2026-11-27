@@ -184,3 +184,41 @@ fn pusher_presence() {
     drop((first, second));
 }
 
+/// regression-for: features/pusher-private.testfile#scenario
+/// note: Cabby-only: the client event the subscriber receives must have exactly the expected keys (wsdirector's exact match, kept in the translation, accepts `{}` or a frame with keys missing)
+#[test]
+fn pusher_private_frames_are_exact() {
+    let sut = launch(
+        &["--pusher_app_id=my-test-id", "--pusher_app_key=ballard", "--public_streams", "--pusher_secret=oaugc1"],
+        &[],
+    );
+    let url = ws_url(&sut, "/app/ballard");
+    let subscribe = |socket_id: &str| -> Result<Client, StepError> {
+        let mut c = pusher_client(&url, socket_id)?;
+        c.receive(&established())?;
+        c.send(&json!({
+            "event": "pusher:subscribe",
+            "data": {"channel": "private-test", "auth": channel_auth("ballard", "oaugc1", &format!("{socket_id}:private-test"))},
+        }));
+        c.receive(&Expect::Partial(json!({"event": "pusher_internal:subscription_succeeded"})))?;
+        Ok(c)
+    };
+
+    let result = (|| -> Result<(), StepError> {
+        let mut publisher = subscribe("2025.1234")?;
+        let mut subscriber = subscribe("2025.4343")?;
+        publisher.send(&json!({
+            "event": "client-forgotten",
+            "channel": "private-test",
+            "data": {"body": "funeral_without_applause"},
+        }));
+        subscriber.receive(&Expect::Strict(json!({
+            "event": "client-forgotten",
+            "channel": "private-test",
+            "data": {"body": "funeral_without_applause"},
+        })))?;
+        Ok(())
+    })();
+
+    assert_groups(&[("subscriber", result)]);
+}

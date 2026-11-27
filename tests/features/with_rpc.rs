@@ -283,3 +283,36 @@ fn a_second_signal_during_disconnect_calls_exits_cleanly() {
     drop(release);
     drop(client);
 }
+
+/// regression-for: features/ping_pong.testfile#scenario
+/// note: Cabby-only: the no_pong disconnect frame must have exactly the expected keys (wsdirector's exact match, kept in the translation, accepts `{}` or a frame with keys missing); inherent windows as in ping_pong, with one pong instead of three
+#[test]
+fn ping_pong_frames_are_exact() {
+    let app = rpc_app();
+    let rpc = rpc_host(&app);
+    let sut = launch(&[&rpc, "--pong_timeout=1"], &[]);
+    let url = ws_url(&sut, "/cable");
+    let ping = Expect::Partial(json!({"type": "ping"}));
+
+    let result = (|| -> Result<(), StepError> {
+        let mut c: Client = wsd(
+            &url,
+            Protocol::Base,
+            Connection {
+                subprotocol: Some("actioncable-v1-ext-json".into()),
+                query: vec![("pi".into(), "1".into()), ("ptp".into(), "ns".into())],
+                ..Default::default()
+            },
+        )?;
+        c.receive(&Expect::Partial(json!({"type": "welcome"})))?;
+        c.receive(&ping)?;
+        std::thread::sleep(Duration::from_millis(500));
+        c.send(&json!({"command": "pong"}));
+        c.receive(&ping)?;
+        std::thread::sleep(Duration::from_secs(1));
+        c.receive(&Expect::Strict(json!({"type": "disconnect", "reason": "no_pong", "reconnect": true})))?;
+        Ok(())
+    })();
+
+    assert_groups(&[("default", result)]);
+}

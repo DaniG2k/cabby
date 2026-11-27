@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 230
+      "cases": 233
     },
     "translation": {
       "reviewed": 923
@@ -27662,6 +27662,15 @@
       "rust_status": "pending"
     },
     {
+      "rust_case": "features::enats::enats_clusters_frames_are_exact",
+      "relation": "regression",
+      "links": [
+        "26a1a703:features/enats_clusters.testfile#scenario"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pass"
+    },
+    {
       "rust_case": "features::enats::the_embedded_server_ends_with_a_killed_process",
       "relation": "regression",
       "links": [
@@ -27677,6 +27686,15 @@
         "26a1a703:features/file_config.testfile#scenario"
       ],
       "reference_status": "not_observable",
+      "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::pusher::pusher_private_frames_are_exact",
+      "relation": "regression",
+      "links": [
+        "26a1a703:features/pusher-private.testfile#scenario"
+      ],
+      "reference_status": "unverified",
       "rust_status": "pass"
     },
     {
@@ -27786,6 +27804,15 @@
       ],
       "reference_status": "unverified",
       "rust_status": "pending"
+    },
+    {
+      "rust_case": "features::with_rpc::ping_pong_frames_are_exact",
+      "relation": "regression",
+      "links": [
+        "26a1a703:features/ping_pong.testfile#scenario"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pass"
     },
     {
       "rust_case": "hub::hub_test::build_message_json_through_hub",
