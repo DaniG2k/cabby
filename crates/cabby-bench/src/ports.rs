@@ -19,8 +19,10 @@
 //! * A port that something else listens on (a process that does not use this
 //!   module) fails a bind probe and is dropped from the queue.
 //!
-//! A server that still finds its port taken can only have met such a process
-//! after the probe; supervisors restart it with new ports (bounded, logged).
+//! A server can still find its port taken (by such a process, after the
+//! probe). Supervisors check that the listener they wait for is the server's
+//! own ([`listening`]) and restart a server that failed to bind on new ports,
+//! a bounded number of times, logging each retry.
 
 use std::collections::VecDeque;
 use std::fs::{File, TryLockError};
