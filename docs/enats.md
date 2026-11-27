@@ -59,13 +59,23 @@ This document is the packaging strategy. The Go runtime dependency it keeps is d
 - **Shutdown:** `shutdown` (and `Drop`) sends SIGINT for a graceful stop (JetStream
   flushed) and kills the process if it hasn't exited after 10 s. Upstream disables
   JetStream, then shuts the in-process server down.
+- **Signals:** the child runs in a process group of its own, so Ctrl-C in a terminal (SIGINT
+  to Cabby's process group) reaches Cabby only, which stops the child after the components that
+  use it, as upstream's in-process server (`NoSigs`) is.
+- **When Cabby is killed:** a watchdog, `sh` started next to the child (in its own process
+  group too), waits for the end of a pipe only Cabby holds open; the system closes it when Cabby
+  exits however it ends (SIGKILL included). The watchdog then sends the child SIGINT and removes
+  its configuration file. `shutdown`, and the supervision when the child exits on its own, end
+  the watchdog first, so it never signals a reused process ID. Without `/bin/sh` (an image
+  without a shell) there is no watchdog: the child outlives a killed Cabby, as before.
 
 ## Differences from upstream (disclosure)
 
 - Embedded NATS adds a **runtime dependency on the Go-built `nats-server` binary**. It is a
   separate process, not part of the Cabby binary.
-- If Cabby is killed with SIGKILL, the child server keeps running. Linux
-  `PR_SET_PDEATHSIG` would need `unsafe`.
+- If Cabby is killed with SIGKILL, the child server stops through its watchdog (see
+  "When Cabby is killed"), shortly after rather than at once; Linux `PR_SET_PDEATHSIG`
+  would need `unsafe`. Without `/bin/sh` the child keeps running.
 - Startup failures report the server's exit status and output instead of
   `server.NewServer` errors.
 - JetStream readiness is probed over TCP instead of an in-process connection.

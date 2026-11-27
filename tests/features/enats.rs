@@ -276,3 +276,70 @@ fn enats_broker() {
         Ok(())
     });
 }
+
+/// When the server process is killed (SIGKILL, no shutdown), its embedded NATS
+/// server stops too and frees its port, as an in-process server does. Cabby's
+/// `nats-server` child is stopped by a watchdog process that sees the killed
+/// process's end of a pipe close.
+/// regression-for: features/enats_broker.testfile#scenario
+/// note: the port is free within 5 s of the SIGKILL (upstream: at once, the server is in-process)
+#[test]
+fn the_embedded_server_ends_with_a_killed_process() {
+    let port = free_port();
+    let mut sut = launch(&["--embed_nats", &format!("--enats_addr={}", nats(port))], &[]);
+    wait_output(&sut, "the embedded NATS server", READY_DEADLINE, |out| out.contains("Embedded NATS server started"));
+    assert!(std::net::TcpStream::connect(local(port)).is_ok(), "the embedded server listens");
+
+    let killed = std::process::Command::new("kill")
+        .args(["-KILL", &sut.process.pid().to_string()])
+        .status()
+        .expect("running kill");
+    assert!(killed.success());
+    sut.process.wait_exit(READY_DEADLINE).unwrap_or_else(|e| panic!("{e:#}"));
+
+    await_ready(
+        "the embedded server's port to be free",
+        Duration::from_secs(5),
+        || match std::net::TcpStream::connect(local(port)) {
+            Err(_) => Ok(()),
+            Ok(_) => Err("still accepting".to_owned()),
+        },
+    );
+}
+
+/// Ctrl-C in a terminal (SIGINT to the server's process group) shuts the
+/// server down gracefully and it exits 0, as with an in-process NATS server
+/// (upstream sets `NoSigs`). Cabby's `nats-server` child runs in a process
+/// group of its own, so the signal reaches the server only, which stops the
+/// child after the components that use it. The 1 s shutdown delay gives the
+/// child's supervision (every 200 ms) time to see an exit, had the child got
+/// the signal too.
+/// regression-for: features/enats_broker.testfile#scenario
+/// note: the server runs in a process group of its own, which the test signals as a terminal does
+#[test]
+fn ctrl_c_shuts_the_server_and_its_embedded_nats_down_cleanly() {
+    use std::os::unix::process::CommandExt;
+
+    let [port, broadcast_port, nats_port] = std::array::from_fn(|_| free_port());
+    let store = TempDir::new("enats-ctrl-c");
+    let mut cmd = std::process::Command::new(cabby_testkit::sut::sut_binary());
+    cabby_testkit::sut::scrub_env(&mut cmd);
+    cmd.env("ANYCABLE_DISABLE_TELEMETRY", "true")
+        .args(["--host=127.0.0.1", &format!("--port={port}"), &format!("--http_broadcast_port={broadcast_port}")])
+        .args(["--embed_nats", &format!("--enats_addr={}", nats(nats_port))])
+        .args(["--broker=nats", "--pubsub=nats", "--shutdown_delay=1"])
+        .arg(format!("--enats_store_dir={}", store.0.display()))
+        .process_group(0);
+    let mut server = cabby_testkit::process::Supervised::spawn("sut", cmd).unwrap_or_else(|e| panic!("{e:#}"));
+    server.wait_tcp(local(port), READY_DEADLINE).unwrap_or_else(|e| panic!("{e:#}"));
+
+    let group = format!("-{}", server.pid());
+    let sent = std::process::Command::new("kill").args(["-INT", "--", &group]).status().expect("running kill");
+    assert!(sent.success(), "kill -INT -- {group}");
+    let status = server.wait_exit(READY_DEADLINE).unwrap_or_else(|e| panic!("{e:#}"));
+
+    let out = server.output();
+    assert!(status.success(), "{status}. Output:\n{out}");
+    assert!(!out.contains("exited unexpectedly"), "Output:\n{out}");
+    assert!(std::net::TcpStream::connect(local(nats_port)).is_err(), "the embedded server stopped");
+}

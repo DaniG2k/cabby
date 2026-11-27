@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 228
+      "cases": 230
     },
     "translation": {
       "reviewed": 923
@@ -27647,6 +27647,24 @@
       ],
       "reference_status": "pass",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::enats::ctrl_c_shuts_the_server_and_its_embedded_nats_down_cleanly",
+      "relation": "regression",
+      "links": [
+        "26a1a703:features/enats_broker.testfile#scenario"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "features::enats::the_embedded_server_ends_with_a_killed_process",
+      "relation": "regression",
+      "links": [
+        "26a1a703:features/enats_broker.testfile#scenario"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "features::file_config::deviation_d060_cabby_toml_beats_anycable_toml",

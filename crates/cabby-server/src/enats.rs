@@ -370,6 +370,9 @@ fn configured_server_binary(get: impl Fn(&str) -> Option<std::ffi::OsString>) ->
 
 struct Running {
     child: Child,
+    /// Stops the server if this process ends without stopping it (see
+    /// [`spawn_watchdog`]); `None` when it could not be started.
+    watchdog: Option<Child>,
     output: Arc<Mutex<OutputTail>>,
     conf_path: PathBuf,
     host: String,
@@ -567,14 +570,10 @@ impl Service {
             return Err(EnatsError(format!("failed to start NATS server, cause: creating store dir: {e}")));
         }
 
-        let mut child = match Command::new(bin)
-            .arg("-c")
-            .arg(&conf_path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
+        let mut command = Command::new(bin);
+        command.arg("-c").arg(&conf_path).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        own_process_group(&mut command);
+        let mut child = match command.spawn() {
             Ok(child) => child,
             Err(e) => {
                 let _ = std::fs::remove_file(&conf_path);
@@ -606,7 +605,14 @@ impl Service {
         }
 
         let url = client_url(&host, port);
-        *lock(&self.running) = Some(Running { child, output, conf_path, host, port });
+        let watchdog = spawn_watchdog(child.id(), &conf_path);
+        if watchdog.is_none() {
+            log_debug!(
+                self.log,
+                "cannot start the embedded NATS server watchdog; the server outlives a killed process"
+            );
+        }
+        *lock(&self.running) = Some(Running { child, watchdog, output, conf_path, host, port });
         self.wait_ready()?;
         self.watch();
         // Upstream waits for JetStream in the background (`go WaitJetStreamReady`),
@@ -632,8 +638,10 @@ impl Service {
                 let mut guard = lock(&running);
                 let Some(r) = guard.as_mut() else { return };
                 let Ok(Some(status)) = r.child.try_wait() else { continue };
-                let Some(r) = guard.take() else { return };
+                let Some(mut r) = guard.take() else { return };
                 drop(guard);
+                // First, so that it never signals the server's pid once reused.
+                stop_watchdog(&mut r.watchdog);
                 let _ = std::fs::remove_file(&r.conf_path);
                 let output = lock(&r.output).text(EXIT_OUTPUT_LIMIT);
                 let err = EnatsError(format!("embedded NATS server exited unexpectedly: {status}"));
@@ -723,6 +731,8 @@ impl Service {
         let Some(mut r) = lock(&self.running).take() else {
             return Ok(());
         };
+        // Before the server: once the server is reaped, its pid may be reused.
+        stop_watchdog(&mut r.watchdog);
         stop_child(&mut r.child);
         let _ = std::fs::remove_file(&r.conf_path);
         Ok(())
@@ -782,6 +792,50 @@ fn wait_jetstream(url: String, max: Duration, leader: bool, log: Logger) -> Resu
 
 async fn async_connect(url: &str) -> Result<async_nats::Client, async_nats::ConnectError> {
     async_nats::ConnectOptions::new().connection_timeout(Duration::from_secs(1)).connect(url).await
+}
+
+/// Starts a process that stops the server (SIGINT, as [`Service::shutdown`]
+/// does) when this process ends without stopping it, for example when it is
+/// killed with SIGKILL, and removes its configuration file. Upstream's server
+/// runs in-process and ends with it.
+///
+/// `sh` waits for the end of its standard input: a pipe whose other end only
+/// this process holds (the standard library opens pipes close-on-exec, so other
+/// children do not inherit it), and which the system closes when this process
+/// exits. This process never writes to it. `None` when `sh` cannot be started
+/// (an image without a shell): the server then keeps running after a SIGKILL.
+fn spawn_watchdog(server: u32, conf_path: &Path) -> Option<Child> {
+    let mut command = Command::new("/bin/sh");
+    command
+        .arg("-c")
+        .arg(r#"read -r _; kill -INT "$1" 2>/dev/null; rm -f "$2""#)
+        .arg("cabby-enats-watchdog")
+        .arg(server.to_string())
+        .arg(conf_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    own_process_group(&mut command);
+    command.spawn().ok()
+}
+
+/// Starts the child in a process group of its own, so that signals sent to
+/// this process's group (Ctrl-C in a terminal) reach this process only, as
+/// they reach an in-process server (upstream sets `NoSigs`): the server is
+/// stopped by [`Service::shutdown`], after the components that use it.
+fn own_process_group(command: &mut Command) {
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(command, 0);
+    #[cfg(not(unix))]
+    let _ = command;
+}
+
+/// Ends the watchdog without letting it signal the server.
+fn stop_watchdog(watchdog: &mut Option<Child>) {
+    if let Some(mut w) = watchdog.take() {
+        let _ = w.kill();
+        let _ = w.wait();
+    }
 }
 
 fn stop_child(child: &mut Child) {
@@ -990,6 +1044,48 @@ mod tests {
             service.shutdown().expect("shutdown");
             let _ = std::fs::remove_dir_all(store);
         }
+    }
+
+    /// When this process ends without stopping the server (its end of the
+    /// watchdog's pipe closes, as the system does for a killed process), the
+    /// watchdog stops the server, which then frees its port. The test closes
+    /// the pipe itself; the server's exit is reported as any other (D-044).
+    #[test]
+    fn the_server_stops_when_the_watchdog_pipe_closes() {
+        let Some(bin) = test_server_binary() else { return };
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let config = Config { service_addr: format!("nats://127.0.0.1:{port}"), ..Config::new() };
+        let service = Service::new(&config);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        service.on_exit(move |e| {
+            let _ = lock(&tx).send(e);
+        });
+        service.start_with(&bin).expect("start");
+
+        let pipe = lock(&service.running).as_mut().and_then(|r| r.watchdog.as_mut()?.stdin.take());
+        drop(pipe.expect("the watchdog's pipe"));
+
+        let err = rx.recv_timeout(Duration::from_secs(5)).expect("the server stopped");
+        assert!(err.0.starts_with("embedded NATS server exited unexpectedly: "), "{err}");
+        assert!(TcpStream::connect(("127.0.0.1", port)).is_err(), "the port is free");
+    }
+
+    /// A shutdown stops the watchdog without a signal from it.
+    #[test]
+    fn a_shutdown_stops_the_watchdog() {
+        let Some(bin) = test_server_binary() else { return };
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let config = Config { service_addr: format!("nats://127.0.0.1:{port}"), ..Config::new() };
+        let service = Service::new(&config);
+        service.start_with(&bin).expect("start");
+        let watchdog = lock(&service.running).as_ref().and_then(|r| r.watchdog.as_ref().map(Child::id));
+        let watchdog = watchdog.expect("a watchdog");
+
+        service.shutdown().expect("shutdown");
+
+        let alive = Command::new("kill").arg("-0").arg(watchdog.to_string()).stderr(Stdio::null()).status();
+        assert!(!alive.expect("kill -0").success(), "the watchdog has ended");
     }
 
     #[test]

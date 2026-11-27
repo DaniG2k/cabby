@@ -26,7 +26,17 @@ Differences from the AnyCable Go server are listed by ID in
   panicked`), the remaining steps run, and the process exits 1 with `shutdown step panicked:
   <message>`. A session whose Disconnect call panics no longer holds the shutdown until its
   timeout (D-117).
-- Embedded NATS (`--embed_nats`): with an IPv6 address (`--enats_addr=nats://[::1]:4222`),
+- Embedded NATS (`--embed_nats`): Ctrl-C in a terminal shuts Cabby down gracefully and it exits
+  0, as AnyCable does. Before, the signal also reached the `nats-server` child, which stopped at
+  once: Cabby logged `embedded NATS server exited unexpectedly` and exited 1, and the NATS broker
+  and pub/sub lost their connection during the shutdown. The child now runs in a process group
+  of its own and is stopped by Cabby, after the components that use it.
+- Embedded NATS: when Cabby is killed (SIGKILL), its `nats-server` child stops too and frees its
+  ports, as AnyCable's in-process server does. Before, the child kept running and holding its
+  ports, so the next start failed until it was stopped by hand. A watchdog process (`/bin/sh`)
+  stops it when Cabby's end of a pipe closes; without `/bin/sh` the child outlives a killed
+  Cabby, as before.
+- Embedded NATS: with an IPv6 address (`--enats_addr=nats://[::1]:4222`),
   JetStream readiness is checked at `nats://[::1]:4222`. Before, the check used
   `nats://::1:4222`, which the client refuses, so `JetStream cluster is ready` was never logged
   (the NATS broker and pub/sub were not affected). An empty host (`--enats_addr=nats://:4222`,
