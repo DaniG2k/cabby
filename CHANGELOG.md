@@ -8,7 +8,12 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
-## [Unreleased]
+## [0.5.2] - 2026-11-27
+
+Cabby 0.5.2 gives request bodies a time limit in the HTTP broadcast endpoint, the API and the
+Pusher API, answers `400` for stream names that are not valid UTF-8 in SSE, Durable Streams and
+the API, and sends the StatsD metrics still queued when the server stops. No setting changes. It
+stays compatible with AnyCable server 1.6.21.
 
 ### Fixed
 

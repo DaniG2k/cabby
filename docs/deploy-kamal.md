@@ -9,7 +9,7 @@ service called `myapp`.
 ```yaml
 accessories:
   cabby:
-    image: ghcr.io/danig2k/cabby:0.5.1
+    image: ghcr.io/danig2k/cabby:0.5.2
     host: 203.0.113.10                 # a host of your web role, or a dedicated one
     port: "8080:8080"                  # WebSocket /cable; terminate TLS in front of it
     env:
@@ -85,7 +85,7 @@ network with TLS. The app broadcasts over HTTP or by inserting rows into Cabby's
 ```yaml
 accessories:
   cabby:
-    image: ghcr.io/danig2k/cabby:0.5.1
+    image: ghcr.io/danig2k/cabby:0.5.2
     hosts:
       - 203.0.113.10
       - 203.0.113.11
