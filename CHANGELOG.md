@@ -44,6 +44,11 @@ Differences from the AnyCable Go server are listed by ID in
   waited longer than the read block time and broadcast them too, so some broadcasts reached
   clients twice. A backlog is now shared by the servers that read it, 1000 entries at a time,
   so entries are no longer claimed while their server works through a large reply (D-109).
+- Redis Streams broadcasting: claiming the entries a stopped server left pending continues
+  where the last pass ended. Before, every pass started at the beginning of the pending list, so
+  100 entries there whose handling kept failing (an entry without a `payload` field, for
+  example) were claimed again every time, and the entries after them were never broadcast
+  (D-110).
 
 ## [0.4.2] - 2026-11-27
 

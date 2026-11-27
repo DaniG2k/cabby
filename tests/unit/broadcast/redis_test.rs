@@ -132,3 +132,30 @@ fn test_redis_config_to_toml() {
 
     assert_eq!(config, config2);
 }
+
+/// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts
+/// note: Deviation D-110: claim passes continue where the last one ended. A stopped consumer left 100 entries without a payload (their handling fails, so they stay pending) ahead of a broadcast; the test sets their idle time with `XCLAIM ... IDLE` instead of waiting. The first pass claims the 100, the next one the broadcast (upstream: every pass claims the same 100).
+#[test]
+fn deviation_d110_entries_after_failing_ones_are_claimed() {
+    let (scope, config, handler) = setup();
+    let stream = &config.stream;
+    let group = &config.group;
+    scope.command(&["XGROUP", "CREATE", stream, group, "$", "MKSTREAM"]).expect("XGROUP CREATE");
+    let mut ids: Vec<String> = (0..100).map(|_| scope.xadd(stream, "other", "x").expect("XADD")).collect();
+    ids.push(scope.xadd(stream, "payload", &payload("any_test", "after")).expect("XADD"));
+    scope.command(&["XREADGROUP", "GROUP", group, "stopped", "COUNT", "1000", "STREAMS", stream, ">"]).expect("read");
+    let mut claim = vec!["XCLAIM", stream, group, "stopped", "0"];
+    claim.extend(ids.iter().map(String::as_str));
+    claim.extend(["IDLE", "60000", "JUSTID"]);
+    scope.command(&claim).expect("XCLAIM");
+
+    let broadcaster = Broadcaster::redis(&handler, &config);
+    broadcaster.start().expect("Start");
+    let _guard = ShutdownGuard(&broadcaster);
+    // The first read follows the first claim pass.
+    scope.wait_clients_with_cmd(scope.user(), "xreadgroup", 1, CONSUMERS).expect("No stream consumer were created");
+
+    let messages = decode(handler.drain(DRAIN_IDLE));
+    assert_eq!(1, messages.len(), "Expected 1 message, got {}", messages.len());
+    assert_eq!(Some("after"), messages[0].get("data").map(String::as_str));
+}

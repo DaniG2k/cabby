@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 213
+      "cases": 214
     },
     "translation": {
       "reviewed": 923
@@ -26414,6 +26414,15 @@
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "broadcast::redis_test::deviation_d110_entries_after_failing_ones_are_claimed",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "broker::memory_test::test_memory_peak_reports_latest_position",

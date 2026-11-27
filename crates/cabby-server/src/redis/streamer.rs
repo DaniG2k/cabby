@@ -257,6 +257,8 @@ impl Inner {
 
             let block = self.block_ms;
             let mut last_claimed_at: i64 = 0;
+            // Where the next claim pass starts in the group's pending list.
+            let mut claim_from = String::from(SCAN_START);
 
             self.ready.set();
 
@@ -268,7 +270,7 @@ impl Inner {
                 }
 
                 if last_claimed_at + block < now_ms() {
-                    match self.autoclaim(&client).await {
+                    match self.autoclaim(&client, &claim_from).await {
                         Err(e) => {
                             log_error!(self.log, "failed to claim from Redis stream", "error" => e.to_string());
                             if self.maybe_reconnect(&mut attempt).await {
@@ -276,8 +278,9 @@ impl Inner {
                             }
                             return;
                         }
-                        Ok(reclaimed) => {
+                        Ok((next, reclaimed)) => {
                             last_claimed_at = now_ms();
+                            claim_from = next;
                             if !reclaimed.is_empty() {
                                 log_debug!(self.log, "reclaimed messages", "size" => reclaimed.len());
                                 self.handle_range(&client, reclaimed).await;
@@ -320,32 +323,17 @@ impl Inner {
             .to_owned()
     }
 
-    async fn autoclaim(&self, client: &Client) -> RedisResult<Vec<Entry>> {
+    /// One claim pass from `start`; returns where the next pass starts and
+    /// the entries claimed.
+    async fn autoclaim(&self, client: &Client, start: &str) -> RedisResult<(String, Vec<Entry>)> {
         let cmd = redis::cmd("XAUTOCLAIM")
             .arg(&self.stream)
             .arg(&self.group)
             .arg(&self.consumer)
             .arg(self.block_ms.to_string())
-            .arg("0-0")
+            .arg(start)
             .to_owned();
-        match client.query(&cmd).await? {
-            Value::Nil => Ok(Vec::new()),
-            Value::Array(items) => {
-                if items.len() < 2 {
-                    return Err(redis::RedisError::from((
-                        redis::ErrorKind::Parse,
-                        "autoclaim failed",
-                        format!("got {} elements, wanted 2", items.len()),
-                    )));
-                }
-                Ok(entries(&items[1]))
-            }
-            other => Err(redis::RedisError::from((
-                redis::ErrorKind::Parse,
-                "autoclaim failed",
-                format!("unexpected reply {other:?}"),
-            ))),
-        }
+        claimed(client.query(&cmd).await?)
     }
 
     async fn handle_range(&self, client: &Client, messages: Vec<Entry>) {
@@ -415,6 +403,40 @@ fn text(v: &Value) -> Option<String> {
         Value::Int(i) => Some(i.to_string()),
         Value::Okay => Some("OK".to_owned()),
         _ => None,
+    }
+}
+
+/// The ID a claim pass starts from to scan the pending list from its start;
+/// `XAUTOCLAIM` returns it as the cursor once it has scanned to the end.
+const SCAN_START: &str = "0-0";
+
+/// An `XAUTOCLAIM` reply: `[cursor, entries, deleted IDs]` (the third
+/// element since Redis 7: entries no longer in the stream, which Redis has
+/// already removed from the pending list). Returns the cursor, where the
+/// next pass starts, and the claimed entries.
+///
+/// Upstream starts every pass at `0-0`: when the first 100 entries it claims
+/// stay pending (their handling fails), every pass claims those again and
+/// never reaches the entries after them (D-110).
+fn claimed(reply: Value) -> RedisResult<(String, Vec<Entry>)> {
+    match reply {
+        Value::Nil => Ok((SCAN_START.to_owned(), Vec::new())),
+        Value::Array(items) => {
+            if items.len() < 2 {
+                return Err(redis::RedisError::from((
+                    redis::ErrorKind::Parse,
+                    "autoclaim failed",
+                    format!("got {} elements, wanted 2", items.len()),
+                )));
+            }
+            let next = text(&items[0]).unwrap_or_else(|| SCAN_START.to_owned());
+            Ok((next, entries(&items[1])))
+        }
+        other => Err(redis::RedisError::from((
+            redis::ErrorKind::Parse,
+            "autoclaim failed",
+            format!("unexpected reply {other:?}"),
+        ))),
     }
 }
 
@@ -520,6 +542,28 @@ mod tests {
             ["XREADGROUP", "GROUP", "g", "c1", "COUNT", "1000", "BLOCK", "500", "STREAMS", "s", ">"],
             args(&streamer().inner.read_command()).as_slice()
         );
+    }
+
+    /// Pins D-110: the cursor of a claim pass is where the next one starts;
+    /// deleted IDs (Redis 7) are not entries.
+    #[test]
+    fn deviation_d110_claim_passes_continue_at_the_cursor() {
+        let entry = |id: &str| Value::Array(vec![bulk(id), Value::Array(vec![bulk("payload"), bulk("x")])]);
+        let reply = Value::Array(vec![
+            bulk("7-0"),
+            Value::Array(vec![entry("5-0"), entry("6-0")]),
+            Value::Array(vec![bulk("4-0")]),
+        ]);
+        let (next, got) = claimed(reply).unwrap();
+        assert_eq!("7-0", next);
+        assert_eq!(vec!["5-0", "6-0"], got.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>());
+
+        // At the end of the pending list the cursor is `0-0`: the next pass starts over.
+        let (next, got) = claimed(Value::Array(vec![bulk("0-0"), Value::Array(vec![]), Value::Array(vec![])])).unwrap();
+        assert_eq!(("0-0", 0), (next.as_str(), got.len()));
+        let (next, got) = claimed(Value::Nil).unwrap();
+        assert_eq!(("0-0", 0), (next.as_str(), got.len()));
+        assert!(claimed(Value::Array(vec![bulk("0-0")])).is_err());
     }
 
     #[test]

@@ -62,3 +62,5 @@ builds contain neither.
   entries, so after an outage the backlog is shared by the servers that read it, and entries are
   not broadcast a second time by servers that claim them while the first works through a large
   reply (D-109).
+  Claiming the entries of a stopped server goes through its whole pending list, 100 entries a
+  pass, so entries whose handling keeps failing don't hold back the ones after them (D-110).
