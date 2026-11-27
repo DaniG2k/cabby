@@ -26,7 +26,7 @@ use tokio::runtime::Handle;
 
 use super::adapters::{
     CoreBroadcaster, CoreBroker, CoreSubscriber, DeferredController, Events, NodeBroker, NodeHandler, RpcController,
-    ShutdownContext, ShutdownFn, SubscriberBroadcaster, block_on, forward_errors_verbatim, remaining,
+    ShutdownContext, ShutdownFn, SubscriberBroadcaster, block_on, forward_errors_verbatim, remaining, shut_down_server,
 };
 use super::session_options::default_websocket_handler;
 use super::{
@@ -414,7 +414,7 @@ impl Runner {
         self.shutdownables.insert(
             0,
             Arc::new(ShutdownFn(move || {
-                block_on(&runtime, srv.shutdown_graceful(remaining(&ctx.get()))).map_err(|e| CliError(e.0))
+                shut_down_server(&runtime, &ctx, |time_left| srv.shutdown_graceful(time_left))
             })),
         );
 
@@ -840,7 +840,7 @@ impl Runner {
             api.run().map_err(|e| CliError(e.to_string()))?;
             let (srv, runtime, ctx) = (api.clone(), self.runtime.clone(), self.shutdown_ctx.clone());
             self.shutdownables.push(Arc::new(ShutdownFn(move || {
-                block_on(&runtime, srv.shutdown(remaining(&ctx.get()))).map_err(|e| CliError(e.to_string()))
+                shut_down_server(&runtime, &ctx, |time_left| srv.shutdown(time_left))
             })));
         }
         Ok(())
@@ -893,7 +893,7 @@ impl Runner {
         let (ctx, runtime, a, s) = (self.shutdown_ctx.clone(), self.runtime.clone(), api.clone(), srv.clone());
         self.shutdownables.push(Arc::new(ShutdownFn(move || {
             let _ = a.shutdown();
-            block_on(&runtime, s.shutdown_graceful(remaining(&ctx.get()))).map_err(|e| CliError(e.0))
+            shut_down_server(&runtime, &ctx, |time_left| s.shutdown_graceful(time_left))
         })));
 
         if !api.authenticator().is_enabled() {

@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 226
+      "cases": 228
     },
     "translation": {
       "reviewed": 923
@@ -27746,6 +27746,24 @@
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "features::with_rpc::a_second_signal_during_disconnect_calls_exits_cleanly",
+      "relation": "regression",
+      "links": [
+        "26a1a703:features/shutdown.testfile#scenario"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "features::with_rpc::a_second_signal_stops_a_server_waiting_for_a_request",
+      "relation": "regression",
+      "links": [
+        "26a1a703:features/shutdown.testfile#scenario"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "hub::hub_test::build_message_json_through_hub",

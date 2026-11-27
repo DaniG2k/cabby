@@ -105,6 +105,30 @@ pub(super) fn remaining(ctx: &Context) -> Duration {
     ctx.deadline.map_or(Duration::from_secs(3600), |d| d.saturating_duration_since(Instant::now()))
 }
 
+/// Runs a server's graceful shutdown (`shutdown`, given the time left in
+/// `ctx`) on `runtime`, and returns as soon as `ctx` is cancelled (a second
+/// signal), as Go's `http.Server.Shutdown(ctx)` does. The shutdown is polled
+/// first, so the server stops accepting connections even then.
+pub(super) fn shut_down_server<F, E>(
+    runtime: &Handle,
+    ctx: &ShutdownContext,
+    shutdown: impl FnOnce(Duration) -> F,
+) -> Result<(), CliError>
+where
+    F: Future<Output = Result<(), E>> + Send,
+    E: Display,
+{
+    let ctx = ctx.get();
+    let stop = shutdown(remaining(&ctx));
+    block_on(runtime, async move {
+        tokio::select! {
+            biased;
+            result = stop => result.map_err(|e| CliError(e.to_string())),
+            () = ctx.cancel.cancelled() => Err(CliError("context canceled".into())),
+        }
+    })
+}
+
 /// A named shutdown step (upstream `Shutdownable` implementations).
 pub(super) struct ShutdownFn<F>(pub(super) F);
 

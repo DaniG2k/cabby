@@ -51,7 +51,8 @@ pub enum CliOption {
 /// (upstream `main`: `NewRunner` with the default components, then `Run`).
 ///
 /// Builds the Tokio runtime the server's I/O runs on (one worker per CPU, like
-/// Go's `GOMAXPROCS`), then blocks until the server stops.
+/// Go's `GOMAXPROCS`), then blocks until the server stops. The process is
+/// meant to exit when this returns (the runtime is left running, see below).
 pub fn run(config: Config) -> Result<(), CliError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .thread_name("cabby-io")
@@ -63,8 +64,12 @@ pub fn run(config: Config) -> Result<(), CliError> {
         set_command_pool_size(&config);
         Runner::new(config, default_runner_options()).and_then(|mut runner| runner.run())
     };
-    // Connections still open are dropped with the runtime; do not wait for them.
-    runtime.shutdown_timeout(std::time::Duration::from_millis(100));
+    // Work still in progress ends with the process, as Go's goroutines do:
+    // connections still open, and Disconnect calls of sessions that a second
+    // signal or the shutdown timeout left in progress. Shutting the runtime
+    // down instead would fail the timers of the threads still waiting in those
+    // calls, each with a panic message.
+    std::mem::forget(runtime);
     result
 }
 

@@ -12,6 +12,13 @@ Differences from the AnyCable Go server are listed by ID in
 
 ### Fixed
 
+- Shutdown: a second SIGINT or SIGTERM stops the server at once, as in AnyCable, also while
+  the WebSocket, API or Pusher API server waits for an HTTP request in progress (one whose head
+  has not fully arrived waits for up to 5 s). Before, those servers kept waiting for the request
+  or for the shutdown timeout. The process also exits without `panicked at ... A Tokio 1.x
+  context was found, but it is being shutdown` messages on stderr, which were printed for each
+  Disconnect call still in progress when a second signal or the shutdown timeout ended the
+  shutdown; the exit status was 0 already.
 - Disconnect queue: the backlog limit (`--max_disconnect_backlog_size`) holds when sessions
   disconnect at the same time. Before, each of them could pass the size check before any was
   added, so the queue could grow past the limit by one session per concurrent disconnect. The

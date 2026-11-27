@@ -195,3 +195,91 @@ fn shutdown() {
     assert_eq!(3, disconnect_calls, "Expected to receive 3 Disconnect RPC calls. Got {disconnect_calls}");
     drop(clients);
 }
+
+/// `kill -<name> <server pid>`.
+fn send_signal(sut: &cabby_testkit::sut::Sut, name: &str) {
+    let sent = std::process::Command::new("kill")
+        .args([format!("-{name}"), sut.process.pid().to_string()])
+        .status()
+        .expect("running kill");
+    assert!(sent.success(), "kill -{name}");
+}
+
+/// A second signal stops the server at once while its HTTP server waits for a
+/// request whose head has not fully arrived (the wait would otherwise last
+/// until the 5 s header timeout). The first signal's shutdown is still running
+/// when the second one is sent.
+/// regression-for: features/shutdown.testfile#scenario
+/// note: a connection holding half a request head keeps the HTTP server's graceful shutdown waiting; on both servers the second signal ends that wait (Go: `http.Server.Shutdown` returns when its context is cancelled)
+#[test]
+fn a_second_signal_stops_a_server_waiting_for_a_request() {
+    use std::io::{BufRead, BufReader, Write};
+
+    let mut sut = launch(&["--shutdown_timeout=30"], &[]);
+    let mut pending = std::net::TcpStream::connect(local(sut.port)).expect("connecting");
+    pending.write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\n").expect("half a request head");
+    // Connections are accepted in order: once a later one is answered, the
+    // server has the pending one.
+    let mut later = std::net::TcpStream::connect(local(sut.port)).expect("connecting");
+    later.set_read_timeout(Some(READY_DEADLINE)).expect("read timeout");
+    later.write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").expect("a request");
+    let status = BufReader::new(later).lines().next().expect("a status line").expect("a status line");
+    assert!(status.contains(" 200 "), "{status}");
+
+    send_signal(&sut, "INT");
+    wait_output(&sut, "the shutdown", READY_DEADLINE, |out| out.contains("Shutting down..."));
+    assert!(sut.process.wait_exit(Duration::from_millis(500)).is_err(), "the shutdown waits for the request");
+
+    send_signal(&sut, "INT");
+    let sent = std::time::Instant::now();
+    let status = sut.process.wait_exit(Duration::from_secs(3)).unwrap_or_else(|e| panic!("{e:#}"));
+    assert!(status.success(), "{status}");
+    assert!(sent.elapsed() < Duration::from_secs(2), "stopped {:?} after the second signal", sent.elapsed());
+    drop(pending);
+}
+
+/// A second signal while sessions are being disconnected (their Disconnect
+/// calls still waiting for the application) ends the process with status 0
+/// and nothing about panics in its output.
+/// regression-for: features/shutdown.testfile#scenario
+/// note: an HTTP RPC double holds the Disconnect calls; the second signal is sent once the first one reached it
+#[test]
+fn a_second_signal_during_disconnect_calls_exits_cleanly() {
+    use cabby_testkit::http_stub::{HttpStub, Response};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex, mpsc};
+
+    let disconnects = Arc::new(AtomicUsize::new(0));
+    let (release, held) = mpsc::channel::<()>();
+    let held = Mutex::new(held);
+    let seen = disconnects.clone();
+    let rpc = HttpStub::start(move |req| {
+        if req.path.ends_with("/disconnect") {
+            seen.fetch_add(1, Ordering::SeqCst);
+            // Until the test ends (the sender is dropped), or for at most 20 s.
+            let _ =
+                held.lock().unwrap_or_else(std::sync::PoisonError::into_inner).recv_timeout(Duration::from_secs(20));
+            return Response { status: 200, body: br#"{"status":1}"#.to_vec() };
+        }
+        let welcome = json!({"status": 1, "identifiers": "{}", "transmissions": [r#"{"type":"welcome"}"#]});
+        Response { status: 200, body: welcome.to_string().into_bytes() }
+    });
+    let rpc_host = format!("--rpc_host={}", rpc.url());
+    let mut sut = launch(&[&rpc_host, "--disconnect_mode=always", "--shutdown_timeout=30"], &[]);
+    let url = ws_url(&sut, "/cable");
+    let mut client = wsd(&url, Protocol::Base, Connection::default()).unwrap_or_else(|e| panic!("{e}"));
+    client.receive(&Expect::Partial(json!({"type": "welcome"}))).unwrap_or_else(|e| panic!("{e}"));
+
+    send_signal(&sut, "INT");
+    await_ready("a Disconnect call", READY_DEADLINE, || {
+        if disconnects.load(Ordering::SeqCst) > 0 { Ok(()) } else { Err("none yet".to_owned()) }
+    });
+    send_signal(&sut, "INT");
+    let status = sut.process.wait_exit(Duration::from_secs(5)).unwrap_or_else(|e| panic!("{e:#}"));
+
+    let out = sut.process.output();
+    assert!(status.success(), "{status}. Output:\n{out}");
+    assert!(!out.contains("panicked"), "Output:\n{out}");
+    drop(release);
+    drop(client);
+}
