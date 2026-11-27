@@ -18,7 +18,9 @@
 //! keeping the failed row and the rows after it, and the claim is retried
 //! with backoff (at most 5 s) for as long as it takes: no row is dropped for
 //! it. A row that is not JSON is deleted with an error log without reaching
-//! the node. A node that finds the lock taken retries a
+//! the node. A row the node can't take because Postgres can never store its
+//! message (the broker's error says [`UNSTORABLE`]) is deleted with an error
+//! log too, and the batch goes on. A node that finds the lock taken retries a
 //! second later; the server ends a claim transaction left idle for 60 s.
 //! A batch hands rows to the broker for at most 10 s, then commits what it
 //! handled and goes on in a new transaction; only SQL statements time out,
@@ -35,13 +37,13 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use cabby_core::broadcast::{BroadcastError, Broadcaster, Handler};
-use cabby_core::logger::Logger;
+use cabby_core::logger::{LogValuer, Logger, compact_value_bytes};
 use cabby_core::{log_debug, log_error, log_info, log_warn};
 use tokio::sync::{Notify, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use super::connect::{self, ConnectSpec, ListenSink, Listener};
-use super::{BROADCASTS, Metrics, Names, PgError, PostgresConfig, schema};
+use super::{BROADCASTS, Metrics, Names, PgError, PostgresConfig, UNSTORABLE, schema};
 
 /// How often the outbox is polled without a notification.
 pub const POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -158,6 +160,10 @@ struct Claimer {
     node: Arc<dyn Handler>,
     spec: Arc<ConnectSpec>,
     app: String,
+    /// The outbox table (quoted).
+    table: String,
+    /// The claim statement for the current connection's server encoding
+    /// ([`select_sql`]).
     select_sql: String,
     delete_sql: String,
     lock_key: i64,
@@ -165,6 +171,29 @@ struct Claimer {
     log: Logger,
     /// Failed handler calls in a row (for the log).
     failures: u64,
+}
+
+/// The claim statement. Payloads are read as bytes in UTF-8: the server
+/// converts them from its encoding, except from `SQL_ASCII`, which has no
+/// conversion and may hold bytes that aren't UTF-8; there the bytes are read
+/// as stored, so such a row is set aside alone instead of failing the
+/// statement for every row.
+fn select_sql(table: &str, server_encoding: &str) -> String {
+    let encoding = if server_encoding.eq_ignore_ascii_case("SQL_ASCII") { "SQL_ASCII" } else { "UTF8" };
+    format!("SELECT id, convert_to(payload, '{encoding}') FROM {table} ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED")
+}
+
+/// What handing a batch's rows to the node came to.
+struct Handled {
+    /// Rows the node took.
+    handled: Vec<i64>,
+    /// Rows Postgres can't store ([`UNSTORABLE`]): ID, payload and error.
+    unstorable: Vec<(i64, String, String)>,
+    /// The row the node failed to take, and the error; it and the rows after
+    /// it stay in the outbox.
+    failed: Option<(i64, String)>,
+    /// Rows not handed over because the handling budget ran out.
+    left_over: bool,
 }
 
 /// The delay before retrying after the `n`th handler failure in a row
@@ -190,7 +219,7 @@ impl Claimer {
                 return;
             }
             if client.as_ref().is_none_or(tokio_postgres::Client::is_closed) {
-                match self.spec.connect(&self.app).await {
+                match self.connect().await {
                     Ok(c) => client = Some(c),
                     Err(e) => {
                         self.metrics.error();
@@ -227,6 +256,16 @@ impl Claimer {
         }
     }
 
+    /// Opens the claim connection and picks the claim statement for its
+    /// server encoding.
+    async fn connect(&mut self) -> Result<tokio_postgres::Client, PgError> {
+        let client = self.spec.connect(&self.app).await?;
+        let row = sql(client.query_one("SHOW server_encoding", &[])).await?;
+        let encoding: String = row.try_get(0).map_err(PgError::from)?;
+        self.select_sql = select_sql(&self.table, &encoding);
+        Ok(client)
+    }
+
     /// Claims and handles batches until the outbox is empty. Each batch is
     /// one transaction holding the claim lock (a transaction advisory lock),
     /// so one node drains at a time, in id order; a row is deleted in the
@@ -260,7 +299,10 @@ impl Claimer {
             return Ok(Some(Round::Busy));
         }
         let rows = sql(tx.query(self.select_sql.as_str(), &[&CLAIM_BATCH])).await?;
-        let claimed: Vec<(i64, String)> = rows.iter().map(|r| (r.get(0), r.get(1))).collect();
+        let claimed = rows
+            .iter()
+            .map(|r| Ok((r.try_get::<_, i64>(0)?, r.try_get::<_, Vec<u8>>(1)?)))
+            .collect::<Result<Vec<_>, tokio_postgres::Error>>()?;
         if claimed.is_empty() {
             sql(tx.commit()).await?;
             return Ok(Some(Round::Drained));
@@ -271,38 +313,52 @@ impl Claimer {
         let mut done: Vec<i64> = Vec::new();
         let mut valid: Vec<(i64, String)> = Vec::new();
         for (id, payload) in claimed {
-            if serde_json::from_str::<serde::de::IgnoredAny>(&payload).is_err() {
-                self.metrics.error();
-                log_error!(self.log, "dropping a broadcast that is not JSON", "id" => id);
-                done.push(id);
-            } else {
-                valid.push((id, payload));
+            let json = String::from_utf8(payload)
+                .map_err(|e| e.to_string())
+                .and_then(|p| serde_json::from_str::<serde::de::IgnoredAny>(&p).map(|_| p).map_err(|e| e.to_string()));
+            match json {
+                Ok(p) => valid.push((id, p)),
+                Err(e) => {
+                    self.metrics.error();
+                    log_error!(self.log, "dropping a broadcast that is not JSON", "id" => id, "error" => e);
+                    done.push(id);
+                }
             }
         }
         let node = self.node.clone();
         let budget = std::time::Instant::now() + HANDLING_BUDGET;
         // The handler may wait for the broker (another Postgres query). It
-        // stops at the first failure, or once the budget is used up:
-        // (handled IDs, the failed ID and error, rows left over).
-        let (handled, failed, left_over) = tokio::task::spawn_blocking(move || {
-            let mut handled = Vec::new();
+        // stops at the first failure, or once the budget is used up; a row
+        // Postgres can't store is set aside and the next one handed over.
+        let Handled { handled, unstorable, failed, left_over } = tokio::task::spawn_blocking(move || {
+            let mut out = Handled { handled: Vec::new(), unstorable: Vec::new(), failed: None, left_over: false };
             let total = valid.len();
             for (id, payload) in valid {
-                if !handled.is_empty() && std::time::Instant::now() >= budget {
+                let progress = out.handled.len() + out.unstorable.len();
+                if progress > 0 && std::time::Instant::now() >= budget {
                     break;
                 }
-                if let Err(e) = node.handle_broadcast(payload.as_bytes()) {
-                    return (handled, Some((id, e.0)), false);
+                match node.handle_broadcast(payload.as_bytes()) {
+                    Ok(()) => out.handled.push(id),
+                    Err(e) if e.0.contains(UNSTORABLE) => out.unstorable.push((id, payload, e.0)),
+                    Err(e) => {
+                        out.failed = Some((id, e.0));
+                        return out;
+                    }
                 }
-                handled.push(id);
             }
-            let left_over = handled.len() < total;
-            (handled, None, left_over)
+            out.left_over = out.handled.len() + out.unstorable.len() < total;
+            out
         })
         .await
         .map_err(|_| PgError("broadcast handler panicked".into()))?;
         self.metrics.claimed(handled.len());
         done.extend(&handled);
+        for (id, payload, error) in unstorable {
+            self.metrics.error();
+            log_error!(self.log, "dropping a broadcast Postgres can't store", "id" => id, "error" => error, "payload" => compact_value_bytes(payload.as_bytes()).log_value());
+            done.push(id);
+        }
         let round = match failed {
             None => {
                 if self.failures > 0 {
@@ -387,8 +443,9 @@ impl Broadcaster for PostgresBroadcaster {
             spec: self.spec.clone(),
             app: format!("cabby broadcast {}", self.names.channel),
             lock_key: claim_lock_key(&self.names),
-            select_sql: format!("SELECT id, payload FROM {table} ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED"),
+            select_sql: select_sql(&table, "UTF8"),
             delete_sql: format!("DELETE FROM {table} WHERE id = ANY($1)"),
+            table,
             metrics: self.metrics.clone(),
             log: self.log.clone(),
             failures: 0,
@@ -441,6 +498,17 @@ impl Drop for PostgresBroadcaster {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn payloads_are_read_as_stored_only_from_sql_ascii() {
+        let utf8 = select_sql("\"public\".\"cabby_broadcasts\"", "UTF8");
+        assert_eq!(
+            "SELECT id, convert_to(payload, 'UTF8') FROM \"public\".\"cabby_broadcasts\" ORDER BY id LIMIT $1 FOR UPDATE SKIP LOCKED",
+            utf8
+        );
+        assert_eq!(utf8, select_sql("\"public\".\"cabby_broadcasts\"", "LATIN1"), "the server converts");
+        assert!(select_sql("t", "SQL_ASCII").contains("convert_to(payload, 'SQL_ASCII')"));
+    }
 
     #[test]
     fn row_ids_claim_and_json_is_direct() {

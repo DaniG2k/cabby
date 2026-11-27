@@ -56,6 +56,18 @@ Differences from the AnyCable Go server are listed by ID in
   a consumer group deleted by a flush is created again as quickly as before; while Redis can't
   be reached the delays are unchanged (D-111).
 
+### Fixed
+
+- Postgres broadcaster (`--broadcast_adapter=postgres`) with `--broker=postgres`: an outbox row
+  holding a message Postgres can never store (a NUL character in `data` or in the stream name, or
+  a stream name over 2704 bytes, the limit of an index entry) no longer holds back the rows after
+  it. Before, the broker's error was retried at the head of the outbox for as long as the node
+  ran, and no later row was broadcast. Such a row is now deleted with an error naming its ID
+  (`dropping a broadcast Postgres can't store`); other broker errors are still retried.
+- Postgres broadcaster: in a `SQL_ASCII` database, a row whose payload is not UTF-8 is deleted and
+  logged as a row that is not JSON. Before, the server failed the claim of every batch on it, so
+  nothing more was broadcast from the outbox.
+
 ## [0.4.2] - 2026-11-27
 
 Cabby 0.4.2 fixes request handling in the SSE and Durable Streams endpoints, keeps metrics

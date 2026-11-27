@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 216
+      "cases": 218
     },
     "translation": {
       "reviewed": 923
@@ -26317,6 +26317,15 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "broadcast::postgres_test::deviation_d070_postgres_a_payload_that_is_not_utf8_is_dropped",
+      "relation": "regression",
+      "links": [
+        "26a1a703:broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
       "rust_case": "broadcast::postgres_test::deviation_d070_postgres_a_silent_commit_of_an_empty_batch_is_given_up",
       "relation": "regression",
       "links": [
@@ -27300,6 +27309,15 @@
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "conformance::postgres::deviation_d070_d071_postgres_rows_postgres_cannot_store_do_not_block_the_outbox",
+      "relation": "regression",
+      "links": [
+        "26a1a703:node/broker_integration_test.go#TestIntegrationHistory_Memory/Subscribe_+_History"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "conformance::pusher::presence_subscription",

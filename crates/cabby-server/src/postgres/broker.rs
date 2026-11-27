@@ -29,7 +29,9 @@
 //!   server-side statement timeout) for at most 20 s per pass; reads filter
 //!   by the same rules, so pruning only reclaims space.
 //! - **Errors.** Database failures are returned as broker errors (and counted
-//!   and logged); a failed `handle_broadcast` doesn't fan the message out.
+//!   and logged); a failed `handle_broadcast` doesn't fan the message out. A
+//!   message Postgres can never store ([`super::unstorable`]) fails with a
+//!   cause starting with [`UNSTORABLE`], which the outbox claimer reads.
 //!   Presence is not supported (as with the NATS broker).
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -46,7 +48,10 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use super::connect::{self, ConnectSpec, Params, Pool};
-use super::{HISTORY, META, Metrics, Names, PgError, PostgresConfig, SESSIONS, STREAMS, error_text, schema};
+use super::{
+    HISTORY, META, Metrics, Names, PgError, PostgresConfig, SESSIONS, STREAMS, UNSTORABLE, error_text, schema,
+    unstorable,
+};
 
 /// Command connections shared by the broker's callers.
 const POOL_SIZE: usize = 4;
@@ -336,7 +341,10 @@ impl Inner {
     async fn add(&self, msg: &StreamMessage) -> Result<StreamMessage, PgError> {
         let deadline = ttl(self.conf.history_ttl).saturating_mul(10);
         let params: Params = vec![Box::new(msg.stream.clone()), Box::new(msg.data.clone()), Box::new(deadline)];
-        let rows = self.pool.query(&self.sql.broadcast, &params).await?;
+        let rows = self.pool.query_coded(&self.sql.broadcast, &params).await.map_err(|e| match e.code {
+            Some(code) if unstorable(&code) => PgError(format!("{UNSTORABLE}: {}", e.error.0)),
+            _ => e.error,
+        })?;
         let row = rows.first().ok_or_else(|| PgError("no offset returned".into()))?;
         let seq: i64 = row.get(0);
         let epoch = self.epoch_or_new(row.get(1)).await?;

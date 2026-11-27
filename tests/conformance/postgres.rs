@@ -114,3 +114,50 @@ fn deviation_d070_d071_postgres_nodes_share_broadcasts_history_and_sessions() {
     }
     assert!(!output.contains("cabby:cabby@"), "credentials in the log:\n{output}");
 }
+
+/// regression-for: node/broker_integration_test.go#TestIntegrationHistory_Memory/Subscribe_+_History
+/// note: Deviations D-070, D-071: outbox rows the Postgres broker can never store (a NUL character in the data, which a text column rejects, and a stream name over the 2704-byte limit of a btree index entry) are deleted with an error log naming the row; the rows after them are delivered, in order. A failure that may pass (a lock, a timeout, an outage) is still retried.
+/// note: not_observable on Go: AnyCable rejects --pubsub=postgres, --broadcast_adapter=postgres and --broker=postgres.
+#[test]
+fn deviation_d070_d071_postgres_rows_postgres_cannot_store_do_not_block_the_outbox() {
+    rust_only();
+    let scope = PgScope::new("conf");
+    let fake = app();
+    let mut node1 = node(&scope, &fake.http_url());
+    let (mut client, _) = sq::connect(&node1, None);
+    sq::subscribe(&mut client, "pg_rows");
+
+    insert(&scope, "pg_rows", "before");
+    sq::receive_message(&mut client, "before");
+    // `data` is the text the client gets; a NUL in it can't be stored in a text column.
+    scope.insert_broadcast(&json!({"stream": "pg_rows", "data": "nul\u{0}"}).to_string());
+    // md5 digests don't compress, so the key stays over the index entry limit.
+    let long: String = (0..100).map(|i| format!("{:x}", md5_like(i))).collect();
+    insert(&scope, &long, "long stream");
+    insert(&scope, "pg_rows", "after");
+    sq::receive_message(&mut client, "after");
+    // The rows are deleted when the batch commits, right after "after" is fanned out.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let outbox = || scope.scalar(&format!("SELECT count(*) FROM {}", scope.table("broadcasts")));
+    while outbox().as_deref() != Some("0") {
+        assert!(std::time::Instant::now() < deadline, "{:?} rows left in the outbox", outbox());
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    drop(client);
+    let output = sq::stop_gracefully(&mut node1);
+    let dropped: Vec<&str> =
+        output.lines().filter(|l| l.contains("dropping a broadcast Postgres can't store")).collect();
+    assert_eq!(2, dropped.len(), "one error line per row:\n{output}");
+    assert!(dropped[0].contains("invalid byte sequence"), "{}", dropped[0]);
+    assert!(dropped[1].contains("index row"), "{}", dropped[1]);
+}
+
+/// 32 hex digits that differ for every `i` (not compressible as a run).
+fn md5_like(i: u64) -> u128 {
+    let mut x = u128::from(i).wrapping_add(0x9e37_79b9_7f4a_7c15_f39c_c060_5ced_c834);
+    x ^= x >> 33;
+    x = x.wrapping_mul(0xff51_afd7_ed55_8ccd_c4ce_b9fe_1a85_ec53);
+    x ^= x >> 29;
+    x
+}

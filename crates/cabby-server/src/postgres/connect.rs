@@ -892,13 +892,18 @@ impl Pool {
     /// Runs one query within one deadline (connect included); failures are
     /// counted, and a connection that timed out or closed is dropped.
     pub async fn query(self: &Arc<Self>, sql: &str, params: &Params) -> Result<Vec<Row>, PgError> {
+        self.query_coded(sql, params).await.map_err(|e| e.error)
+    }
+
+    /// [`Pool::query`], keeping the SQLSTATE of an error the server reported.
+    pub async fn query_coded(self: &Arc<Self>, sql: &str, params: &Params) -> Result<Vec<Row>, QueryError> {
         let started = Instant::now();
         let deadline = tokio::time::Instant::now() + QUERY_TIMEOUT;
         let conn = match self.get(deadline).await {
             Ok(c) => c,
             Err(e) => {
                 self.metrics.error();
-                return Err(e);
+                return Err(QueryError { error: e, code: None });
             }
         };
         let result = tokio::time::timeout_at(deadline, conn.query(sql, &refs(params))).await;
@@ -910,15 +915,25 @@ impl Pool {
                 if conn.client.is_closed() {
                     self.discard(&conn);
                 }
-                Err(e.into())
+                Err(QueryError { code: e.code().cloned(), error: e.into() })
             }
             Err(_) => {
                 self.metrics.error();
                 self.discard(&conn);
-                Err(PgError(format!("query timed out after {}s", QUERY_TIMEOUT.as_secs())))
+                Err(QueryError {
+                    error: PgError(format!("query timed out after {}s", QUERY_TIMEOUT.as_secs())),
+                    code: None,
+                })
             }
         }
     }
+}
+
+/// A failed [`Pool::query_coded`]: the error, and the SQLSTATE when the
+/// server reported it.
+pub(crate) struct QueryError {
+    pub error: PgError,
+    pub code: Option<tokio_postgres::error::SqlState>,
 }
 
 /// Receives what the `LISTEN` connection gets.

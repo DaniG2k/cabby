@@ -279,6 +279,31 @@ impl PgScope {
         format!("{scheme}://{user}{addr}{tail}")
     }
 
+    /// A database of this scope's own (its name is the scope's schema name),
+    /// for what needs settings of a database such as its encoding; dropped
+    /// with the returned value.
+    pub fn database(&self, encoding: &str) -> PgDatabase {
+        let name = self.schema.clone();
+        self.execute(&format!(
+            "CREATE DATABASE \"{name}\" ENCODING '{encoding}' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0"
+        ));
+        let url = url();
+        let (scheme, rest) = url.split_once("://").expect("a URL");
+        let (user, host_and_rest) = rest.rsplit_once('@').map_or(("", rest), |(u, h)| (u, h));
+        let host = host_and_rest.split(['/', '?']).next().unwrap_or(host_and_rest);
+        let query = host_and_rest.find('?').map_or("", |i| &host_and_rest[i..]);
+        let user = if user.is_empty() { String::new() } else { format!("{user}@") };
+        let db_url = format!("{scheme}://{user}{host}/{name}{query}");
+        let target = db_url.clone();
+        let client = block(async move {
+            let (client, conn) =
+                tokio_postgres::connect(&target, NoTls).await.expect("connecting to the scope's database");
+            tokio::spawn(conn);
+            std::sync::Arc::new(client)
+        });
+        PgDatabase { name, url: db_url, client, admin: self.client.clone() }
+    }
+
     /// The name of a pub/sub `LISTEN` connection in this scope.
     pub fn pubsub_listener(&self) -> String {
         format!("cabby pubsub-listen {}", self.channel)
@@ -298,6 +323,46 @@ impl PgSession {
     pub fn execute(&self, sql: &str) {
         let (client, sql) = (self.0.clone(), sql.to_owned());
         block(async move { client.batch_execute(&sql).await }).unwrap_or_else(|e| panic!("SQL failed: {e:?}"));
+    }
+}
+
+/// A database of a scope's own ([`PgScope::database`]).
+pub struct PgDatabase {
+    pub name: String,
+    /// The test URL pointing at this database.
+    pub url: String,
+    client: std::sync::Arc<Client>,
+    admin: std::sync::Arc<Client>,
+}
+
+impl PgDatabase {
+    /// Runs SQL in this database (one or more statements, simple protocol).
+    pub fn execute(&self, sql: &str) {
+        let (client, sql) = (self.client.clone(), sql.to_owned());
+        block(async move { client.batch_execute(&sql).await }).unwrap_or_else(|e| panic!("SQL failed: {e:?}"));
+    }
+
+    /// The first column of the first row, as text.
+    pub fn scalar(&self, sql: &str) -> Option<String> {
+        let (client, sql) = (self.client.clone(), sql.to_owned());
+        let messages =
+            block(async move { client.simple_query(&sql).await }).unwrap_or_else(|e| panic!("SQL failed: {e:?}"));
+        messages.into_iter().find_map(|m| match m {
+            SimpleQueryMessage::Row(r) => Some(r.get(0).map(str::to_owned)),
+            _ => None,
+        })?
+    }
+}
+
+impl Drop for PgDatabase {
+    fn drop(&mut self) {
+        let sql = format!("DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)", self.name);
+        let client = self.admin.clone();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        runtime().spawn(async move {
+            let _ = tx.send(client.batch_execute(&sql).await);
+        });
+        let _ = rx.recv_timeout(DEADLINE);
     }
 }
 

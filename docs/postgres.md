@@ -186,9 +186,22 @@ inserted while a node was reconnecting is not left behind.
   backoff of at most 5 seconds, for as long as it takes: no row is dropped because of a broker
   error. Errors are logged at the 1st, 2nd, 4th, 8th, ... failure in a row and counted in
   `postgres_broadcast_retries_total`. A row that is not JSON is deleted and logged without
-  reaching the broker. A row that is JSON but not a broadcast (for example `data` as an object
-  instead of a string) is logged as `failed to parse pubsub message ... error="invalid
-  publication format"` and deleted too; nothing is retried for it.
+  reaching the broker (in a `SQL_ASCII` database, so is a row whose bytes are not UTF-8). A row
+  that is JSON but not a broadcast (for example `data` as an object instead of a string) is
+  logged as `failed to parse pubsub message ... error="invalid publication format"` and deleted
+  too; nothing is retried for it.
+- **Rows Postgres can't store.** With `--broker=postgres`, a message Postgres can never store
+  fails the same way on every retry: a NUL character (`\u0000`) in `data` or in the stream name
+  (text columns can't hold one), or a stream name over 2704 bytes (the limit of an index entry).
+  Such a row is deleted with an error naming its ID, and the rows after it are broadcast:
+
+  ```text
+  ERR dropping a broadcast Postgres can't store context=broadcast provider=postgres id=17 error="failed to add message to Postgres history: stream=chat_42, cause: Postgres can't store this message: ERROR: invalid byte sequence for encoding \"UTF8\": 0x00" payload="{\"stream\":\"chat_42\",...
+  ```
+
+  In a row holding an array of messages, the messages before that one are broadcast and the
+  ones after it are not. It is counted in `postgres_errors_total`. Any other broker error (a
+  lock, a timeout, an outage) is retried as above.
 - **Duplicates** can happen: rows already handed to the broker are handed again after a node
   crashes mid-batch, after its claim connection is lost or its commit fails (the transaction
   rolls back), when the broker's query timed out but Postgres ran it afterwards (see

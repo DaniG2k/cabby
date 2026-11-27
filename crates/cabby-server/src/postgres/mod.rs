@@ -180,6 +180,21 @@ pub(crate) fn error_text(e: &tokio_postgres::Error) -> String {
     }
 }
 
+/// Starts the cause of a broker error for a message Postgres can never
+/// store, whatever the retry; the outbox claimer sets such rows aside
+/// instead of retrying them.
+pub(crate) const UNSTORABLE: &str = "Postgres can't store this message";
+
+/// Whether a statement storing a message failed because of the message
+/// itself: a character the database encoding can't hold (a NUL, or one with
+/// no equivalent in it) or a value over a limit (an index entry over 2704
+/// bytes, a value over 1 GB). Retrying it fails the same way.
+pub(crate) fn unstorable(code: &tokio_postgres::error::SqlState) -> bool {
+    use tokio_postgres::error::SqlState;
+    [SqlState::CHARACTER_NOT_IN_REPERTOIRE, SqlState::UNTRANSLATABLE_CHARACTER, SqlState::PROGRAM_LIMIT_EXCEEDED]
+        .contains(code)
+}
+
 /// Whether `value` is a valid identifier: `^[A-Za-z_][A-Za-z0-9_]*$`, at most
 /// `max` bytes.
 pub fn is_identifier(value: &str, max: usize) -> bool {
@@ -493,6 +508,19 @@ mod tests {
         let mut back = PostgresConfig::new();
         back.decode_toml(&c.to_toml()).unwrap();
         assert_eq!(c, back);
+    }
+
+    #[test]
+    fn only_errors_of_the_message_itself_are_unstorable() {
+        use tokio_postgres::error::SqlState;
+        for code in ["22021", "22P05", "54000"] {
+            assert!(unstorable(&SqlState::from_code(code)), "{code}");
+        }
+        // Lock and statement timeouts, a deadlock, a lost connection, an
+        // out-of-range offset or deadline (a setting): retried.
+        for code in ["55P03", "57014", "40P01", "08006", "22003", "53300"] {
+            assert!(!unstorable(&SqlState::from_code(code)), "{code}");
+        }
     }
 
     #[test]

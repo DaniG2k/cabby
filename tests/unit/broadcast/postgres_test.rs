@@ -338,3 +338,30 @@ fn deviation_d070_postgres_a_silent_commit_of_an_empty_batch_is_given_up() {
     }
     assert_eq!(vec![payload("s", "after")], payloads(&calls, "HandleBroadcast"));
 }
+
+/// regression-for: broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts
+/// note: Deviation D-070: in a SQL_ASCII database, which stores text bytes without checking them, a row whose payload is not valid UTF-8 is deleted and logged as a row that is not JSON, and the rows after it are delivered; the server can't send such a row as UTF-8, so reading it as text failed the claim for every row.
+#[test]
+fn deviation_d070_postgres_a_payload_that_is_not_utf8_is_dropped() {
+    let scope = scope();
+    let db = scope.database("SQL_ASCII");
+    let mut config = scope.plain_config();
+    config.url = without_tls(db.url.clone());
+    let handler = MockHandler::new();
+    let b = Broadcaster::postgres(&handler, &config, Metrics::none()).expect("PostgresBroadcaster::new");
+    b.start().expect("start");
+    let _b = ShutdownGuard(b);
+
+    // {"stream":"s","data":"<0xff>"}: the 0xff byte is not UTF-8.
+    db.execute(&format!(
+        "INSERT INTO {t} (payload) VALUES (convert_from('\\x7b2273747265616d223a2273222c2264617461223a22ff227d'::bytea, 'SQL_ASCII')); \
+         INSERT INTO {t} (payload) VALUES ('{after}');",
+        t = scope.table("broadcasts"),
+        after = payload("s", "after")
+    ));
+
+    let calls = handler.drain(DRAIN_IDLE * 2);
+    assert_eq!(vec![payload("s", "after")], payloads(&calls, "HandleBroadcast"));
+    assert_eq!(1, calls.len(), "{calls:?}");
+    assert_eq!(Some("0".to_owned()), db.scalar(&format!("SELECT count(*) FROM {}", scope.table("broadcasts"))));
+}
