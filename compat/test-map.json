@@ -26322,8 +26322,8 @@
       "links": [
         "26a1a703:broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "not_observable",
+      "rust_status": "pass"
     },
     {
       "rust_case": "broadcast::postgres_test::deviation_d070_postgres_a_silent_commit_of_an_empty_batch_is_given_up",
@@ -26421,8 +26421,8 @@
       "links": [
         "26a1a703:broadcast/redis_test.go#TestRedisBroadcaster/With_multiple_subscribers"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "not_observable",
+      "rust_status": "pass"
     },
     {
       "rust_case": "broadcast::postgres_test::deviation_d070_postgres_slow_batches_are_committed_in_parts",
@@ -26439,8 +26439,8 @@
       "links": [
         "26a1a703:broadcast/redis_test.go#TestRedisBroadcaster/Handles_broadcasts"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "not_observable",
+      "rust_status": "pass"
     },
     {
       "rust_case": "broker::memory_test::test_memory_peak_reports_latest_position",
@@ -26457,8 +26457,8 @@
       "links": [
         "26a1a703:broker/memory_test.go#TestMemory_Expire"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "not_observable",
+      "rust_status": "pass"
     },
     {
       "rust_case": "broker::postgres_test::deviation_d071_postgres_a_slot_that_cannot_connect_does_not_fail_the_pool",
@@ -26511,8 +26511,8 @@
       "links": [
         "26a1a703:broker/nats_test.go#TestNATSBroker_Sessions"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "not_observable",
+      "rust_status": "pass"
     },
     {
       "rust_case": "broker::postgres_test::deviation_d071_postgres_history_from_reports_gaps_and_expiry",
@@ -27343,8 +27343,8 @@
       "links": [
         "26a1a703:node/broker_integration_test.go#TestIntegrationHistory_Memory/Subscribe_+_History"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "not_observable",
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::pubsub_subscribe::deviation_d105_postgres_messages_published_right_after_a_confirmation_are_delivered",
@@ -27352,8 +27352,8 @@
       "links": [
         "26a1a703:pubsub/subscriber_test.go#TestLegacySubscriber/Broadcast"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "not_observable",
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::pubsub_subscribe::redis_messages_published_right_after_a_confirmation_are_delivered",
@@ -27361,8 +27361,8 @@
       "links": [
         "26a1a703:pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "pass",
+      "rust_status": "pass"
     },
     {
       "rust_case": "conformance::pusher::presence_subscription",
@@ -27978,8 +27978,8 @@
       "links": [
         "26a1a703:pubsub/redis_test.go#TestRedisCommon/Broadcast"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "not_observable",
+      "rust_status": "pass"
     },
     {
       "rust_case": "pubsub::postgres_test::deviation_d070_postgres_unsubscribing_one_stream_of_a_shard_keeps_the_other",
@@ -27996,8 +27996,8 @@
       "links": [
         "26a1a703:pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "not_observable",
+      "rust_status": "pass"
     },
     {
       "rust_case": "pubsub::postgres_test::test_postgres_common::broadcast",
@@ -28050,8 +28050,8 @@
       "links": [
         "26a1a703:pubsub/redis_test.go#TestRedisCommon/Subscribe_-_Broadcast"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "not_observable",
+      "rust_status": "pass"
     },
     {
       "rust_case": "pubsub::redis_issues_test::recovers_after_the_subscriber_connection_goes_half_open",
@@ -28248,8 +28248,8 @@
       "links": [
         "26a1a703:redis/streamer_test.go#TestStreamer/Handles_incoming_messages"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "pass",
+      "rust_status": "pass"
     },
     {
       "rust_case": "redis::streamer_test::deviation_d109_a_backlog_is_read_in_batches",
@@ -28257,8 +28257,8 @@
       "links": [
         "26a1a703:redis/streamer_test.go#TestStreamerAcksClaims"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "not_observable",
+      "rust_status": "pass"
     },
     {
       "rust_case": "redis::streamer_test::deviation_d111_failing_commands_are_retried_less_and_less_often",
@@ -28266,8 +28266,8 @@
       "links": [
         "26a1a703:redis/streamer_test.go#TestStreamer/Handles_incoming_messages"
       ],
-      "reference_status": "unverified",
-      "rust_status": "pending"
+      "reference_status": "not_observable",
+      "rust_status": "pass"
     },
     {
       "rust_case": "rpc::grpc_test::test_grpc_integration::timeout_is_deadline_exceeded",
