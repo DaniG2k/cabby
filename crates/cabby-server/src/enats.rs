@@ -178,6 +178,23 @@ fn parse_host_port(addr: &str) -> Result<(String, Option<u16>), EnatsError> {
     Ok((host.to_owned(), port))
 }
 
+/// The host this process connects to for a server listening on `host`: an
+/// empty host listens on every interface (nats-server's default `0.0.0.0`), so
+/// the server is reached on the IPv4 loopback address.
+fn connect_host(host: &str) -> &str {
+    if host.is_empty() { "127.0.0.1" } else { host }
+}
+
+/// `host:port`, with an IPv6 host in brackets (Go `net.JoinHostPort`).
+fn join_host_port(host: &str, port: u16) -> String {
+    if host.contains(':') { format!("[{host}]:{port}") } else { format!("{host}:{port}") }
+}
+
+/// The client URL of a server listening on `host` and `port`.
+fn client_url(host: &str, port: u16) -> String {
+    format!("nats://{}", join_host_port(connect_host(host), port))
+}
+
 fn address_with_port(addr: &str, what: &str) -> Result<(String, u16), EnatsError> {
     match parse_host_port(addr) {
         Ok((host, Some(port))) => Ok((host, port)),
@@ -588,7 +605,7 @@ impl Service {
             });
         }
 
-        let url = format!("nats://{host}:{port}");
+        let url = client_url(&host, port);
         *lock(&self.running) = Some(Running { child, output, conf_path, host, port });
         self.wait_ready()?;
         self.watch();
@@ -643,7 +660,7 @@ impl Service {
                     let out = lock(&r.output).text(OUTPUT_LIMIT);
                     return Err(EnatsError(format!("failed to start NATS server: exited with {status}\n{out}")));
                 }
-                let addr = (r.host.as_str(), r.port).to_socket_addrs().ok().and_then(|mut a| a.next());
+                let addr = (connect_host(&r.host), r.port).to_socket_addrs().ok().and_then(|mut a| a.next());
                 if let Some(addr) = addr
                     && TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
                 {
@@ -669,7 +686,7 @@ impl Service {
         let url = {
             let running = lock(&self.running);
             let r = running.as_ref().ok_or_else(|| EnatsError("NATS server is not started".into()))?;
-            format!("nats://{}:{}", r.host, r.port)
+            client_url(&r.host, r.port)
         };
         let max = Duration::from_secs(u64::try_from(max_seconds).unwrap_or(0));
         wait_jetstream(url, max, self.is_jetstream_leader(), self.log.clone())
@@ -834,6 +851,48 @@ mod tests {
         assert!(parse_host_port("nats://h:port").is_err());
     }
 
+    /// The URL this process connects to (JetStream readiness): an IPv6 host
+    /// in brackets, an empty host (every interface) through the loopback
+    /// address. Before, `nats://[::1]:4222` was probed as `nats://::1:4222`,
+    /// which the client refuses, and an empty host could not be probed at all.
+    #[test]
+    fn client_urls_join_host_and_port() {
+        assert_eq!("nats://127.0.0.1:4222", client_url("127.0.0.1", 4222));
+        assert_eq!("nats://[::1]:4222", client_url("::1", 4222));
+        assert_eq!("nats://[fe80::1%25en0]:4222", client_url("fe80::1%25en0", 4222));
+        assert_eq!("nats://localhost:4222", client_url("localhost", 4222));
+        assert_eq!("nats://127.0.0.1:4222", client_url("", 4222));
+        for url in ["nats://[::1]:4222", "nats://127.0.0.1:4222"] {
+            assert!(url.parse::<async_nats::ServerAddr>().is_ok(), "{url}");
+        }
+    }
+
+    /// IPv6 addresses in the configuration file: hosts without brackets,
+    /// routes and gateway URLs as given.
+    #[test]
+    fn server_config_with_ipv6_addresses() {
+        let config = Config {
+            name: "n1".into(),
+            service_addr: "nats://[::1]:4242".into(),
+            cluster_addr: "nats://[::1]:4342".into(),
+            cluster_name: "c1".into(),
+            gateway_addr: "nats://[::1]:4442".into(),
+            gateways: vec!["c2:nats://[::1]:4443,nats://[::1]:4444".into()],
+            routes: vec!["nats://[::1]:4343".into()],
+            ..Config::new()
+        };
+        let conf = Service::new(&config).server_config().unwrap();
+        for line in [
+            "host: \"::1\"\nport: 4242",
+            "  name: \"c1\"\n  host: \"::1\"\n  port: 4342",
+            "  routes: [\"nats://[::1]:4343\"]",
+            "gateway: {\n  name: \"c1\"\n  host: \"::1\"\n  port: 4442",
+            "{ name: \"c2\", urls: [\"nats://[::1]:4443\", \"nats://[::1]:4444\"] }",
+        ] {
+            assert!(conf.contains(line), "{line:?} not in:\n{conf}");
+        }
+    }
+
     #[test]
     fn server_config_mirrors_upstream_options() {
         let config = Config {
@@ -905,6 +964,32 @@ mod tests {
         service.shutdown().expect("shutdown");
         assert!(TcpStream::connect(("127.0.0.1", port)).is_err());
         let _ = std::fs::remove_dir_all(store);
+    }
+
+    /// A server on an IPv6 address, and one on every interface (an empty
+    /// host), start and report JetStream ready. Before, the second failed to
+    /// start ("failed to start NATS server within 5 seconds": the readiness
+    /// probe could not resolve the empty host), and JetStream readiness was
+    /// never reported for the first.
+    #[test]
+    fn starts_on_ipv6_and_on_every_interface() {
+        let Some(bin) = test_server_binary() else { return };
+        let v6 = std::net::TcpListener::bind("[::1]:0").ok().map(|l| ("[::1]", l.local_addr().unwrap().port()));
+        let any = Some(("", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()));
+        for (host, port) in [v6, any].into_iter().flatten() {
+            let store = std::env::temp_dir().join(format!("cabby-enats-test-{port}"));
+            let config = Config {
+                service_addr: format!("nats://{host}:{port}"),
+                jetstream: true,
+                store_dir: store.display().to_string(),
+                ..Config::new()
+            };
+            let service = Service::new(&config);
+            service.start_with(&bin).unwrap_or_else(|e| panic!("start on {host:?}: {e}"));
+            service.wait_jetstream_ready(10).unwrap_or_else(|e| panic!("JetStream ready on {host:?}: {e}"));
+            service.shutdown().expect("shutdown");
+            let _ = std::fs::remove_dir_all(store);
+        }
     }
 
     #[test]

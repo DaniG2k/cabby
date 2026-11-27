@@ -41,9 +41,11 @@ This document is the packaging strategy. The Go runtime dependency it keeps is d
   - the gateway (name, host, port, advertise address, remote gateways in
     `name:url1,url2` form).
 
-  Address parsing and error texts follow upstream.
+  Address parsing and error texts follow upstream. IPv6 addresses are given in brackets
+  (`nats://[::1]:4222`); the file holds the bare host, and routes and gateway URLs as given.
 - **Startup:** `start` spawns `nats-server -c <file>` and waits up to 5 s
-  (upstream `serverStartTimeout`) for the port to accept TCP connections. If the process
+  (upstream `serverStartTimeout`) for the port to accept TCP connections (on `127.0.0.1` when
+  the host is empty, which listens on every interface). If the process
   exits early, the error includes its output. As upstream does, `start` doesn't wait for
   JetStream: `wait_jetstream_ready(max_seconds)` polls JetStream's account info over a
   regular client connection.

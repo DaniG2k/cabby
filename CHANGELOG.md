@@ -26,6 +26,12 @@ Differences from the AnyCable Go server are listed by ID in
   panicked`), the remaining steps run, and the process exits 1 with `shutdown step panicked:
   <message>`. A session whose Disconnect call panics no longer holds the shutdown until its
   timeout (D-117).
+- Embedded NATS (`--embed_nats`): with an IPv6 address (`--enats_addr=nats://[::1]:4222`),
+  JetStream readiness is checked at `nats://[::1]:4222`. Before, the check used
+  `nats://::1:4222`, which the client refuses, so `JetStream cluster is ready` was never logged
+  (the NATS broker and pub/sub were not affected). An empty host (`--enats_addr=nats://:4222`,
+  every interface) no longer fails the start with `failed to start NATS server within 5
+  seconds`: the server is checked on `127.0.0.1`.
 - Disconnect queue: the backlog limit (`--max_disconnect_backlog_size`) holds when sessions
   disconnect at the same time. Before, each of them could pass the size check before any was
   added, so the queue could grow past the limit by one session per concurrent disconnect. The
