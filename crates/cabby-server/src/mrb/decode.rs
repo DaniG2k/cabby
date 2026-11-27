@@ -23,6 +23,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use cabby_core::toml_config::go_quote;
 use serde::de::{self, DeserializeOwned, DeserializeSeed, IntoDeserializer, MapAccess, SeqAccess, Visitor};
 
 use super::{MrbValue, Value, ValueType};
@@ -232,25 +233,6 @@ fn underscores_ok(s: &str, prefixed: bool) -> bool {
         i += 1;
     }
     saw != b'_'
-}
-
-/// Go `strconv.Quote` for the texts that reach error messages.
-fn go_quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\t' => out.push_str("\\t"),
-            '\r' => out.push_str("\\r"),
-            c if c.is_control() => out.push_str(&format!("\\x{:02x}", u32::from(c))),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 /// A serde deserializer over one Ruby value; `name` is the Go-style path used
@@ -536,5 +518,27 @@ impl<'de> MapAccess<'de> for Fields {
             .and_then(|v| seed.deserialize(Decoder { v, name: format!("{}.{field}", self.name) }));
         m.arena_restore(ai);
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Error texts quote the input as Go's `strconv.Quote` does (the shared
+    /// `go_quote`): `\a`, `\v` and characters Go does not print get Go's escapes.
+    /// Before, this module had its own quoting, which wrote U+0007 as `\x07` and
+    /// U+0085 as `\x85` (Go: `\a`, `\u0085`).
+    #[test]
+    fn parse_errors_quote_the_input_like_strconv_quote() {
+        for (input, quoted) in
+            [("12x", r#""12x""#), ("\u{7}", r#""\a""#), ("1\u{b}", r#""1\v""#), ("\u{85}", r#""\u0085""#)]
+        {
+            assert_eq!(
+                Err(format!("strconv.ParseInt: parsing {quoted}: invalid syntax")),
+                parse_go_int(input),
+                "{input:?}"
+            );
+        }
     }
 }

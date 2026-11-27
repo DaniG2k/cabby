@@ -37,6 +37,10 @@ Differences from the AnyCable Go server are listed by ID in
   the metrics interval formats the newest snapshot; snapshots written while it is busy replace
   the one waiting. Before, every snapshot was queued without a limit, so the formatter fell
   further behind and the queue grew each interval (D-124).
+- mruby (`mruby` builds): a decoding error for a string that is not an integer quotes the
+  string as Go's `strconv.Quote` does (`parsing "\a"`, `parsing "\u0085"`), through the shared
+  quoting helper. Before, the mruby module had its own quoting, which wrote these characters as
+  `\x07` and `\x85`.
 
 ## [0.5.1] - 2026-11-27
 
