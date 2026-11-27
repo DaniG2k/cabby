@@ -13,7 +13,8 @@
 //! must stay under 8000 bytes, so an envelope larger than
 //! [`INLINE_LIMIT`] is stored in `<prefix>pubsub_overflow` (for 60 seconds)
 //! and the notification carries its row: `{"t":"ref","id":123}`. Receivers
-//! read the row; a background task deletes expired rows.
+//! read the row; a background task deletes expired rows, in batches, on a
+//! connection of its own.
 //!
 //! As with Redis and NATS, a node receives its own publications through
 //! pub/sub: the broker publishes, and every node, this one included, delivers
@@ -49,6 +50,14 @@ const MAX_BATCH: usize = 64;
 const OVERFLOW_TTL_SECS: i64 = 60;
 /// How often expired overflow rows are deleted.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
+/// Expired overflow rows deleted per statement (each its own transaction).
+const SWEEP_BATCH: i64 = 10_000;
+/// How long one sweep may delete; the next one goes on from there.
+const SWEEP_BUDGET: Duration = Duration::from_secs(10);
+/// The server-side limits of a sweep statement: in all, and waiting for a
+/// lock on the table (rows locked by others are skipped).
+const SWEEP_STATEMENT_TIMEOUT: Duration = Duration::from_secs(5);
+const SWEEP_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long `start` waits for the `LISTEN` connection.
 const START_WAIT: Duration = Duration::from_secs(10);
 /// Command connections for publishing and reading spilled payloads.
@@ -130,6 +139,8 @@ pub struct PostgresSubscriber {
     log: Logger,
     subscriptions: Arc<Mutex<Subscriptions>>,
     running: Arc<Mutex<Option<Running>>>,
+    /// How often expired overflow rows are deleted ([`SWEEP_INTERVAL`]).
+    sweep_interval: Duration,
 }
 
 /// Waits until a subscriber listens to a stream's shard, without holding any
@@ -183,7 +194,17 @@ impl PostgresSubscriber {
             log: super::logger("pubsub"),
             subscriptions: Arc::new(Mutex::new(Subscriptions::default())),
             running: Arc::new(Mutex::new(None)),
+            sweep_interval: SWEEP_INTERVAL,
         })
+    }
+
+    /// Deletes expired overflow rows every `interval` instead of every
+    /// [`SWEEP_INTERVAL`] (tests); takes effect at `start`.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_sweep_interval(mut self, interval: Duration) -> Self {
+        self.sweep_interval = interval;
+        self
     }
 
     fn subs(&self) -> std::sync::MutexGuard<'_, Subscriptions> {
@@ -375,15 +396,69 @@ async fn publish_loop(
     }
 }
 
-async fn sweep_loop(pool: Arc<Pool>, sql: String, log: Logger, stop: CancellationToken) {
+/// Deletes expired overflow rows every `interval` ([`SWEEP_INTERVAL`]) on a connection of
+/// its own (opened at the first sweep), so publishing and reading spilled
+/// payloads never wait behind it. Rows go in batches of [`SWEEP_BATCH`] that
+/// skip rows another session holds (another node's sweep, for one), for at
+/// most [`SWEEP_BUDGET`] per sweep.
+async fn sweep_loop(
+    spec: Arc<ConnectSpec>,
+    app: String,
+    sql: String,
+    interval: Duration,
+    metrics: Metrics,
+    log: Logger,
+    stop: CancellationToken,
+) {
+    let mut client: Option<tokio_postgres::Client> = None;
     loop {
         tokio::select! {
             biased;
             () = stop.cancelled() => return,
-            () = tokio::time::sleep(SWEEP_INTERVAL) => {}
+            () = tokio::time::sleep(interval) => {}
         }
-        if let Err(e) = pool.query(&sql, &Vec::new()).await {
+        if let Err(e) = sweep(&spec, &app, &mut client, &sql, &stop).await {
+            metrics.error();
             log_warn!(log, "failed to delete expired pubsub overflow rows", "error" => e.0);
+        }
+    }
+}
+
+/// One sweep; the rows deleted.
+async fn sweep(
+    spec: &ConnectSpec,
+    app: &str,
+    client: &mut Option<tokio_postgres::Client>,
+    sql: &str,
+    stop: &CancellationToken,
+) -> Result<u64, PgError> {
+    let started = std::time::Instant::now();
+    let mut total = 0;
+    loop {
+        if client.as_ref().is_none_or(tokio_postgres::Client::is_closed) {
+            let c = spec.connect(app).await?;
+            let settings = format!(
+                "SET statement_timeout = '{}s'; SET lock_timeout = '{}s'",
+                SWEEP_STATEMENT_TIMEOUT.as_secs(),
+                SWEEP_LOCK_TIMEOUT.as_secs()
+            );
+            tokio::time::timeout(connect::QUERY_TIMEOUT, c.batch_execute(&settings))
+                .await
+                .map_err(|_| PgError("timed out preparing the sweep connection".into()))??;
+            *client = Some(c);
+        }
+        let Some(c) = client.as_ref() else { unreachable!("connected above") };
+        let deleted = match tokio::time::timeout(connect::QUERY_TIMEOUT, c.execute(sql, &[&SWEEP_BATCH])).await {
+            Ok(Ok(n)) => n,
+            Ok(Err(e)) => return Err(e.into()),
+            Err(_) => {
+                *client = None;
+                return Err(PgError(format!("query timed out after {}s", connect::QUERY_TIMEOUT.as_secs())));
+            }
+        };
+        total += deleted;
+        if deleted < SWEEP_BATCH as u64 || started.elapsed() >= SWEEP_BUDGET || stop.is_cancelled() {
+            return Ok(total);
         }
     }
 }
@@ -459,8 +534,14 @@ impl Subscriber for PostgresSubscriber {
             stop.clone(),
         ));
         connect::runtime().spawn(sweep_loop(
-            pool.clone(),
-            format!("DELETE FROM {overflow} WHERE expires_at < NOW()"),
+            self.spec.clone(),
+            format!("cabby pubsub-maintenance {}", self.names.channel),
+            format!(
+                "DELETE FROM {overflow} WHERE id IN (SELECT id FROM {overflow} WHERE expires_at < NOW() \
+                 LIMIT $1 FOR UPDATE SKIP LOCKED)"
+            ),
+            self.sweep_interval,
+            self.metrics.clone(),
             self.log.clone(),
             stop.clone(),
         ));

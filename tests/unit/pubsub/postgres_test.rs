@@ -426,3 +426,46 @@ fn deviation_d070_postgres_start_opens_the_publish_connection() {
     let publishers = h.scope.pids(&format!("cabby pubsub {}", h.config.channel));
     assert_eq!(1, publishers.len(), "one publish connection open when start returns: {publishers:?}");
 }
+
+/// regression-for: pubsub/redis_test.go#TestRedisCommon/Broadcast
+/// note: Deviation D-070: the sweep of expired <prefix>pubsub_overflow rows runs on a connection of its own, in batches that skip rows another session has locked: with 50000 expired rows and one of them locked (here by a session holding it), the sweep deletes the others at its first run, publishing and delivering go on meanwhile (each message within 1 s), and no connection is left waiting for the lock. The sweep runs every 30 s; here every 500 ms (PostgresSubscriber::with_sweep_interval).
+#[test]
+fn deviation_d070_postgres_the_overflow_sweep_does_not_hold_up_publishing() {
+    let h = Postgres::new();
+    h.scope.migrate();
+    let overflow = h.scope.table("pubsub_overflow");
+    h.scope.execute(&format!(
+        "INSERT INTO {overflow} (payload, expires_at) SELECT repeat('x', 200), now() - interval '1 hour' FROM generate_series(1, 50000)"
+    ));
+    let holder = h.scope.other_session();
+    holder.execute(&format!("BEGIN; SELECT id FROM {overflow} WHERE id = 1 FOR UPDATE;"));
+    let handler = TestHandler::new();
+    let (s, probe) = Subscriber::postgres_tuned(&handler, &h.config, Metrics::none(), |s| {
+        s.with_sweep_interval(Duration::from_millis(500))
+    })
+    .expect("PostgresSubscriber::new");
+    h.probes.lock().unwrap().push(probe);
+    let s = ShutdownGuard(s);
+    s.0.start().expect("start");
+    s.0.subscribe("sweep");
+    h.wait("sweep");
+
+    let rows = || h.scope.scalar(&format!("SELECT count(*) FROM {overflow}"));
+    let deadline = std::time::Instant::now() + WAIT;
+    let mut i = 0;
+    while rows().as_deref() != Some("1") {
+        assert!(std::time::Instant::now() < deadline, "the sweep did not run: {:?} rows", rows());
+        i += 1;
+        s.0.broadcast(&msg("sweep", &i.to_string()));
+        let got = handler.receive().within(Duration::from_secs(1));
+        assert_eq!(Some(i.to_string()), got.map(|m| m.data), "message {i} within 1 s");
+        // Pacing, not synchronization: about twenty messages a second.
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let waiting = h.scope.scalar(&format!(
+        "SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'cabby pubsub%{}' AND wait_event_type = 'Lock'",
+        h.config.channel
+    ));
+    assert_eq!(Some("0".to_owned()), waiting, "a sweep is waiting for the locked row");
+    holder.execute("ROLLBACK;");
+}

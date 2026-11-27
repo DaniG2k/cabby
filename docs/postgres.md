@@ -31,15 +31,16 @@ in Cabby (deviations D-070 and D-071 in [`compat/deviations.md`](../compat/devia
   `GRANT CREATE ON SCHEMA public TO <role>`, or a schema of its own
   (`--postgres_schema=cabby` with `CREATE SCHEMA cabby AUTHORIZATION <role>`).
 
-Each node opens up to 10 connections with all three adapters: one `LISTEN` connection and two
-command connections for pub/sub, one `LISTEN` connection and one claim connection for the
-broadcaster, four command connections and one maintenance connection for the broker (plus one
-for a moment at startup, for the migration). Size
+Each node opens up to 11 connections with all three adapters: one `LISTEN` connection, two
+command connections and one maintenance connection for pub/sub, one `LISTEN` connection and one
+claim connection for the broadcaster, four command connections and one maintenance connection
+for the broker (plus one for a moment at startup, for the migration). Size
 `max_connections` (or the PgBouncer pool) for your node count. Each connection sets
 `application_name`, so `pg_stat_activity` shows what it is for: `cabby pubsub <channel>`,
-`cabby pubsub-listen <channel>`, `cabby broadcast <channel>`, `cabby broadcast-listen <channel>`,
-`cabby broker <channel>`, `cabby broker-maintenance <channel>` and `cabby migrate` (with
-`<channel>` the `--postgres_channel` value; at most 63 bytes are kept).
+`cabby pubsub-listen <channel>`, `cabby pubsub-maintenance <channel>`, `cabby broadcast
+<channel>`, `cabby broadcast-listen <channel>`, `cabby broker <channel>`, `cabby
+broker-maintenance <channel>` and `cabby migrate` (with `<channel>` the `--postgres_channel`
+value; at most 63 bytes are kept).
 
 ## Quick start
 
@@ -139,7 +140,10 @@ there, as with Redis pub/sub. Remote commands (disconnects through the API, for 
 `NOTIFY` payloads must stay under 8000 bytes. A message larger than 7500 bytes (after its
 envelope) is stored in `cabby_pubsub_overflow` for 60 seconds and the notification carries the
 row's ID; receivers read it from there. A node deletes expired rows every 30 seconds, so a node
-that falls more than 60 seconds behind skips such a message (with a warning).
+that falls more than 60 seconds behind skips such a message (with a warning). It does so on a
+connection of its own, opened at the first sweep, 10000 rows per statement for at most 10
+seconds per sweep, skipping rows another session has locked (the sweep of another node), so
+publishing and reading never wait for it.
 
 The task reading the `LISTEN` connection hands each notification on at once, also while a
 `LISTEN`, `UNLISTEN` or heartbeat on that connection is waiting for its answer. Each node keeps

@@ -24,7 +24,7 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 220
+      "cases": 221
     },
     "translation": {
       "reviewed": 923
@@ -27944,6 +27944,15 @@
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "pubsub::postgres_test::deviation_d070_postgres_the_overflow_sweep_does_not_hold_up_publishing",
+      "relation": "regression",
+      "links": [
+        "26a1a703:pubsub/redis_test.go#TestRedisCommon/Broadcast"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "pubsub::postgres_test::deviation_d070_postgres_unsubscribing_one_stream_of_a_shard_keeps_the_other",

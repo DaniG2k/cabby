@@ -227,8 +227,20 @@ impl Subscriber {
         config: &cabby_server::postgres::PostgresConfig,
         metrics: cabby_server::postgres::Metrics,
     ) -> Result<(Self, cabby_server::postgres::pubsub::ListenProbe), String> {
+        Self::postgres_tuned(handler, config, metrics, |s| s)
+    }
+
+    /// [`Subscriber::postgres`], with the subscriber adjusted by `tune` before
+    /// it is used (shorter intervals for tests).
+    pub fn postgres_tuned(
+        handler: &TestHandler,
+        config: &cabby_server::postgres::PostgresConfig,
+        metrics: cabby_server::postgres::Metrics,
+        tune: impl FnOnce(cabby_server::postgres::PostgresSubscriber) -> cabby_server::postgres::PostgresSubscriber,
+    ) -> Result<(Self, cabby_server::postgres::pubsub::ListenProbe), String> {
         crate::postgres::rust_only();
         let s = cabby_server::postgres::PostgresSubscriber::new(handler.rust(), config, metrics).map_err(|e| e.0)?;
+        let s = tune(s);
         let probe = s.probe();
         Ok((Self { inner: SubscriberImpl::Rust(Box::new(s)) }, probe))
     }

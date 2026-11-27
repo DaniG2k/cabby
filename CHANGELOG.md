@@ -76,6 +76,14 @@ Differences from the AnyCable Go server are listed by ID in
   from being deleted, for example) ended the pass, so expired sessions and streams were never
   deleted. Each step now runs in turn, waits at most 2 s for a lock, and gets its share of the
   20 s pass, and the error names the steps that failed and their tables.
+- Postgres pub/sub (`--pubsub=postgres`): the sweep of expired `pubsub_overflow` rows no longer
+  holds up publishing. It ran as one `DELETE` of every expired row on one of the two publish
+  connections, so the publications sent on that connection waited behind it; when a row it
+  needed was locked, they failed after 10 s (`failed to publish messages error="timed out"`)
+  and were lost, and the server went on waiting for the lock after Cabby had dropped the
+  connection. The sweep now runs on a connection of its own (`cabby pubsub-maintenance
+  <channel>`, so a node opens up to 11 connections), deletes 10000 rows per statement for at
+  most 10 s per sweep, and skips rows another session holds.
 
 ## [0.4.2] - 2026-11-27
 
