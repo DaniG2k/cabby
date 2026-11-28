@@ -1370,6 +1370,10 @@ impl Node {
     fn handle_command_reply(&self, s: &Arc<Session>, msg: &Message, reply: &CommandResult) -> bool {
         let id = &msg.identifier;
         let mut dirty = false;
+        // The application may list streams in a reply that is not a success (a
+        // rejected subscription, a failed action): they are ignored, as in
+        // AnyCable 1.6.22.
+        let streams: &[String] = if reply.status == Status::Success { &reply.streams } else { &[] };
 
         let closed = {
             let _reg = s.registration();
@@ -1390,9 +1394,9 @@ impl Node {
                     }
                 }
 
-                if !reply.streams.is_empty() {
+                if !streams.is_empty() {
                     dirty = true;
-                    for stream in &reply.streams {
+                    for stream in streams {
                         self.start_channel_stream(s, broker.as_ref(), id, stream);
                     }
                 }
@@ -1402,7 +1406,7 @@ impl Node {
 
         // D-105: the transmissions (the confirmation) go once the streams' pub/sub subscriptions are active.
         if !closed {
-            super::activation::wait_for_streams(&self.activations, s, &reply.streams);
+            super::activation::wait_for_streams(&self.activations, s, streams);
         }
 
         if !closed {

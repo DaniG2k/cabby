@@ -90,7 +90,7 @@ impl Controller for Scripted {
         let script: Value = serde_json::from_str(data).expect("a script");
         Outcome {
             result: Some(CommandResult {
-                status: Status::Success,
+                status: if script["fail"] == true { Status::Failure } else { Status::Success },
                 streams: strings(&script["start"]),
                 stopped_streams: strings(&script["stop"]),
                 ..Default::default()
@@ -252,7 +252,11 @@ impl Rig {
     /// A perform whose reply starts and stops the given streams, in that reply's
     /// order (stops first).
     fn perform(&self, s: &Arc<Session>, channel: &str, start: &[&str], stop: &[&str]) {
-        let data = serde_json::json!({"start": start, "stop": stop}).to_string();
+        self.perform_script(s, channel, serde_json::json!({"start": start, "stop": stop}));
+    }
+
+    fn perform_script(&self, s: &Arc<Session>, channel: &str, script: Value) {
+        let data = script.to_string();
         let msg = Message {
             command: "message".into(),
             identifier: channel.into(),
@@ -400,11 +404,10 @@ fn deviation_d091_stop_all_streams_after_duplicates() {
     assert_eq!(vec!["+s", "+t", "-s", "-t"], rig.recorder.events());
 }
 
-/// Deviation D-091: a reply for a channel the session does not have (here a
-/// rejected subscription that started a stream) adds no reference and no hub
-/// subscription.
+/// The streams of a rejected subscription add no reference and no hub
+/// subscription, as in AnyCable 1.6.22.
 #[test]
-fn deviation_d091_streams_of_a_rejected_subscription_are_not_subscribed() {
+fn streams_of_a_rejected_subscription_are_not_subscribed() {
     let rig = rig();
     let (s, rx) = rig.session("a");
     rig.subscribe(&s, "rejected");
@@ -441,4 +444,19 @@ fn deviation_d091_duplicate_starts_with_renamed_streams_hold_one_reference() {
 
     rig.disconnect(&s);
     assert_eq!(vec!["+id:s", "-id:s"], rig.recorder.events());
+}
+
+/// The streams of a reply that is not a success (here a failed action on a
+/// channel the session has) are not started; the streams it stops are
+/// stopped, as in AnyCable 1.6.22.
+#[test]
+fn streams_of_a_failed_action_are_not_subscribed() {
+    let rig = rig();
+    let (s, _rx) = rig.session("a");
+    rig.subscribe(&s, "chat");
+    rig.perform(&s, "chat", &["s"], &[]);
+
+    rig.perform_script(&s, "chat", serde_json::json!({"start": ["t"], "stop": ["s"], "fail": true}));
+    assert_eq!(Some(Vec::<String>::new()), s.subscriptions().streams_for("chat"));
+    assert_eq!(vec!["+s", "-s"], rig.recorder.events());
 }
