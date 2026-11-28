@@ -746,10 +746,8 @@ pub fn run() -> Result<()> {
     }
 
     let previous = manifest::load().map(migrate_ids);
-    let old: HashMap<String, Case> = previous
-        .as_ref()
-        .map(|m| m.cases.iter().map(|c| (c.id.clone(), c.clone())).collect())
-        .unwrap_or_default();
+    let old: HashMap<String, Case> =
+        previous.as_ref().map(|m| m.cases.iter().map(|c| (c.id.clone(), c.clone())).collect()).unwrap_or_default();
     let old_only: HashMap<String, RustOnly> = previous
         .as_ref()
         .map(|m| m.rust_only.iter().map(|r| (r.rust_case.clone(), r.clone())).collect())
@@ -867,41 +865,75 @@ fn migrate_ids(mut m: Manifest) -> Manifest {
 }
 
 /// Aggregate Go parents (no direct assertions) take their status from children.
+/// Nested aggregates (a subtest that only runs table rows) are derived first, so a
+/// parent sees its aggregate children's derived statuses.
 pub fn derive_aggregates(cases: &mut [Case]) {
-    // (id, translation, reference, rust)
-    type Status4 = (String, String, String, String);
-    let snapshot: Vec<Status4> = cases
-        .iter()
-        .map(|c| (c.id.clone(), c.translation_status.clone(), c.reference_status.clone(), c.rust_status.clone()))
-        .collect();
-    for c in cases.iter_mut().filter(|c| c.aggregate && c.rust_cases.is_empty()) {
-        let prefix = format!("{}/", c.id);
-        let kids: Vec<_> = snapshot.iter().filter(|(id, ..)| id.starts_with(&prefix)).collect();
+    let mut order: Vec<usize> =
+        (0..cases.len()).filter(|&i| cases[i].aggregate && cases[i].rust_cases.is_empty()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(cases[i].id.matches('/').count()));
+    for i in order {
+        let prefix = format!("{}/", cases[i].id);
+        let kids: Vec<&Case> = cases.iter().filter(|k| k.id.starts_with(&prefix)).collect();
         if kids.is_empty() {
             continue;
         }
-        let all = |f: &dyn Fn(&Status4) -> bool| kids.iter().all(|k| f(k));
-        c.translation_status = if all(&|k| k.1 == "reviewed") {
-            "reviewed".into()
-        } else if all(&|k| k.1 != "unreviewed") {
-            "translated".into()
+        let all = |f: &dyn Fn(&Case) -> bool| kids.iter().all(|k| f(k));
+        let translation = if all(&|k| k.translation_status == "reviewed") {
+            "reviewed"
+        } else if all(&|k| k.translation_status != "unreviewed") {
+            "translated"
         } else {
-            "unreviewed".into()
+            "unreviewed"
         };
-        c.reference_status = if all(&|k| k.2 == "pass") { "pass".into() } else { "unverified".into() };
-        c.rust_status = if all(&|k| k.3 == "pass") {
-            "pass".into()
-        } else if kids.iter().any(|k| k.3 == "fail") {
-            "fail".into()
+        let reference = if all(&|k| k.reference_status == "pass") { "pass" } else { "unverified" };
+        let rust = if all(&|k| k.rust_status == "pass") {
+            "pass"
+        } else if kids.iter().any(|k| k.rust_status == "fail") {
+            "fail"
         } else {
-            "pending".into()
+            "pending"
         };
+        let c = &mut cases[i];
+        c.translation_status = translation.into();
+        c.reference_status = reference.into();
+        c.rust_status = rust.into();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_aggregates_are_derived_before_their_parents() {
+        let case = |id: &str, aggregate: bool, status: &str| Case {
+            id: id.into(),
+            aggregate,
+            translation_status: status.into(),
+            reference_status: status.into(),
+            rust_status: status.into(),
+            ..Default::default()
+        };
+        let mut cases = vec![
+            case("x:f#T", true, "unreviewed"),
+            case("x:f#T/Rows", true, "unreviewed"),
+            case("x:f#T/Rows/a", false, "pass"),
+            case("x:f#T/Rows/b", false, "pass"),
+            case("x:f#T/Other", false, "pass"),
+        ];
+        cases[2].translation_status = "translated".into();
+        cases[3].translation_status = "translated".into();
+        cases[4].translation_status = "translated".into();
+        derive_aggregates(&mut cases);
+        assert_eq!(
+            ("translated", "pass", "pass"),
+            (&*cases[1].translation_status, &*cases[1].reference_status, &*cases[1].rust_status)
+        );
+        assert_eq!(
+            ("translated", "pass", "pass"),
+            (&*cases[0].translation_status, &*cases[0].reference_status, &*cases[0].rust_status)
+        );
+    }
 
     #[test]
     fn ids_recorded_at_an_earlier_pin_move_to_the_current_one() {
