@@ -507,7 +507,7 @@ pub(super) fn decode_cache_entry(cached: &[u8]) -> Result<CacheEntryIn, NodeErro
 }
 
 /// The value printed by Go's `%v` for decoded JSON (`interface{}`).
-pub(super) fn go_value_text(v: &Value) -> String {
+pub(crate) fn go_value_text(v: &Value) -> String {
     match v {
         Value::Null => "<nil>".into(),
         Value::Bool(b) => b.to_string(),

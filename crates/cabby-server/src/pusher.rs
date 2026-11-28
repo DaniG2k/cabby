@@ -227,6 +227,9 @@ pub const ENCODER_ID: &str = "pusher7";
 
 /// Identifier channel for Pusher subscriptions (upstream `ChannelName`).
 pub const CHANNEL_NAME: &str = "$pusher";
+/// Channel state the executor sets once a private or presence subscription's
+/// signature is verified (upstream unexported `verifiedStateField`).
+pub const VERIFIED_STATE_FIELD: &str = "pusher_verified";
 
 pub const CONNECTION_ESTABLISHED_TYPE: &str = "pusher:connection_established";
 pub const SUBSCRIBE_TYPE: &str = "pusher:subscribe";
@@ -545,20 +548,28 @@ impl Encoder {
         }
 
         if r.kind == common::PRESENCE_TYPE {
-            let invalid = || encode_error(format!("failed to encode presence event: {:?}", r.message));
-            let event = r.message.as_ref().and_then(Value::as_object).ok_or_else(invalid)?;
-            // Both fields must be strings.
-            let user_id = event.get("id").and_then(Value::as_str).ok_or_else(invalid)?;
-            let presence_type = event.get("type").and_then(Value::as_str).ok_or_else(invalid)?;
+            // The event must be an object with a string id and a join or leave
+            // type, as in AnyCable 1.6.22; the texts are Go's `%v (%T)`.
+            let Some(event) = r.message.as_ref().and_then(Value::as_object) else {
+                let message = go_value_or_nil(r.message.as_ref());
+                return Err(encode_error(format!("failed to encode presence event: {message}")));
+            };
+            let invalid = |what: &str, v: Option<&Value>| {
+                encode_error(format!("invalid presence event {what}: {} ({})", go_value_or_nil(v), go_type_name(v)))
+            };
+            let user_id = match event.get("id") {
+                Some(Value::String(id)) => id.as_str(),
+                other => return Err(invalid("id", other)),
+            };
 
             let mut data = PusherPresenceData { user_id, user_info: None };
-            let pusher_event = if presence_type == common::PRESENCE_JOIN_TYPE {
-                data.user_info = event.get("info").filter(|v| !v.is_null());
-                MEMBER_ADDED_TYPE
-            } else if presence_type == common::PRESENCE_LEAVE_TYPE {
-                MEMBER_REMOVED_TYPE
-            } else {
-                ""
+            let pusher_event = match event.get("type") {
+                Some(Value::String(t)) if t == common::PRESENCE_JOIN_TYPE => {
+                    data.user_info = event.get("info").filter(|v| !v.is_null());
+                    MEMBER_ADDED_TYPE
+                }
+                Some(Value::String(t)) if t == common::PRESENCE_LEAVE_TYPE => MEMBER_REMOVED_TYPE,
+                other => return Err(invalid("type", other)),
             };
 
             let channel = identifier_to_channel(&r.identifier)?;
@@ -692,20 +703,39 @@ struct PresenceConfirmation {
     presence: PusherPresenceInfo,
 }
 
-/// Upstream `UserPresence`, decoded from the subscription's `channel_data`.
+/// Go's `%v` of a decoded JSON value in an `interface{}` (`<nil>` when missing).
+fn go_value_or_nil(v: Option<&Value>) -> String {
+    v.map_or_else(|| "<nil>".to_owned(), crate::node::go_value_text)
+}
+
+/// Go's `%T` of a decoded JSON value in an `interface{}`; numbers are
+/// `json.Number` (broadcast data is decoded with `UseNumber`).
+fn go_type_name(v: Option<&Value>) -> &'static str {
+    match v {
+        None | Some(Value::Null) => "<nil>",
+        Some(Value::Bool(_)) => "bool",
+        Some(Value::Number(_)) => "json.Number",
+        Some(Value::String(_)) => "string",
+        Some(Value::Array(_)) => "[]interface {}",
+        Some(Value::Object(_)) => "map[string]interface {}",
+    }
+}
+
+/// Upstream `UserPresence`, decoded from the subscription's `channel_data`;
+/// it must have a user id (`null` decodes to an empty one), as in AnyCable 1.6.22.
 fn decode_user_presence(raw: &str) -> Result<PresenceEvent, ControllerError> {
     const TY: &str = "pusher.UserPresence";
     let decorate = |e: EncodeError| ControllerError::new(format!("failed to unmarshal presence data, cause: {}", e.0));
 
     let value = parse_json(raw.as_bytes()).map_err(decorate)?;
-    // `null` is a decode error (D-030).
-    let obj =
-        go_struct(&value, TY).map_err(decorate)?.ok_or_else(|| decorate(encode_error("presence data is null")))?;
-    Ok(PresenceEvent {
-        kind: common::PRESENCE_JOIN_TYPE.to_owned(),
-        id: go_string_field(obj, "user_id", TY).map_err(decorate)?,
-        info: go_interface_field(obj, "user_info").map_err(decorate)?,
-    })
+    let empty = Map::new();
+    let obj = go_struct(&value, TY).map_err(decorate)?.unwrap_or(&empty);
+    let id = go_string_field(obj, "user_id", TY).map_err(decorate)?;
+    let info = go_interface_field(obj, "user_info").map_err(decorate)?;
+    if id.is_empty() {
+        return Err(ControllerError::new("presence data must contain user_id"));
+    }
+    Ok(PresenceEvent { kind: common::PRESENCE_JOIN_TYPE.to_owned(), id, info })
 }
 
 fn error_outcome(message: String) -> Outcome<CommandResult> {
@@ -759,6 +789,14 @@ impl NodeController for Controller {
         };
 
         if stream.is_empty() {
+            return Outcome { result: Some(rejection()), error: None };
+        }
+
+        // The executor verified the signature of a private or presence channel
+        // (AnyCable 1.6.22).
+        if (stream.starts_with("private-") || stream.starts_with("presence-"))
+            && env.map(|e| e.get_channel_state_field(identifier, VERIFIED_STATE_FIELD)).as_deref() != Some("1")
+        {
             return Outcome { result: Some(rejection()), error: None };
         }
 
@@ -888,6 +926,9 @@ impl Executor {
             if !verified {
                 return Err("invalid signature".to_owned());
             }
+
+            let state = StringMap::from([(VERIFIED_STATE_FIELD.to_owned(), "1".to_owned())]);
+            s.update_env(&mut |env| env.merge_channel_state(&msg.identifier, &state));
         }
 
         Ok(())

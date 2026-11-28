@@ -33,20 +33,43 @@ fn deviation_d029_subscription_without_data_is_a_decode_error() {
     }
 }
 
-/// D-030: a signed presence `channel_data` of `null` fails the subscription
-/// with an error status.
+/// A verified presence `channel_data` of `null` fails the subscription with an
+/// error status: it has no user id, as in AnyCable 1.6.22. Before (D-030),
+/// Cabby reported `failed to unmarshal presence data`.
 #[test]
-fn deviation_d030_null_presence_data_fails_the_subscription() {
+fn null_presence_data_fails_the_subscription() {
     let ctrl = Controller::new(None, Config::new());
     let identifier = channel_to_identifier("presence-room");
     let mut env = SessionEnv::new("ws://example.com/app/key", None);
-    env.merge_channel_state(&identifier, &StringMap::from([("channel_data".to_owned(), "null".to_owned())]));
+    env.merge_channel_state(
+        &identifier,
+        &StringMap::from([
+            ("channel_data".to_owned(), "null".to_owned()),
+            (VERIFIED_STATE_FIELD.to_owned(), "1".to_owned()),
+        ]),
+    );
 
     let out = ctrl.subscribe("1.1", Some(&env), "", &identifier);
 
     assert_eq!(Status::Error, out.result.expect("result").status);
-    let err = out.error.expect("error");
-    assert!(err.message.starts_with("failed to unmarshal presence data"), "{}", err.message);
+    assert_eq!("presence data must contain user_id", out.error.expect("error").message);
+}
+
+/// A private or presence subscription that reaches the controller without the
+/// executor's verification is rejected, as in AnyCable 1.6.22; public channels
+/// need none.
+#[test]
+fn unverified_private_channels_are_rejected() {
+    let ctrl = Controller::new(None, Config::new());
+    let identifier = channel_to_identifier("private-room");
+    let env = SessionEnv::new("ws://example.com/app/key", None);
+
+    let res = ctrl.subscribe("1.1", Some(&env), "", &identifier).result.expect("result");
+    assert_eq!(Status::Failure, res.status);
+    assert_eq!(vec![common::rejection_message(&identifier)], res.transmissions);
+
+    let public = channel_to_identifier("room");
+    assert_eq!(Status::Success, ctrl.subscribe("1.1", Some(&env), "", &public).result.expect("result").status);
 }
 
 /// D-030: a signed `POST .../events` with a `null` body is answered 422.
