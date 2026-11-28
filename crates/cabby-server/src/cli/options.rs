@@ -292,6 +292,9 @@ pub fn new_config_from_cli_with(
     let mut c = finalize(state, &mut emit);
     c.startup_notes.splice(0..0, file_notes.into_iter().chain(env_notes));
 
+    // TTLs beyond a year would overflow duration arithmetic (AnyCable 1.6.22).
+    c.broker.validate().map_err(|e| CliError(e.message))?;
+
     if print_config {
         emit(&c.to_toml());
         return Ok((c, true));

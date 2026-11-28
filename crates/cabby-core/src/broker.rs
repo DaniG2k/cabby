@@ -59,6 +59,9 @@ pub struct Config {
     pub presence_ttl: i64,
 }
 
+/// The largest TTL setting, in seconds (upstream `MaxTTL`, a year).
+pub const MAX_TTL: i64 = 365 * 24 * 60 * 60;
+
 crate::toml_section!(Config, "broker.Config" {
     "adapter" => adapter,
     "history_ttl" => history_ttl,
@@ -68,6 +71,24 @@ crate::toml_section!(Config, "broker.Config" {
 });
 
 impl Config {
+    /// Upstream `Config.Validate`: `history_ttl`, `sessions_ttl` and
+    /// `presence_ttl` (checked in this order) must be between 0 and
+    /// [`MAX_TTL`].
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        for (name, val) in [
+            ("history_ttl", self.history_ttl),
+            ("sessions_ttl", self.sessions_ttl),
+            ("presence_ttl", self.presence_ttl),
+        ] {
+            if !(0..=MAX_TTL).contains(&val) {
+                return Err(ConfigError {
+                    message: format!("{name} must be between 0 and {MAX_TTL} seconds, got {val}"),
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Upstream `NewConfig()`.
     pub fn new() -> Self {
         Self {
