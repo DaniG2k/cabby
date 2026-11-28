@@ -81,6 +81,11 @@ AnyCable: [`docs/compatibility.md`](docs/compatibility.md). Building and testing
 [`docs/development.md`](docs/development.md). Third-party licenses:
 [`docs/third-party.md`](docs/third-party.md).
 
+## Support
+
+Cabby is free. If it saves you servers or memory, you can
+[buy me a coffee](https://buymeacoffee.com/cabbyhq).
+
 ## License and attribution
 
 Cabby is released under the [MIT License](LICENSE).
