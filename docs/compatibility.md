@@ -1,12 +1,13 @@
 # Compatibility
 
 Cabby is a port of AnyCable's open-source Go server at the commit pinned in
-[`compat/upstream.lock`](../compat/upstream.lock) (`anycable/anycable@26a1a703`, server version
-1.6.21). It was built tests-first: the whole upstream test corpus, 923 cases (Go unit tests,
-Benchi, go-mruby, feature tests and the AnyT conformance suite), was translated to Rust and
-verified against the Go server before any Cabby code was written. 914 cases are verified against
-Go; 9 test behavior Go can't expose and run against Cabby only. 922 pass against Cabby; 1 is
-retired by design (telemetry, D-058)
+[`compat/upstream.lock`](../compat/upstream.lock) (`anycable/anycable@ef995afb`, server version
+1.6.22). It was built tests-first: the whole upstream test corpus of 1.6.21, 923 cases (Go unit
+tests, Benchi, go-mruby, feature tests and the AnyT conformance suite), was translated to Rust and
+verified against the Go server before any Cabby code was written, and the 42 cases 1.6.22 added
+were translated and verified the same way before Cabby followed them. Of the 965 cases, 934 are
+verified against Go; 31 test behavior Go can't expose and run against Cabby only. 964 pass
+against Cabby; 1 is retired by design (telemetry, D-058)
 ([`compat/test-map.json`](../compat/test-map.json), summarized by `cargo xtask report`).
 
 Cabby's own documentation is at [docs.cabbyhq.com](https://docs.cabbyhq.com/install); the
@@ -28,12 +29,12 @@ takes broadcasts over HTTP only. If your app broadcasts through Redis, set
 Cabby warns at startup when a Redis URL is set but no broadcast adapter uses it (with
 `--broker=redis`, whenever no broadcast adapter reads from Redis). Rename
 to `cabby.toml` and `CABBY_*` when convenient ([`docs/configuration.md`](configuration.md)).
-Two things look different: `cabby --version` prints `cabby 0.5.3 (AnyCable 1.6.21 compatible)`
-instead of `1.6.21`, and Cabby sends no telemetry. The `x-anycable-version` header still says
-`1.6.21`. The application secret set to `none` (`--secret=none`, `ANYCABLE_SECRET=none`,
-`secret = "none"`) is treated as not set, with a warning at startup; remove the setting, or set a
-real secret. `none` still turns off a single secret, such as `--http_rpc_secret=none` (D-086,
-[`docs/configuration.md`](configuration.md#secrets-and-none)).
+Two things look different: `cabby --version` prints `cabby 0.5.3 (AnyCable 1.6.22 compatible)`
+instead of `1.6.22`, and Cabby sends no telemetry. The `x-anycable-version` header still says
+`1.6.22`. The application secret set to `none` (`--secret=none`, `ANYCABLE_SECRET=none`,
+`secret = "none"`) is treated as not set, as in AnyCable 1.6.22, and Cabby logs a warning at
+startup; remove the setting, or set a real secret. `none` still turns off a single secret, such
+as `--http_rpc_secret=none` (D-086, [`docs/configuration.md`](configuration.md#secrets-and-none)).
 
 ## Supported for compatibility
 
@@ -69,7 +70,3 @@ builds contain neither.
   pass, so entries whose handling keeps failing don't hold back the ones after them (D-110).
   A failure that repeats on every attempt (a value of another type at the stream key) is
   retried after a growing delay, up to 8 to 16 s, instead of every 250 ms (D-111).
-- **A remote disconnect reaches one connection of the user**: AnyCable 1.6.21 disconnects one
-  session registered with the identifiers and leaves the others open and subscribed. Cabby
-  disconnects every one of them, as Rails' `remote_connections.where(...).disconnect` expects,
-  and as AnyCable does from 1.6.22 (D-085).

@@ -8,6 +8,66 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
+## [Unreleased]
+
+Cabby becomes compatible with AnyCable server 1.6.22: the request body limits get flags, TTL
+settings and the disconnect rate are checked at startup, ping intervals are capped at a day from
+every source, a remote disconnect makes the closed sessions' cache entries unrecoverable, and
+Pusher private channels need the Pusher endpoint's verification. Two settings are new; values
+that AnyCable 1.6.22 refuses now stop the server.
+
+### Added
+
+- `--http_broadcast_max_body_size` and `--api_max_body_size` (`CABBY_*` and `ANYCABLE_*`
+  variables) set the `max_body_size` of `[http_broadcast]` and `[api]`: 1048576 by default, `0`
+  for no limit, as in AnyCable 1.6.22.
+
+### Changed
+
+- Compatible with AnyCable 1.6.22: `cabby --version` prints `cabby <version> (AnyCable 1.6.22
+  compatible)`, the start line reads `Starting Cabby <version> (AnyCable 1.6.22 compatible)`, and
+  the `x-anycable-version` header is `1.6.22`.
+- `history_ttl`, `sessions_ttl` and `presence_ttl` outside 0 to 31536000 seconds (a year) stop
+  the server before it starts, also with `--print-config`: `sessions_ttl must be between 0 and
+  31536000 seconds, got -1`, as in AnyCable 1.6.22. Before, any value was accepted.
+- The disconnect rate (`--disconnect_rate`, `[disconnector] rate`) outside 1 to 1000000000 stops
+  the server at startup (`failed to initialize disconnector, cause: disconnect rate must be
+  between 1 and 1000000000, got 0`), and its period is one second divided by the rate in
+  nanoseconds (300 calls/s: 3.333333 ms; 5000 calls/s: 200 µs), as in AnyCable 1.6.22. Before,
+  the period was whole milliseconds (`1000 / rate`), and Cabby ran a rate below 1 at 1 call/s
+  and one above 1000 at 1000 calls/s (D-015, resolved).
+- Ping intervals: a `?pi=` that is zero, negative or not an integer is ignored with `WRN invalid
+  ping interval value, must be a positive integer`, and the server's interval applies. Before, as
+  in AnyCable 1.6.21, zero and negative values disabled pings, and the warning read "must be
+  integer". `--ping_interval` and the SSE and Durable Streams ping intervals are capped at a day,
+  as `?pi=` already was (D-054).
+- After a remote disconnect, the session it closes rewrites its cache entry marked unrecoverable
+  (`"unrec":true`) and deletes it when it disconnects, as in AnyCable 1.6.22; an entry so marked
+  is not restored. Every broker deletes session entries: memory, SQLite, NATS, Redis and
+  Postgres. Cabby's record of the remote disconnect, which also covers the identifiers' sessions
+  that were not connected, stays (D-084).
+- Cache entries write the Disconnect interest as `"disc"`, left out when false, as in AnyCable
+  1.6.22. Entries written before, with `"Disconnectable"`, are still read with their interest
+  (D-125).
+- A session the application did not authenticate has no Disconnect interest in the `auto` mode,
+  as in AnyCable 1.6.22.
+- The streams listed in a reply that is not a success (a rejected subscription, a failed action)
+  are not started, as in AnyCable 1.6.22. Before, Cabby ignored them only for a channel the
+  session does not have (D-091).
+- Pusher: the controller rejects a private or presence subscription whose signature the Pusher
+  endpoint did not verify, and presence data without a user id (`null` included) fails the
+  subscription with `presence data must contain user_id`, as in AnyCable 1.6.22. A presence
+  broadcast that is not an object, has no string id or a type other than join and leave fails
+  to encode with AnyCable's texts; before, an unknown type was sent as an event without a name
+  (D-030).
+- Durable Streams: a client cursor too large to advance (above 9223372036854775746) gets the
+  current interval, as an old one does, as in AnyCable 1.6.22. Before, it gave
+  9223372036854775807.
+- Redis URLs: an empty or scheme-only entry in a list means `localhost:6379`, a path of `/`
+  selects no database, and an `addr` without a port is a host with port 6379, as in AnyCable
+  1.6.22 (rueidis 1.0.80). Before, the first two failed with `redis: invalid database number`,
+  and `addr=replica.example` took the URL's host.
+
 ## [0.5.3] - 2026-11-28
 
 Cabby 0.5.3 changes when a session is cached and restored, makes a remote disconnect close every

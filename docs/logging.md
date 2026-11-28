@@ -3,8 +3,10 @@
 Cabby writes the log lines Go writes: same level, message, attributes, attribute order
 and context attributes (`nodeid`, `context=…`, `sid=…`, `component=hub`, `provider=…`,
 …). This page describes how logging is wired and lists every log call site of the Go
-reference (anycable/anycable@26a1a703) with its Cabby counterpart. It closes review
-finding H7 (`docs/review/2026-11-fable-review.md`).
+reference (anycable/anycable@26a1a703, 1.6.21; Go line numbers are that commit's) with its
+Cabby counterpart. AnyCable 1.6.22 (ef995afb) added one call site, listed with its line at
+that commit, and changed the text of the `?pi=` warning. It closes review finding H7
+(`docs/review/2026-11-fable-review.md`).
 
 ## How it works
 
@@ -310,6 +312,7 @@ call sites are found by the message text (`grep -rn '"<message>"' crates`).
 | `node/session.go:534` | WRN | `failed to handle incoming message` | `crates/cabby-server/src/node/session.rs:1298`, `crates/cabby-server/src/node/session.rs:1355` | matched |  |
 | `node/session.go:547` | WRN | `failed to encode message` | `crates/cabby-server/src/node/session.rs:1365` | matched |  |
 | `node/session.go:559` | WRN | `failed to encode transmission` | `crates/cabby-server/src/node/session.rs:1376` | matched |  |
+| `node/session.go:614` (ef995afb) | ERR | `failed to persist session in cache` | `crates/cabby-server/src/node/session.rs:1590` | matched |  |
 | `node/session.go:728` | DBG | `slow client detected, disconnecting` | `crates/cabby-server/src/node/session.rs:1450` | matched |  |
 | `node/session.go:762` | ERR | `unknown frame type` | — | n/a | frame types are a closed Rust enum: no unknown frame type exists |
 | `node/session.go:780` | ERR | `failed to encode ping message` | `crates/cabby-server/src/node/session.rs:1013` | matched |  |
