@@ -315,6 +315,9 @@ impl core_broker::Broker for NodeBroker {
     fn touch_session(&self, sid: &str) -> Result<(), BrokerError> {
         self.legacy.touch_session(sid)
     }
+    fn delete_session(&self, sid: &str) -> Result<(), BrokerError> {
+        self.legacy.delete_session(sid)
+    }
     fn supports_presence(&self) -> bool {
         self.legacy.supports_presence()
     }

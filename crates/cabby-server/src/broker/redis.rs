@@ -1207,6 +1207,11 @@ impl Broker for RedisBroker {
         self.op(|| "failed to touch session in Redis".to_owned(), vec![Call::Cmd(c)], true, |_| Ok(()))
     }
 
+    fn delete_session(&self, sid: &str) -> Result<(), BrokerError> {
+        let c = self.session_call("DEL", sid);
+        self.op(|| "failed to delete session from Redis".to_owned(), vec![Call::Cmd(c)], true, |_| Ok(()))
+    }
+
     /// Presence is not shared through Redis (yet): like the NATS broker, the
     /// Redis broker has none.
     fn supports_presence(&self) -> bool {

@@ -227,6 +227,7 @@ const INSERT_HISTORY: &str = "INSERT INTO history (stream, seq, ts, data) VALUES
 const UPSERT_SESSION: &str = "INSERT INTO sessions (sid, data, expires_at_ms) VALUES (?1, ?2, ?3)
   ON CONFLICT (sid) DO UPDATE SET data = excluded.data, expires_at_ms = excluded.expires_at_ms";
 const TOUCH_SESSION: &str = "UPDATE sessions SET expires_at_ms = ?2 WHERE sid = ?1";
+const DELETE_SESSION: &str = "DELETE FROM sessions WHERE sid = ?1";
 /// Keeps the highest offset (concurrent broadcasts may enqueue out of order),
 /// unless the stored row's deadline has passed: the memory broker dropped that
 /// stream and restarted its offsets, so the batch's offset is the stream's.
@@ -256,6 +257,7 @@ pub(super) fn write_batch(
         let mut history = tx.prepare_cached(INSERT_HISTORY)?;
         let mut commit = tx.prepare_cached(UPSERT_SESSION)?;
         let mut touch = tx.prepare_cached(TOUCH_SESSION)?;
+        let mut delete = tx.prepare_cached(DELETE_SESSION)?;
         for op in ops {
             match op {
                 WriteOp::History { stream, offset, ts_secs, data } => {
@@ -268,6 +270,9 @@ pub(super) fn write_batch(
                 }
                 WriteOp::SessionTouch { sid, expires_at_ms } => {
                     touch.execute(params![sid, expires_at_ms])?;
+                }
+                WriteOp::SessionDelete { sid } => {
+                    delete.execute(params![sid])?;
                 }
             }
         }

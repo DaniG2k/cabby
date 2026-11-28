@@ -346,6 +346,9 @@ impl cabby_core::broker::Broker for MockBroker {
     fn touch_session(&self, _sid: &str) -> Result<(), BrokerError> {
         self.unexpected("TouchSession")
     }
+    fn delete_session(&self, _sid: &str) -> Result<(), BrokerError> {
+        self.unexpected("DeleteSession")
+    }
     fn supports_presence(&self) -> bool {
         match self.answer(BrokerCall::SupportsPresence) {
             BrokerReturn::Bool(b) => b,

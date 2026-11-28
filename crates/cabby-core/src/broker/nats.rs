@@ -1094,6 +1094,15 @@ impl Broker for Nats {
         block_on(async move { refresh_session(&js.kv, &key).await })
     }
 
+    fn delete_session(&self, sid: &str) -> Result<(), BrokerError> {
+        let js = self.inner.js_ready()?;
+        let key = format!("{SESSIONS_PREFIX}{sid}");
+        // A delete marker: a missing key is not an error.
+        block_on(async move { js.kv.delete(key).await })
+            .map_err(|e| decorate("failed to delete session from NATS", e))?;
+        Ok(())
+    }
+
     fn supports_presence(&self) -> bool {
         false
     }

@@ -91,6 +91,7 @@ struct Sql {
     commit: String,
     restore: String,
     touch: String,
+    delete: String,
     prune: Vec<Prune>,
 }
 
@@ -184,6 +185,7 @@ impl Sql {
             touch: format!(
                 "UPDATE {sessions} SET expires_at_ms = {NOW_MS} + $2 WHERE sid = $1 AND expires_at_ms > {NOW_MS}"
             ),
+            delete: format!("DELETE FROM {sessions} WHERE sid = $1"),
             prune: vec![
                 Prune::Limit(format!(
                     "DELETE FROM {history} WHERE ctid IN (SELECT h.ctid FROM {history} h JOIN {streams} s \
@@ -707,6 +709,12 @@ impl Broker for PostgresBroker {
         let params: Params = vec![Box::new(sid.to_owned()), Box::new(ttl_ms)];
         run(&self.inner, |inner| async move { inner.pool.query(&inner.sql.touch, &params).await.map(drop) })
             .map_err(|e| decorate("failed to touch session in Postgres", &e))
+    }
+
+    fn delete_session(&self, sid: &str) -> Result<(), BrokerError> {
+        let params: Params = vec![Box::new(sid.to_owned())];
+        run(&self.inner, |inner| async move { inner.pool.query(&inner.sql.delete, &params).await.map(drop) })
+            .map_err(|e| decorate("failed to delete session from Postgres", &e))
     }
 
     fn supports_presence(&self) -> bool {

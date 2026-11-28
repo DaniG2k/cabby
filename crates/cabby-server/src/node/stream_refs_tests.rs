@@ -188,6 +188,9 @@ impl Broker for Renaming {
     fn touch_session(&self, sid: &str) -> Result<(), BrokerError> {
         self.0.touch_session(sid)
     }
+    fn delete_session(&self, sid: &str) -> Result<(), BrokerError> {
+        self.0.delete_session(sid)
+    }
     fn supports_presence(&self) -> bool {
         self.0.supports_presence()
     }

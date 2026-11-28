@@ -338,6 +338,12 @@ impl Broker for SqliteBroker {
         Ok(())
     }
 
+    fn delete_session(&self, sid: &str) -> Result<(), BrokerError> {
+        self.memory.delete_session(sid)?;
+        self.enqueue(WriteOp::SessionDelete { sid: sid.to_owned() });
+        Ok(())
+    }
+
     /// Presence lives in memory only: every connection drops on restart.
     fn supports_presence(&self) -> bool {
         self.memory.supports_presence()

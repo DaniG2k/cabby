@@ -411,6 +411,10 @@ impl Broker for StubBroker {
         unexpected(&format!("TouchSession({sid:?})"))
     }
 
+    fn delete_session(&self, sid: &str) -> Result<(), BrokerError> {
+        unexpected(&format!("DeleteSession({sid:?})"))
+    }
+
     fn supports_presence(&self) -> bool {
         unexpected("SupportsPresence()")
     }

@@ -688,6 +688,9 @@ impl Broker for MockBroker {
     fn touch_session(&self, sid: &str) -> Result<(), BrokerError> {
         Err(self.forbid(format!("TouchSession({sid:?})")))
     }
+    fn delete_session(&self, sid: &str) -> Result<(), BrokerError> {
+        Err(self.forbid(format!("DeleteSession({sid:?})")))
+    }
     fn supports_presence(&self) -> bool {
         self.forbid("SupportsPresence()".into());
         false

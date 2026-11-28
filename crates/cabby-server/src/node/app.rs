@@ -23,7 +23,7 @@ use cabby_core::{log_debug, log_error, log_info, log_warn};
 use super::call_context::with_close_context;
 use super::disconnect_queue::context_done;
 use super::revocations::Revocations;
-use super::session::{decode_cache_entry, go_value_text};
+use super::session::{NOT_RECOVERABLE, decode_cache_entry, go_value_text};
 use super::*;
 use crate::cli::SubscriberHandler;
 use crate::metrics::{Instrumenter, NoopMetrics};
@@ -145,6 +145,9 @@ impl Broker for UnsetBroker {
         Ok(None)
     }
     fn touch_session(&self, _sid: &str) -> Result<(), BrokerError> {
+        Ok(())
+    }
+    fn delete_session(&self, _sid: &str) -> Result<(), BrokerError> {
         Ok(())
     }
     fn supports_presence(&self) -> bool {
@@ -751,7 +754,8 @@ impl Node {
         let Some(res) = result else { return Ok(None) };
 
         let mut disconnect_after = false;
-        if res.status == Status::Success {
+        let authenticated = res.status == Status::Success;
+        if authenticated {
             self.authenticated_since(s, &res.identifier, started);
         } else {
             if res.status == Status::Failure {
@@ -761,7 +765,9 @@ impl Node {
         }
 
         self.handle_call_reply(s, res.cstate.as_ref(), &res.broadcasts, &res.transmissions);
-        self.mark_disconnectable(s, res.disconnect_interest);
+        // A session the application did not authenticate has no Disconnect
+        // interest (in the `auto` mode), as in AnyCable 1.6.22.
+        self.mark_disconnectable(s, if authenticated { res.disconnect_interest } else { -1 });
         self.commit_session(s);
 
         if disconnect_after {
@@ -816,6 +822,10 @@ impl Node {
         }
 
         let entry = match decode_cache_entry(&cached) {
+            Ok(entry) if entry.unrecoverable => {
+                log_error!(s.logger(), "failed to restore session from cache", "old_sid" => &prev_sid, "error" => NOT_RECOVERABLE);
+                return false;
+            }
             Ok(entry) => entry,
             Err(e) => {
                 log_error!(s.logger(), "failed to restore session from cache", "old_sid" => &prev_sid, "error" => e.0);
@@ -1261,9 +1271,14 @@ impl Node {
         }
 
         let sid = s.get_id();
-        self.write_session_cache(s, || {
-            let _ = broker.touch_session(&sid);
-        });
+        if s.non_recoverable() {
+            // Closed by a remote disconnect: the entry must not be restored.
+            let _ = broker.delete_session(&sid);
+        } else {
+            self.write_session_cache(s, || {
+                let _ = broker.touch_session(&sid);
+            });
+        }
         let _ = broker.touch_presence(&sid);
 
         if !s.is_disconnectable() {

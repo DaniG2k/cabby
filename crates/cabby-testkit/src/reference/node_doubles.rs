@@ -492,6 +492,9 @@ impl Broker for MockBroker {
     fn touch_session(&self, sid: &str) -> BrokerResult<()> {
         self.mock.call("TouchSession", vec![json!(sid)])
     }
+    fn delete_session(&self, sid: &str) -> BrokerResult<()> {
+        self.mock.call("DeleteSession", vec![json!(sid)])
+    }
     fn supports_presence(&self) -> bool {
         self.mock.call("SupportsPresence", vec![])
     }

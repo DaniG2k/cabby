@@ -2282,6 +2282,9 @@ data:{"streamCursor":"c","streamNextOffset":"1::e","upToDate":true}"#,
         fn touch_session(&self, sid: &str) -> Result<(), BrokerError> {
             self.memory.touch_session(sid)
         }
+        fn delete_session(&self, sid: &str) -> Result<(), BrokerError> {
+            self.memory.delete_session(sid)
+        }
         fn supports_presence(&self) -> bool {
             self.memory.supports_presence()
         }

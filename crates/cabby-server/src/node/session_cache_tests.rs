@@ -164,6 +164,10 @@ impl Broker for RecordingBroker {
         lock(&self.writes).push(format!("touch {sid}"));
         self.memory.touch_session(sid)
     }
+    fn delete_session(&self, sid: &str) -> Result<(), BrokerError> {
+        lock(&self.writes).push(format!("delete {sid}"));
+        self.memory.delete_session(sid)
+    }
     fn supports_presence(&self) -> bool {
         self.memory.supports_presence()
     }
@@ -484,19 +488,22 @@ fn alice_subscribed(rig: &Rig, sid: &str) -> Client {
 }
 
 /// Deviation D-084: after a remote disconnect, the disconnected session is
-/// authenticated by the application instead of restored, and it leaves its
-/// cache entry as it was.
+/// authenticated by the application instead of restored. Its cache entry is
+/// rewritten marked unrecoverable, then deleted when it disconnects, as in
+/// AnyCable 1.6.22; it is not touched.
 #[test]
 fn deviation_d084_a_remotely_disconnected_session_is_not_restored() {
     let rig = rig();
     let alice = alice_subscribed(&rig, "alice-1");
-    let writes = rig.broker.writes_for("alice-1");
+    let mut writes = rig.broker.writes_for("alice-1");
 
     remote_disconnect(&rig, ALICE);
     let frames = alice.until_close();
     assert!(frames.contains(&r#"{"type":"disconnect","reason":"remote","reconnect":true}"#.to_owned()), "{frames:?}");
     rig.await_teardown(&alice);
-    assert_eq!(writes, rig.broker.writes_for("alice-1"), "no touch or commit after the remote disconnect");
+    writes.extend(["commit alice-1".to_owned(), "delete alice-1".to_owned()]);
+    assert_eq!(writes, rig.broker.writes_for("alice-1"), "an unrecoverable commit and a delete, no touch");
+    assert_eq!(None, rig.broker.restore_session("alice-1").unwrap(), "the entry is deleted");
 
     let (again, first) = rig.connect("alice-2", None, Some("alice-1"));
     assert!(!is_restored(&first), "{first}");

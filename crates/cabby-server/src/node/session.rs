@@ -292,6 +292,9 @@ struct Lifecycle {
     /// unknown, e.g. restored from an entry without the time). Kept in the
     /// cache entry and carried over by restores (D-084).
     authenticated_at: Option<i64>,
+    /// A remote disconnect closed the session: its cache entry is marked
+    /// unrecoverable and deleted when it disconnects (AnyCable 1.6.22).
+    unrecoverable: bool,
     internal_state: Option<HashMap<String, Value>>,
 }
 
@@ -436,8 +439,10 @@ struct CacheEntryOut<'a> {
     subs: BTreeMap<String, Vec<String>>,
     cstate: Option<BTreeMap<&'a str, &'a str>>,
     istate: Option<BTreeMap<&'a str, BTreeMap<&'a str, &'a str>>>,
-    #[serde(rename = "Disconnectable")]
+    #[serde(rename = "disc", skip_serializing_if = "std::ops::Not::not")]
     disconnectable: bool,
+    #[serde(rename = "unrec", skip_serializing_if = "std::ops::Not::not")]
+    unrecoverable: bool,
     /// Cabby only (D-084); Go ignores unknown fields when it restores an entry.
     #[serde(skip_serializing_if = "Option::is_none")]
     authenticated_at: Option<i64>,
@@ -451,8 +456,12 @@ pub(super) struct CacheEntryIn {
     cstate: Option<StringMap>,
     istate: HashMap<String, StringMap>,
     disconnectable: bool,
+    pub(super) unrecoverable: bool,
     pub(super) authenticated_at: Option<i64>,
 }
+
+/// Upstream `RestoreFromCache`'s error for an entry marked unrecoverable.
+pub(super) const NOT_RECOVERABLE: &str = "session is not recoverable";
 
 fn json_error(e: impl std::fmt::Display) -> NodeError {
     NodeError(e.to_string())
@@ -460,9 +469,11 @@ fn json_error(e: impl std::fmt::Display) -> NodeError {
 
 /// Decodes a cache entry like Go's `json.Unmarshal` into `cacheEntry`: field
 /// names match exactly or case-insensitively, `null` leaves a field unset,
-/// unknown fields are ignored.
+/// unknown fields are ignored. `Disconnectable`, the key of entries written by
+/// AnyCable 1.6.21 and Cabby 0.5.3 and earlier, is read as `disc` (D-125).
 pub(super) fn decode_cache_entry(cached: &[u8]) -> Result<CacheEntryIn, NodeError> {
-    const FIELDS: [&str; 6] = ["ids", "subs", "cstate", "istate", "disconnectable", "authenticated_at"];
+    const FIELDS: [&str; 8] =
+        ["ids", "subs", "cstate", "istate", "disc", "authenticated_at", "unrec", "disconnectable"];
     let value: Value = serde_json::from_slice(cached).map_err(json_error)?;
     let mut entry = CacheEntryIn::default();
     let Value::Object(map) = value else {
@@ -486,8 +497,9 @@ pub(super) fn decode_cache_entry(cached: &[u8]) -> Result<CacheEntryIn, NodeErro
                 let istate: HashMap<String, Option<StringMap>> = serde_json::from_value(v).map_err(json_error)?;
                 entry.istate = istate.into_iter().map(|(k, v)| (k, v.unwrap_or_default())).collect();
             }
-            Some(4) => entry.disconnectable = serde_json::from_value(v).map_err(json_error)?,
+            Some(4 | 7) => entry.disconnectable = serde_json::from_value(v).map_err(json_error)?,
             Some(5) => entry.authenticated_at = serde_json::from_value(v).map_err(json_error)?,
+            Some(6) => entry.unrecoverable = serde_json::from_value(v).map_err(json_error)?,
             _ => {}
         }
     }
@@ -1257,12 +1269,12 @@ impl Session {
     /// Upstream `MarkUnrecoverable`: the session's cache entry is not restored
     /// (a remote disconnect closed it).
     pub fn mark_unrecoverable(&self) {
-        cabby_core::pending!("node::Session::MarkUnrecoverable")
+        lock(&self.lifecycle).unrecoverable = true;
     }
 
     /// Upstream `NonRecoverable`.
     pub fn non_recoverable(&self) -> bool {
-        cabby_core::pending!("node::Session::NonRecoverable")
+        lock(&self.lifecycle).unrecoverable
     }
 
     /// Sticky: once marked disconnectable, `false` does not reset it.
@@ -1552,10 +1564,31 @@ impl Session {
     fn finish_disconnect_with_message(self: &Arc<Self>, code: &str) {
         let (reason, ws_code) = match code {
             SERVER_RESTART_REASON => ("Server restart", CLOSE_GOING_AWAY),
-            REMOTE_DISCONNECT_REASON => ("Closed remotely", CLOSE_NORMAL_CLOSURE),
+            REMOTE_DISCONNECT_REASON => {
+                self.mark_unrecoverable_in_cache();
+                ("Closed remotely", CLOSE_NORMAL_CLOSURE)
+            }
             _ => ("", CLOSE_NORMAL_CLOSURE),
         };
         self.disconnect(reason, ws_code);
+    }
+
+    /// A remote disconnect: the session's cache entry is rewritten marked
+    /// unrecoverable (other nodes refuse it), and the node deletes it when the
+    /// session disconnects, as in AnyCable 1.6.22. Only cached sessions write
+    /// (D-083); writing an unrecoverable entry needs no revocation check
+    /// (D-084), since no node restores it.
+    fn mark_unrecoverable_in_cache(&self) {
+        self.mark_unrecoverable();
+        if !self.is_resumeable() || !self.is_authenticated() {
+            return;
+        }
+        let broker = self.settings().broker.clone();
+        if let Some(b) = broker
+            && let Err(e) = b.commit_session(&self.get_id(), self)
+        {
+            log_error!(self.logger(), "failed to persist session in cache", "error" => e.message);
+        }
     }
 
     /// Closes first, then detaches from the node and writes the close frame
@@ -1642,7 +1675,11 @@ impl Session {
     /// Restores identifiers, states, subscriptions and the Disconnect interest
     /// from a cache entry (upstream `RestoreFromCache`).
     pub fn restore_from_cache(&self, cached: &[u8]) -> Result<(), NodeError> {
-        self.apply_cache_entry(decode_cache_entry(cached)?);
+        let entry = decode_cache_entry(cached)?;
+        if entry.unrecoverable {
+            return Err(NodeError(NOT_RECOVERABLE.into()));
+        }
+        self.apply_cache_entry(entry);
         Ok(())
     }
 
@@ -1986,9 +2023,9 @@ impl cabby_core::hub::HubSession for Session {
 /// `Disconnectable` (upstream `ToCacheEntry`).
 impl Cacheable for Session {
     fn to_cache_entry(&self) -> Result<Vec<u8>, BrokerError> {
-        let (disconnectable, authenticated_at) = {
+        let (disconnectable, unrecoverable, authenticated_at) = {
             let l = lock(&self.lifecycle);
-            (l.disconnect_interest, l.authenticated_at)
+            (l.disconnect_interest, l.unrecoverable, l.authenticated_at)
         };
         let subs: BTreeMap<String, Vec<String>> = self.subscriptions.to_map().into_iter().collect();
         let env = lock(&self.env);
@@ -2003,6 +2040,7 @@ impl Cacheable for Session {
                     .collect()
             }),
             disconnectable,
+            unrecoverable,
             authenticated_at,
         };
         Ok(cabby_core::gojson::to_vec(&entry))
@@ -2470,10 +2508,40 @@ mod tests {
             env.merge_connection_state(&[("b".into(), "2".into()), ("a".into(), "1".into())].into())
         });
         let entry = String::from_utf8(s.to_cache_entry().unwrap()).unwrap();
+        assert_eq!(r#"{"ids":"user:1","subs":{"chat":["s1"]},"cstate":{"a":"1","b":"2"},"istate":{}}"#, entry);
+
+        // `disc` and `unrec` are written when set (AnyCable 1.6.22).
+        s.mark_disconnectable(true);
+        s.mark_unrecoverable();
+        let entry = String::from_utf8(s.to_cache_entry().unwrap()).unwrap();
         assert_eq!(
-            r#"{"ids":"user:1","subs":{"chat":["s1"]},"cstate":{"a":"1","b":"2"},"istate":{},"Disconnectable":false}"#,
+            r#"{"ids":"user:1","subs":{"chat":["s1"]},"cstate":{"a":"1","b":"2"},"istate":{},"disc":true,"unrec":true}"#,
             entry
         );
+    }
+
+    /// An entry marked unrecoverable is not restored, and nothing of it is
+    /// applied, as in AnyCable 1.6.22.
+    #[test]
+    fn unrecoverable_entries_are_not_restored() {
+        let clock = TestClock::new();
+        let (s, _rx) = session(&clock, vec![]);
+        let err = s.restore_from_cache(br#"{"ids":"x","subs":{"c":["s"]},"disc":true,"unrec":true}"#).unwrap_err();
+        assert_eq!(NOT_RECOVERABLE, err.0);
+        assert_eq!("", s.get_identifiers());
+        assert!(s.subscriptions().channels().is_empty());
+        assert!(!s.is_disconnectable());
+    }
+
+    /// Pins D-125: entries written by AnyCable 1.6.21 and Cabby 0.5.3 and earlier keep
+    /// their Disconnect interest under `Disconnectable`; Cabby reads that key as
+    /// `disc` (AnyCable 1.6.22 ignores it).
+    #[test]
+    fn deviation_d125_the_disconnectable_key_of_older_entries_is_read() {
+        assert!(decode_cache_entry(br#"{"ids":"x","Disconnectable":true}"#).unwrap().disconnectable);
+        assert!(decode_cache_entry(br#"{"ids":"x","disc":true}"#).unwrap().disconnectable);
+        assert!(!decode_cache_entry(br#"{"ids":"x","Disconnectable":false}"#).unwrap().disconnectable);
+        assert!(!decode_cache_entry(br#"{"ids":"x"}"#).unwrap().disconnectable);
     }
 
     /// Deviation D-084: the cache entry keeps when the application
@@ -2485,10 +2553,7 @@ mod tests {
         s.set_identifiers("user:1");
         s.mark_authenticated(Some(1_800_000_000_000_000));
         let entry = String::from_utf8(s.to_cache_entry().unwrap()).unwrap();
-        assert_eq!(
-            r#"{"ids":"user:1","subs":{},"cstate":{},"istate":{},"Disconnectable":false,"authenticated_at":1800000000000000}"#,
-            entry
-        );
+        assert_eq!(r#"{"ids":"user:1","subs":{},"cstate":{},"istate":{},"authenticated_at":1800000000000000}"#, entry);
         assert_eq!(Some(1_800_000_000_000_000), decode_cache_entry(entry.as_bytes()).unwrap().authenticated_at);
         assert_eq!(None, decode_cache_entry(br#"{"ids":"x"}"#).unwrap().authenticated_at);
     }

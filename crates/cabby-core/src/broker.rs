@@ -177,10 +177,9 @@ pub trait Broker: Send + Sync {
     fn commit_session(&self, sid: &str, session: &dyn Cacheable) -> Result<(), BrokerError>;
     fn restore_session(&self, sid: &str) -> Result<Option<Vec<u8>>, BrokerError>;
     fn touch_session(&self, sid: &str) -> Result<(), BrokerError>;
-    /// Removes the session's state from the cache (upstream `DeleteSession`).
-    fn delete_session(&self, _sid: &str) -> Result<(), BrokerError> {
-        crate::pending!("broker::Broker::DeleteSession")
-    }
+    /// Removes the session's state from the cache (upstream `DeleteSession`);
+    /// an unknown session is not an error.
+    fn delete_session(&self, sid: &str) -> Result<(), BrokerError>;
     fn supports_presence(&self) -> bool;
     fn presence_add(
         &self,
@@ -684,7 +683,7 @@ impl Memory {
 
     /// Cached sessions waiting to expire (upstream unexported `expireSessions.Len()`).
     pub fn expiring_sessions(&self) -> usize {
-        crate::pending!("broker::Memory::expireSessions")
+        lock(&self.inner.sessions).expiration.len()
     }
 
     /// [`Broker::touch_session`]; returns the new expiry (unix milliseconds), or
@@ -926,6 +925,15 @@ impl Broker for Memory {
         Ok(())
     }
 
+    fn delete_session(&self, sid: &str) -> Result<(), BrokerError> {
+        let mut guard = lock(&self.inner.sessions);
+        let st = &mut *guard;
+        if let Some(entry) = st.entries.remove(sid) {
+            st.expiration.remove(entry.expiration);
+        }
+        Ok(())
+    }
+
     fn supports_presence(&self) -> bool {
         true
     }
@@ -1123,6 +1131,10 @@ impl Broker for Legacy {
         Ok(None)
     }
     fn touch_session(&self, _sid: &str) -> Result<(), BrokerError> {
+        Ok(())
+    }
+
+    fn delete_session(&self, _sid: &str) -> Result<(), BrokerError> {
         Ok(())
     }
     fn supports_presence(&self) -> bool {

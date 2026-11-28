@@ -32,6 +32,8 @@ pub(crate) enum WriteOp {
     SessionCommit { sid: String, data: Vec<u8>, expires_at_ms: i64 },
     /// A new expiry (unix milliseconds) for a stored session.
     SessionTouch { sid: String, expires_at_ms: i64 },
+    /// A deleted session (queued and dropped with the commits, whose lane it shares).
+    SessionDelete { sid: String },
 }
 
 /// The kind of a [`WriteOp`] (what an overflow dropped).
@@ -47,7 +49,7 @@ impl WriteOp {
         match self {
             WriteOp::History { .. } => OpKind::History,
             WriteOp::SessionTouch { .. } => OpKind::SessionTouch,
-            WriteOp::SessionCommit { .. } => OpKind::SessionCommit,
+            WriteOp::SessionCommit { .. } | WriteOp::SessionDelete { .. } => OpKind::SessionCommit,
         }
     }
 
@@ -56,7 +58,7 @@ impl WriteOp {
         match self {
             WriteOp::History { stream, data, .. } => stream.len() + data.len(),
             WriteOp::SessionCommit { sid, data, .. } => sid.len() + data.len(),
-            WriteOp::SessionTouch { sid, .. } => sid.len(),
+            WriteOp::SessionTouch { sid, .. } | WriteOp::SessionDelete { sid } => sid.len(),
         }
     }
 }
