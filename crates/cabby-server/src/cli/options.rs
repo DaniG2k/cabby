@@ -251,7 +251,7 @@ pub fn new_config_from_cli_with(
         return Ok((Config::default(), true));
     }
     if !app.version.is_empty() && parsed.bool(&flags, "version") {
-        // `cabby 0.5.3 (AnyCable 1.6.21 compatible)` (D-059): the program name,
+        // `cabby 0.5.3 (AnyCable 1.6.22 compatible)` (D-059): the program name,
         // then the version (an embedder's `CliOption::Version` keeps its text).
         emit(&format!("{} {}\n", app.name, app.version));
         return Ok((Config::default(), true));
@@ -1651,7 +1651,7 @@ mod tests {
     fn deviation_d059_help_and_version_name_cabby() {
         let (res, out) = run(&["-v"], &[]);
         assert!(res.unwrap().1);
-        assert_eq!(out, format!("cabby {} (AnyCable 1.6.21 compatible)\n", env!("CARGO_PKG_VERSION")));
+        assert_eq!(out, format!("cabby {} (AnyCable 1.6.22 compatible)\n", env!("CARGO_PKG_VERSION")));
         let (res, out) = run(&["--help"], &[]);
         assert!(res.unwrap().1);
         assert!(

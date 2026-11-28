@@ -152,7 +152,7 @@ for b in "${bins[@]}"; do
 done
 
 step "glibc $GLIBC_MAX baseline and smoke tests"
-expected="cabby $version (AnyCable 1.6.21 compatible)"
+expected="cabby $version (AnyCable 1.6.22 compatible)"
 version_sort() { sort -t. -k1,1n -k2,2n -k3,3n "$@"; }
 for t in "${LINUX_TARGETS[@]}"; do
   case "$t" in x86_64-*) platform=linux/amd64 ;; aarch64-*) platform=linux/arm64 ;; esac

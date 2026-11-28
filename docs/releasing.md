@@ -113,7 +113,7 @@ marked as a pre-release, and `--promote` leaves `latest` where it is.
   `/build/cabby`, and `strings` must find no other `/Users/…` or `/home/…` path.
 - `objdump -T` (in an Alpine container of the binary's platform) finds no glibc symbol newer
   than `GLIBC_2.28` in the Linux `cabby` and `cabby-healthcheck`.
-- Every `cabby` prints `cabby <version> (AnyCable 1.6.21 compatible)`; the Linux ones run in the
+- Every `cabby` prints `cabby <version> (AnyCable 1.6.22 compatible)`; the Linux ones run in the
   image's base.
 - Every archive lists exactly the five files, owned by `root`, with `cabby` executable (bsdtar
   with `--no-mac-metadata --no-xattrs --format ustar` and `COPYFILE_DISABLE=1`), and
