@@ -83,7 +83,8 @@ AnyCable: [`docs/compatibility.md`](docs/compatibility.md). Building and testing
 
 ## Tip the driver
 
-Cabby is free. The driver happily accepts [coffee](https://buymeacoffee.com/cabbyhq). ☕
+Cabby is free, and the meter never runs. If it saved you a server or two and you're feeling nice,
+the driver happily accepts [coffee](https://buymeacoffee.com/cabbyhq). ☕
 
 ## License and attribution
 
