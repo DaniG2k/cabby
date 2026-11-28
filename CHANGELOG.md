@@ -8,9 +8,9 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
-## [Unreleased]
+## [0.5.4] - 2026-11-28
 
-Cabby becomes compatible with AnyCable server 1.6.22: the request body limits get flags, TTL
+Cabby 0.5.4 is compatible with AnyCable server 1.6.22: the request body limits get flags, TTL
 settings and the disconnect rate are checked at startup, ping intervals are capped at a day from
 every source, a remote disconnect makes the closed sessions' cache entries unrecoverable, and
 Pusher private channels need the Pusher endpoint's verification. Two settings are new; values

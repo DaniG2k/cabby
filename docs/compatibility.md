@@ -29,7 +29,7 @@ takes broadcasts over HTTP only. If your app broadcasts through Redis, set
 Cabby warns at startup when a Redis URL is set but no broadcast adapter uses it (with
 `--broker=redis`, whenever no broadcast adapter reads from Redis). Rename
 to `cabby.toml` and `CABBY_*` when convenient ([`docs/configuration.md`](configuration.md)).
-Two things look different: `cabby --version` prints `cabby 0.5.3 (AnyCable 1.6.22 compatible)`
+Two things look different: `cabby --version` prints `cabby 0.5.4 (AnyCable 1.6.22 compatible)`
 instead of `1.6.22`, and Cabby sends no telemetry. The `x-anycable-version` header still says
 `1.6.22`. The application secret set to `none` (`--secret=none`, `ANYCABLE_SECRET=none`,
 `secret = "none"`) is treated as not set, as in AnyCable 1.6.22, and Cabby logs a warning at
