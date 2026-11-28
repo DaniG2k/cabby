@@ -687,7 +687,7 @@ impl Node {
 
     /// Runs `write` (a commit or touch of the session's cache entry) only for
     /// sessions that the application authenticated, or that were restored
-    /// (D-083; Go writes the session after every authentication result). A
+    /// (D-083; AnyCable 1.6.22 does not write a failure result either). A
     /// session authenticated before a remote disconnect of its identifiers
     /// leaves its entry as it is (D-084).
     pub(super) fn write_session_cache(&self, s: &Session, write: impl FnOnce()) {

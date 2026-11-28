@@ -409,10 +409,10 @@ fn is_restored(welcome: &str) -> bool {
     serde_json::from_str::<Value>(welcome).ok().and_then(|v| v["restored"].as_bool()).unwrap_or(false)
 }
 
-/// Deviation D-083: a rejected connection writes nothing to the session
-/// cache; a later connection is authenticated by the application.
+/// A rejected connection writes nothing to the session cache, as in AnyCable
+/// 1.6.22; a later connection is authenticated by the application.
 #[test]
-fn deviation_d083_rejected_sessions_are_not_cached() {
+fn rejected_sessions_are_not_cached() {
     let rig = rig();
 
     let (rejected, first) = rig.connect("client-chosen-id", None, None);
@@ -428,7 +428,7 @@ fn deviation_d083_rejected_sessions_are_not_cached() {
     assert!(again.session.get_identifiers().is_empty());
 }
 
-/// Deviation D-083: a rejected session that stays open
+/// Pins D-083: a rejected session that stays open
 /// (`DisconnectOnFailure(false)`) writes nothing to the session cache either,
 /// whatever it does before it goes.
 #[test]
@@ -453,10 +453,9 @@ fn deviation_d083_rejected_sessions_left_open_are_not_cached() {
     assert_eq!(2, rig.app.authentications());
 }
 
-/// Deviation D-083 keeps the cache for authenticated sessions: they commit
-/// and are restored without the application.
+/// Authenticated sessions commit and are restored without the application.
 #[test]
-fn deviation_d083_authenticated_sessions_are_cached_and_restored() {
+fn authenticated_sessions_are_cached_and_restored() {
     let rig = rig();
 
     let (alice, first) = rig.connect("alice-1", Some("alice"), None);

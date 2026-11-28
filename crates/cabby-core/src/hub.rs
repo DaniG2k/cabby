@@ -499,8 +499,8 @@ impl<S: ?Sized + HubSession> HubInner<S> {
     }
 
     /// Upstream `disconnectSessions`' scheduled task: disconnects every session
-    /// registered with `identifier` (D-085; upstream disconnects the first one it
-    /// finds). The sessions are collected under the lock and disconnected after
+    /// registered with `identifier`, as AnyCable 1.6.22 does (1.6.21 disconnected
+    /// the first one it found). The sessions are collected under the lock and disconnected after
     /// it is released, each with the same message, so a session may unregister
     /// itself while it disconnects.
     fn disconnect_sessions(&self, identifier: &str, reconnect: bool) {
@@ -564,7 +564,7 @@ impl<S: ?Sized + HubSession + 'static> Hub<S> {
 
     /// Enqueues a remote disconnect command: every session registered with
     /// `msg.identifier` receives a `remote` disconnect message, on the
-    /// remote-commands pool (D-085).
+    /// remote-commands pool.
     pub fn remote_disconnect(&self, msg: RemoteDisconnectMessage) {
         if !read(&self.inner.state).identifiers.contains_key(msg.identifier.as_str()) {
             log_debug!(self.inner.log, "cannot disconnect session",
@@ -975,12 +975,13 @@ mod tests {
         names
     }
 
-    /// Pins D-085: a remote disconnect closes every session registered with the
-    /// identifier (two of them); a session with other identifiers stays connected.
+    /// A remote disconnect closes every session registered with the identifier
+    /// (two of them), as in AnyCable 1.6.22; a session with other identifiers
+    /// stays connected.
     /// Each session unregisters itself while it disconnects, so the hub's lock is
     /// not held then (the frames arrive within a deadline instead of deadlocking).
     #[test]
-    fn deviation_d085_remote_disconnect_closes_every_session_of_the_identifier() {
+    fn remote_disconnect_closes_every_session_of_the_identifier() {
         let (hub, tx, frames) = remote_hub();
         let a = connection(&hub, &tx, "a", "1", "user-1", false);
         let b = connection(&hub, &tx, "b", "2", "user-1", false);
@@ -1001,10 +1002,10 @@ mod tests {
         hub.shutdown();
     }
 
-    /// Pins D-085 with three sessions, two of which share a session id (D-077):
+    /// Three sessions of one identifier, two of which share a session id (D-077):
     /// each of them gets the same message and is closed.
     #[test]
-    fn deviation_d085_three_sessions_of_one_identifier_are_closed() {
+    fn deviation_d077_three_sessions_of_one_identifier_are_closed() {
         let (hub, tx, frames) = remote_hub();
         let conns =
             [("a", "1"), ("b", "1"), ("c", "2")].map(|(name, sid)| connection(&hub, &tx, name, sid, "user-1", false));
@@ -1023,9 +1024,9 @@ mod tests {
         hub.shutdown();
     }
 
-    /// D-085: a remote disconnect for an identifier no session has changes nothing.
+    /// A remote disconnect for an identifier no session has changes nothing.
     #[test]
-    fn deviation_d085_unknown_identifier_is_a_no_op() {
+    fn remote_disconnect_of_an_unknown_identifier_is_a_no_op() {
         let (hub, tx, frames) = remote_hub();
         let a = connection(&hub, &tx, "a", "1", "user-1", false);
 
@@ -1040,10 +1041,10 @@ mod tests {
         hub.shutdown();
     }
 
-    /// D-085: a session that panics while it disconnects does not keep the other
-    /// sessions of the identifier connected.
+    /// A session that panics while it disconnects does not keep the other
+    /// sessions of the identifier connected (the pool task survives, D-009).
     #[test]
-    fn deviation_d085_a_panicking_session_does_not_stop_the_others() {
+    fn deviation_d009_a_panicking_session_does_not_stop_the_others() {
         let (hub, tx, frames) = remote_hub();
         let failing = connection(&hub, &tx, "failing", "1", "user-1", true);
         let a = connection(&hub, &tx, "a", "2", "user-1", false);

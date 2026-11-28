@@ -1,5 +1,6 @@
 //! Deviation D-091: the broker's stream references follow the sessions' own
-//! stream memberships.
+//! stream memberships. Also the subscription routing these tests' node shares:
+//! the `$pusher` channel reserved for the Pusher endpoint.
 //!
 //! The broker counts references per stream: the first one subscribes the node to
 //! pub/sub for the stream and the last one unsubscribes it. The recording
@@ -459,4 +460,31 @@ fn streams_of_a_failed_action_are_not_subscribed() {
     rig.perform_script(&s, "chat", serde_json::json!({"start": ["t"], "stop": ["s"], "fail": true}));
     assert_eq!(Some(Vec::<String>::new()), s.subscriptions().streams_for("chat"));
     assert_eq!(vec!["+s", "-s"], rig.recorder.events());
+}
+
+/// Once the Pusher endpoint is mounted, `$pusher` subscriptions from other
+/// sessions are rejected before the controller; Pusher sessions subscribe as
+/// before.
+#[test]
+fn the_pusher_channel_is_reserved_for_the_pusher_endpoint() {
+    let rig = rig();
+    let identifier = r#"{"channel":"$pusher","stream":"all-chat"}"#;
+
+    let (open, _rx) = rig.session("before");
+    rig.subscribe(&open, identifier);
+    assert!(open.subscriptions().has_channel(identifier), "not reserved without the Pusher endpoint");
+
+    rig.node.reserve_pusher_channel();
+    let (cable, rx) = rig.session("cable");
+    rig.subscribe(&cable, identifier);
+    assert!(!cable.subscriptions().has_channel(identifier));
+    assert_eq!(
+        format!(r#"{{"type":"reject_subscription","identifier":{}}}"#, serde_json::json!(identifier)),
+        next_frame(&rx)
+    );
+
+    let (pusher, _rx) = rig.session("pusher");
+    pusher.mark_pusher();
+    rig.subscribe(&pusher, identifier);
+    assert!(pusher.subscriptions().has_channel(identifier));
 }
