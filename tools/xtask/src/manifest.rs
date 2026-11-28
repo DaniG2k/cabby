@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::root;
 
 pub const PATH: &str = "compat/test-map.json";
-pub const COMMIT: &str = "26a1a703a54b870e42f5660c3d0785db2c602764";
-pub const SHORT: &str = "26a1a703";
+pub const COMMIT: &str = "ef995afbfa177e8e0b789cc651c7d11a550ccc70";
+pub const SHORT: &str = "ef995afb";
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Manifest {

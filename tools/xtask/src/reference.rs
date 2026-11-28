@@ -90,6 +90,16 @@ pub fn sha256_file(path: &Path) -> Result<String> {
 
 pub fn check_inputs() -> Result<()> {
     let l = lock()?;
+    // The manifest and the xtask's case IDs must follow the pin (see `migrate_ids`).
+    let recorded = crate::manifest::load()?.upstream.commit;
+    if l.commit != crate::manifest::COMMIT || recorded != l.commit {
+        bail!(
+            "upstream.lock commit {} != xtask manifest::COMMIT {} or compat/test-map.json commit {recorded}",
+            l.commit,
+            crate::manifest::COMMIT
+        );
+    }
+    println!("test manifest and xtask follow the pinned commit");
     let proto = sha256_file(&root().join("crates/cabby-core/proto/rpc.proto"))?;
     if proto != l.rpc_proto_sha256 {
         bail!("crates/cabby-core/proto/rpc.proto sha256 {proto} != upstream {}", l.rpc_proto_sha256);

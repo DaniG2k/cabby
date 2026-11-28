@@ -4,7 +4,7 @@
 //! Ruby originals stay runnable through `compat/scripts/reference-conformance.sh`.
 //!
 //! Scenarios derived from AnyCable (https://github.com/anycable/anycable) at commit
-//! 26a1a703a54b870e42f5660c3d0785db2c602764. Copyright 2016-2026 Vladimir
+//! ef995afbfa177e8e0b789cc651c7d11a550ccc70. Copyright 2016-2026 Vladimir
 //! Dementyev. MIT License; see compat/licenses/anycable-MIT-LICENSE.
 
 mod support;

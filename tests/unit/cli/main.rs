@@ -1,7 +1,7 @@
 //! Translated tests for upstream Go package `cli`.
 //!
 //! Translated from AnyCable (https://github.com/anycable/anycable) at commit
-//! 26a1a703a54b870e42f5660c3d0785db2c602764.
+//! ef995afbfa177e8e0b789cc651c7d11a550ccc70.
 //! Copyright 2016-2026 Vladimir Dementyev. Licensed under the MIT License;
 //! see compat/licenses/anycable-MIT-LICENSE.
 //!

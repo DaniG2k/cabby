@@ -745,10 +745,14 @@ pub fn run() -> Result<()> {
         }
     }
 
-    let old: HashMap<String, Case> =
-        manifest::load().map(|m| m.cases.into_iter().map(|c| (c.id.clone(), c)).collect()).unwrap_or_default();
-    let old_only: HashMap<String, RustOnly> = manifest::load()
-        .map(|m| m.rust_only.into_iter().map(|r| (r.rust_case.clone(), r)).collect())
+    let previous = manifest::load().map(migrate_ids);
+    let old: HashMap<String, Case> = previous
+        .as_ref()
+        .map(|m| m.cases.iter().map(|c| (c.id.clone(), c.clone())).collect())
+        .unwrap_or_default();
+    let old_only: HashMap<String, RustOnly> = previous
+        .as_ref()
+        .map(|m| m.rust_only.iter().map(|r| (r.rust_case.clone(), r.clone())).collect())
         .unwrap_or_default();
 
     let index: HashMap<String, usize> = cases.iter().enumerate().map(|(i, c)| (c.id.clone(), i)).collect();
@@ -838,6 +842,30 @@ pub fn run() -> Result<()> {
     manifest::report()
 }
 
+/// A manifest recorded at an earlier pin, with its case IDs and links moved to the
+/// current one (`<old commit8>:file#path` becomes `<SHORT>:file#path`), so curated
+/// fields and recorded statuses carry over when the reference moves
+/// (`docs/translating-tests.md`, "Moving the reference"). AnyT IDs carry no commit.
+fn migrate_ids(mut m: Manifest) -> Manifest {
+    let Some(old) = m.upstream.commit.get(..8).map(|s| format!("{s}:")) else { return m };
+    if m.upstream.commit == COMMIT {
+        return m;
+    }
+    let moved = |id: &mut String| {
+        if let Some(rest) = id.strip_prefix(&old) {
+            *id = format!("{SHORT}:{rest}");
+        }
+    };
+    for c in &mut m.cases {
+        moved(&mut c.id);
+    }
+    for r in &mut m.rust_only {
+        r.links.iter_mut().for_each(moved);
+    }
+    m.upstream.commit = COMMIT.into();
+    m
+}
+
 /// Aggregate Go parents (no direct assertions) take their status from children.
 pub fn derive_aggregates(cases: &mut [Case]) {
     // (id, translation, reference, rust)
@@ -868,5 +896,26 @@ pub fn derive_aggregates(cases: &mut [Case]) {
         } else {
             "pending".into()
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_recorded_at_an_earlier_pin_move_to_the_current_one() {
+        let case = |id: &str| Case { id: id.into(), ..Default::default() };
+        let m = Manifest {
+            upstream: Upstream { repository: String::new(), commit: "0123456789abcdef0123456789abcdef01234567".into() },
+            cases: vec![case("01234567:hub/hub_test.go#TestHub"), case("anyt-core-1.4.0:a.rb#F/S")],
+            rust_only: vec![RustOnly { links: vec!["01234567:node/node_test.go#TestX".into()], ..Default::default() }],
+            ..Default::default()
+        };
+        let m = migrate_ids(m);
+        assert_eq!(COMMIT, m.upstream.commit);
+        assert_eq!(format!("{SHORT}:hub/hub_test.go#TestHub"), m.cases[0].id);
+        assert_eq!("anyt-core-1.4.0:a.rb#F/S", m.cases[1].id);
+        assert_eq!(vec![format!("{SHORT}:node/node_test.go#TestX")], m.rust_only[0].links);
     }
 }

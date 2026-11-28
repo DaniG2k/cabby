@@ -102,11 +102,8 @@ fn build_shim(name: &str) -> Result<PathBuf> {
     crate::go_build::build(&artifacts_dir().join(format!("{name}.shim")), &how, |tmp| {
         // Written under the build's lock, so no other process reads it half written.
         std::fs::write(&overlay_path, overlay).unwrap_or_else(|e| panic!("writing {}: {e}", overlay_path.display()));
-        // Benchi's own go.mod is stale at the pinned commit; use the tidied copy
-        // (compat/baseline/README.md item 1).
         let mut cmd = Command::new("go");
         cmd.args(["test", "-c"])
-            .arg(format!("-modfile={}", adapters.join("benchi-modfile/go.mod").display()))
             .arg(format!("-overlay={}", overlay_path.display()))
             .arg("-o")
             .arg(tmp)

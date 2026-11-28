@@ -53,7 +53,7 @@ enum Cmd {
     },
     /// Mark translated cases as reviewed after an independent fidelity review.
     /// Patterns are case IDs, or prefixes ending in `/` or `#` (e.g.
-    /// `26a1a703:identity/`); `--except` takes precedence.
+    /// `ef995afb:identity/`); `--except` takes precedence.
     MarkReviewed {
         patterns: Vec<String>,
         #[arg(long)]

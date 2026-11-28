@@ -1,232 +1,232 @@
-{"Time":"2026-11-17T14:54:09.54552075+01:00","Action":"start","Package":"github.com/mitchellh/go-mruby"}
-{"Time":"2026-11-17T14:54:09.549073089+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestArray"}
-{"Time":"2026-11-17T14:54:09.549153819+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestArray","Output":"=== RUN   TestArray\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.550753896+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestArray","Output":"--- PASS: TestArray (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.550780496+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestArray","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.550796576+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineClassMethod"}
-{"Time":"2026-11-17T14:54:09.550803278+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineClassMethod","Output":"=== RUN   TestClassDefineClassMethod\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.551837172+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineClassMethod","Output":"--- PASS: TestClassDefineClassMethod (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.551856508+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineClassMethod","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.55187374+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineConst"}
-{"Time":"2026-11-17T14:54:09.551879881+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineConst","Output":"=== RUN   TestClassDefineConst\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.552909436+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineConst","Output":"--- PASS: TestClassDefineConst (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.552919876+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineConst","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.55292767+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineMethod"}
-{"Time":"2026-11-17T14:54:09.552932239+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineMethod","Output":"=== RUN   TestClassDefineMethod\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.553939433+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineMethod","Output":"--- PASS: TestClassDefineMethod (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.553950634+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineMethod","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.553957907+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNew"}
-{"Time":"2026-11-17T14:54:09.553962496+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNew","Output":"=== RUN   TestClassNew\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.554942609+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNew","Output":"--- PASS: TestClassNew (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.554954461+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNew","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.554962907+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNewException"}
-{"Time":"2026-11-17T14:54:09.554968397+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNewException","Output":"=== RUN   TestClassNewException\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.555958469+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNewException","Output":"--- PASS: TestClassNewException (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.555970291+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNewException","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.555989667+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestClassValue"}
-{"Time":"2026-11-17T14:54:09.555995448+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassValue","Output":"=== RUN   TestClassValue\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.556954933+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassValue","Output":"--- PASS: TestClassValue (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.556966945+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestClassValue","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.556976463+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestCompileContextFilename"}
-{"Time":"2026-11-17T14:54:09.556982043+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestCompileContextFilename","Output":"=== RUN   TestCompileContextFilename\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.557944243+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestCompileContextFilename","Output":"--- PASS: TestCompileContextFilename (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.557956656+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestCompileContextFilename","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.557964972+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestDecode"}
-{"Time":"2026-11-17T14:54:09.557970472+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestDecode","Output":"=== RUN   TestDecode\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.570709622+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestDecode","Output":"--- PASS: TestDecode (0.01s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.5707407+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestDecode","Elapsed":0.01}
-{"Time":"2026-11-17T14:54:09.570758183+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestDecodeInterface"}
-{"Time":"2026-11-17T14:54:09.570764555+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestDecodeInterface","Output":"=== RUN   TestDecodeInterface\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.578537355+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestDecodeInterface","Output":"--- PASS: TestDecodeInterface (0.01s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.578554126+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestDecodeInterface","Elapsed":0.01}
-{"Time":"2026-11-17T14:54:09.578565177+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestEnableDisableGC"}
-{"Time":"2026-11-17T14:54:09.578573993+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestEnableDisableGC","Output":"=== RUN   TestEnableDisableGC\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.579589944+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestEnableDisableGC","Output":"--- PASS: TestEnableDisableGC (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.579602106+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestEnableDisableGC","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.57960964+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestIsDead"}
-{"Time":"2026-11-17T14:54:09.579614259+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestIsDead","Output":"=== RUN   TestIsDead\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.580583362+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestIsDead","Output":"--- PASS: TestIsDead (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.580594222+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestIsDead","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.580607968+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestHash"}
-{"Time":"2026-11-17T14:54:09.580613227+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestHash","Output":"=== RUN   TestHash\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.581610803+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestHash","Output":"--- PASS: TestHash (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.581624128+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestHash","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.581632814+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestNewMrb"}
-{"Time":"2026-11-17T14:54:09.581638445+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestNewMrb","Output":"=== RUN   TestNewMrb\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.582606957+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestNewMrb","Output":"--- PASS: TestNewMrb (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.582619049+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestNewMrb","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.582625611+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbArena"}
-{"Time":"2026-11-17T14:54:09.582631101+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbArena","Output":"=== RUN   TestMrbArena\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.583589214+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbArena","Output":"--- PASS: TestMrbArena (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.583601437+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbArena","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.583608259+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbModule"}
-{"Time":"2026-11-17T14:54:09.583613619+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbModule","Output":"=== RUN   TestMrbModule\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.584627465+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbModule","Output":"--- PASS: TestMrbModule (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.584643585+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbModule","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.584650889+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbClass"}
-{"Time":"2026-11-17T14:54:09.58465661+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbClass","Output":"=== RUN   TestMrbClass\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.585622026+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbClass","Output":"--- PASS: TestMrbClass (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.58563484+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbClass","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.585641382+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbConstDefined"}
-{"Time":"2026-11-17T14:54:09.585647082+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbConstDefined","Output":"=== RUN   TestMrbConstDefined\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.586611627+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbConstDefined","Output":"--- PASS: TestMrbConstDefined (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.586636012+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbConstDefined","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.58664536+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass"}
-{"Time":"2026-11-17T14:54:09.586652894+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass","Output":"=== RUN   TestMrbDefineClass\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.587635271+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass","Output":"--- PASS: TestMrbDefineClass (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.587645641+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.587653595+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass_methodException"}
-{"Time":"2026-11-17T14:54:09.587658254+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass_methodException","Output":"=== RUN   TestMrbDefineClass_methodException\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.588657583+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass_methodException","Output":"--- PASS: TestMrbDefineClass_methodException (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.588669766+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass_methodException","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.588680265+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClassUnder"}
-{"Time":"2026-11-17T14:54:09.588685826+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClassUnder","Output":"=== RUN   TestMrbDefineClassUnder\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.589669135+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClassUnder","Output":"--- PASS: TestMrbDefineClassUnder (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.589682881+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClassUnder","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.589689673+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModule"}
-{"Time":"2026-11-17T14:54:09.589695073+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModule","Output":"=== RUN   TestMrbDefineModule\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.590650411+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModule","Output":"--- PASS: TestMrbDefineModule (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.590662974+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModule","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.590669546+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModuleUnder"}
-{"Time":"2026-11-17T14:54:09.590675077+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModuleUnder","Output":"=== RUN   TestMrbDefineModuleUnder\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.591638479+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModuleUnder","Output":"--- PASS: TestMrbDefineModuleUnder (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.59164996+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModuleUnder","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.591656402+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFixnumValue"}
-{"Time":"2026-11-17T14:54:09.591662023+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFixnumValue","Output":"=== RUN   TestMrbFixnumValue\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.592615847+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFixnumValue","Output":"--- PASS: TestMrbFixnumValue (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.592627278+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFixnumValue","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.592634582+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFullGC"}
-{"Time":"2026-11-17T14:54:09.592648237+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFullGC","Output":"=== RUN   TestMrbFullGC\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.593670299+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFullGC","Output":"--- PASS: TestMrbFullGC (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:09.593683153+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFullGC","Elapsed":0}
-{"Time":"2026-11-17T14:54:09.593689915+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGetArgs"}
-{"Time":"2026-11-17T14:54:09.593695616+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGetArgs","Output":"=== RUN   TestMrbGetArgs\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.664751685+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGetArgs","Output":"--- PASS: TestMrbGetArgs (1.07s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.66481311+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGetArgs","Elapsed":1.07}
-{"Time":"2026-11-17T14:54:10.664824601+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGlobalVariable"}
-{"Time":"2026-11-17T14:54:10.664828158+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGlobalVariable","Output":"=== RUN   TestMrbGlobalVariable\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.665435828+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGlobalVariable","Output":"--- PASS: TestMrbGlobalVariable (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.665444965+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGlobalVariable","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.665450576+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbInstanceVariable"}
-{"Time":"2026-11-17T14:54:10.665453681+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbInstanceVariable","Output":"=== RUN   TestMrbInstanceVariable\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.666119029+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbInstanceVariable","Output":"--- PASS: TestMrbInstanceVariable (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.666123748+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbInstanceVariable","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.666128757+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString"}
-{"Time":"2026-11-17T14:54:10.666131803+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString","Output":"=== RUN   TestMrbLoadString\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.666792542+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString","Output":"--- PASS: TestMrbLoadString (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.666804805+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.666811688+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString_twice"}
-{"Time":"2026-11-17T14:54:10.666817348+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString_twice","Output":"=== RUN   TestMrbLoadString_twice\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.667481344+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString_twice","Output":"--- PASS: TestMrbLoadString_twice (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.667514896+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString_twice","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.667526508+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadStringException"}
-{"Time":"2026-11-17T14:54:10.667571451+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadStringException","Output":"=== RUN   TestMrbLoadStringException\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.668131223+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadStringException","Output":"--- PASS: TestMrbLoadStringException (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.668136803+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadStringException","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.668140731+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRaise"}
-{"Time":"2026-11-17T14:54:10.668144287+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRaise","Output":"=== RUN   TestMrbRaise\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.668803984+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRaise","Output":"--- PASS: TestMrbRaise (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.668810877+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRaise","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.668815726+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYield"}
-{"Time":"2026-11-17T14:54:10.668818842+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYield","Output":"=== RUN   TestMrbYield\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.669482076+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYield","Output":"--- PASS: TestMrbYield (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.669493668+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYield","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.66950031+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYieldException"}
-{"Time":"2026-11-17T14:54:10.669506031+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYieldException","Output":"=== RUN   TestMrbYieldException\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.670152253+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYieldException","Output":"--- PASS: TestMrbYieldException (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.670162402+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYieldException","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.670170416+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRun"}
-{"Time":"2026-11-17T14:54:10.670186867+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRun","Output":"=== RUN   TestMrbRun\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.670836325+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRun","Output":"--- PASS: TestMrbRun (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.670845242+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRun","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.670852165+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineMethodConcurrent"}
-{"Time":"2026-11-17T14:54:10.670857966+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineMethodConcurrent","Output":"=== RUN   TestMrbDefineMethodConcurrent\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.68529791+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineMethodConcurrent","Output":"--- PASS: TestMrbDefineMethodConcurrent (0.01s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.685361188+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineMethodConcurrent","Elapsed":0.01}
-{"Time":"2026-11-17T14:54:10.685389+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbStackedException"}
-{"Time":"2026-11-17T14:54:10.685415359+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbStackedException","Output":"=== RUN   TestMrbStackedException\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.686814702+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbStackedException","Output":"--- PASS: TestMrbStackedException (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.686829469+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbStackedException","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.686836432+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestParserGenerateCode"}
-{"Time":"2026-11-17T14:54:10.686840139+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserGenerateCode","Output":"=== RUN   TestParserGenerateCode\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.687509204+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserGenerateCode","Output":"--- PASS: TestParserGenerateCode (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.687526336+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestParserGenerateCode","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.687534431+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse"}
-{"Time":"2026-11-17T14:54:10.687542436+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse","Output":"=== RUN   TestParserParse\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.688167769+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse","Output":"--- PASS: TestParserParse (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.688187235+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.688200841+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse_error"}
-{"Time":"2026-11-17T14:54:10.688212182+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse_error","Output":"=== RUN   TestParserParse_error\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.68882948+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse_error","Output":"--- PASS: TestParserParse_error (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.688842555+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse_error","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.688849898+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestParserError_error"}
-{"Time":"2026-11-17T14:54:10.688855639+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserError_error","Output":"=== RUN   TestParserError_error\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.688863213+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserError_error","Output":"--- PASS: TestParserError_error (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.688871418+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestParserError_error","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.68887756+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionString_afterClose"}
-{"Time":"2026-11-17T14:54:10.688883571+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionString_afterClose","Output":"=== RUN   TestExceptionString_afterClose\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.689509055+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionString_afterClose","Output":"--- PASS: TestExceptionString_afterClose (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.689525475+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionString_afterClose","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.689540623+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionBacktrace"}
-{"Time":"2026-11-17T14:54:10.689547005+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionBacktrace","Output":"=== RUN   TestExceptionBacktrace\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.690191915+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionBacktrace","Output":"--- PASS: TestExceptionBacktrace (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.690209117+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionBacktrace","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.690217893+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCall"}
-{"Time":"2026-11-17T14:54:10.690223794+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCall","Output":"=== RUN   TestMrbValueCall\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.690866771+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCall","Output":"--- PASS: TestMrbValueCall (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.690879685+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCall","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.690886888+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCallBlock"}
-{"Time":"2026-11-17T14:54:10.690892508+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCallBlock","Output":"=== RUN   TestMrbValueCallBlock\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.691532249+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCallBlock","Output":"--- PASS: TestMrbValueCallBlock (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.691547928+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCallBlock","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.69155468+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue"}
-{"Time":"2026-11-17T14:54:10.691560431+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue","Output":"=== RUN   TestMrbValueValue\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.692192868+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue","Output":"--- PASS: TestMrbValueValue (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.692209288+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.692217764+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue_impl"}
-{"Time":"2026-11-17T14:54:10.692223384+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue_impl","Output":"=== RUN   TestMrbValueValue_impl\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.692829342+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue_impl","Output":"--- PASS: TestMrbValueValue_impl (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.692841294+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue_impl","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.692848007+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueFixnum"}
-{"Time":"2026-11-17T14:54:10.692853667+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueFixnum","Output":"=== RUN   TestMrbValueFixnum\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.693481665+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueFixnum","Output":"--- PASS: TestMrbValueFixnum (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.693504277+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueFixnum","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.693624331+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueString"}
-{"Time":"2026-11-17T14:54:10.693658434+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueString","Output":"=== RUN   TestMrbValueString\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.694557216+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueString","Output":"--- PASS: TestMrbValueString (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.694576142+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueString","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.694581562+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueType"}
-{"Time":"2026-11-17T14:54:10.694584938+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueType","Output":"=== RUN   TestMrbValueType\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.694949526+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueType","Output":"--- PASS: TestMrbValueType (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.694957601+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueType","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.694985954+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestIntMrbValue"}
-{"Time":"2026-11-17T14:54:10.694994009+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestIntMrbValue","Output":"=== RUN   TestIntMrbValue\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.695613752+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestIntMrbValue","Output":"--- PASS: TestIntMrbValue (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.69562337+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestIntMrbValue","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.695631475+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestStringMrbValue"}
-{"Time":"2026-11-17T14:54:10.695634811+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestStringMrbValue","Output":"=== RUN   TestStringMrbValue\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.696271125+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestStringMrbValue","Output":"--- PASS: TestStringMrbValue (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.696277837+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestStringMrbValue","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.696282226+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestValueClass"}
-{"Time":"2026-11-17T14:54:10.696285211+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestValueClass","Output":"=== RUN   TestValueClass\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.696932776+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestValueClass","Output":"--- PASS: TestValueClass (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.696941662+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestValueClass","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.696948275+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestValueSingletonClass"}
-{"Time":"2026-11-17T14:54:10.696954045+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestValueSingletonClass","Output":"=== RUN   TestValueSingletonClass\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.69759605+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestValueSingletonClass","Output":"--- PASS: TestValueSingletonClass (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.697608563+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestValueSingletonClass","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.697625996+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"Example_CustomFunction"}
-{"Time":"2026-11-17T14:54:10.697632097+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"Example_CustomFunction","Output":"=== RUN   Example_CustomFunction\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.698380539+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"Example_CustomFunction","Output":"--- PASS: Example_CustomFunction (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.698396639+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"Example_CustomFunction","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.698403913+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"Example_Decode"}
-{"Time":"2026-11-17T14:54:10.698409714+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"Example_Decode","Output":"=== RUN   Example_Decode\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.699933789+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"Example_Decode","Output":"--- PASS: Example_Decode (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.699957994+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"Example_Decode","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.699967281+01:00","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"Example_SimulateFiles"}
-{"Time":"2026-11-17T14:54:10.699973483+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"Example_SimulateFiles","Output":"=== RUN   Example_SimulateFiles\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.701367116+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"Example_SimulateFiles","Output":"--- PASS: Example_SimulateFiles (0.00s)\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.701381853+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"Example_SimulateFiles","Elapsed":0}
-{"Time":"2026-11-17T14:54:10.701387514+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Output":"PASS\n","OutputType":"frame"}
-{"Time":"2026-11-17T14:54:10.704659751+01:00","Action":"output","Package":"github.com/mitchellh/go-mruby","Output":"ok  \tgithub.com/mitchellh/go-mruby\t1.159s\n"}
-{"Time":"2026-11-17T14:54:10.70469652+01:00","Action":"pass","Package":"github.com/mitchellh/go-mruby","Elapsed":1.159}
+{"Time":"2026-11-28T06:02:44.887823627Z","Action":"start","Package":"github.com/mitchellh/go-mruby"}
+{"Time":"2026-11-28T06:02:44.92026521Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestArray"}
+{"Time":"2026-11-28T06:02:44.92055146Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestArray","Output":"=== RUN   TestArray\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.928704252Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestArray","Output":"--- PASS: TestArray (0.01s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.929015168Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestArray","Elapsed":0.01}
+{"Time":"2026-11-28T06:02:44.92942496Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineClassMethod"}
+{"Time":"2026-11-28T06:02:44.929476377Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineClassMethod","Output":"=== RUN   TestClassDefineClassMethod\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.93103671Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineClassMethod","Output":"--- PASS: TestClassDefineClassMethod (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.931067293Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineClassMethod","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.931103835Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineConst"}
+{"Time":"2026-11-28T06:02:44.93112021Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineConst","Output":"=== RUN   TestClassDefineConst\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.932135668Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineConst","Output":"--- PASS: TestClassDefineConst (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.932175502Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineConst","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.932202043Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineMethod"}
+{"Time":"2026-11-28T06:02:44.932221877Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineMethod","Output":"=== RUN   TestClassDefineMethod\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.932974877Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineMethod","Output":"--- PASS: TestClassDefineMethod (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.933001752Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestClassDefineMethod","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.93302246Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNew"}
+{"Time":"2026-11-28T06:02:44.933047127Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNew","Output":"=== RUN   TestClassNew\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.933899252Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNew","Output":"--- PASS: TestClassNew (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.933939502Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNew","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.933973918Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNewException"}
+{"Time":"2026-11-28T06:02:44.93399196Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNewException","Output":"=== RUN   TestClassNewException\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.935825418Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNewException","Output":"--- PASS: TestClassNewException (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.935850043Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestClassNewException","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.935870835Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestClassValue"}
+{"Time":"2026-11-28T06:02:44.935897668Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassValue","Output":"=== RUN   TestClassValue\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.936618252Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestClassValue","Output":"--- PASS: TestClassValue (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.93664571Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestClassValue","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.93666396Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestCompileContextFilename"}
+{"Time":"2026-11-28T06:02:44.936688127Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestCompileContextFilename","Output":"=== RUN   TestCompileContextFilename\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.937422293Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestCompileContextFilename","Output":"--- PASS: TestCompileContextFilename (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.937447543Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestCompileContextFilename","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.937466168Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestDecode"}
+{"Time":"2026-11-28T06:02:44.937498627Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestDecode","Output":"=== RUN   TestDecode\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.951564835Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestDecode","Output":"--- PASS: TestDecode (0.01s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.951591168Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestDecode","Elapsed":0.01}
+{"Time":"2026-11-28T06:02:44.951615835Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestDecodeInterface"}
+{"Time":"2026-11-28T06:02:44.951642335Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestDecodeInterface","Output":"=== RUN   TestDecodeInterface\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.95757796Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestDecodeInterface","Output":"--- PASS: TestDecodeInterface (0.01s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.957605877Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestDecodeInterface","Elapsed":0.01}
+{"Time":"2026-11-28T06:02:44.957631793Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestEnableDisableGC"}
+{"Time":"2026-11-28T06:02:44.957653418Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestEnableDisableGC","Output":"=== RUN   TestEnableDisableGC\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.958574668Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestEnableDisableGC","Output":"--- PASS: TestEnableDisableGC (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.958592793Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestEnableDisableGC","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.958609585Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestIsDead"}
+{"Time":"2026-11-28T06:02:44.958631877Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestIsDead","Output":"=== RUN   TestIsDead\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.959482502Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestIsDead","Output":"--- PASS: TestIsDead (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.959507668Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestIsDead","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.959529835Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestHash"}
+{"Time":"2026-11-28T06:02:44.959548085Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestHash","Output":"=== RUN   TestHash\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.961027252Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestHash","Output":"--- PASS: TestHash (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.961058918Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestHash","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.961089127Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestNewMrb"}
+{"Time":"2026-11-28T06:02:44.961104585Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestNewMrb","Output":"=== RUN   TestNewMrb\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.961811335Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestNewMrb","Output":"--- PASS: TestNewMrb (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.961832585Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestNewMrb","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.961851752Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbArena"}
+{"Time":"2026-11-28T06:02:44.961880668Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbArena","Output":"=== RUN   TestMrbArena\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.962585002Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbArena","Output":"--- PASS: TestMrbArena (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.962605668Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbArena","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.96263221Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbModule"}
+{"Time":"2026-11-28T06:02:44.962649877Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbModule","Output":"=== RUN   TestMrbModule\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.96338496Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbModule","Output":"--- PASS: TestMrbModule (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.963404877Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbModule","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.963422335Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbClass"}
+{"Time":"2026-11-28T06:02:44.963438168Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbClass","Output":"=== RUN   TestMrbClass\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.964186293Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbClass","Output":"--- PASS: TestMrbClass (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.964208168Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbClass","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.96422446Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbConstDefined"}
+{"Time":"2026-11-28T06:02:44.964245377Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbConstDefined","Output":"=== RUN   TestMrbConstDefined\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.964989418Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbConstDefined","Output":"--- PASS: TestMrbConstDefined (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.965010585Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbConstDefined","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.96502696Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass"}
+{"Time":"2026-11-28T06:02:44.965040502Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass","Output":"=== RUN   TestMrbDefineClass\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.965751127Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass","Output":"--- PASS: TestMrbDefineClass (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.965775002Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.96579696Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass_methodException"}
+{"Time":"2026-11-28T06:02:44.965813127Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass_methodException","Output":"=== RUN   TestMrbDefineClass_methodException\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.966553043Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass_methodException","Output":"--- PASS: TestMrbDefineClass_methodException (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.966588377Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClass_methodException","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.966615252Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClassUnder"}
+{"Time":"2026-11-28T06:02:44.966636335Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClassUnder","Output":"=== RUN   TestMrbDefineClassUnder\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.967360168Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClassUnder","Output":"--- PASS: TestMrbDefineClassUnder (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.96738346Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineClassUnder","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.967401127Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModule"}
+{"Time":"2026-11-28T06:02:44.967414418Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModule","Output":"=== RUN   TestMrbDefineModule\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.968137752Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModule","Output":"--- PASS: TestMrbDefineModule (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.968160627Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModule","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.968178002Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModuleUnder"}
+{"Time":"2026-11-28T06:02:44.968194585Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModuleUnder","Output":"=== RUN   TestMrbDefineModuleUnder\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.968933252Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModuleUnder","Output":"--- PASS: TestMrbDefineModuleUnder (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.968958252Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineModuleUnder","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.96897671Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFixnumValue"}
+{"Time":"2026-11-28T06:02:44.968998377Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFixnumValue","Output":"=== RUN   TestMrbFixnumValue\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.969671793Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFixnumValue","Output":"--- PASS: TestMrbFixnumValue (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.969694877Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFixnumValue","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.969713168Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFullGC"}
+{"Time":"2026-11-28T06:02:44.96973621Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFullGC","Output":"=== RUN   TestMrbFullGC\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.970410668Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFullGC","Output":"--- PASS: TestMrbFullGC (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:44.970432918Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbFullGC","Elapsed":0}
+{"Time":"2026-11-28T06:02:44.970457335Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGetArgs"}
+{"Time":"2026-11-28T06:02:44.97047471Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGetArgs","Output":"=== RUN   TestMrbGetArgs\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.751996794Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGetArgs","Output":"--- PASS: TestMrbGetArgs (0.78s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.752103252Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGetArgs","Elapsed":0.78}
+{"Time":"2026-11-28T06:02:45.752138752Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGlobalVariable"}
+{"Time":"2026-11-28T06:02:45.75217171Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGlobalVariable","Output":"=== RUN   TestMrbGlobalVariable\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.753003835Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGlobalVariable","Output":"--- PASS: TestMrbGlobalVariable (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.75303071Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbGlobalVariable","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.753058169Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbInstanceVariable"}
+{"Time":"2026-11-28T06:02:45.753080294Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbInstanceVariable","Output":"=== RUN   TestMrbInstanceVariable\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.754067877Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbInstanceVariable","Output":"--- PASS: TestMrbInstanceVariable (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.754091335Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbInstanceVariable","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.75411871Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString"}
+{"Time":"2026-11-28T06:02:45.754136294Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString","Output":"=== RUN   TestMrbLoadString\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.754814169Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString","Output":"--- PASS: TestMrbLoadString (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.754839294Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.754860335Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString_twice"}
+{"Time":"2026-11-28T06:02:45.754882627Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString_twice","Output":"=== RUN   TestMrbLoadString_twice\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.755557669Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString_twice","Output":"--- PASS: TestMrbLoadString_twice (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.755585419Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadString_twice","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.75561271Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadStringException"}
+{"Time":"2026-11-28T06:02:45.755641835Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadStringException","Output":"=== RUN   TestMrbLoadStringException\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.756295877Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadStringException","Output":"--- PASS: TestMrbLoadStringException (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.756316752Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbLoadStringException","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.75635021Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRaise"}
+{"Time":"2026-11-28T06:02:45.756364252Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRaise","Output":"=== RUN   TestMrbRaise\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.757078252Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRaise","Output":"--- PASS: TestMrbRaise (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.757100335Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRaise","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.75711671Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYield"}
+{"Time":"2026-11-28T06:02:45.75713071Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYield","Output":"=== RUN   TestMrbYield\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.75811546Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYield","Output":"--- PASS: TestMrbYield (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.758139752Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYield","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.758156752Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYieldException"}
+{"Time":"2026-11-28T06:02:45.75817121Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYieldException","Output":"=== RUN   TestMrbYieldException\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.758888669Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYieldException","Output":"--- PASS: TestMrbYieldException (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.758914919Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbYieldException","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.758933585Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRun"}
+{"Time":"2026-11-28T06:02:45.758950044Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRun","Output":"=== RUN   TestMrbRun\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.760123794Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRun","Output":"--- PASS: TestMrbRun (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.760144002Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbRun","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.760172419Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineMethodConcurrent"}
+{"Time":"2026-11-28T06:02:45.760871835Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineMethodConcurrent","Output":"=== RUN   TestMrbDefineMethodConcurrent\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.812663669Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineMethodConcurrent","Output":"--- PASS: TestMrbDefineMethodConcurrent (0.05s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.816646669Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbDefineMethodConcurrent","Elapsed":0.05}
+{"Time":"2026-11-28T06:02:45.817464502Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbStackedException"}
+{"Time":"2026-11-28T06:02:45.817831127Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbStackedException","Output":"=== RUN   TestMrbStackedException\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.818633335Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbStackedException","Output":"--- PASS: TestMrbStackedException (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.819634127Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbStackedException","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.820606877Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestParserGenerateCode"}
+{"Time":"2026-11-28T06:02:45.820647585Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserGenerateCode","Output":"=== RUN   TestParserGenerateCode\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.820668335Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserGenerateCode","Output":"--- PASS: TestParserGenerateCode (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.82069046Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestParserGenerateCode","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.820708377Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse"}
+{"Time":"2026-11-28T06:02:45.820726919Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse","Output":"=== RUN   TestParserParse\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.820748919Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse","Output":"--- PASS: TestParserParse (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.820777419Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.82079871Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse_error"}
+{"Time":"2026-11-28T06:02:45.820818252Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse_error","Output":"=== RUN   TestParserParse_error\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.820837377Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse_error","Output":"--- PASS: TestParserParse_error (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.82085596Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestParserParse_error","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.820873919Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestParserError_error"}
+{"Time":"2026-11-28T06:02:45.82089221Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserError_error","Output":"=== RUN   TestParserError_error\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.820912377Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestParserError_error","Output":"--- PASS: TestParserError_error (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.820931627Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestParserError_error","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.820950294Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionString_afterClose"}
+{"Time":"2026-11-28T06:02:45.82097846Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionString_afterClose","Output":"=== RUN   TestExceptionString_afterClose\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.82099721Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionString_afterClose","Output":"--- PASS: TestExceptionString_afterClose (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.821017044Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionString_afterClose","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.821035377Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionBacktrace"}
+{"Time":"2026-11-28T06:02:45.821051752Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionBacktrace","Output":"=== RUN   TestExceptionBacktrace\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.821070127Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionBacktrace","Output":"--- PASS: TestExceptionBacktrace (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.821087752Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestExceptionBacktrace","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.82110471Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCall"}
+{"Time":"2026-11-28T06:02:45.821127585Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCall","Output":"=== RUN   TestMrbValueCall\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.821147169Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCall","Output":"--- PASS: TestMrbValueCall (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.821171335Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCall","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.821189752Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCallBlock"}
+{"Time":"2026-11-28T06:02:45.82120596Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCallBlock","Output":"=== RUN   TestMrbValueCallBlock\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.82122371Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCallBlock","Output":"--- PASS: TestMrbValueCallBlock (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.82124246Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueCallBlock","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.821259377Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue"}
+{"Time":"2026-11-28T06:02:45.82127746Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue","Output":"=== RUN   TestMrbValueValue\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.821353502Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue","Output":"--- PASS: TestMrbValueValue (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.821377294Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.82139521Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue_impl"}
+{"Time":"2026-11-28T06:02:45.821411877Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue_impl","Output":"=== RUN   TestMrbValueValue_impl\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.822179544Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue_impl","Output":"--- PASS: TestMrbValueValue_impl (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.822206002Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueValue_impl","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.822230919Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueFixnum"}
+{"Time":"2026-11-28T06:02:45.822251752Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueFixnum","Output":"=== RUN   TestMrbValueFixnum\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.823022877Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueFixnum","Output":"--- PASS: TestMrbValueFixnum (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.823046377Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueFixnum","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.823063794Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueString"}
+{"Time":"2026-11-28T06:02:45.823082752Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueString","Output":"=== RUN   TestMrbValueString\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.82383096Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueString","Output":"--- PASS: TestMrbValueString (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.823851127Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueString","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.823872127Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueType"}
+{"Time":"2026-11-28T06:02:45.823888919Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueType","Output":"=== RUN   TestMrbValueType\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.824940919Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueType","Output":"--- PASS: TestMrbValueType (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.824973794Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestMrbValueType","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.824990835Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestIntMrbValue"}
+{"Time":"2026-11-28T06:02:45.825003752Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestIntMrbValue","Output":"=== RUN   TestIntMrbValue\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.825733502Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestIntMrbValue","Output":"--- PASS: TestIntMrbValue (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.825760419Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestIntMrbValue","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.825780085Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestStringMrbValue"}
+{"Time":"2026-11-28T06:02:45.825795919Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestStringMrbValue","Output":"=== RUN   TestStringMrbValue\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.826523169Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestStringMrbValue","Output":"--- PASS: TestStringMrbValue (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.826546877Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestStringMrbValue","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.826563044Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestValueClass"}
+{"Time":"2026-11-28T06:02:45.826578377Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestValueClass","Output":"=== RUN   TestValueClass\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.827376669Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestValueClass","Output":"--- PASS: TestValueClass (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.827400502Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestValueClass","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.827417502Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"TestValueSingletonClass"}
+{"Time":"2026-11-28T06:02:45.827435835Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestValueSingletonClass","Output":"=== RUN   TestValueSingletonClass\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.82820271Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"TestValueSingletonClass","Output":"--- PASS: TestValueSingletonClass (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.828225294Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"TestValueSingletonClass","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.828440085Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"Example_CustomFunction"}
+{"Time":"2026-11-28T06:02:45.828460627Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"Example_CustomFunction","Output":"=== RUN   Example_CustomFunction\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.829795794Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"Example_CustomFunction","Output":"--- PASS: Example_CustomFunction (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.829831544Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"Example_CustomFunction","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.829857794Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"Example_Decode"}
+{"Time":"2026-11-28T06:02:45.829885835Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"Example_Decode","Output":"=== RUN   Example_Decode\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.831068002Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"Example_Decode","Output":"--- PASS: Example_Decode (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.831101877Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"Example_Decode","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.831121544Z","Action":"run","Package":"github.com/mitchellh/go-mruby","Test":"Example_SimulateFiles"}
+{"Time":"2026-11-28T06:02:45.831136627Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"Example_SimulateFiles","Output":"=== RUN   Example_SimulateFiles\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.832083002Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Test":"Example_SimulateFiles","Output":"--- PASS: Example_SimulateFiles (0.00s)\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.832106835Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Test":"Example_SimulateFiles","Elapsed":0}
+{"Time":"2026-11-28T06:02:45.832243419Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Output":"PASS\n","OutputType":"frame"}
+{"Time":"2026-11-28T06:02:45.835460627Z","Action":"output","Package":"github.com/mitchellh/go-mruby","Output":"ok  \tgithub.com/mitchellh/go-mruby\t0.944s\n"}
+{"Time":"2026-11-28T06:02:45.836369627Z","Action":"pass","Package":"github.com/mitchellh/go-mruby","Elapsed":0.949}

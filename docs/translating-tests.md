@@ -52,8 +52,8 @@ Every `#[test]` has at least one doc annotation immediately above it:
 
 The path after `#` is the **Go runtime name** as printed by `go test -json`: spaces become `_`
 (e.g. `TestNewCommandMessage/With_connection,_channel_state_and_data`). Look the exact IDs up in
-`compat/test-map.json` (`"id": "26a1a703:<file>#<path>"`; the annotation omits the `26a1a703:`
-prefix). Table-driven rows have their own runtime IDs there too. `cargo xtask inventory` fails on
+`compat/test-map.json` (`"id": "ef995afb:<file>#<path>"`; the annotation omits the `ef995afb:`
+prefix, the pinned commit's first 8 hex digits). Table-driven rows have their own runtime IDs there too. `cargo xtask inventory` fails on
 unknown IDs and on tests without annotations.
 
 Adaptations and `not_observable` reasons must be recorded. Write them as
@@ -117,6 +117,25 @@ to `unreviewed`/`pending`.
 A retired case must stay retired: any other outcome is a `RETIRED` error, and the marker on the
 Go backend is a `RETIRED-ON-GO` error. `cargo xtask report --by-package` lists retired cases in
 their own column.
+
+## Moving the reference
+
+The pin moves in a dedicated change with a test and behavior diff (`compat/upstream.lock`).
+
+1. In `compat/upstream.lock`, set `commit`, `commit_date`, `go_sum_sha256` (`go.sum` at the new
+   commit) and `go_module_count` (`go list -m all | wc -l`); `rpc_proto_sha256` and the
+   toolchain lines change only with `etc/rpc.proto`, `go.mod`'s `go`/`toolchain` lines or the
+   Makefile. Set `COMMIT` and `SHORT` in `tools/xtask/src/manifest.rs` to the same commit.
+2. `cargo xtask reference-checkout`, then `go mod tidy` in each `compat/reference-adapters/*`
+   module and `cargo xtask reference-build`.
+3. Re-record the baselines the inventory reads (`compat/baseline/README.md`) and refresh the
+   blob SHAs and file list of `compat/test-files.json`.
+4. `cargo xtask inventory` moves every case ID recorded at the old pin to the new prefix and keeps
+   its curated fields and statuses; new upstream cases appear as `unreviewed`, and a parent with
+   new subtests drops to `unreviewed` until they are translated. `cargo xtask check-inputs` fails
+   while the lock, the xtask and the manifest name different commits.
+5. Translate new cases and update changed ones (`git diff <old>..<new> -- '*_test.go' mocks/`
+   in `compat/reference`), verify them against Go, then port the behavior.
 
 ## Ruby scenarios (AnyT, features)
 

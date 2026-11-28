@@ -57,6 +57,7 @@ func (b *scriptedBroker) RestoreSession(string) ([]byte, error) {
 	return nil, nil
 }
 func (b *scriptedBroker) TouchSession(string) error { b.other("TouchSession"); return nil }
+func (b *scriptedBroker) DeleteSession(string) error { b.other("DeleteSession"); return nil }
 func (b *scriptedBroker) SupportsPresence() bool {
 	r := decodeScriptedReturn(b.s.answer("SupportsPresence", struct{}{}))
 	var v bool

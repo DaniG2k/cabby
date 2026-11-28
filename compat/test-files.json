@@ -1,7 +1,7 @@
 {
   "upstream": "https://github.com/anycable/anycable",
-  "commit": "26a1a703a54b870e42f5660c3d0785db2c602764",
-  "generated_on": "2026-11-17",
+  "commit": "ef995afbfa177e8e0b789cc651c7d11a550ccc70",
+  "generated_on": "2026-11-28",
   "status": "file_inventory_only",
   "note": "Case enumeration and test execution have not been performed. External AnyT cases and Go Benchmark/Example/Fuzz functions must be inventoried separately. Case-level mapping and statuses now live in test-map.json; file status here is a coarse summary.",
   "files": [
@@ -67,13 +67,13 @@
     },
     {
       "path": "broker/memory_test.go",
-      "blob_sha": "4739485de6fb71a4533fe03d30faae90074058e0",
+      "blob_sha": "7613efb19f9b818b9ca475660d7f438340a8623d",
       "status": "unreviewed",
       "kind": "server_go_test"
     },
     {
       "path": "broker/nats_test.go",
-      "blob_sha": "2d66ed902789564a53d57511d54862ee026ad911",
+      "blob_sha": "757ca975487a325f81f2b7b81e8e817174ab27ea",
       "status": "unreviewed",
       "kind": "server_go_test"
     },
@@ -91,7 +91,13 @@
     },
     {
       "path": "cli/options_test.go",
-      "blob_sha": "4df23f9f36832ce6b84294ea52d6b3a251399f95",
+      "blob_sha": "fd70ea55a50e77421c6587f6e601201471e6f82b",
+      "status": "unreviewed",
+      "kind": "server_go_test"
+    },
+    {
+      "path": "cli/session_options_test.go",
+      "blob_sha": "c6adde69df38aaf2aa40dbd9940ce92e2f93074f",
       "status": "unreviewed",
       "kind": "server_go_test"
     },
@@ -133,7 +139,7 @@
     },
     {
       "path": "ds/ds_test.go",
-      "blob_sha": "6f6d8242fd80b28ef5722132b7d14a55782ae128",
+      "blob_sha": "cbf3d9f6e5ed5aee9b1467f5fb14dceeaaf9454f",
       "status": "unreviewed",
       "kind": "server_go_test"
     },
@@ -409,7 +415,7 @@
     },
     {
       "path": "hub/hub_test.go",
-      "blob_sha": "5268d559198030dc669ea742ecbe6e87f31e9b95",
+      "blob_sha": "a3232cbaddfd5211a5d784304409cbbba544e201",
       "status": "unreviewed",
       "kind": "server_go_test"
     },
@@ -499,7 +505,7 @@
     },
     {
       "path": "node/disconnect_queue_test.go",
-      "blob_sha": "e47d1b2cf311382b77ed0cc9ca369e0cfd4e21e7",
+      "blob_sha": "962ffd7371a79cdb11055c1ca8783ac40ae03ce4",
       "status": "unreviewed",
       "kind": "server_go_test"
     },
@@ -511,13 +517,13 @@
     },
     {
       "path": "node/node_test.go",
-      "blob_sha": "0aadbeaf8f622a398aca117fc1ecad6dff49f011",
+      "blob_sha": "8cc75914afadcb1a8216f509f3be8d651dc90b83",
       "status": "unreviewed",
       "kind": "server_go_test"
     },
     {
       "path": "node/session_test.go",
-      "blob_sha": "b9e89143d90c861840d8301d2a90521e412106fd",
+      "blob_sha": "8dbc7185a42b93191fae38f9d2a429538bf704da",
       "status": "unreviewed",
       "kind": "server_go_test"
     },
@@ -559,13 +565,13 @@
     },
     {
       "path": "pusher/controller_test.go",
-      "blob_sha": "0b9874767af3a8a837ddd9c5eb8816d24c58b64e",
+      "blob_sha": "2e5d82d9fe87850255c87cc6651a26cb5ac201b8",
       "status": "unreviewed",
       "kind": "server_go_test"
     },
     {
       "path": "pusher/encoder_test.go",
-      "blob_sha": "3d7f43c6a702882748187e95ca0bf3ae739ff922",
+      "blob_sha": "ec863f7e54f806416c5d99956cccb0cb0092494f",
       "status": "unreviewed",
       "kind": "server_go_test"
     },

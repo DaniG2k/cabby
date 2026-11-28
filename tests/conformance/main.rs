@@ -3,7 +3,7 @@
 //! same contracts through the network interface.
 //!
 //! Scenarios derived from AnyCable (https://github.com/anycable/anycable) at commit
-//! 26a1a703a54b870e42f5660c3d0785db2c602764. Copyright 2016-2026 Vladimir
+//! ef995afbfa177e8e0b789cc651c7d11a550ccc70. Copyright 2016-2026 Vladimir
 //! Dementyev. MIT License; see compat/licenses/anycable-MIT-LICENSE.
 //!
 //! The `anyt_*` modules port the AnyT conformance scenarios of anyt-core 1.4.0

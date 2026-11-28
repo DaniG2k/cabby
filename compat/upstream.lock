@@ -3,12 +3,12 @@
 
 [reference]
 repository = "https://github.com/anycable/anycable"
-commit = "26a1a703a54b870e42f5660c3d0785db2c602764"
-commit_date = "2026-11-13"
+commit = "ef995afbfa177e8e0b789cc651c7d11a550ccc70"
+commit_date = "2026-11-27"
 go_module = "github.com/anycable/anycable-go"
 license = "MIT"                      # MIT-LICENSE; notices preserved for translated tests
 checkout = "compat/reference"        # created by `cargo xtask reference-checkout`, not committed
-go_sum_sha256 = "cced6ec33fa2234a7d2ee5377f9b11aa071a3f5df638e05333d7e44f106dc275"
+go_sum_sha256 = "30b6e00312b66cc28a52cd7b528ca18f60b5d246562ea41a95e57910f51c2011"
 rpc_proto_path = "etc/rpc.proto"
 rpc_proto_sha256 = "676df6a03e7effebbcbbc4eb894862882e5fc47e083bc462a51c44817026ae94"
 go_module_count = 118                # `go list -m all`
