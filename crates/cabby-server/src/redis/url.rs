@@ -281,7 +281,12 @@ pub(crate) fn parse_rueidis_listed(raw: &str, shown: Option<&str>) -> Result<Par
     let invalid_quoted = |what: &str, value: &str| invalid(what, &format!("{value:?}"));
     let mut opt = ParsedRedisUrl::default();
     let parse_addr = |hostport: &str| -> (String, String) {
-        let (mut host, mut port) = split_host_port(hostport).unwrap_or_default();
+        // An address without a port (`replica.example`, `[::1]`) is all host
+        // (rueidis 1.0.80, AnyCable 1.6.22).
+        let (mut host, mut port) = split_host_port(hostport).unwrap_or_else(|| {
+            let host = hostport.strip_prefix('[').unwrap_or(hostport);
+            (host.strip_suffix(']').unwrap_or(host).to_owned(), String::new())
+        });
         if host.is_empty() {
             host = u.hostname();
         }
@@ -317,7 +322,8 @@ pub(crate) fn parse_rueidis_listed(raw: &str, shown: Option<&str>) -> Result<Par
     }
     if u.scheme != "unix" {
         let ps: Vec<&str> = u.path.split('/').collect();
-        if ps.len() == 2 {
+        // A path of `/` selects no database (rueidis 1.0.80).
+        if ps.len() == 2 && !ps[1].is_empty() {
             opt.select_db = go_atoi(ps[1]).ok_or_else(|| invalid_quoted("database number", ps[1]))?;
         } else if ps.len() > 2 {
             return Err(invalid("URL path", &u.path));
@@ -434,14 +440,15 @@ mod tests {
     fn rueidis_parse_url() {
         let o = parse_rueidis("redis://localhost").unwrap();
         assert_eq!(vec!["localhost:6379"], o.init_address);
-        let o = parse_rueidis("rediss://[::1]:7000/3?skip_verify&addr=other:7001&addr=7002").unwrap();
-        // As in Go, an address without a port takes the URL host and the default port.
-        assert_eq!(vec!["[::1]:7000", "other:7001", "[::1]:6379"], o.init_address);
+        let o = parse_rueidis("rediss://[::1]:7000/3?skip_verify&addr=other:7001&addr=7002&addr=[::2]").unwrap();
+        // As in Go (rueidis 1.0.80), an address without a port is all host.
+        assert_eq!(vec!["[::1]:7000", "other:7001", "7002:6379", "[::2]:6379"], o.init_address);
         assert_eq!(3, o.select_db);
         assert!(o.tls && o.skip_verify);
         assert_eq!("::1", o.server_name);
         assert_eq!("redis: invalid URL scheme: invalid", parse_rueidis("invalid://").unwrap_err());
-        assert_eq!("redis: invalid database number: \"\"", parse_rueidis("redis://h/").unwrap_err());
+        assert_eq!(0, parse_rueidis("redis://h/").unwrap().select_db, "a path of / selects no database");
+        assert_eq!(vec!["localhost:6379"], parse_rueidis("redis:/").unwrap().init_address);
         assert_eq!("redis: invalid URL path: /1/2", parse_rueidis("redis://h/1/2").unwrap_err());
         assert_eq!("m", parse_rueidis("redis://h?master_set=m").unwrap().master_set);
     }

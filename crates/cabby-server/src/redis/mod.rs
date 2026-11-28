@@ -407,7 +407,7 @@ fn parse_redis_url(raw: &str) -> Result<(ClientOptions, url::ParsedRedisUrl), Re
     let mut first: Option<url::ParsedRedisUrl> = None;
     for (addr, shown) in cabby_core::utils::url_list(raw) {
         let current =
-            url::parse_rueidis_listed(&ensure_redis_scheme(chomp_trailing_slash_hostname(addr)), shown.as_deref())
+            url::parse_rueidis_listed(chomp_trailing_slash_hostname(&ensure_redis_scheme(addr)), shown.as_deref())
                 .map_err(RedisError)?;
         match first.as_mut() {
             None => first = Some(current),
@@ -434,7 +434,7 @@ fn parse_redis_url(raw: &str) -> Result<(ClientOptions, url::ParsedRedisUrl), Re
 /// Upstream `redisURLHasDB`.
 fn redis_url_has_db(raw: &str) -> bool {
     let first = raw.split(',').next().unwrap_or("");
-    match url::parse(&ensure_redis_scheme(chomp_trailing_slash_hostname(first))) {
+    match url::parse(chomp_trailing_slash_hostname(&ensure_redis_scheme(first))) {
         Ok(u) => !u.path.is_empty() && u.path != "/",
         Err(_) => false,
     }

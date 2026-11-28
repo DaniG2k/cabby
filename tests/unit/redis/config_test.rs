@@ -49,6 +49,38 @@ fn test_basic() {
     assert!(options.tls.is_none());
 }
 
+/// regression-for: redis/config_test.go#TestTrailingSlashHostname
+/// note: the scheme is added before the trailing slash is dropped (AnyCable 1.6.22): an empty or scheme-only URL in a list parses as `redis:/`.
+#[test]
+fn scheme_is_added_before_the_trailing_slash_is_dropped() {
+    for (url, expected) in [
+        ("redis://localhost:6379,", &["localhost:6379", "localhost:6379"][..]),
+        ("redis://localhost:6379,redis://", &["localhost:6379", "localhost:6379"]),
+        ("localhost:6379/", &["localhost:6379"]),
+    ] {
+        let mut config = Config::new();
+        config.url = url.into();
+        let options = config.to_rueidis_options().unwrap_or_else(|e| panic!("{url}: {e}"));
+        assert_eq!(strings(expected), options.init_address, "{url}");
+    }
+}
+
+/// regression-for: redis/config_test.go#TestBasic
+/// note: an `addr` without a port is all host, and a path of `/` selects no database (AnyCable 1.6.22, rueidis 1.0.80).
+#[test]
+fn addresses_without_a_port_are_hosts() {
+    let mut config = Config::new();
+    config.url = "redis://localhost:6379?addr=replica.example&addr=[::1]&addr=other:7001".into();
+    let options = config.to_rueidis_options().expect("options");
+    assert_eq!(strings(&["localhost:6379", "replica.example:6379", "[::1]:6379", "other:7001"]), options.init_address);
+
+    let mut config = Config::new();
+    config.url = "redis://localhost:6379,redis:///".into();
+    let options = config.to_rueidis_options().expect("options");
+    assert_eq!(strings(&["localhost:6379", "localhost:6379"]), options.init_address);
+    assert_eq!(0, options.select_db);
+}
+
 /// upstream: redis/config_test.go#TestTrailingSlashHostname
 #[test]
 fn test_trailing_slash_hostname() {
