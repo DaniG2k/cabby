@@ -174,10 +174,11 @@ pub(super) fn ticker(period: Duration) -> Arc<dyn Ticker> {
                 if now >= next {
                     state.buffered = true;
                     ticking.changed.notify_all();
-                    // Ticks missed while nobody received are dropped (Go adjusts too).
-                    while next <= now {
-                        next += period;
-                    }
+                    // Ticks missed while nobody received are dropped (Go adjusts too),
+                    // skipped in one step: a period of a few nanoseconds (a disconnect
+                    // rate near its maximum) misses millions of ticks per millisecond.
+                    let missed = (now - next).as_nanos() / period.as_nanos() + 1;
+                    next += Duration::from_nanos(u64::try_from(missed * period.as_nanos()).unwrap_or(u64::MAX));
                     continue;
                 }
                 state = ticking.changed.wait_timeout(state, next - now).unwrap_or_else(PoisonError::into_inner).0;

@@ -489,6 +489,10 @@ impl Runner {
         let disconnector: Arc<dyn Disconnector> = if self.config.disconnector_disabled {
             Arc::new(NoopDisconnectQueue)
         } else {
+            self.config
+                .disconnect_queue
+                .validate()
+                .map_err(|e| decorate(CliError(e), "failed to initialize disconnector"))?;
             Arc::new(DisconnectQueue::new(node.clone(), &self.config.disconnect_queue))
         };
         {
@@ -1187,6 +1191,21 @@ mod tests {
         ] {
             assert!(check_pusher_secret(&cli_config(args)).is_ok(), "{args:?}");
         }
+    }
+
+    /// A disconnect rate outside 1 to 1000000000 stops the server at startup, as
+    /// in AnyCable 1.6.22.
+    #[test]
+    fn a_disconnect_rate_out_of_range_stops_the_server() {
+        let c = cli_config(&["cabby", "--disconnect_rate=0"]);
+        let mut runner = Runner::new(c, super::super::default_runner_options()).expect("a runner");
+
+        let err = runner.run().expect_err("the server must not start");
+
+        assert_eq!(
+            "failed to initialize disconnector, cause: disconnect rate must be between 1 and 1000000000, got 0",
+            err.0
+        );
     }
 
     /// Pins D-066: with `--secret` alone, Pusher is mounted with that secret.

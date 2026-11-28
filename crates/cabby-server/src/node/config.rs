@@ -142,7 +142,10 @@ impl DisconnectQueueConfig {
     /// Upstream `DisconnectQueueConfig.Validate`: the rate must be between 1
     /// and [`MAX_DISCONNECT_RATE`].
     pub fn validate(&self) -> Result<(), String> {
-        cabby_core::pending!("node::DisconnectQueueConfig::Validate")
+        if !(1..=MAX_DISCONNECT_RATE).contains(&self.rate) {
+            return Err(format!("disconnect rate must be between 1 and {MAX_DISCONNECT_RATE}, got {}", self.rate));
+        }
+        Ok(())
     }
 
     /// Defaults (upstream `NewDisconnectQueueConfig`).

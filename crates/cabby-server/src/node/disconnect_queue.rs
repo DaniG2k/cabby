@@ -8,7 +8,7 @@ use cabby_core::logger::Logger;
 use cabby_core::utils::{Item, Queue};
 use cabby_core::{log_debug, log_info};
 
-use super::{DisconnectQueueConfig, METRICS_DISCONNECT_DISCARDED, Node, NodeError, Session};
+use super::{DisconnectQueueConfig, MAX_DISCONNECT_RATE, METRICS_DISCONNECT_DISCARDED, Node, NodeError, Session};
 use crate::rpc::Context;
 
 /// Where the node sends sessions whose Disconnect callback must run (upstream
@@ -108,14 +108,13 @@ impl DisconnectQueue {
         self.rate
     }
 
-    /// Upstream `NewDisconnectQueue(node, config, logger)`: period `1000 / rate` ms,
-    /// at least one worker, `max_backlog` limit (0: unlimited).
+    /// Upstream `NewDisconnectQueue(node, config, logger)`: period one second
+    /// divided by the rate (nanosecond precision), at least one worker,
+    /// `max_backlog` limit (0: unlimited).
     pub fn new(node: Arc<Node>, config: &DisconnectQueueConfig) -> Self {
-        // Upstream divides by the rate (a zero rate panics) and a rate above
-        // 1000/s makes a zero period (`time.NewTicker` panics); both are clamped
-        // to the fastest valid period instead.
-        let millis = 1000 / config.rate.max(1);
-        let rate = Duration::from_millis(millis.max(1) as u64);
+        // The runner validates the rate (1 to MAX_DISCONNECT_RATE) before it
+        // builds the queue; other callers get the nearest valid rate.
+        let rate = Duration::from_nanos((1_000_000_000 / config.rate.clamp(1, MAX_DISCONNECT_RATE)) as u64);
         let workers = config.workers_num.max(1) as usize;
         let capacity = (config.max_backlog / 8).max(512) as usize;
 
@@ -314,15 +313,19 @@ mod tests {
     fn period_is_one_second_divided_by_the_rate() {
         assert_eq!(Duration::from_millis(1000), queue_with_rate(1).rate);
         assert_eq!(Duration::from_millis(10), queue_with_rate(100).rate);
-        assert_eq!(Duration::from_millis(3), queue_with_rate(300).rate);
+        assert_eq!(Duration::from_nanos(3_333_333), queue_with_rate(300).rate);
+        assert_eq!(Duration::from_micros(200), queue_with_rate(5000).rate);
     }
 
-    /// Deviation D-015: a zero rate or one above 1000 calls/s (Go: division by
-    /// zero, or a zero ticker period; both panic) runs at the fastest valid period.
+    /// The runner refuses rates outside 1 to `MAX_DISCONNECT_RATE`
+    /// (`DisconnectQueueConfig::validate`); a queue built with one directly
+    /// uses the nearest valid rate instead of dividing by zero.
     #[test]
-    fn deviation_d015_out_of_range_rates_are_clamped() {
-        assert_eq!(Duration::from_millis(1000), queue_with_rate(0).rate);
-        assert_eq!(Duration::from_millis(1), queue_with_rate(5000).rate);
+    fn out_of_range_rates_use_the_nearest_valid_rate() {
+        assert_eq!(Duration::from_secs(1), queue_with_rate(0).rate);
+        assert_eq!(Duration::from_secs(1), queue_with_rate(-5).rate);
+        assert_eq!(Duration::from_nanos(1), queue_with_rate(MAX_DISCONNECT_RATE).rate);
+        assert_eq!(Duration::from_nanos(1), queue_with_rate(i64::MAX).rate);
     }
 
     /// Two sessions enqueued at the same time into a queue with room for one:
