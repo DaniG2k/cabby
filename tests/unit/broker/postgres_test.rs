@@ -270,6 +270,12 @@ fn deviation_d071_postgres_sessions() {
     broker.touch_session("test345").expect("touch");
     broker.touch_session("missing").expect("touch");
     assert_eq!(None, another_broker.restore_session("test345").expect("restore"));
+
+    // Deletion (as in AnyCable 1.6.22's NATS broker): gone for every node.
+    broker.commit_session("test567", &TestCacheable("delete-me".into())).expect("commit");
+    broker.delete_session("test567").expect("delete");
+    broker.delete_session("missing").expect("delete");
+    assert_eq!(None, another_broker.restore_session("test567").expect("restore"));
 }
 
 /// Polls until `sid` no longer restores (at most 10 s).

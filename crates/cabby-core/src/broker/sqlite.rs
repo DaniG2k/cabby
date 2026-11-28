@@ -582,6 +582,26 @@ mod tests {
     }
 
     #[test]
+    fn a_deleted_session_is_gone_at_once_and_after_a_restart() {
+        let dir = TempDir::new();
+        let clock = TestClock::new();
+        let broker = open(&dir, &clock);
+        broker.start().unwrap();
+        broker.commit_session("gone", &Bytes(b"state".to_vec())).unwrap();
+        broker.commit_session("kept", &Bytes(b"kept".to_vec())).unwrap();
+        broker.delete_session("gone").unwrap();
+        broker.delete_session("unknown").unwrap();
+        assert_eq!(None, broker.restore_session("gone").unwrap());
+        assert!(broker.shutdown_within(Duration::from_secs(5)));
+        drop(broker);
+
+        let broker = open(&dir, &clock);
+        assert_eq!(None, broker.restore_session("gone").unwrap());
+        assert_eq!(Some(b"kept".to_vec()), broker.restore_session("kept").unwrap());
+        assert!(broker.shutdown_within(Duration::from_secs(5)));
+    }
+
+    #[test]
     fn dropping_the_broker_without_shutdown_rotates_the_epoch() {
         let dir = TempDir::new();
         let clock = TestClock::new();

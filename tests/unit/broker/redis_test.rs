@@ -347,6 +347,12 @@ fn sessions() {
     // Unknown sessions: nothing to restore, nothing to touch.
     assert_eq!(Ok(None), broker.restore_session("unknown"));
     assert_eq!(Ok(()), broker.touch_session("unknown"));
+
+    // Deletion (as in AnyCable 1.6.22's NATS broker): gone for every node.
+    broker.commit_session("test567", &TestCacheable("delete-me".into())).expect("commit");
+    assert_eq!(Ok(()), broker.delete_session("test567"));
+    assert_eq!(Ok(()), broker.delete_session("unknown"));
+    assert_eq!(Ok(None), another_broker.restore_session("test567"));
 }
 
 /// regression-for: broker/nats_test.go#TestNATSBroker_Sessions
