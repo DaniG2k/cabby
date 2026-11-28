@@ -48,7 +48,9 @@ that AnyCable 1.6.22 refuses now stop the server.
   that were not connected, stays (D-084).
 - Cache entries write the Disconnect interest as `"disc"`, left out when false, as in AnyCable
   1.6.22. Entries written before, with `"Disconnectable"`, are still read with their interest
-  (D-125).
+  (D-125). A node on 0.5.3 or earlier reads only the earlier key: while nodes of both versions
+  share a session cache, a session that an older node restores from an entry written by this
+  version starts without its Disconnect interest, until one of its later commands sets it again.
 - A session the application did not authenticate has no Disconnect interest in the `auto` mode,
   as in AnyCable 1.6.22.
 - The streams listed in a reply that is not a success (a rejected subscription, a failed action)
