@@ -515,12 +515,14 @@ impl Stream {
 
         // A client cursor at or past the current interval: return a strictly
         // greater one (1 to 60 intervals ahead) to keep cursors progressing.
+        // Cursors too large to advance that far are ignored, as in AnyCable 1.6.22.
         if !self.params.cursor.is_empty()
             && let Ok(client) = self.params.cursor.parse::<i64>()
             && client >= current
+            && client <= i64::MAX - 61
         {
             let jitter = (now.as_nanos() % 60) as i64;
-            current = client.saturating_add(1).saturating_add(jitter);
+            current = client + 1 + jitter;
         }
 
         let cursor = current.to_string();
