@@ -116,6 +116,18 @@ treated as not set too, with a similar warning. AnyCable 1.6.21 uses `none` as t
 secret; AnyCable 1.6.22 no longer derives the HTTP broadcast and RPC secrets from it, without a
 warning (deviation D-086).
 
+## Request body limits
+
+Request bodies of the HTTP broadcast endpoint and of the API are limited to 1 MiB by default;
+a larger body is answered `413`. `0` turns the limit off. As in AnyCable 1.6.22:
+
+| Setting | Flag | Variables | Configuration key | Default |
+|---|---|---|---|---|
+| HTTP broadcast body | `--http_broadcast_max_body_size` | `CABBY_HTTP_BROADCAST_MAX_BODY_SIZE`, `ANYCABLE_HTTP_BROADCAST_MAX_BODY_SIZE` | `max_body_size` under `[http_broadcast]` | `1048576` |
+| API body | `--api_max_body_size` | `CABBY_API_MAX_BODY_SIZE`, `ANYCABLE_API_MAX_BODY_SIZE` | `max_body_size` under `[api]` | `1048576` |
+
+The Pusher REST API keeps its own `max_body_size` key under `[pusher]` (no flag).
+
 ## Reserved names
 
 `CABBY_NATS_SERVER_BIN` (or its older spelling `CABBY_NATS_SERVER`) names the `nats-server`

@@ -1060,6 +1060,12 @@ fn http_broadcast_flags(c: &Config) -> Vec<Flag> {
             str_flag("http_broadcast_path", &c.http_broadcast.path, "HTTP pub/sub endpoint path", |s, v| {
                 s.c.http_broadcast.path = v
             }),
+            int_flag(
+                "http_broadcast_max_body_size",
+                c.http_broadcast.max_body_size,
+                "Maximum size (in bytes) of an HTTP broadcast request body (0 = unlimited)",
+                |s, v| s.c.http_broadcast.max_body_size = v,
+            ),
             hidden(str_flag("http_broadcast_secret", "", "[Deprecated] HTTP pub/sub authorization secret", |s, v| {
                 s.c.http_broadcast.secret = v
             })),
@@ -1550,6 +1556,12 @@ fn api_flags(c: &Config) -> Vec<Flag> {
             }),
             str_flag("api_path", &c.api.path, "API endpoint base path", |s, v| s.c.api.path = v),
             str_flag("api_secret", "", "Secret token to authenticate API requests", |s, v| s.c.api.secret = v),
+            int_flag(
+                "api_max_body_size",
+                c.api.max_body_size,
+                "Maximum size (in bytes) of an API request body (0 = unlimited)",
+                |s, v| s.c.api.max_body_size = v,
+            ),
         ],
     )
 }
