@@ -8,7 +8,13 @@ release may contain breaking changes; they are listed under "Changed" and "Remov
 Differences from the AnyCable Go server are listed by ID in
 [`compat/deviations.md`](compat/deviations.md).
 
-## [Unreleased]
+## [0.5.3] - 2026-11-28
+
+Cabby 0.5.3 changes when a session is cached and restored, makes a remote disconnect close every
+connection of the identifier, and keeps a node's pub/sub subscriptions in step with the sessions
+that hold them, following AnyCable 1.6.22 where it changed the same behavior. One setting reads
+differently: the application secret `none` now counts as not set, with a warning at startup. It
+stays compatible with AnyCable server 1.6.21.
 
 ### Fixed
 

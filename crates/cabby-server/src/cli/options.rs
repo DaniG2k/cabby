@@ -251,7 +251,7 @@ pub fn new_config_from_cli_with(
         return Ok((Config::default(), true));
     }
     if !app.version.is_empty() && parsed.bool(&flags, "version") {
-        // `cabby 0.5.2 (AnyCable 1.6.21 compatible)` (D-059): the program name,
+        // `cabby 0.5.3 (AnyCable 1.6.21 compatible)` (D-059): the program name,
         // then the version (an embedder's `CliOption::Version` keeps its text).
         emit(&format!("{} {}\n", app.name, app.version));
         return Ok((Config::default(), true));
