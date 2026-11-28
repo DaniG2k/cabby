@@ -134,7 +134,17 @@ cabby_core::toml_section!(DisconnectQueueConfig, "node.DisconnectQueueConfig" {
     "ShutdownTimeout" => shutdown_timeout,
 });
 
+/// The largest disconnect rate (calls per second), upstream `MaxDisconnectRate`
+/// (`int(time.Second)`: a period of one nanosecond).
+pub const MAX_DISCONNECT_RATE: i64 = 1_000_000_000;
+
 impl DisconnectQueueConfig {
+    /// Upstream `DisconnectQueueConfig.Validate`: the rate must be between 1
+    /// and [`MAX_DISCONNECT_RATE`].
+    pub fn validate(&self) -> Result<(), String> {
+        cabby_core::pending!("node::DisconnectQueueConfig::Validate")
+    }
+
     /// Defaults (upstream `NewDisconnectQueueConfig`).
     pub fn new() -> Self {
         Self { rate: 100, workers_num: 4, max_backlog: 8192, ..Default::default() }

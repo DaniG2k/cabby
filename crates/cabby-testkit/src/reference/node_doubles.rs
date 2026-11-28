@@ -261,7 +261,10 @@ impl Controller for MockController {
         }
         let mut res = Self::mock_result(sid);
         if channel == "failure" {
+            // Upstream's mock rejects with streams to start (ignored on a rejection).
             res.status = Status::Failure;
+            res.stop_all_streams = true;
+            res.streams = vec!["bad_stream".into()];
             return ok(res);
         }
         if channel == "disconnect" {

@@ -214,6 +214,43 @@ mod test_remote_disconnect {
 
         assert!(session.closed());
     }
+
+    /// upstream: hub/hub_test.go#TestRemoteDisconnect/Disconnect_all_sessions_with_the_same_identifiers
+    /// note: upstream runs this subtest on the hub of "Disconnect session" (whose session "123" is closed by then); the hub here starts with that subtest's setup, so "123" is registered and disconnected first.
+    #[test]
+    fn disconnect_all_sessions_with_the_same_identifiers() {
+        let _load = crate::shared_load();
+        let hub = Hub::start(2);
+        let first = MockSession::new("123");
+        hub.add_session(&first);
+        hub.remote_disconnect(RemoteDisconnectMessage { identifier: "123".into(), reconnect: false });
+        let _ = first.read(); // the earlier subtest's read
+
+        let sessions = [
+            MockSession::with_identifiers("s1", "user:42"),
+            MockSession::with_identifiers("s2", "user:42"),
+            MockSession::with_identifiers("s3", "user:42"),
+        ];
+
+        for s in &sessions {
+            hub.add_session(s);
+        }
+
+        let other = MockSession::with_identifiers("s4", "user:43");
+        hub.add_session(&other);
+
+        hub.remote_disconnect(RemoteDisconnectMessage { identifier: "user:42".into(), reconnect: false });
+
+        for (s, sid) in sessions.iter().zip(["s1", "s2", "s3"]) {
+            let msg = s.read();
+            assert!(msg.is_ok(), "session {sid} hasn't been disconnected");
+            assert_eq!(Ok("{\"type\":\"disconnect\",\"reason\":\"remote\",\"reconnect\":false}".to_owned()), msg);
+
+            assert!(s.closed());
+        }
+
+        assert!(!other.closed());
+    }
 }
 
 mod test_broadcast_message {

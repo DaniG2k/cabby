@@ -188,6 +188,21 @@ fn test_cache_entry_empty_session() {
     new_session.restore_from_cache(&cached).expect("restore");
 }
 
+/// upstream: node/session_test.go#TestCacheEntryUnrecoverable
+/// note: on Go, the bare sessions are node.BuildSession.
+#[test]
+fn test_cache_entry_unrecoverable() {
+    let session = bare_session();
+    session.mark_unrecoverable();
+
+    let cached = session.to_cache_entry().expect("require.NoError");
+
+    let new_session = bare_session();
+
+    let err = new_session.restore_from_cache(&cached);
+    assert!(err.is_err(), "require.Error");
+}
+
 /// upstream: node/session_test.go#TestMarkDisconnectable
 /// note: on Go, the bare session is node.BuildSession.
 #[test]
@@ -285,4 +300,96 @@ mod test_send_max_pending_size {
         assert_eq!(Ok(r#"{"type":"message","message":"test B"}"#.to_owned()), session.read_string());
         assert_eq!(Ok(r#"{"type":"message","message":"test C"}"#.to_owned()), session.read_string());
     }
+}
+
+mod test_new_session_ping_interval_overflow {
+    use std::time::Duration;
+
+    use cabby_server::node::MAX_PING_INTERVAL;
+    use cabby_testkit::reference::node::*;
+
+    /// `ws.CloseNormalClosure`.
+    const CLOSE_NORMAL_CLOSURE: i32 = 1000;
+
+    /// The table row body: a session built with `WithPingInterval(interval)`
+    /// gets a day, and its first ping is due within [12h - 1 min, 36h].
+    fn check(interval: Duration) {
+        let node = new_mock_node();
+
+        // require.NotPanics
+        let session = new_session("123", &node, vec![SessionOpt::PingInterval(interval)]);
+
+        assert_eq!(MAX_PING_INTERVAL, session.ping_interval());
+
+        let deadline = session.ping_deadline_in().expect("a ping deadline");
+        assert!(
+            deadline >= MAX_PING_INTERVAL / 2 - Duration::from_secs(60) && deadline <= MAX_PING_INTERVAL * 3 / 2,
+            "{deadline:?}"
+        );
+        session.disconnect("test", CLOSE_NORMAL_CLOSURE);
+    }
+
+    /// upstream: node/session_test.go#TestNewSessionPingIntervalOverflow/2562047h47m16.854775807s
+    /// note: not_observable on Go: pingInterval and timers.pingDeadline are unexported; NewSession (the NotPanics part) runs against Go first.
+    #[test]
+    fn max_int64() {
+        check(Duration::from_nanos(i64::MAX as u64));
+    }
+
+    /// upstream: node/session_test.go#TestNewSessionPingIntervalOverflow/854015h55m46s
+    /// note: not_observable on Go: pingInterval and timers.pingDeadline are unexported; NewSession (the NotPanics part) runs against Go first. Upstream's `time.Duration(3074457346) * time.Second` overflows int64 and wraps to 854015h55m46s, the value used here.
+    #[test]
+    fn wrapped_3074457346_seconds() {
+        let wrapped = 3_074_457_346_i64.wrapping_mul(1_000_000_000);
+        assert_eq!(Duration::from_secs(854_015 * 3600 + 55 * 60 + 46), Duration::from_nanos(wrapped as u64));
+        check(Duration::from_nanos(wrapped as u64));
+    }
+
+    /// upstream: node/session_test.go#TestNewSessionPingIntervalOverflow/24h0m1s
+    /// note: not_observable on Go: pingInterval and timers.pingDeadline are unexported; NewSession (the NotPanics part) runs against Go first.
+    #[test]
+    fn a_day_and_a_second() {
+        check(MAX_PING_INTERVAL + Duration::from_secs(1));
+    }
+
+    /// upstream: node/session_test.go#TestNewSessionPingIntervalOverflow/server-wide_ping_interval
+    /// note: not_observable on Go: pingInterval is unexported; NewSession (the NotPanics part) runs against Go first. Upstream assigns the unexported node.config.PingInterval; the Go arm builds the mock node with it.
+    #[test]
+    fn server_wide_ping_interval() {
+        let anode = new_mock_node_with_ping_interval(9_223_372_036);
+
+        // require.NotPanics
+        let session = new_session("123", &anode, vec![]);
+
+        assert_eq!(MAX_PING_INTERVAL, session.ping_interval());
+        session.disconnect("test", CLOSE_NORMAL_CLOSURE);
+    }
+
+    /// upstream: node/session_test.go#TestNewSessionPingIntervalOverflow/zero_disables_pings
+    /// note: not_observable on Go: timers.pingDeadline is unexported.
+    #[test]
+    fn zero_disables_pings() {
+        let node = new_mock_node();
+        let session = new_session("123", &node, vec![SessionOpt::PingInterval(Duration::ZERO)]);
+
+        assert_eq!(None, session.ping_deadline_in());
+        session.disconnect("test", CLOSE_NORMAL_CLOSURE);
+    }
+}
+
+/// upstream: node/session_test.go#TestPingIntervalFromSeconds
+/// note: not_observable on Go: pingIntervalFromSeconds is unexported.
+#[test]
+fn test_ping_interval_from_seconds() {
+    use std::time::Duration;
+
+    use cabby_server::node::MAX_PING_INTERVAL;
+
+    assert_eq!(Duration::ZERO, ping_interval_from_seconds(0));
+    assert_eq!(Duration::ZERO, ping_interval_from_seconds(-1));
+    assert_eq!(Duration::ZERO, ping_interval_from_seconds(-9_223_372_037));
+    assert_eq!(Duration::from_secs(1), ping_interval_from_seconds(1));
+    assert_eq!(MAX_PING_INTERVAL, ping_interval_from_seconds(86_400));
+    assert_eq!(MAX_PING_INTERVAL, ping_interval_from_seconds(86_401));
+    assert_eq!(MAX_PING_INTERVAL, ping_interval_from_seconds(6_148_914_691_236_517_206));
 }

@@ -1,7 +1,9 @@
 //! upstream file: pusher/controller_test.go
 //!
-//! The upstream subtests share one `env`; the presence subtest merges channel state
-//! into it, which no other subtest reads. Each Rust test builds its own env.
+//! The upstream subtests share one `env`; the private and presence subtests merge
+//! channel state into it for their own channels, which no other subtest reads. Each
+//! Rust test builds its own env. `pusher_verified` is upstream's unexported
+//! `verifiedStateField`.
 //! `mocks.Broker` with `On("PresenceInfo", mock.Anything)` is [`StubBroker`].
 //! Go distinguishes `[]string{}` from nil in `Unsubscribe`'s result; the facade
 //! reports Go's nil slices separately (`CommandResult` has none).
@@ -16,10 +18,12 @@ use cabby_testkit::reference::pusher::{Controller, StubBroker, new_config};
 use serde_json::json;
 
 fn build_env() -> SessionEnv {
-    // common.NewSessionEnv(url, &headers)
+    // common.NewSessionEnv(url, &headers): empty connection and channel states
     SessionEnv {
         url: "ws://demo.anycable.io/pusher/app-id".into(),
         headers: Some(HashMap::from([("cookie".to_owned(), "val=1;".to_owned())])),
+        connection_state: Some(HashMap::new()),
+        channel_states: Some(HashMap::new()),
         ..Default::default()
     }
 }
@@ -39,6 +43,9 @@ fn build_controller() -> Controller {
     };
     Controller::new(bro, &conf)
 }
+
+/// Upstream's unexported `verifiedStateField`.
+const VERIFIED_STATE_FIELD: &str = "pusher_verified";
 
 /// `common.ConfirmationMessage(identifier)`: `utils.ToJSON(Reply{Identifier, Type})`
 /// with the upstream field order.
@@ -62,9 +69,15 @@ mod test_pusher_controller {
     /// upstream: pusher/controller_test.go#TestPusherController/Subscribe_private_(success)
     #[test]
     fn subscribe_private_success() {
-        let env = build_env();
+        let mut env = build_env();
         let ctrl = build_controller();
         let channel = r#"{"channel":"$pusher","stream":"private-party"}"#;
+
+        // env.MergeChannelState(channel, &map[string]string{verifiedStateField: "1"})
+        env.channel_states = Some(HashMap::from([(
+            channel.to_owned(),
+            HashMap::from([(VERIFIED_STATE_FIELD.to_owned(), "1".to_owned())]),
+        )]));
 
         let out = ctrl.subscribe("1234.1234", &env, "name=jack", channel);
 
@@ -88,7 +101,10 @@ mod test_pusher_controller {
         // env.MergeChannelState(channel, ...) on an env without channel state.
         env.channel_states = Some(HashMap::from([(
             channel.to_owned(),
-            HashMap::from([("channel_data".to_owned(), r#"{"user_id":"b4","user_info":{"name":"bob"}}"#.to_owned())]),
+            HashMap::from([
+                ("channel_data".to_owned(), r#"{"user_id":"b4","user_info":{"name":"bob"}}"#.to_owned()),
+                (VERIFIED_STATE_FIELD.to_owned(), "1".to_owned()),
+            ]),
         )]));
 
         let out = ctrl.subscribe("1234.1234", &env, "name=jack", channel);
@@ -112,6 +128,52 @@ mod test_pusher_controller {
         assert_eq!("b4", presence.id);
         assert_eq!(PRESENCE_JOIN_TYPE, presence.kind);
         assert_eq!(Some(json!({"name": "bob"})), presence.info);
+    }
+
+    /// upstream: pusher/controller_test.go#TestPusherController/Subscribe_private/presence_(unverified)
+    /// note: `assert.Nil(res.Streams)` is an empty `streams` (Rust slices are never nil).
+    #[test]
+    fn subscribe_private_presence_unverified() {
+        let env = build_env();
+        let ctrl = build_controller();
+
+        for channel in [
+            r#"{"channel":"$pusher","stream":"private-secret"}"#,
+            r#"{"channel":"$pusher","stream":"presence-secret"}"#,
+        ] {
+            let out = ctrl.subscribe("1234.1234", &env, "name=jack", channel);
+
+            assert!(out.error.is_none(), "{:?}", out.error);
+            let res = out.result.expect("require.NotNil");
+            assert_eq!(Status::Failure, res.status);
+            assert_eq!(vec![rejection_message(channel)], res.transmissions);
+            assert!(res.streams.is_empty(), "{:?}", res.streams);
+            assert!(res.istate.is_none(), "{:?}", res.istate);
+        }
+    }
+
+    /// regression-for: pusher/controller_test.go#TestPusherController/Subscribe_presence_(success)
+    /// note: presence data without a user id (or `null`) fails the subscription with an error.
+    #[test]
+    fn presence_data_must_contain_a_user_id() {
+        let ctrl = build_controller();
+        let channel = r#"{"channel":"$pusher","stream":"presence-room"}"#;
+
+        for data in [r#"{"user_info":{"name":"bob"}}"#, r#"{"user_id":""}"#, "null"] {
+            let mut env = build_env();
+            env.channel_states = Some(HashMap::from([(
+                channel.to_owned(),
+                HashMap::from([
+                    ("channel_data".to_owned(), data.to_owned()),
+                    (VERIFIED_STATE_FIELD.to_owned(), "1".to_owned()),
+                ]),
+            )]));
+
+            let out = ctrl.subscribe("1234.1234", &env, "name=jack", channel);
+
+            assert_eq!(Some("presence data must contain user_id".to_owned()), out.error.map(|e| e.message), "{data}");
+            assert_eq!(Status::Error, out.result.expect("a result").status, "{data}");
+        }
     }
 
     /// upstream: pusher/controller_test.go#TestPusherController/Subscribe_private_(failure)

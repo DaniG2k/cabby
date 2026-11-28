@@ -230,6 +230,15 @@ fn bounded(d: Duration) -> Duration {
     d.min(MAX_TIMER_INTERVAL)
 }
 
+/// The longest ping interval (upstream `MaxPingInterval`, a day).
+pub const MAX_PING_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Upstream `pingIntervalFromSeconds`: zero and negative values disable pings,
+/// values above a day are a day.
+pub fn ping_interval_from_seconds(_sec: i64) -> Duration {
+    cabby_core::pending!("node::pingIntervalFromSeconds")
+}
+
 fn lock<T: ?Sized>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -1231,6 +1240,29 @@ impl Session {
 
     pub fn is_disconnectable(&self) -> bool {
         lock(&self.lifecycle).disconnect_interest
+    }
+
+    /// The ping interval (upstream unexported `pingInterval`).
+    pub fn ping_interval(&self) -> Duration {
+        self.settings().ping_interval
+    }
+
+    /// The time until the next ping (upstream unexported `timers.pingDeadline`),
+    /// `None` when no ping is scheduled.
+    pub fn ping_deadline_in(&self) -> Option<Duration> {
+        let now = self.clock_now();
+        lock(&self.timers).ping.map(|d| d.saturating_duration_since(now))
+    }
+
+    /// Upstream `MarkUnrecoverable`: the session's cache entry is not restored
+    /// (a remote disconnect closed it).
+    pub fn mark_unrecoverable(&self) {
+        cabby_core::pending!("node::Session::MarkUnrecoverable")
+    }
+
+    /// Upstream `NonRecoverable`.
+    pub fn non_recoverable(&self) -> bool {
+        cabby_core::pending!("node::Session::NonRecoverable")
     }
 
     /// Sticky: once marked disconnectable, `false` does not reset it.

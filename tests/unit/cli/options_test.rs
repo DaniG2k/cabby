@@ -156,3 +156,77 @@ mod test_unknown_config_keys {
         assert!(c.unknown_config_keys.is_empty());
     }
 }
+
+mod test_max_body_size_options {
+    use super::*;
+
+    /// upstream: cli/options_test.go#TestMaxBodySizeOptions/defaults
+    #[test]
+    fn defaults() {
+        let c = cli(&["", "--ignore-config-path"]).result.expect("require.NoError");
+
+        assert_eq!(1048576_i64, c.http_broadcast.max_body_size);
+        assert_eq!(1048576_i64, c.api.max_body_size);
+    }
+
+    /// upstream: cli/options_test.go#TestMaxBodySizeOptions/flags
+    #[test]
+    fn flags() {
+        let c = cli(&["", "--ignore-config-path", "--http_broadcast_max_body_size=5242880", "--api_max_body_size=0"])
+            .result
+            .expect("require.NoError");
+
+        assert_eq!(5242880_i64, c.http_broadcast.max_body_size);
+        assert_eq!(0_i64, c.api.max_body_size);
+    }
+
+    /// upstream: cli/options_test.go#TestMaxBodySizeOptions/env_vars
+    #[test]
+    fn env_vars() {
+        // t.Setenv("ANYCABLE_HTTP_BROADCAST_MAX_BODY_SIZE", "10485760")
+        // t.Setenv("ANYCABLE_API_MAX_BODY_SIZE", "2097152")
+        let env =
+            env(&[("ANYCABLE_HTTP_BROADCAST_MAX_BODY_SIZE", "10485760"), ("ANYCABLE_API_MAX_BODY_SIZE", "2097152")]);
+
+        let c = new_config_from_cli(&["", "--ignore-config-path"], &env, &[]).result.expect("require.NoError");
+
+        assert_eq!(10485760_i64, c.http_broadcast.max_body_size);
+        assert_eq!(2097152_i64, c.api.max_body_size);
+    }
+}
+
+/// upstream: cli/options_test.go#TestBrokerTTLValidation
+#[test]
+fn test_broker_ttl_validation() {
+    for args in [
+        ["--sessions_ttl=0", "--presence_ttl=0", "--history_ttl=0"],
+        ["--sessions_ttl=31536000", "--presence_ttl=31536000", "--history_ttl=31536000"],
+    ] {
+        let mut argv = vec!["", "--ignore-config-path"];
+        argv.extend(args);
+        let res = cli(&argv).result;
+        assert!(res.is_ok(), "{args:?}: {res:?}");
+    }
+
+    for arg in [
+        "--sessions_ttl=-1",
+        "--presence_ttl=31536001",
+        "--history_ttl=9223372036854775807",
+        "--sessions_ttl=18446744073709552",
+    ] {
+        let res = cli(&["", "--ignore-config-path", arg]).result;
+        assert!(res.is_err(), "{arg}");
+    }
+}
+
+/// regression-for: cli/options_test.go#TestBrokerTTLValidation
+/// note: the error text names the setting, the bounds and the value, and the history TTL is checked first.
+#[test]
+fn broker_ttl_errors_name_the_setting() {
+    let err = cli(&["", "--ignore-config-path", "--sessions_ttl=-1"]).result.expect_err("an error");
+    assert_eq!("sessions_ttl must be between 0 and 31536000 seconds, got -1", err.to_string());
+
+    let err =
+        cli(&["", "--ignore-config-path", "--presence_ttl=31536001", "--history_ttl=-5"]).result.expect_err("an error");
+    assert_eq!("history_ttl must be between 0 and 31536000 seconds, got -5", err.to_string());
+}

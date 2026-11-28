@@ -195,6 +195,92 @@ mod test_pusher_encode {
 
         assert_eq!(expected, payload(encode(&coder, &msg)));
     }
+
+    mod malformed_presence_events {
+        use super::*;
+
+        /// The table row body: encoding the presence reply returns an error
+        /// (`require.NotPanics` holds when the call returns).
+        fn check(message: serde_json::Value) {
+            let coder = new_encoder();
+            let msg = reply(Reply {
+                kind: PRESENCE_TYPE.into(),
+                identifier: PRESENCE_IDENTIFIER.into(),
+                message: Some(message),
+                ..Default::default()
+            });
+
+            let res = encode(&coder, &msg);
+            assert!(res.is_err(), "{res:?}");
+        }
+
+        /// upstream: pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/empty
+        #[test]
+        fn empty() {
+            check(json!({}));
+        }
+
+        /// upstream: pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/missing_id
+        #[test]
+        fn missing_id() {
+            check(json!({"type": PRESENCE_JOIN_TYPE}));
+        }
+
+        /// upstream: pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/numeric_id
+        /// note: upstream's `json.Number("42")` is the JSON number 42 (Go decodes it from the bridge's JSON).
+        #[test]
+        fn numeric_id() {
+            check(json!({"type": PRESENCE_JOIN_TYPE, "id": 42}));
+        }
+
+        /// upstream: pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/missing_type
+        #[test]
+        fn missing_type() {
+            check(json!({"id": "42"}));
+        }
+
+        /// upstream: pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/unknown_type
+        #[test]
+        fn unknown_type() {
+            check(json!({"type": "update", "id": "42"}));
+        }
+
+        /// upstream: pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/numeric_type
+        #[test]
+        fn numeric_type() {
+            check(json!({"type": 1, "id": "42"}));
+        }
+
+        /// upstream: pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/non-map
+        #[test]
+        fn non_map() {
+            check(json!("join"));
+        }
+
+        /// regression-for: pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/empty
+        /// regression-for: pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/missing_type
+        /// regression-for: pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/unknown_type
+        /// regression-for: pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/non-map
+        /// note: the error texts (logged with `failed to encode message`) name the value and its Go type.
+        #[test]
+        fn errors_name_the_value_and_its_type() {
+            let coder = new_encoder();
+            for (message, expected) in [
+                (json!({}), "invalid presence event id: <nil> (<nil>)"),
+                (json!({"id": "42"}), "invalid presence event type: <nil> (<nil>)"),
+                (json!({"type": "update", "id": "42"}), "invalid presence event type: update (string)"),
+                (json!("join"), "failed to encode presence event: join"),
+            ] {
+                let msg = reply(Reply {
+                    kind: PRESENCE_TYPE.into(),
+                    identifier: PRESENCE_IDENTIFIER.into(),
+                    message: Some(message),
+                    ..Default::default()
+                });
+                assert_eq!(Err(expected.to_owned()), encode(&coder, &msg).map(|_| ()));
+            }
+        }
+    }
 }
 
 mod test_pusher_encode_transmission {

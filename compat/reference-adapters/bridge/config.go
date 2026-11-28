@@ -27,8 +27,12 @@ type configView struct {
 	RPC                  struct{ Host, Implementation string }
 	Broker               struct{ Adapter string }
 	Redis                struct{ URL string }
-	HTTPBroadcast        struct{ Port int }
-	Metrics              struct {
+	HTTPBroadcast        struct {
+		Port        int
+		MaxBodySize int64
+	}
+	API     struct{ MaxBodySize int64 }
+	Metrics struct {
 		HTTP string
 		Tags map[string]string
 	}
@@ -60,7 +64,8 @@ func viewOfConfig(c *config.Config) configView {
 	v.RPC.Host, v.RPC.Implementation = c.RPC.Host, c.RPC.Implementation
 	v.Broker.Adapter = c.Broker.Adapter
 	v.Redis.URL = c.Redis.URL
-	v.HTTPBroadcast.Port = c.HTTPBroadcast.Port
+	v.HTTPBroadcast.Port, v.HTTPBroadcast.MaxBodySize = c.HTTPBroadcast.Port, c.HTTPBroadcast.MaxBodySize
+	v.API.MaxBodySize = c.API.MaxBodySize
 	v.Metrics.HTTP, v.Metrics.Tags = c.Metrics.HTTP, c.Metrics.Tags
 	n := &c.EmbeddedNats
 	v.EmbeddedNats.Enabled, v.EmbeddedNats.Name, v.EmbeddedNats.Routes = n.Enabled, n.Name, n.Routes
@@ -82,7 +87,8 @@ func (v configView) apply(c *config.Config) {
 	c.RPC.Host, c.RPC.Implementation = v.RPC.Host, v.RPC.Implementation
 	c.Broker.Adapter = v.Broker.Adapter
 	c.Redis.URL = v.Redis.URL
-	c.HTTPBroadcast.Port = v.HTTPBroadcast.Port
+	c.HTTPBroadcast.Port, c.HTTPBroadcast.MaxBodySize = v.HTTPBroadcast.Port, v.HTTPBroadcast.MaxBodySize
+	c.API.MaxBodySize = v.API.MaxBodySize
 	c.Metrics.HTTP, c.Metrics.Tags = v.Metrics.HTTP, v.Metrics.Tags
 	n := &c.EmbeddedNats
 	n.Enabled, n.Name, n.Routes = v.EmbeddedNats.Enabled, v.EmbeddedNats.Name, v.EmbeddedNats.Routes

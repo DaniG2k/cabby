@@ -167,7 +167,7 @@ type mockExpectation struct {
 // Argument types of the mocked methods (after the implicit context of controller calls).
 var brokerArgTypes = map[string][]string{
 	"Subscribe": {"s"}, "Unsubscribe": {"s"}, "RestoreSession": {"s"}, "TouchPresence": {"s"},
-	"TouchSession": {"s"}, "HistorySince": {"s", "i64"}, "HistoryFrom": {"s", "s", "u64"},
+	"TouchSession": {"s"}, "DeleteSession": {"s"}, "HistorySince": {"s", "i64"}, "HistoryFrom": {"s", "s", "u64"},
 	"PresenceAdd": {"s", "s", "s", "any"}, "PresenceRemove": {"s", "s"}, "CommitSession": {"s", "opaque"},
 	"HandleBroadcast": {"opaque"},
 }
@@ -586,6 +586,13 @@ func init() {
 	register("node.NewDisconnectQueueConfig", func(json.RawMessage) (interface{}, error) {
 		return node.NewDisconnectQueueConfig(), nil
 	})
+	register("node.DisconnectQueueConfig.Validate", func(raw json.RawMessage) (interface{}, error) {
+		var a struct{ Config node.DisconnectQueueConfig }
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return nil, err
+		}
+		return errString(a.Config.Validate()), nil
+	})
 	register("node.DisconnectQueueConfig.ToToml", func(raw json.RawMessage) (interface{}, error) {
 		var a struct{ Config node.DisconnectQueueConfig }
 		if err := json.Unmarshal(raw, &a); err != nil {
@@ -643,10 +650,22 @@ func init() {
 	})
 
 	// Upstream NewMockNode (node/node_mocks_test.go).
-	register("node.NewMockNode", func(json.RawMessage) (interface{}, error) {
+	register("node.NewMockNode", func(raw json.RawMessage) (interface{}, error) {
+		var a struct {
+			// Upstream tests assign the unexported `config.PingInterval` after NewMockNode.
+			PingInterval *int `json:"ping_interval"`
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &a); err != nil {
+				return nil, err
+			}
+		}
 		controller := mocks.NewMockController()
 		config := node.NewConfig()
 		config.HubGopoolSize = 2
+		if a.PingInterval != nil {
+			config.PingInterval = *a.PingInterval
+		}
 		m := metrics.NewMetrics(nil, 10, slog.Default())
 		n := node.NewNode(&config, node.WithInstrumenter(m), node.WithController(&controller))
 		o := newNodeObj(n, m, &controller)
@@ -804,6 +823,16 @@ func init() {
 			if v, ok := b.(*broker.NATS); ok {
 				return errReply(v.Reset()), nil
 			}
+		case "Shutdown":
+			return errReply(b.Shutdown(context.Background())), nil
+		case "RestoreSession":
+			data, rerr := b.RestoreSession(c.Data)
+			var cached *string
+			if data != nil {
+				s := string(data)
+				cached = &s
+			}
+			return map[string]interface{}{"data": cached, "error": errString(rerr)}, nil
 		}
 		return nil, fmt.Errorf("unsupported Broker method %q for %T", c.Method, b)
 	}))
@@ -881,6 +910,9 @@ func init() {
 			return nil, nil
 		case "LookupSession":
 			return handleOf(n.LookupSession(c.Ids)), nil
+		case "RemoteDisconnect":
+			n.RemoteDisconnect(&common.RemoteDisconnectMessage{Identifier: c.Ids, Reconnect: c.Val})
+			return nil, nil
 		}
 
 		s, err := session()
@@ -990,6 +1022,7 @@ func init() {
 			SessionsTTL    *int64             `json:"sessions_ttl_ms"`
 			PresenceTTL    *int64             `json:"presence_ttl_ms"`
 			PrevSid        *string            `json:"prev_sid"`
+			PingIntervalNs *int64             `json:"ping_interval_ns"`
 		}
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return nil, err
@@ -1007,6 +1040,9 @@ func init() {
 		}
 		if a.MaxPendingSize != nil {
 			opts = append(opts, node.WithMaxPendingSize(*a.MaxPendingSize))
+		}
+		if a.PingIntervalNs != nil {
+			opts = append(opts, node.WithPingInterval(time.Duration(*a.PingIntervalNs)))
 		}
 		obj := &sessionObj{node: o}
 		var conn node.Connection
@@ -1035,6 +1071,9 @@ func init() {
 			opts = append([]node.SessionOption{node.WithPingInterval(0)}, opts...)
 			obj.s = node.NewSession(o.n, conn, a.URL, a.Headers, a.UID, opts...)
 			obj.s.SetIdentifiers(a.UID)
+		case "new":
+			// Upstream `NewSession(node, mocks.NewMockConnection(), url, headers, uid, opts...)`.
+			obj.s = node.NewSession(o.n, conn, a.URL, a.Headers, a.UID, opts...)
 		default:
 			return nil, fmt.Errorf("unknown session mode %q", a.Mode)
 		}
@@ -1098,6 +1137,9 @@ func init() {
 			return nil, nil
 		case "IsDisconnectable":
 			return s.IsDisconnectable(), nil
+		case "MarkUnrecoverable":
+			s.MarkUnrecoverable()
+			return nil, nil
 		case "Send":
 			var reply common.Reply
 			if err := json.Unmarshal(c.Reply, &reply); err != nil {

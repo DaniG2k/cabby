@@ -47,12 +47,15 @@ mod test_support;
 pub use cabby_core::common::Controller;
 pub use config::{
     Config, DISCONNECT_MODE_ALWAYS, DISCONNECT_MODE_AUTO, DISCONNECT_MODE_NEVER, DISCONNECT_MODES,
-    DisconnectQueueConfig,
+    DisconnectQueueConfig, MAX_DISCONNECT_RATE,
 };
 pub use deps::{Hub, LegacySubscriber};
 pub use disconnect_queue::{DisconnectQueue, Disconnector, InlineDisconnector, NoopDisconnectQueue};
 pub(crate) use session::deadline_after;
-pub use session::{Connection, ConnectionError, Executor, ReadPermit, Session, SessionOption, SessionReader};
+pub use session::{
+    Connection, ConnectionError, Executor, MAX_PING_INTERVAL, ReadPermit, Session, SessionOption, SessionReader,
+    ping_interval_from_seconds,
+};
 pub use subscription_state::SubscriptionState;
 pub use tasks::{
     DEFAULT_COMMAND_CONCURRENCY, MAX_BLOCKED, blocking, command_concurrency, execute, set_command_concurrency,

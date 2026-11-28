@@ -42,6 +42,39 @@ mod test_stream_generate_cursor {
         assert!(!cursor.is_empty());
     }
 
+    /// upstream: ds/ds_test.go#TestStream_GenerateCursor/ignores_cursors_that_would_overflow
+    #[test]
+    fn ignores_cursors_that_would_overflow() {
+        for val in [i64::MAX, i64::MAX - 60] {
+            let cursor = next_cursor(&val.to_string()).parse::<i64>();
+
+            assert!(cursor.is_ok(), "{cursor:?}");
+            assert!(cursor.expect("assert.NoError") > 0);
+        }
+    }
+
+    /// upstream: ds/ds_test.go#TestStream_GenerateCursor/advances_large_valid_cursors
+    #[test]
+    fn advances_large_valid_cursors() {
+        let val = i64::MAX - 61;
+
+        let cursor = next_cursor(&val.to_string()).parse::<i64>();
+
+        assert!(cursor.is_ok(), "{cursor:?}");
+        assert!(cursor.expect("assert.NoError") > val);
+    }
+
+    /// regression-for: ds/ds_test.go#TestStream_GenerateCursor/ignores_cursors_that_would_overflow
+    /// note: a cursor too large to advance by 61 intervals is ignored: the cursor is the current interval, as for an old client cursor.
+    #[test]
+    fn cursors_too_large_to_advance_give_the_current_interval() {
+        let current: i64 = next_cursor("").parse().expect("a decimal cursor");
+        for val in [i64::MAX, i64::MAX - 60] {
+            let cursor: i64 = next_cursor(&val.to_string()).parse().expect("a decimal cursor");
+            assert!((current..current + 2).contains(&cursor), "{cursor} is the current interval ({current})");
+        }
+    }
+
     /// regression-for: ds/ds_test.go#TestStream_GenerateCursor/returns_greater_cursor_when_client_cursor_is_old
     /// regression-for: ds/ds_test.go#TestStream_GenerateCursor/ensures_monotonic_progression_for_current_cursor
     /// note: cursors are decimal interval numbers (DS spec §8.1). Compared as numbers, a fresh cursor beats an old client cursor and an echoed cursor yields a strictly greater one, including across a digit-count change, which the upstream string comparison gets wrong.

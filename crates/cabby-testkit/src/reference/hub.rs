@@ -27,6 +27,7 @@ pub const NO_MESSAGES: &str = "Session hasn't received any messages";
 
 struct RustSession {
     sid: String,
+    identifiers: String,
     frames: Mutex<VecDeque<Vec<u8>>>,
     ready: Condvar,
     closed: Mutex<bool>,
@@ -59,7 +60,7 @@ impl HubSession for RustSession {
     }
 
     fn get_identifiers(&self) -> String {
-        self.sid.clone()
+        if self.identifiers.is_empty() { self.sid.clone() } else { self.identifiers.clone() }
     }
 
     fn send(&self, msg: &EncodedMessage) {
@@ -88,16 +89,24 @@ pub struct MockSession {
 
 impl MockSession {
     pub fn new(sid: &str) -> Self {
+        Self::with_identifiers(sid, "")
+    }
+
+    /// Upstream `NewMockSessionWithIdentifiers(sid, identifiers)`; an empty
+    /// `identifiers` is `NewMockSession(sid)`.
+    pub fn with_identifiers(sid: &str, identifiers: &str) -> Self {
         match backend() {
-            Backend::Rust => Self::rust(sid),
-            Backend::Go => Self { inner: SessionImpl::Go(bridge::call("hub.NewSession", json!({"Sid": sid}))) },
+            Backend::Rust => Self::rust(sid, identifiers),
+            Backend::Go => Self {
+                inner: SessionImpl::Go(bridge::call("hub.NewSession", json!({"Sid": sid, "Identifiers": identifiers}))),
+            },
         }
     }
 
     /// Many sessions in one bridge round trip (benchmark configurations).
     pub fn new_many(sids: &[String]) -> Vec<Self> {
         match backend() {
-            Backend::Rust => sids.iter().map(|s| Self::rust(s)).collect(),
+            Backend::Rust => sids.iter().map(|s| Self::rust(s, "")).collect(),
             Backend::Go => {
                 let ids: Vec<i64> = bridge::call("hub.NewSessions", json!({"Sids": sids}));
                 ids.into_iter().map(|id| Self { inner: SessionImpl::Go(id) }).collect()
@@ -105,10 +114,11 @@ impl MockSession {
         }
     }
 
-    fn rust(sid: &str) -> Self {
+    fn rust(sid: &str, identifiers: &str) -> Self {
         Self {
             inner: SessionImpl::Rust(Arc::new(RustSession {
                 sid: sid.to_owned(),
+                identifiers: identifiers.to_owned(),
                 frames: Mutex::new(VecDeque::new()),
                 ready: Condvar::new(),
                 closed: Mutex::new(false),

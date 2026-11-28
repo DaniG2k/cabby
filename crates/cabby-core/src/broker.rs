@@ -156,6 +156,10 @@ pub trait Broker: Send + Sync {
     fn commit_session(&self, sid: &str, session: &dyn Cacheable) -> Result<(), BrokerError>;
     fn restore_session(&self, sid: &str) -> Result<Option<Vec<u8>>, BrokerError>;
     fn touch_session(&self, sid: &str) -> Result<(), BrokerError>;
+    /// Removes the session's state from the cache (upstream `DeleteSession`).
+    fn delete_session(&self, _sid: &str) -> Result<(), BrokerError> {
+        crate::pending!("broker::Broker::DeleteSession")
+    }
     fn supports_presence(&self) -> bool;
     fn presence_add(
         &self,
@@ -655,6 +659,11 @@ impl Memory {
         let deadline = self.inner.session_deadline();
         self.inner.cache_session(sid, data, deadline);
         deadline
+    }
+
+    /// Cached sessions waiting to expire (upstream unexported `expireSessions.Len()`).
+    pub fn expiring_sessions(&self) -> usize {
+        crate::pending!("broker::Memory::expireSessions")
     }
 
     /// [`Broker::touch_session`]; returns the new expiry (unix milliseconds), or

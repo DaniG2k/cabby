@@ -286,6 +286,15 @@ fn test_nats_broker_sessions() {
     let finished_stale = another_broker.restore_session("test345").expect("restore");
     assert_eq!(None, finished_stale);
 
+    // Deletion
+    broker.commit_session("test567", &TestCacheable("delete-me".into())).expect("commit");
+
+    broker.delete_session("test567").expect("delete");
+    broker.delete_session("unknown").expect("delete");
+
+    let deleted = another_broker.restore_session("test567").expect("restore");
+    assert_eq!(None, deleted);
+
     another_broker.shutdown().expect("shutdown");
     broker.shutdown().expect("shutdown");
 }

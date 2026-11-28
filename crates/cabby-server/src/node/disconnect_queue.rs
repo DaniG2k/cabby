@@ -103,6 +103,11 @@ pub struct DisconnectQueue {
 }
 
 impl DisconnectQueue {
+    /// The throttle period (upstream unexported `rate`).
+    pub fn rate(&self) -> Duration {
+        self.rate
+    }
+
     /// Upstream `NewDisconnectQueue(node, config, logger)`: period `1000 / rate` ms,
     /// at least one worker, `max_backlog` limit (0: unlimited).
     pub fn new(node: Arc<Node>, config: &DisconnectQueueConfig) -> Self {

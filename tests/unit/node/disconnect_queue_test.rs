@@ -398,3 +398,54 @@ fn test_disconnect_queue_config_to_toml() {
 
     assert_eq!(conf, conf2);
 }
+
+/// upstream: node/disconnect_queue_test.go#TestDisconnectQueueConfig_Validate
+#[test]
+fn test_disconnect_queue_config_validate() {
+    use cabby_server::node::MAX_DISCONNECT_RATE;
+
+    let mut conf = new_disconnect_queue_config();
+
+    for rate in [1, 100, 1000, 2000, MAX_DISCONNECT_RATE] {
+        conf.rate = rate;
+        let res = disconnect_queue_config_validate(&conf);
+        assert!(res.is_ok(), "{rate}: {res:?}");
+    }
+
+    for rate in [0, -1, MAX_DISCONNECT_RATE + 1] {
+        conf.rate = rate;
+        assert!(disconnect_queue_config_validate(&conf).is_err(), "{rate}");
+    }
+}
+
+/// regression-for: node/disconnect_queue_test.go#TestDisconnectQueueConfig_Validate
+/// note: the error names the bounds and the rate.
+#[test]
+fn disconnect_rate_errors_name_the_bounds() {
+    let mut conf = new_disconnect_queue_config();
+    conf.rate = 0;
+    assert_eq!(
+        Err("disconnect rate must be between 1 and 1000000000, got 0".to_owned()),
+        disconnect_queue_config_validate(&conf)
+    );
+}
+
+/// upstream: node/disconnect_queue_test.go#TestNewDisconnectQueue_Rate
+/// note: not_observable on Go: DisconnectQueue.rate is unexported. Upstream builds the queues without a node (nil); here they belong to a mock node.
+#[test]
+fn test_new_disconnect_queue_rate() {
+    use cabby_server::node::MAX_DISCONNECT_RATE;
+
+    let node = new_mock_node();
+    let mut conf = new_disconnect_queue_config();
+
+    for (rate, expected) in [
+        (1, Duration::from_secs(1)),
+        (100, Duration::from_millis(10)),
+        (2000, Duration::from_micros(500)),
+        (MAX_DISCONNECT_RATE, Duration::from_nanos(1)),
+    ] {
+        conf.rate = rate;
+        assert_eq!(expected, new_disconnect_queue_rate(&node, &conf), "{rate}");
+    }
+}

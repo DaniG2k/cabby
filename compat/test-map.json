@@ -26,11 +26,11 @@
       "retired": 1
     },
     "rust_only": {
-      "cases": 233
+      "cases": 238
     },
     "translation": {
       "reviewed": 919,
-      "unreviewed": 46
+      "translated": 46
     },
     "upstream_result": {
       "pass": 964,
@@ -3214,10 +3214,13 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
+        "[src] not_observable on Go: the last assertion reads the unexported `expireSessions`; the assertions before it run against Go.",
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "broker::memory_test::test_memory_delete_session"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -3901,8 +3904,10 @@
       "notes": [
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "cli::options_test::test_broker_ttl_validation"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4064,7 +4069,7 @@
         "Static case with no runtime event in the baseline"
       ],
       "rust_cases": [],
-      "translation_status": "unreviewed",
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4090,8 +4095,10 @@
       "notes": [
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "cli::options_test::test_max_body_size_options::defaults"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4117,8 +4124,10 @@
       "notes": [
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "cli::options_test::test_max_body_size_options::env_vars"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4144,8 +4153,10 @@
       "notes": [
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "cli::options_test::test_max_body_size_options::flags"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4366,7 +4377,7 @@
         "Static case with no runtime event in the baseline"
       ],
       "rust_cases": [],
-      "translation_status": "unreviewed",
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4390,9 +4401,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: Runner.sessionOptionsFromParams is unexported."
+      ],
+      "rust_cases": [
+        "cli::session_options_test::test_session_options_from_params_ping_interval::negative_one"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4416,9 +4431,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: Runner.sessionOptionsFromParams is unexported."
+      ],
+      "rust_cases": [
+        "cli::session_options_test::test_session_options_from_params_ping_interval::zero"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4442,9 +4461,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: Runner.sessionOptionsFromParams is unexported."
+      ],
+      "rust_cases": [
+        "cli::session_options_test::test_session_options_from_params_ping_interval::one"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4468,9 +4491,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: Runner.sessionOptionsFromParams is unexported."
+      ],
+      "rust_cases": [
+        "cli::session_options_test::test_session_options_from_params_ping_interval::v20211507185753197"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4494,9 +4521,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: Runner.sessionOptionsFromParams is unexported."
+      ],
+      "rust_cases": [
+        "cli::session_options_test::test_session_options_from_params_ping_interval::v3074457346"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4520,9 +4551,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: Runner.sessionOptionsFromParams is unexported."
+      ],
+      "rust_cases": [
+        "cli::session_options_test::test_session_options_from_params_ping_interval::v6148914691236517206"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4546,9 +4581,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: Runner.sessionOptionsFromParams is unexported."
+      ],
+      "rust_cases": [
+        "cli::session_options_test::test_session_options_from_params_ping_interval::a_day"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4572,9 +4611,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: Runner.sessionOptionsFromParams is unexported."
+      ],
+      "rust_cases": [
+        "cli::session_options_test::test_session_options_from_params_ping_interval::a_day_and_a_second"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4598,9 +4641,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: Runner.sessionOptionsFromParams is unexported."
+      ],
+      "rust_cases": [
+        "cli::session_options_test::test_session_options_from_params_ping_interval::v9223372036"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4624,9 +4671,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: Runner.sessionOptionsFromParams is unexported."
+      ],
+      "rust_cases": [
+        "cli::session_options_test::test_session_options_from_params_ping_interval::v9223372037"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4650,9 +4701,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: Runner.sessionOptionsFromParams is unexported."
+      ],
+      "rust_cases": [
+        "cli::session_options_test::test_session_options_from_params_ping_interval::v99999999999999999999"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -4676,9 +4731,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: Runner.sessionOptionsFromParams is unexported."
+      ],
+      "rust_cases": [
+        "cli::session_options_test::test_session_options_from_params_ping_interval::abc"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -6362,7 +6421,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "unreviewed",
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -6388,8 +6447,10 @@
       "notes": [
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "ds::ds_test::test_stream_generate_cursor::advances_large_valid_cursors"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -6498,8 +6559,10 @@
       "notes": [
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "ds::ds_test::test_stream_generate_cursor::ignores_cursors_that_would_overflow"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -11968,7 +12031,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "unreviewed",
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -11992,10 +12055,13 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
+        "[src] upstream runs this subtest on the hub of \"Disconnect session\" (whose session \"123\" is closed by then); the hub here starts with that subtest's setup, so \"123\" is registered and disconnected first.",
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "hub::hub_test::test_remote_disconnect::disconnect_all_sessions_with_the_same_identifiers"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -14744,8 +14810,10 @@
       "notes": [
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "node::disconnect_queue_test::test_disconnect_queue_config_validate"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -15182,10 +15250,13 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
+        "[src] not_observable on Go: DisconnectQueue.rate is unexported. Upstream builds the queues without a node (nil); here they belong to a mock node.",
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "node::disconnect_queue_test::test_new_disconnect_queue_rate"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -16310,10 +16381,13 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
+        "[src] upstream assigns the unexported `session.broker` of mock sessions; the sessions here are built by the node (`NewSession`, pings off, keepalive timers on), which binds the node's broker on both backends. `require.Eventually(prev.IsClosed, 2s, 10ms)` is a bounded probe. The Rust memory broker runs on the node's controlled clock (no keepalive fires).",
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "node::node_test::test_restore_session_after_remote_disconnect"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -16846,10 +16920,13 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
+        "[src] on Go, the bare sessions are node.BuildSession.",
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "node::session_test::test_cache_entry_unrecoverable"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -16935,7 +17012,7 @@
         "Static case with no runtime event in the baseline"
       ],
       "rust_cases": [],
-      "translation_status": "unreviewed",
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -16959,9 +17036,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: pingInterval and timers.pingDeadline are unexported; NewSession (the NotPanics part) runs against Go first."
+      ],
+      "rust_cases": [
+        "node::session_test::test_new_session_ping_interval_overflow::a_day_and_a_second"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -16985,9 +17066,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: pingInterval and timers.pingDeadline are unexported; NewSession (the NotPanics part) runs against Go first."
+      ],
+      "rust_cases": [
+        "node::session_test::test_new_session_ping_interval_overflow::max_int64"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -17011,9 +17096,13 @@
       "direct_assertions": 3,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] not_observable on Go: pingInterval and timers.pingDeadline are unexported; NewSession (the NotPanics part) runs against Go first. Upstream's `time.Duration(3074457346) * time.Second` overflows int64 and wraps to 854015h55m46s, the value used here."
+      ],
+      "rust_cases": [
+        "node::session_test::test_new_session_ping_interval_overflow::wrapped_3074457346_seconds"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -17037,10 +17126,13 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
+        "[src] not_observable on Go: pingInterval is unexported; NewSession (the NotPanics part) runs against Go first. Upstream assigns the unexported node.config.PingInterval; the Go arm builds the mock node with it.",
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "node::session_test::test_new_session_ping_interval_overflow::server_wide_ping_interval"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -17064,10 +17156,13 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
+        "[src] not_observable on Go: timers.pingDeadline is unexported.",
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "node::session_test::test_new_session_ping_interval_overflow::zero_disables_pings"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -17091,10 +17186,13 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
+        "[src] not_observable on Go: pingIntervalFromSeconds is unexported.",
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "node::session_test::test_ping_interval_from_seconds"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -18539,7 +18637,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "unreviewed",
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -18590,10 +18688,13 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [
+        "[src] `assert.Nil(res.Streams)` is an empty `streams` (Rust slices are never nil).",
         "Static case with no runtime event in the baseline"
       ],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "pusher::controller_test::test_pusher_controller::subscribe_private_presence_unverified"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -18944,7 +19045,7 @@
       "description": "",
       "notes": [],
       "rust_cases": [],
-      "translation_status": "unreviewed",
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -19053,7 +19154,7 @@
         "Static case with no runtime event in the baseline"
       ],
       "rust_cases": [],
-      "translation_status": "unreviewed",
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -19078,8 +19179,10 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "pusher::encoder_test::test_pusher_encode::malformed_presence_events::empty"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -19104,8 +19207,10 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "pusher::encoder_test::test_pusher_encode::malformed_presence_events::missing_id"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -19130,8 +19235,10 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "pusher::encoder_test::test_pusher_encode::malformed_presence_events::missing_type"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -19156,8 +19263,10 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "pusher::encoder_test::test_pusher_encode::malformed_presence_events::non_map"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -19181,9 +19290,13 @@
       "direct_assertions": 2,
       "upstream_result": "pass",
       "description": "",
-      "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "notes": [
+        "[src] upstream's `json.Number(\"42\")` is the JSON number 42 (Go decodes it from the bridge's JSON)."
+      ],
+      "rust_cases": [
+        "pusher::encoder_test::test_pusher_encode::malformed_presence_events::numeric_id"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -19208,8 +19321,10 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "pusher::encoder_test::test_pusher_encode::malformed_presence_events::numeric_type"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -19234,8 +19349,10 @@
       "upstream_result": "pass",
       "description": "",
       "notes": [],
-      "rust_cases": [],
-      "translation_status": "unreviewed",
+      "rust_cases": [
+        "pusher::encoder_test::test_pusher_encode::malformed_presence_events::unknown_type"
+      ],
+      "translation_status": "translated",
       "reference_status": "unverified",
       "rust_status": "pending",
       "evidence": [
@@ -28108,6 +28225,15 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "cli::options_test::broker_ttl_errors_name_the_setting",
+      "relation": "regression",
+      "links": [
+        "ef995afb:cli/options_test.go#TestBrokerTTLValidation"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
       "rust_case": "conformance::api::publish_accepts_valid_bearer_token",
       "relation": "external",
       "links": [
@@ -28738,6 +28864,15 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "ds::ds_test::test_stream_generate_cursor::cursors_too_large_to_advance_give_the_current_interval",
+      "relation": "regression",
+      "links": [
+        "ef995afb:ds/ds_test.go#TestStream_GenerateCursor/ignores_cursors_that_would_overflow"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
       "rust_case": "ds::handler_test::test_dshandler_get::catch_up_mode_w_empty_stream_next_offset_is_zero",
       "relation": "regression",
       "links": [
@@ -29008,6 +29143,15 @@
       "rust_status": "pass"
     },
     {
+      "rust_case": "node::disconnect_queue_test::disconnect_rate_errors_name_the_bounds",
+      "relation": "regression",
+      "links": [
+        "ef995afb:node/disconnect_queue_test.go#TestDisconnectQueueConfig_Validate"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
       "rust_case": "node::disconnect_queue_test::test_disconnect_queue_shutdown::repeated_shutdowns_succeed",
       "relation": "regression",
       "links": [
@@ -29276,6 +29420,27 @@
       ],
       "reference_status": "not_observable",
       "rust_status": "pass"
+    },
+    {
+      "rust_case": "pusher::controller_test::test_pusher_controller::presence_data_must_contain_a_user_id",
+      "relation": "regression",
+      "links": [
+        "ef995afb:pusher/controller_test.go#TestPusherController/Subscribe_presence_(success)"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
+    },
+    {
+      "rust_case": "pusher::encoder_test::test_pusher_encode::malformed_presence_events::errors_name_the_value_and_its_type",
+      "relation": "regression",
+      "links": [
+        "ef995afb:pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/empty",
+        "ef995afb:pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/missing_type",
+        "ef995afb:pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/non-map",
+        "ef995afb:pusher/encoder_test.go#TestPusherEncode/Malformed_presence_events/unknown_type"
+      ],
+      "reference_status": "unverified",
+      "rust_status": "pending"
     },
     {
       "rust_case": "pusher::executor_test::rejected_subscriptions::a_presence_subscription_with_a_bad_signature_is_rejected",

@@ -199,6 +199,26 @@ pub fn disconnect_queue_config_to_toml(c: &DisconnectQueueConfig) -> String {
     }
 }
 
+/// `config.Validate()`.
+pub fn disconnect_queue_config_validate(c: &DisconnectQueueConfig) -> Result<(), String> {
+    match backend() {
+        Backend::Rust => c.validate(),
+        Backend::Go => {
+            let err: Option<String> =
+                bridge::call("node.DisconnectQueueConfig.Validate", json!({"Config": GoQueueConfig::from(c)}));
+            err.map_or(Ok(()), Err)
+        }
+    }
+}
+
+/// `q.rate` of `NewDisconnectQueue(node, &config, logger)` (unexported upstream).
+pub fn new_disconnect_queue_rate(node: &TestNode, config: &DisconnectQueueConfig) -> Duration {
+    match &node.imp {
+        NodeImp::Rust(r) => rs::DisconnectQueue::new(r.node.clone(), config).rate(),
+        NodeImp::Go { .. } => unimplemented!("not_observable: DisconnectQueue.rate is unexported"),
+    }
+}
+
 /// `toml.Decode(s, &conf)`.
 pub fn disconnect_queue_config_merge_toml(c: &mut DisconnectQueueConfig, toml: &str) -> Result<(), String> {
     match backend() {
@@ -814,38 +834,58 @@ pub struct SessionId(u64);
 /// legacy subscriber, and a disconnect queue with `Rate = 1`.
 pub fn new_mock_node() -> TestNode {
     match backend() {
-        Backend::Rust => {
-            let timers = ManualTimers::new();
-            let mut config = Config::new();
-            config.hub_gopool_size = 2;
-            let metrics = Arc::new(Metrics::new(Vec::new(), 10));
-            let node = Node::new(
-                config,
-                vec![
-                    NodeOption::Instrumenter(metrics.clone() as Arc<dyn Instrumenter>),
-                    NodeOption::Controller(MockController::new()),
-                    NodeOption::Clock(Arc::new(timers.clone())),
-                ],
-            );
-            let subscriber = Arc::new(LegacySubscriber::new(node.clone()));
-            node.set_broker(Arc::new(cabby_core::broker::Legacy::new(subscriber)));
-            let mut dconfig = DisconnectQueueConfig::new();
-            dconfig.rate = 1;
-            let queue = Arc::new(rs::DisconnectQueue::new(node.clone(), &dconfig));
-            node.set_disconnector(queue.clone());
-            TestNode {
-                imp: NodeImp::Rust(RustNode { node, timers, manual: true, metrics: Some(metrics), queue: Some(queue) }),
-            }
-        }
-        Backend::Go => {
-            #[derive(Deserialize)]
-            struct R {
-                node: u64,
-                queue: u64,
-            }
-            let r: R = bridge::call("node.NewMockNode", json!({}));
-            TestNode { imp: NodeImp::Go { handle: r.node, queue: Some(r.queue) } }
-        }
+        Backend::Rust => mock_node_with(|_| {}),
+        Backend::Go => go_mock_node(json!({})),
+    }
+}
+
+fn go_mock_node(args: Value) -> TestNode {
+    #[derive(Deserialize)]
+    struct R {
+        node: u64,
+        queue: u64,
+    }
+    let r: R = bridge::call("node.NewMockNode", args);
+    TestNode { imp: NodeImp::Go { handle: r.node, queue: Some(r.queue) } }
+}
+
+fn mock_node_with(configure: impl FnOnce(&mut Config)) -> TestNode {
+    let timers = ManualTimers::new();
+    let mut config = Config::new();
+    config.hub_gopool_size = 2;
+    configure(&mut config);
+    let metrics = Arc::new(Metrics::new(Vec::new(), 10));
+    let node = Node::new(
+        config,
+        vec![
+            NodeOption::Instrumenter(metrics.clone() as Arc<dyn Instrumenter>),
+            NodeOption::Controller(MockController::new()),
+            NodeOption::Clock(Arc::new(timers.clone())),
+        ],
+    );
+    let subscriber = Arc::new(LegacySubscriber::new(node.clone()));
+    node.set_broker(Arc::new(cabby_core::broker::Legacy::new(subscriber)));
+    let mut dconfig = DisconnectQueueConfig::new();
+    dconfig.rate = 1;
+    let queue = Arc::new(rs::DisconnectQueue::new(node.clone(), &dconfig));
+    node.set_disconnector(queue.clone());
+    TestNode { imp: NodeImp::Rust(RustNode { node, timers, manual: true, metrics: Some(metrics), queue: Some(queue) }) }
+}
+
+/// `NewMockNode()` followed by `node.config.PingInterval = secs` (the field is
+/// unexported upstream; the Go arm sets it before the node is built).
+pub fn new_mock_node_with_ping_interval(secs: i64) -> TestNode {
+    match backend() {
+        Backend::Rust => mock_node_with(|c| c.ping_interval = secs),
+        Backend::Go => go_mock_node(json!({"ping_interval": secs})),
+    }
+}
+
+/// Upstream unexported `pingIntervalFromSeconds`.
+pub fn ping_interval_from_seconds(sec: i64) -> Duration {
+    match backend() {
+        Backend::Rust => rs::ping_interval_from_seconds(sec),
+        Backend::Go => unimplemented!("not_observable: pingIntervalFromSeconds is unexported"),
     }
 }
 
@@ -1253,6 +1293,19 @@ impl TestNode {
         }
     }
 
+    /// `node.RemoteDisconnect(&common.RemoteDisconnectMessage{Identifier, Reconnect})`.
+    pub fn remote_disconnect(&self, identifier: &str, reconnect: bool) {
+        match &self.imp {
+            NodeImp::Rust(r) => r.node.remote_disconnect(&cabby_core::common::RemoteDisconnectMessage {
+                identifier: identifier.to_owned(),
+                reconnect,
+            }),
+            NodeImp::Go { .. } => {
+                self.go_node("RemoteDisconnect", json!({"ids": identifier, "val": reconnect}));
+            }
+        }
+    }
+
     /// `node.broker.Subscribe(stream)` on the broker the node was built with.
     pub fn broker_subscribe(&self, stream: &str) -> String {
         match &self.imp {
@@ -1468,6 +1521,8 @@ pub enum SessionOpt {
     /// The connection's writes block until [`TestSession::release_writes`]
     /// (replaces upstream tests locking the unexported `session.wmu`).
     GatedWrites,
+    /// `WithPingInterval(d)` (Go: `time.Duration` nanoseconds, at most `math.MaxInt64`).
+    PingInterval(Duration),
 }
 
 enum SessionImp {
@@ -1488,6 +1543,7 @@ fn rust_session_options(opts: &[SessionOpt]) -> Vec<SessionOption> {
             }
             SessionOpt::PrevSid(s) => Some(SessionOption::PrevSid(s.clone())),
             SessionOpt::MaxPendingSize(n) => Some(SessionOption::MaxPendingSize(*n)),
+            SessionOpt::PingInterval(d) => Some(SessionOption::PingInterval(*d)),
             SessionOpt::GatedWrites => None,
         })
         .collect()
@@ -1578,6 +1634,9 @@ fn session_of(
                         a["presence_ttl_ms"] = json!(p.as_millis() as u64);
                     }
                     SessionOpt::PrevSid(sid) => a["prev_sid"] = json!(sid),
+                    SessionOpt::PingInterval(d) => {
+                        a["ping_interval_ns"] = json!(i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
+                    }
                 }
             }
             match env {
@@ -1592,6 +1651,26 @@ fn session_of(
             }
             TestSession { imp: SessionImp::Go { handle: bridge::call("node.NewSession", a) } }
         }
+    }
+}
+
+/// Upstream `NewSession(node, mocks.NewMockConnection(), "/cable", nil, uid, opts...)`:
+/// a session built by the node, writer and timers running.
+pub fn new_session(uid: &str, node: &TestNode, opts: Vec<SessionOpt>) -> TestSession {
+    match &node.imp {
+        NodeImp::Rust(r) => {
+            let conn = MockConnection::new();
+            let session = Session::new(
+                &r.node,
+                conn.clone() as Arc<dyn rs::Connection>,
+                "/cable",
+                None,
+                uid,
+                rust_session_options(&opts),
+            );
+            TestSession { imp: SessionImp::Rust { session, conn, write_gate: None } }
+        }
+        NodeImp::Go { .. } => session_of(uid, node, Some(("/cable", None)), opts, "new"),
     }
 }
 
@@ -1781,6 +1860,33 @@ impl TestSession {
             SessionImp::Rust { session, .. } => session.mark_disconnectable(val),
             SessionImp::Go { .. } => {
                 self.simple("MarkDisconnectable", json!({"val": val}));
+            }
+        }
+    }
+
+    /// `session.pingInterval` (unexported upstream).
+    pub fn ping_interval(&self) -> Duration {
+        match &self.imp {
+            SessionImp::Rust { session, .. } => session.ping_interval(),
+            SessionImp::Go { .. } => unimplemented!("not_observable: Session.pingInterval is unexported"),
+        }
+    }
+
+    /// The time until `session.timers.pingDeadline` (unexported upstream);
+    /// `None` when no ping is scheduled (a zero deadline).
+    pub fn ping_deadline_in(&self) -> Option<Duration> {
+        match &self.imp {
+            SessionImp::Rust { session, .. } => session.ping_deadline_in(),
+            SessionImp::Go { .. } => unimplemented!("not_observable: Session.timers.pingDeadline is unexported"),
+        }
+    }
+
+    /// `session.MarkUnrecoverable()`.
+    pub fn mark_unrecoverable(&self) {
+        match &self.imp {
+            SessionImp::Rust { session, .. } => session.mark_unrecoverable(),
+            SessionImp::Go { .. } => {
+                self.simple("MarkUnrecoverable", json!({}));
             }
         }
     }
@@ -2416,6 +2522,28 @@ impl TestBroker {
             BrokerImp::Rust { nats: Some(n), .. } => n.reset().map_err(|e| e.message),
             BrokerImp::Rust { .. } => unreachable!("reset is a NATS broker method"),
             BrokerImp::Go(_) => self.go_err("Reset", json!({})),
+        }
+    }
+
+    /// `broker.Shutdown(context.Background())`.
+    pub fn shutdown(&self) -> Result<(), String> {
+        match &self.imp {
+            BrokerImp::Rust { broker, .. } => broker.shutdown().map_err(|e| e.message),
+            BrokerImp::Go(_) => self.go_err("Shutdown", json!({})),
+        }
+    }
+
+    /// `broker.RestoreSession(sid)`.
+    pub fn restore_session(&self, sid: &str) -> Result<Option<Vec<u8>>, String> {
+        match &self.imp {
+            BrokerImp::Rust { broker, .. } => broker.restore_session(sid).map_err(|e| e.message),
+            BrokerImp::Go(h) => {
+                let v: Value = bridge::call("node.Broker", json!({"id": h, "method": "RestoreSession", "data": sid}));
+                match v["error"].as_str() {
+                    Some(e) => Err(e.to_owned()),
+                    None => Ok(v["data"].as_str().map(|s| s.as_bytes().to_vec())),
+                }
+            }
         }
     }
 

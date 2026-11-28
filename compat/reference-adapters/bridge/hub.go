@@ -19,8 +19,9 @@ import (
 )
 
 type hubSession struct {
-	sid     string
-	encoder encoders.JSON
+	sid         string
+	identifiers string
+	encoder     encoders.JSON
 
 	mu          sync.Mutex
 	frames      [][]byte
@@ -37,8 +38,15 @@ func newHubSession(sid string) *hubSession {
 	return &hubSession{sid: sid, notify: make(chan struct{}, 1)}
 }
 
-func (s *hubSession) GetID() string          { return s.sid }
-func (s *hubSession) GetIdentifiers() string { return s.sid }
+func (s *hubSession) GetID() string { return s.sid }
+
+// GetIdentifiers is upstream MockSession's: the identifiers when set, else the sid.
+func (s *hubSession) GetIdentifiers() string {
+	if s.identifiers != "" {
+		return s.identifiers
+	}
+	return s.sid
+}
 
 func (s *hubSession) Send(msg encoders.EncodedMessage) {
 	var payload []byte
@@ -174,11 +182,13 @@ func init() {
 		return true, nil
 	})
 	register("hub.NewSession", func(raw json.RawMessage) (interface{}, error) {
-		a, err := msgArgs[struct{ Sid string }](raw)
+		a, err := msgArgs[struct{ Sid, Identifiers string }](raw)
 		if err != nil {
 			return nil, err
 		}
-		return msgPut(newHubSession(a.Sid)), nil
+		s := newHubSession(a.Sid)
+		s.identifiers = a.Identifiers
+		return msgPut(s), nil
 	})
 	register("hub.NewSessions", func(raw json.RawMessage) (interface{}, error) {
 		a, err := msgArgs[struct{ Sids []string }](raw)

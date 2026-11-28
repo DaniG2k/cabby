@@ -433,6 +433,22 @@ impl MemoryBroker {
         }
     }
 
+    pub fn delete_session(&self, sid: &str) -> Result<(), BrokerError> {
+        match self.rust() {
+            Some(b) => b.delete_session(sid),
+            None => go_err(self.go("DeleteSession", json!({"sid": sid})).error),
+        }
+    }
+
+    /// `broker.expireSessions.Len()` (unexported upstream): cached sessions
+    /// waiting to expire.
+    pub fn expire_sessions_len(&self) -> usize {
+        match self.rust() {
+            Some(b) => b.expiring_sessions(),
+            None => unimplemented!("not_observable: Memory.expireSessions is unexported"),
+        }
+    }
+
     pub fn presence_add(
         &self,
         stream: &str,
@@ -713,6 +729,13 @@ impl NatsBroker {
         match &self.rust {
             Some(b) => b.touch_session(sid),
             None => go_err(self.go("TouchSession", json!({"sid": sid})).error),
+        }
+    }
+
+    pub fn delete_session(&self, sid: &str) -> Result<(), BrokerError> {
+        match &self.rust {
+            Some(b) => b.delete_session(sid),
+            None => go_err(self.go("DeleteSession", json!({"sid": sid})).error),
         }
     }
 }

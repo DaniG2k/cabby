@@ -233,6 +233,8 @@ func init() {
 			out = brokerReply(b.RestoreSession(a.Sid))
 		case "TouchSession":
 			out = brokerReply(nil, b.TouchSession(a.Sid))
+		case "DeleteSession":
+			out = brokerReply(nil, b.DeleteSession(a.Sid))
 		case "PresenceAdd":
 			ev, err := b.PresenceAdd(a.Stream, a.Sid, a.Pid, a.Info)
 			out = brokerReply(nilPtr(ev), err)
@@ -316,6 +318,8 @@ func init() {
 			return brokerReply(b.RestoreSession(a.Sid)), nil
 		case "TouchSession":
 			return brokerReply(nil, b.TouchSession(a.Sid)), nil
+		case "DeleteSession":
+			return brokerReply(nil, b.DeleteSession(a.Sid)), nil
 		}
 		return nil, fmt.Errorf("unknown NATS broker method %q", c.Method)
 	})

@@ -221,6 +221,28 @@ fn test_memory_restore_session() {
     assert_eq!(None, data);
 }
 
+/// upstream: broker/memory_test.go#TestMemory_DeleteSession
+/// note: not_observable on Go: the last assertion reads the unexported `expireSessions`; the assertions before it run against Go.
+#[test]
+fn test_memory_delete_session() {
+    let config = new_config();
+    let broker = new_memory_broker(None, &config, clock());
+
+    broker.commit_session("123", &TestCacheable("cache-me".into())).expect("require.NoError");
+    broker.commit_session("456", &TestCacheable("keep-me".into())).expect("require.NoError");
+
+    broker.delete_session("123").expect("require.NoError");
+    broker.delete_session("unknown").expect("require.NoError");
+
+    let data = broker.restore_session("123").expect("require.NoError");
+    assert_eq!(None, data);
+
+    let data = broker.restore_session("456").expect("require.NoError");
+    assert_eq!(Some(b"keep-me".to_vec()), data);
+
+    assert_eq!(1, broker.expire_sessions_len());
+}
+
 fn event(kind: &str, id: &str, info: Option<serde_json::Value>) -> PresenceEvent {
     PresenceEvent { kind: kind.into(), id: id.into(), info }
 }

@@ -125,6 +125,12 @@ impl SessionSettings {
     }
 }
 
+/// Upstream `Runner.sessionOptionsFromParams`: the session options a
+/// connection request asks for (`?pi=`, `?ptp=`, the previous session id).
+pub fn session_options_from_params(info: &RequestInfo) -> Vec<SessionOption> {
+    SessionSettings::params_options(info)
+}
+
 /// Go `strconv.Atoi` (decimal, optional sign, fits an `int`).
 fn go_atoi(s: &str) -> Option<i64> {
     let digits = s.strip_prefix(['+', '-']).unwrap_or(s);

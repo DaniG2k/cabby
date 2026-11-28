@@ -10,4 +10,5 @@
 
 mod cli_test;
 mod options_test;
+mod session_options_test;
 mod support;

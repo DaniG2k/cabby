@@ -98,6 +98,26 @@ pub fn new_config_from_cli(args: &[&str], env: &EnvMap, custom_flags: &[CustomFl
     }
 }
 
+/// Upstream unexported `Runner.sessionOptionsFromParams(info)` for
+/// `NewRequestInfo(httptest.NewRequest("GET", target, nil), nil)`: the number of
+/// options it returns.
+pub fn session_options_from_params(target: &str) -> usize {
+    match backend() {
+        Backend::Rust => {
+            let req = cabby_server::server::HttpRequest {
+                method: "GET".into(),
+                target: target.into(),
+                host: "example.com".into(),
+                remote_addr: "192.0.2.1:1234".into(),
+                ..Default::default()
+            };
+            let info = cabby_server::server::RequestInfo::new(&req, None).expect("require.NoError");
+            rs::session_options_from_params(&info).len()
+        }
+        Backend::Go => unimplemented!("not_observable: Runner.sessionOptionsFromParams is unexported"),
+    }
+}
+
 /// Upstream unexported `parseTags`. The Go arm observes it through its only caller:
 /// `NewConfigFromCLI` with `--metrics_tags=<s>` sets `Metrics.Tags = parseTags(s)`.
 pub fn parse_tags(s: &str) -> HashMap<String, String> {

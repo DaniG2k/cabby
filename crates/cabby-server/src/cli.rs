@@ -20,6 +20,7 @@ pub use options::{ConfigSearch, new_config_from_cli, new_config_from_cli_to, new
 pub use runner::{Embedded, Runner};
 pub use session_options::{
     ACTION_CABLE_V1_EXT_JSON, ACTION_CABLE_V1_JSON, action_cable_protocols, is_extended_action_cable_protocol,
+    session_options_from_params,
 };
 
 /// A CLI or runner failure.

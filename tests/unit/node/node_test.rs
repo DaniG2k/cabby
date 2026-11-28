@@ -1264,6 +1264,58 @@ mod test_restore_session {
 
 // --------------------------------------------------------------- TestBroadcasting
 
+/// upstream: node/node_test.go#TestRestoreSessionAfterRemoteDisconnect
+/// note: upstream assigns the unexported `session.broker` of mock sessions; the sessions here are built by the node (`NewSession`, pings off, keepalive timers on), which binds the node's broker on both backends. `require.Eventually(prev.IsClosed, 2s, 10ms)` is a bounded probe. The Rust memory broker runs on the node's controlled clock (no keepalive fires).
+#[test]
+fn test_restore_session_after_remote_disconnect() {
+    let node = new_mock_node();
+
+    let bconf = cabby_testkit::reference::broker::new_config();
+    let br = new_memory_broker_for(&node, &bconf);
+    node.set_broker(&br);
+    br.start().expect("require.NoError");
+
+    let _hub = node.run_hub();
+
+    let keepalive = SessionOpt::KeepaliveIntervals(Duration::from_secs(60), Duration::from_secs(60));
+    let prev =
+        new_session_with_timers("114", &node, "/cable", Some(map(&[("id", "user-114")])), vec![keepalive.clone()]);
+
+    let res = node.authenticate(&prev).expect("require.NoError");
+    assert_eq!(Status::Success, res.expect("a result").status);
+
+    let cached = br.restore_session("114").expect("require.NoError");
+    assert!(cached.is_some(), "require.NotNil");
+
+    node.remote_disconnect("user-114", true);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while !prev.is_closed() {
+        assert!(std::time::Instant::now() < deadline, "require.Eventually: the session is closed");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let cached = br.restore_session("114").expect("require.NoError");
+    assert_eq!(None, cached);
+
+    let session = new_session_with_timers(
+        "214",
+        &node,
+        "/cable",
+        Some(map(&[("id", "user-114")])),
+        vec![keepalive, SessionOpt::PrevSid("114".into())],
+    );
+
+    let res = node.authenticate(&session).expect("require.NoError");
+    assert_eq!(Status::Success, res.expect("a result").status);
+
+    let welcome = session.read_string().expect("require.NoError");
+
+    assert_eq!("welcome", welcome, "Session must not be restored after remote disconnect: {welcome}");
+
+    let _ = br.shutdown();
+}
+
 mod test_broadcasting {
     use super::*;
 

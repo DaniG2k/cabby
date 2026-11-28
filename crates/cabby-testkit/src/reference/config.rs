@@ -39,7 +39,9 @@ pub(crate) struct GoConfigView {
     broker: GoBroker,
     redis: GoRedis,
     #[serde(rename = "HTTPBroadcast")]
-    http_broadcast: GoPort,
+    http_broadcast: GoHttpBroadcast,
+    #[serde(rename = "API")]
+    api: GoApi,
     metrics: GoMetrics,
     embedded_nats: GoEnats,
     #[serde(rename = "SSE")]
@@ -77,8 +79,15 @@ struct GoRedis {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-struct GoPort {
+struct GoHttpBroadcast {
     port: i64,
+    max_body_size: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct GoApi {
+    max_body_size: i64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -129,7 +138,11 @@ impl From<&Config> for GoConfigView {
             rpc: GoRpc { host: c.rpc.host.clone(), implementation: c.rpc.implementation.clone() },
             broker: GoBroker { adapter: c.broker.adapter.clone() },
             redis: GoRedis { url: c.redis.url.clone() },
-            http_broadcast: GoPort { port: c.http_broadcast.port },
+            http_broadcast: GoHttpBroadcast {
+                port: c.http_broadcast.port,
+                max_body_size: c.http_broadcast.max_body_size,
+            },
+            api: GoApi { max_body_size: c.api.max_body_size },
             metrics: GoMetrics {
                 http: c.metrics.http.clone(),
                 tags: (!c.metrics.tags.is_empty()).then(|| c.metrics.tags.clone()),
@@ -174,7 +187,12 @@ impl From<GoConfigView> for Config {
             rpc,
             broker: BrokerConfig { adapter: g.broker.adapter, ..Default::default() },
             redis,
-            http_broadcast: HttpBroadcastConfig { port: g.http_broadcast.port, ..Default::default() },
+            http_broadcast: HttpBroadcastConfig {
+                port: g.http_broadcast.port,
+                max_body_size: g.http_broadcast.max_body_size,
+                ..Default::default()
+            },
+            api: cabby_server::api::Config { max_body_size: g.api.max_body_size, ..Default::default() },
             metrics: MetricsConfig {
                 http: g.metrics.http,
                 tags: g.metrics.tags.unwrap_or_default(),
