@@ -185,7 +185,7 @@ call sites are found by the message text (`grep -rn '"<message>"' crates`).
 | `cli/cli.go:743` | WRN | `Immediate termination requested. Stopped` | `crates/cabby-server/src/cli/signals.rs:97` | matched |  |
 | `cli/cli.go:748` | INF | `Shutting down... (hit Ctrl-C to stop immediately or wait for up to %ds for graceful shu...` | `crates/cabby-server/src/cli/signals.rs:79` | matched |  |
 | `cli/embed.go:74` | INF | `Starting embedded %s %s%s (open file limit: %s)` | `crates/cabby-server/src/cli/runner.rs:561` | matched |  |
-| `cli/session_options.go:52` | WRN | `invalid ping interval value, must be integer` | `crates/cabby-server/src/cli/session_options.rs:106` | matched |  |
+| `cli/session_options.go:52` | WRN | `invalid ping interval value, must be a positive integer` | `crates/cabby-server/src/cli/session_options.rs:106` | matched |  |
 | `config/presets.go:30` | INF | `load presets` | `crates/cabby-server/src/cli/runner.rs:194` | matched |  |
 | `ds/ds.go:242` | DBG | `skip authentication` | `crates/cabby-server/src/ds.rs:1283` | matched |  |
 | `ds/handler.go:60` | DBG | `invalid stream request` | `crates/cabby-server/src/ds.rs:1319` | matched |  |

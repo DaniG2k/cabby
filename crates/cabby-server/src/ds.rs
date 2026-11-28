@@ -1270,7 +1270,9 @@ impl Handler {
                 sse_conn = Some((c, live));
                 let mut opts = vec![SessionOption::Encoder(Arc::new(SseDataEncoder))];
                 if self.config.sse_ping_interval > 0 {
-                    opts.push(SessionOption::PingInterval(Duration::from_secs(self.config.sse_ping_interval as u64)));
+                    opts.push(SessionOption::PingInterval(crate::node::ping_interval_from_seconds(
+                        self.config.sse_ping_interval,
+                    )));
                 }
                 opts
             }

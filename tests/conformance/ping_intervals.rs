@@ -1,12 +1,12 @@
-//! Client ping intervals (D-054), observed from outside.
+//! Client ping intervals (`?pi=`), observed from outside.
 
 use cabby_testkit::cable_client::{CableClient, Options};
 use cabby_testkit::sut::Sut;
 use serde_json::json;
 
-/// `?pi=` values: `1` and a day keep the reference semantics (pings every so
-/// many seconds), larger values are clamped to a day, and zero and negative
-/// values disable pings.
+/// `?pi=` values: `1` and a day keep their meaning (pings every so many
+/// seconds), larger values are a day, and zero and negative values are
+/// ignored with a warning (the server's interval applies), as in AnyCable 1.6.22.
 const PING_INTERVALS: &[&str] = &["1", "86400", "86401", "0", "-1"];
 
 fn connect(sut: &Sut, pi: &str) -> Result<CableClient, String> {
@@ -30,11 +30,22 @@ fn assert_session_works(sut: &Sut, pi: &str) {
 }
 
 /// regression-for: features/ping.testfile#scenario
-/// note: Deviation D-054: every `?pi=` value in PING_INTERVALS (in range, over a day, zero, negative) gives a working session; Cabby clamps values over a day to a day.
+/// note: every `?pi=` value in PING_INTERVALS (in range, over a day, zero, negative) gives a working session; zero and negative values are logged as invalid.
 #[test]
-fn deviation_d054_ping_intervals_over_a_day_are_clamped() {
-    let sut = Sut::start(&["--public", "--broadcast_adapter=http"]);
+fn ping_intervals_in_and_out_of_range_give_working_sessions() {
+    let mut sut = Sut::start(&["--public", "--broadcast_adapter=http"]);
     for pi in PING_INTERVALS {
         assert_session_works(&sut, pi);
+    }
+    for pi in ["0", "-1"] {
+        let line = sut.process.wait_output(std::time::Duration::from_secs(5), |out| {
+            out.lines()
+                .find(|l| {
+                    l.contains("invalid ping interval value, must be a positive integer")
+                        && l.contains(&format!("val={pi}"))
+                })
+                .map(str::to_owned)
+        });
+        assert!(line.is_ok(), "pi={pi}: no warning\nSUT output:\n{}", sut.process.output());
     }
 }

@@ -213,10 +213,9 @@ const WRITE_QUEUE_CAPACITY: usize = 16;
 /// Default write deadline (upstream `BuildSession`).
 const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// The longest timer interval a session keeps (about ten years): longer ping,
-/// pong, keepalive and write intervals are clamped (D-054). Clients are
-/// limited much lower (`cli::MAX_CLIENT_PING_INTERVAL_SECS`); this bounds
-/// operator settings and library callers.
+/// The longest timer interval a session keeps (about ten years): longer pong,
+/// keepalive and write intervals are clamped (D-054). Pings are limited to
+/// [`MAX_PING_INTERVAL`].
 pub const MAX_TIMER_INTERVAL: Duration = Duration::from_secs(10 * 365 * 24 * 60 * 60);
 
 /// The instant `timeout` from now. A timeout beyond what the clock can represent is
@@ -235,8 +234,11 @@ pub const MAX_PING_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Upstream `pingIntervalFromSeconds`: zero and negative values disable pings,
 /// values above a day are a day.
-pub fn ping_interval_from_seconds(_sec: i64) -> Duration {
-    cabby_core::pending!("node::pingIntervalFromSeconds")
+pub fn ping_interval_from_seconds(sec: i64) -> Duration {
+    match u64::try_from(sec) {
+        Ok(0) | Err(_) => Duration::ZERO,
+        Ok(sec) => Duration::from_secs(sec).min(MAX_PING_INTERVAL),
+    }
 }
 
 fn lock<T: ?Sized>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -593,7 +595,7 @@ impl Session {
             s.executor = Some(node.clone() as Arc<dyn Executor>);
             s.broker = Some(node.broker());
             s.clock = node.clock();
-            s.ping_interval = bounded(Duration::from_secs(config.ping_interval.max(0) as u64));
+            s.ping_interval = ping_interval_from_seconds(config.ping_interval);
             s.ping_precision.clone_from(&config.ping_timestamp_precision);
             s.native_ping = config.enable_native_ping;
             s.uid = uid.to_owned();
@@ -661,7 +663,7 @@ impl Session {
                     let mut s = write(&self.settings);
                     let mut hot_changed = false;
                     match opt {
-                        SessionOption::PingInterval(d) => s.ping_interval = bounded(d),
+                        SessionOption::PingInterval(d) => s.ping_interval = d.min(MAX_PING_INTERVAL),
                         SessionOption::PingPrecision(p) => s.ping_precision = p,
                         SessionOption::Encoder(e) => {
                             s.encoder = e;
@@ -883,9 +885,7 @@ impl Session {
         if !ping_interval.is_zero() {
             // Spread the first pings of sessions connecting together over
             // [interval/2, interval*3/2), as upstream.
-            let min = ping_interval / 2;
-            let span = (ping_interval * 3 / 2).saturating_sub(min);
-            let initial = min + random_below(span);
+            let initial = ping_interval / 2 + random_below(ping_interval);
             t.ping = Some(now + initial);
             if !pong_timeout.is_zero() {
                 t.pong = Some(now + pong_timeout + initial);
@@ -1123,7 +1123,7 @@ impl Session {
 
     /// Overrides the ping interval (upstream unexported field `pingInterval`).
     pub fn set_ping_interval(&self, interval: Duration) {
-        write(&self.settings).ping_interval = bounded(interval);
+        write(&self.settings).ping_interval = interval.min(MAX_PING_INTERVAL);
     }
 
     /// Overrides the cache keepalive interval (upstream unexported field `resumeInterval`).
@@ -2174,7 +2174,8 @@ mod tests {
         assert_eq!(1, clock.pending(), "one timer armed for the next ping");
     }
 
-    /// Deviation D-054: huge intervals are clamped.
+    /// Pins D-054: huge pong, keepalive and write intervals are capped at ten
+    /// years; pings at a day, as in AnyCable 1.6.22.
     #[test]
     fn timer_intervals_are_capped() {
         let clock = TestClock::new();
@@ -2192,7 +2193,10 @@ mod tests {
         s.start_timers();
         s.schedule_ping();
         s.reset_pong();
-        assert_eq!(MAX_TIMER_INTERVAL, s.settings().ping_interval);
+        assert_eq!(MAX_PING_INTERVAL, s.settings().ping_interval);
+        assert_eq!(MAX_TIMER_INTERVAL, s.settings().pong_timeout);
+        assert_eq!(MAX_TIMER_INTERVAL, s.settings().resume_interval);
+        assert_eq!(MAX_TIMER_INTERVAL, s.settings().write_timeout);
         assert_eq!(1, clock.pending(), "one timer armed");
         assert!(!s.is_closed());
     }

@@ -8,7 +8,7 @@ use std::time::Duration;
 use cabby_core::logger::{Attr, Level, LogValue};
 
 use crate::config::Config;
-use crate::node::{Connection, Node, Session, SessionOption};
+use crate::node::{Connection, Node, Session, SessionOption, ping_interval_from_seconds};
 use crate::server::{DefaultHeadersExtractor, RequestInfo};
 use crate::ws::{self, SessionCallback, SessionHandler, WsConnection};
 
@@ -16,10 +16,6 @@ const PING_INTERVAL_PARAMETER: &str = "pi";
 const PING_PRECISION_PARAMETER: &str = "ptp";
 const PREV_SESSION_HEADER: &str = "X-ANYCABLE-RESTORE-SID";
 const PREV_SESSION_PARAM: &str = "sid";
-
-/// The largest ping interval a client may ask for with `?pi=` (seconds), D-054.
-/// Larger values are clamped to it.
-pub const MAX_CLIENT_PING_INTERVAL_SECS: i64 = 24 * 60 * 60;
 
 /// Upstream `common.ActionCableV1JSON`.
 pub const ACTION_CABLE_V1_JSON: &str = "actioncable-v1-json";
@@ -97,13 +93,12 @@ impl SessionSettings {
         let mut opts = Vec::new();
         let raw = info.param(PING_INTERVAL_PARAMETER);
         if !raw.is_empty() {
-            match go_atoi(&raw) {
-                // Zero and negative values disable pings, as upstream; values over
-                // a day are clamped to a day (D-054).
-                Some(val) => opts.push(SessionOption::PingInterval(secs(val.min(MAX_CLIENT_PING_INTERVAL_SECS)))),
+            match go_atoi(&raw).filter(|val| *val > 0) {
+                // Values over a day are a day.
+                Some(val) => opts.push(SessionOption::PingInterval(ping_interval_from_seconds(val))),
                 None => crate::metrics::log(
                     Level::Warn,
-                    "invalid ping interval value, must be integer",
+                    "invalid ping interval value, must be a positive integer",
                     &[Attr::new("val", LogValue::String(raw))],
                 ),
             }
@@ -217,15 +212,17 @@ mod tests {
             .collect()
     }
 
-    /// Deviation D-054: `?pi=` values over a day are clamped to a day; zero and
-    /// negative values disable pings, as upstream.
+    /// `?pi=` values over a day are a day; zero, negative and non-integer
+    /// values are ignored (the server's interval applies), as in AnyCable 1.6.22.
     #[test]
     fn client_ping_intervals_are_clamped() {
         assert_eq!(vec![Duration::from_secs(3)], ping_interval_from("pi=3"));
         assert_eq!(vec![Duration::from_secs(86_400)], ping_interval_from("pi=86400"));
         assert_eq!(vec![Duration::from_secs(86_400)], ping_interval_from("pi=86401"));
-        assert_eq!(vec![Duration::ZERO], ping_interval_from("pi=0"));
-        assert_eq!(vec![Duration::ZERO], ping_interval_from("pi=-1"));
+        assert_eq!(vec![Duration::from_secs(86_400)], ping_interval_from("pi=9223372036854775807"));
+        assert!(ping_interval_from("pi=0").is_empty());
+        assert!(ping_interval_from("pi=-1").is_empty());
+        assert!(ping_interval_from("pi=99999999999999999999").is_empty());
     }
 
     /// Pins D-122 for the client parameters of a connection (`pi`, `ptp`,

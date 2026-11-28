@@ -625,7 +625,7 @@ fn new_sse_session(
     let mut opts = vec![SessionOption::Encoder(Arc::new(enc))];
 
     if comment_pings && c.ping_interval > 0 {
-        opts.push(SessionOption::PingInterval(Duration::from_secs(c.ping_interval as u64)));
+        opts.push(SessionOption::PingInterval(crate::node::ping_interval_from_seconds(c.ping_interval)));
     }
 
     let session = Session::new(n, conn.clone(), &info.url, info.headers.clone(), &info.uid, opts);
