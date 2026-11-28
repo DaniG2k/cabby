@@ -885,7 +885,13 @@ pub fn derive_aggregates(cases: &mut [Case]) {
         } else {
             "unreviewed"
         };
-        let reference = if all(&|k| k.reference_status == "pass") { "pass" } else { "unverified" };
+        let reference = if all(&|k| k.reference_status == "pass") {
+            "pass"
+        } else if all(&|k| k.reference_status == "not_observable") {
+            "not_observable"
+        } else {
+            "unverified"
+        };
         let rust = if all(&|k| k.rust_status == "pass") {
             "pass"
         } else if kids.iter().any(|k| k.rust_status == "fail") {
@@ -933,6 +939,28 @@ mod tests {
             ("translated", "pass", "pass"),
             (&*cases[0].translation_status, &*cases[0].reference_status, &*cases[0].rust_status)
         );
+    }
+
+    #[test]
+    fn an_aggregate_of_cases_not_observable_on_go_is_not_observable() {
+        let case = |id: &str, aggregate: bool, reference: &str| Case {
+            id: id.into(),
+            aggregate,
+            translation_status: "translated".into(),
+            reference_status: reference.into(),
+            rust_status: "pass".into(),
+            ..Default::default()
+        };
+        let mut cases = vec![
+            case("x:f#T", true, "unverified"),
+            case("x:f#T/a", false, "not_observable"),
+            case("x:f#T/b", false, "not_observable"),
+        ];
+        derive_aggregates(&mut cases);
+        assert_eq!("not_observable", cases[0].reference_status);
+        cases[2].reference_status = "pass".into();
+        derive_aggregates(&mut cases);
+        assert_eq!("unverified", cases[0].reference_status, "mixed children");
     }
 
     #[test]
